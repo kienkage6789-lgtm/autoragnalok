@@ -1,0 +1,44 @@
+[
+  {
+    "name": "Kien",
+    "line_uid": "google_102946172869647918563",
+    "session_token": "32d58325d48997138fbae64b3011860d",
+    "settings": {
+      "bot": 1,
+      "lock_pos": 0,
+      "explore_radius": 300,
+      "explore_cx": 1125,
+      "explore_cy": 1125,
+      "auto_potion_threshold": 50,
+      "lang": "vi",
+      "autoStats": false,
+      "statsPriority": [
+        "str",
+        "agi",
+        "vit",
+        "intel",
+        "dex",
+        "luk"
+      ],
+      "autoGear": false,
+      "autoSkills": false,
+      "skillsPriority": [
+        "crit_shot",
+        "tough_body",
+        "hp_regen",
+        "armor_up",
+        "knife_atk"
+      ],
+      "autoCompanion": false,
+      "autoMines": false,
+      "defaultOre": "stone",
+      "autoMap": false,
+      "targetMap": 1,
+      "autoZone": false,
+      "targetZone": 0,
+      "autoMVP": false,
+      "autoArena": false
+    },
+    "userId": "usr_admin"
+  }
+]

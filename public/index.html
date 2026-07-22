@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ragnalok Headless Manager</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <div class="glow-orb" id="orb-1"></div>
+  <div class="glow-orb" id="orb-2"></div>
+
+  <header class="app-header">
+    <div class="header-logo">
+      <span class="logo-icon">🛸</span>
+      <div class="logo-text">
+        <h1>RAGNALOK</h1>
+        <p>Headless Manager Dashboard</p>
+      </div>
+    </div>
+    <div class="header-actions" id="user-header-actions" style="display:none; align-items:center; gap:12px;">
+      <div class="user-profile-badge" style="display:flex; align-items:center; gap:8px; background:rgba(124,58,237,0.15); border:1px solid rgba(124,58,237,0.3); padding:6px 14px; border-radius:10px; font-size:0.85rem;">
+        <span>👤 <strong id="header-username">admin</strong></span>
+        <span class="badge badge-info" id="header-quota-badge" style="margin-left:4px;">1/1 Bot</span>
+        <span class="badge" id="header-expiry-badge" style="margin-left:4px; background:rgba(245,158,11,0.2); color:#fbbf24; border:1px solid rgba(245,158,11,0.3);">⏳ Còn --</span>
+      </div>
+      <button class="btn btn-secondary" id="btn-admin-panel" style="display:none; padding:8px 14px; font-size:0.85rem;">
+        ⚙️ Quản Lý User
+      </button>
+      <button class="btn btn-primary" id="btn-add-account" style="padding:8px 16px; font-size:0.85rem;">
+        <span class="btn-icon">＋</span> Thêm Tài Khoản
+      </button>
+      <button class="btn btn-danger" id="btn-logout" style="padding:8px 14px; font-size:0.85rem;">
+        🚪 Đăng Xuất
+      </button>
+    </div>
+  </header>
+
+  <!-- Login Screen Overlay -->
+  <div class="login-screen-backdrop" id="login-screen">
+    <div class="login-card">
+      <div class="login-header">
+        <span class="login-logo-icon">🛸</span>
+        <h2>RAGNALOK MANAGER</h2>
+        <p>Đăng nhập tài khoản hệ thống để quản lý bot</p>
+      </div>
+      <form id="login-form">
+        <div class="form-group">
+          <label for="login-username">Tên Đăng Nhập</label>
+          <input type="text" id="login-username" placeholder="Nhập tên đăng nhập..." required autocomplete="off">
+        </div>
+        <div class="form-group">
+          <label for="login-password">Mật Khẩu</label>
+          <input type="password" id="login-password" placeholder="Nhập mật khẩu..." required autocomplete="off">
+        </div>
+        <button type="submit" class="btn btn-primary" id="login-submit-btn" style="width:100%; justify-content:center; padding:12px; margin-top:10px;">
+          <span class="spinner" id="login-spinner"></span> 🔑 Đăng Nhập
+        </button>
+        <div class="error-msg" id="login-error"></div>
+      </form>
+    </div>
+  </div>
+
+  <main class="app-main">
+    <div class="no-accounts" id="no-accounts-msg">
+      <div class="no-accounts-icon">🎮</div>
+      <h2>Chưa có tài khoản nào được quản lý</h2>
+      <p>Hãy thêm tài khoản game bằng Line UID và Session Token để bắt đầu tự động hóa.</p>
+      <button class="btn btn-primary" id="btn-add-account-placeholder">Thêm Tài Khoản Ngay</button>
+    </div>
+
+    <div class="accounts-grid" id="accounts-grid">
+      <!-- Account cards will be dynamically rendered here -->
+    </div>
+  </main>
+
+  <!-- Modal Admin Users Management -->
+  <div class="modal-backdrop" id="admin-users-modal">
+    <div class="modal-card" style="max-width: 750px;">
+      <div class="modal-header">
+        <h2>⚙️ Quản Lý Người Dùng, Quota & Hạn Sử Dụng</h2>
+        <button class="modal-close" id="admin-modal-close-btn">&times;</button>
+      </div>
+      
+      <!-- Create User Form (Admin) -->
+      <form id="admin-create-user-form" style="background: rgba(0,0,0,0.2); padding: 15px; border-radius: 12px; border: 1px solid var(--border-color); margin-bottom: 20px;">
+        <h4 style="font-size:0.9rem; color:#a78bfa; margin-bottom:10px;">＋ Tạo Người Dùng Mới</h4>
+        <div style="display:grid; grid-template-columns: 1fr 1fr 90px 120px; gap: 8px;">
+          <input type="text" id="new-user-name" placeholder="Username" required style="padding:8px; font-size:0.85rem; background:rgba(0,0,0,0.3); border:1px solid var(--border-color); border-radius:6px; color:#fff;">
+          <input type="password" id="new-user-pass" placeholder="Mật khẩu" required style="padding:8px; font-size:0.85rem; background:rgba(0,0,0,0.3); border:1px solid var(--border-color); border-radius:6px; color:#fff;">
+          <input type="number" id="new-user-quota" value="1" min="1" placeholder="Quota Bot" required style="padding:8px; font-size:0.85rem; background:rgba(0,0,0,0.3); border:1px solid var(--border-color); border-radius:6px; color:#fff;">
+          <select id="new-user-days" style="padding:8px; font-size:0.85rem; background:rgba(0,0,0,0.3); border:1px solid var(--border-color); border-radius:6px; color:#fff;">
+            <option value="30">30 Ngày</option>
+            <option value="1m">1 Phút ⚡ (Test)</option>
+            <option value="1">1 Ngày (Dùng thử)</option>
+            <option value="7">7 Ngày</option>
+            <option value="90">90 Ngày</option>
+            <option value="365">1 Năm</option>
+            <option value="-1">Vô Hạn</option>
+          </select>
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:10px;">
+          <span class="error-msg" id="admin-create-user-error" style="margin:0; text-align:left; font-size:0.8rem;"></span>
+          <button type="submit" class="btn btn-primary" style="padding:6px 14px; font-size:0.8rem;">Tạo User</button>
+        </div>
+      </form>
+
+      <!-- Users List Table -->
+      <div style="max-height: 320px; overflow-y: auto;">
+        <table class="admin-users-table" style="width:100%; border-collapse:collapse; font-size:0.85rem; text-align:left;">
+          <thead>
+            <tr style="border-bottom:1px solid var(--border-color); color:var(--text-secondary);">
+              <th style="padding:8px;">Username</th>
+              <th style="padding:8px;">Vai Trò</th>
+              <th style="padding:8px;">Quota Bot</th>
+              <th style="padding:8px;">Hạn Sử Dụng</th>
+              <th style="padding:8px; text-align:right;">Thao Tác</th>
+            </tr>
+          </thead>
+          <tbody id="admin-users-table-body">
+            <!-- Rendered dynamically -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal Add Account -->
+  <div class="modal-backdrop" id="add-account-modal">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h2>Thêm Tài Khoản Ragnalok</h2>
+        <button class="modal-close" id="modal-close-btn">&times;</button>
+      </div>
+      <form id="add-account-form">
+        <div class="form-group">
+          <label for="acc-name">Tên Gợi Nhớ (Ví dụ: Acc Chính, Clone 1...)</label>
+          <input type="text" id="acc-name" placeholder="Nhập tên gợi nhớ..." required>
+        </div>
+        <div class="form-group">
+          <label for="acc-uid">Line UID</label>
+          <input type="text" id="acc-uid" placeholder="google_105050267352020975983" required>
+        </div>
+        <div class="form-group">
+          <label for="acc-token">Session Token</label>
+          <input type="text" id="acc-token" placeholder="8e84112898e0b58763f9f6cf9dbe447c" required>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" id="modal-cancel-btn">Hủy Bỏ</button>
+          <button type="submit" class="btn btn-primary" id="modal-submit-btn">
+            <span class="spinner" id="submit-spinner"></span> Xác Nhận Thêm
+          </button>
+        </div>
+        <div class="error-msg" id="modal-error"></div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal Edit Account -->
+  <div class="modal-backdrop" id="edit-account-modal">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h2>Cập Nhật Tài Khoản</h2>
+        <button class="modal-close" id="edit-modal-close-btn">&times;</button>
+      </div>
+      <form id="edit-account-form">
+        <input type="hidden" id="edit-acc-uid">
+        <div class="form-group">
+          <label for="edit-acc-name">Tên Gợi Nhớ (Ví dụ: Acc Chính, Clone 1...)</label>
+          <input type="text" id="edit-acc-name" placeholder="Nhập tên gợi nhớ..." required>
+        </div>
+        <div class="form-group">
+          <label for="edit-acc-token">Session Token Mới (Để trống nếu giữ nguyên)</label>
+          <input type="text" id="edit-acc-token" placeholder="Nhập session token mới...">
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" id="edit-modal-cancel-btn">Hủy Bỏ</button>
+          <button type="submit" class="btn btn-primary" id="edit-modal-submit-btn">
+            <span class="spinner" id="edit-submit-spinner"></span> Lưu Thay Đổi
+          </button>
+        </div>
+        <div class="error-msg" id="edit-modal-error"></div>
+      </form>
+    </div>
+  </div>
+
+  <script src="/app.js?v=9.0"></script>
+</body>
+</html>

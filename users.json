@@ -1,0 +1,21 @@
+[
+  {
+    "id": "usr_admin",
+    "username": "admin",
+    "passwordHash": "86d59cc895048aac532b0419856e97c34e05d2b03c0ae7c366a1b7396755c777436894d2f40d69b9554665b70de7773cf5368a56c1fd4be48c06b721d6091c11",
+    "salt": "3bd820d38d98f341c3ef38dd18b54fb6",
+    "role": "admin",
+    "maxAccounts": 999,
+    "createdAt": "2026-07-22T14:21:13.268Z"
+  },
+  {
+    "id": "usr_1784733428168_39",
+    "username": "test",
+    "passwordHash": "77d83530976447d9bb7509aa5e0d233eefae93b1762d58f8611b4ece8fee480b832d2f843972a1efbfc38f82f50bec337a6d9787f64f83786aafc728f372f17a",
+    "salt": "07858500ff1a9645f0eb730fb106e2dd",
+    "role": "user",
+    "maxAccounts": 1,
+    "expiresAt": "2026-07-22T15:18:08.168Z",
+    "createdAt": "2026-07-22T15:17:08.169Z"
+  }
+]
