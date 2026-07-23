@@ -9,15 +9,195 @@ const { fetch, Agent, ProxyAgent } = require('undici');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Connection pool for outbound requests to game server
-const gameAgent = new ProxyAgent({
-  uri: 'http://VN12143:wIbO5m9I@14.225.66.253:53795',
-  connect: { timeout: 10000 },
-  keepAliveTimeout: 30000,
-  keepAliveMaxTimeout: 60000,
-  pipelining: 1,
-  connections: 50,
-});
+// ==================== PROXY POOL ====================
+const PROXIES_FILE = path.join(__dirname, 'proxies.json');
+
+class ProxyPool {
+  constructor() {
+    this._settings = { useDirectConnection: true, maxBotsPerProxy: 10 };
+    this._proxies = [];
+    this._assignments = {}; // line_uid -> proxy_id | 'direct'
+    this._agents = {};      // proxy_id -> ProxyAgent instance
+    this._directAgent = new Agent({
+      connect: { timeout: 10000 },
+      keepAliveTimeout: 30000,
+      keepAliveMaxTimeout: 60000,
+      pipelining: 1,
+      connections: 50,
+    });
+    this._load();
+  }
+
+  _load() {
+    try {
+      if (fs.existsSync(PROXIES_FILE)) {
+        const data = JSON.parse(fs.readFileSync(PROXIES_FILE, 'utf8') || '{}');
+        this._settings = { useDirectConnection: true, maxBotsPerProxy: 10, ...(data.settings || {}) };
+        this._proxies = data.list || [];
+        this._agents = {};
+        for (const p of this._proxies) {
+          if (p.active && p.url) this._agents[p.id] = this._createAgent(p.url);
+        }
+      }
+    } catch (e) {
+      console.error('ProxyPool load error:', e.message);
+    }
+  }
+
+  _save() {
+    try {
+      fs.writeFileSync(PROXIES_FILE, JSON.stringify({ settings: this._settings, list: this._proxies }, null, 2), 'utf8');
+    } catch (e) {
+      console.error('ProxyPool save error:', e.message);
+    }
+  }
+
+  _createAgent(url) {
+    return new ProxyAgent({
+      uri: url,
+      connect: { timeout: 10000 },
+      keepAliveTimeout: 30000,
+      keepAliveMaxTimeout: 60000,
+      pipelining: 1,
+      connections: 50,
+    });
+  }
+
+  _getCounts() {
+    const counts = { direct: 0 };
+    for (const p of this._proxies) counts[p.id] = 0;
+    for (const slot of Object.values(this._assignments)) {
+      counts[slot] = (counts[slot] || 0) + 1;
+    }
+    return counts;
+  }
+
+  // Bin-packing: fill cheapest slots first, then fill each proxy fully before opening next
+  assignBot(line_uid) {
+    if (this._assignments[line_uid]) return this._assignments[line_uid];
+    const max = this._settings.maxBotsPerProxy || 10;
+    const counts = this._getCounts();
+
+    // 1. Direct connection (free) — fill first
+    if (this._settings.useDirectConnection && (counts['direct'] || 0) < max) {
+      this._assignments[line_uid] = 'direct';
+      return 'direct';
+    }
+
+    // 2. Fill existing proxy slots before opening new ones (sort DESC by current count)
+    const active = this._proxies.filter(p => p.active && p.url);
+    active.sort((a, b) => (counts[b.id] || 0) - (counts[a.id] || 0));
+    for (const p of active) {
+      if ((counts[p.id] || 0) < max) {
+        this._assignments[line_uid] = p.id;
+        return p.id;
+      }
+    }
+
+    // 3. All full — overflow to least loaded proxy
+    if (active.length > 0) {
+      active.sort((a, b) => (counts[a.id] || 0) - (counts[b.id] || 0));
+      this._assignments[line_uid] = active[0].id;
+      return active[0].id;
+    }
+
+    // 4. Fallback: direct
+    this._assignments[line_uid] = 'direct';
+    return 'direct';
+  }
+
+  releaseBot(line_uid) {
+    delete this._assignments[line_uid];
+  }
+
+  getDispatcher(line_uid) {
+    const slot = this._assignments[line_uid] || this.assignBot(line_uid);
+    if (slot === 'direct') return this._directAgent;
+    if (this._agents[slot]) return this._agents[slot];
+    // Proxy removed/inactive — reassign
+    delete this._assignments[line_uid];
+    return this.getDispatcher(line_uid);
+  }
+
+  // Default dispatcher for server-level requests (proxyRequest, fetchGameHtml, fetchGameAsset)
+  getDefaultDispatcher() {
+    if (this._settings.useDirectConnection) return this._directAgent;
+    const p = this._proxies.find(p => p.active && p.url && this._agents[p.id]);
+    return p ? this._agents[p.id] : this._directAgent;
+  }
+
+  _reassignFrom(proxyId) {
+    for (const uid of Object.keys(this._assignments)) {
+      if (this._assignments[uid] === proxyId) delete this._assignments[uid];
+    }
+  }
+
+  addProxy(label, url) {
+    const id = 'px_' + Date.now();
+    const proxy = { id, label: label || url, url, active: true };
+    this._proxies.push(proxy);
+    this._agents[id] = this._createAgent(url);
+    this._save();
+    return proxy;
+  }
+
+  updateProxy(id, fields) {
+    const p = this._proxies.find(p => p.id === id);
+    if (!p) return null;
+    if (fields.label !== undefined) p.label = fields.label;
+    if (fields.url !== undefined && fields.url !== p.url) {
+      p.url = fields.url;
+      try { if (this._agents[id]) this._agents[id].destroy(); } catch (e) {}
+      this._agents[id] = (p.active && p.url) ? this._createAgent(p.url) : null;
+    }
+    if (fields.active !== undefined) {
+      const wasActive = p.active;
+      p.active = !!fields.active;
+      if (p.active && p.url && !this._agents[id]) this._agents[id] = this._createAgent(p.url);
+      if (!p.active && wasActive) {
+        this._reassignFrom(id);
+        try { if (this._agents[id]) this._agents[id].destroy(); } catch (e) {}
+        delete this._agents[id];
+      }
+    }
+    this._save();
+    return p;
+  }
+
+  deleteProxy(id) {
+    this._reassignFrom(id);
+    try { if (this._agents[id]) this._agents[id].destroy(); } catch (e) {}
+    delete this._agents[id];
+    this._proxies = this._proxies.filter(p => p.id !== id);
+    this._save();
+  }
+
+  getStats() {
+    const counts = this._getCounts();
+    const max = this._settings.maxBotsPerProxy || 10;
+    const result = [];
+    if (this._settings.useDirectConnection) {
+      result.push({ id: 'direct', label: '🖥️ Kết nối trực tiếp (máy)', url: 'direct', active: true, botCount: counts['direct'] || 0, maxBots: max, isDirect: true });
+    }
+    for (const p of this._proxies) {
+      result.push({ ...p, botCount: counts[p.id] || 0, maxBots: max, isDirect: false });
+    }
+    return result;
+  }
+
+  getBotProxyInfo(line_uid) {
+    const slot = this._assignments[line_uid];
+    if (!slot) return { label: '—', isDirect: true };
+    if (slot === 'direct') return { id: 'direct', label: '🖥️ Direct', isDirect: true };
+    const p = this._proxies.find(p => p.id === slot);
+    return p ? { id: p.id, label: p.label, isDirect: false } : { label: '🖥️ Direct', isDirect: true };
+  }
+
+  getSettings() { return { ...this._settings }; }
+  updateSettings(s) { this._settings = { ...this._settings, ...s }; this._save(); }
+}
+
+const proxyPool = new ProxyPool();
 
 // Enable Gzip/Brotli compression for static and API responses (excluding image files)
 app.use(compression({
@@ -242,6 +422,14 @@ function isSkillUnlocked(skillId, playerLv, skills) {
   return true;
 }
 
+// Map definitions (mirror of MAP_DEFS in xhrpg_canvas.js)
+const MAP_DEFS = [
+  { id: 1, name: 'Thung lũng Trung tâm',  emoji: '🌿', req: 1  },
+  { id: 2, name: 'Sa mạc Vĩnh hằng',      emoji: '🏜️', req: 25 },
+  { id: 3, name: 'Vùng đất Băng giá',     emoji: '❄️', req: 40 },
+  { id: 4, name: 'Đấu trường Arena (PVP)', emoji: '🏛️', req: 20 },
+];
+
 // Background poller manager
 class BotInstance {
   constructor(account) {
@@ -260,6 +448,7 @@ class BotInstance {
     this.timer = null;
     this.isPolling = false;
 
+    proxyPool.assignBot(this.line_uid);
     this.addLog('SYSTEM', `Khởi tạo bot cho tài khoản: ${this.name}`);
   }
 
@@ -390,7 +579,7 @@ class BotInstance {
         method: 'POST',
         headers: headers,
         body: searchParams.toString(),
-        dispatcher: gameAgent,
+        dispatcher: proxyPool.getDispatcher(this.line_uid),
         signal: controller.signal
       });
 
@@ -826,7 +1015,7 @@ class BotInstance {
     }
 
     // 6. Auto Map Warp
-    if (this.settings.autoMap && this.player.map !== this.settings.targetMap) {
+    if (this.settings.autoMap && Number(this.player.map) !== Number(this.settings.targetMap)) {
       const targetMapId = parseInt(this.settings.targetMap) || 1;
       const mapDef = MAP_DEFS.find(m => m.id === targetMapId);
       if (mapDef && (this.player.lv || 1) >= mapDef.req) {
@@ -1203,6 +1392,254 @@ app.delete('/api/admin/users/:userId', requireAdmin, (req, res) => {
   res.json({ success: true });
 });
 
+// ==================== PROXY POOL ADMIN ROUTES ====================
+
+app.get('/api/admin/proxies', requireAuth, (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Chỉ Admin mới có quyền truy cập' });
+  res.json({ settings: proxyPool.getSettings(), list: proxyPool.getStats() });
+});
+
+app.post('/api/admin/proxies', requireAuth, (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Chỉ Admin mới có quyền truy cập' });
+  const { label, url } = req.body;
+  if (!url) return res.status(400).json({ error: 'Thiếu URL proxy' });
+  if (!url.startsWith('http://') && !url.startsWith('https://') && !url.startsWith('socks')) {
+    return res.status(400).json({ error: 'URL proxy không hợp lệ (phải bắt đầu bằng http:// hoặc socks5://)' });
+  }
+  const proxy = proxyPool.addProxy(label || url, url);
+  res.json({ success: true, proxy });
+});
+
+app.put('/api/admin/proxies/settings', requireAuth, (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Chỉ Admin mới có quyền truy cập' });
+  const { useDirectConnection, maxBotsPerProxy } = req.body;
+  const update = {};
+  if (useDirectConnection !== undefined) update.useDirectConnection = Boolean(useDirectConnection);
+  if (maxBotsPerProxy !== undefined) update.maxBotsPerProxy = Math.max(1, parseInt(maxBotsPerProxy) || 10);
+  proxyPool.updateSettings(update);
+  res.json({ success: true, settings: proxyPool.getSettings() });
+});
+
+app.put('/api/admin/proxies/:id', requireAuth, (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Chỉ Admin mới có quyền truy cập' });
+  const { id } = req.params;
+  const { label, url, active } = req.body;
+  const update = {};
+  if (label !== undefined) update.label = label;
+  if (url !== undefined) update.url = url;
+  if (active !== undefined) update.active = Boolean(active);
+  const result = proxyPool.updateProxy(id, update);
+  if (!result) return res.status(404).json({ error: 'Proxy không tìm thấy' });
+  res.json({ success: true, proxy: result });
+});
+
+app.delete('/api/admin/proxies/:id', requireAuth, (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Chỉ Admin mới có quyền truy cập' });
+  const { id } = req.params;
+  proxyPool.deleteProxy(id);
+  res.json({ success: true });
+});
+
+// ==================== AUTO ADD ACCOUNT BY PHPSESSID / GOOGLE LOGIN ====================
+
+app.all('/api/add-by-phpsessid', requireAuth, async (req, res) => {
+  let phpsessid = req.body.phpsessid || req.query.phpsessid || req.body.cookie || req.query.cookie;
+  const customName = req.body.name || req.query.name;
+
+  if (!phpsessid) {
+    return res.status(400).json({ error: 'Thiếu PHPSESSID cookie' });
+  }
+
+  // Parse PHPSESSID if user pasted raw cookie string
+  const match = String(phpsessid).match(/PHPSESSID=([^;\s]+)/i);
+  if (match) phpsessid = match[1];
+  phpsessid = String(phpsessid).trim();
+
+  try {
+    const response = await fetch('https://ragnalok.online/human/xhrpg_google_auth.php', {
+      dispatcher: proxyPool.getDefaultDispatcher(),
+      headers: {
+        'cookie': `PHPSESSID=${phpsessid}`,
+        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      }
+    });
+
+    const text = await response.text();
+    let data;
+    try { data = JSON.parse(text); } catch (e) {}
+
+    if (!data || !data.ok || !data.player || !data.session_token) {
+      if (req.method === 'GET') {
+        return res.status(400).send('<h2 style="color:#ef4444; font-family:sans-serif; text-align:center; margin-top:50px;">⚠️ Mã PHPSESSID không hợp lệ hoặc chưa đăng nhập trên game! Vui lòng đăng nhập Google trên game trước.</h2>');
+      }
+      return res.status(400).json({ error: 'PHPSESSID không hợp lệ hoặc phiên đăng nhập trên game đã hết hạn!' });
+    }
+
+    const line_uid = String(data.player.line_uid);
+    const session_token = String(data.session_token);
+    const accountName = customName || data.player.name || `Google Acc (${line_uid.slice(-4)})`;
+
+    // Check if account already exists
+    if (botInstances[line_uid]) {
+      const bot = botInstances[line_uid];
+      if (bot.userId === req.user.id || req.user.role === 'admin') {
+        bot.session_token = session_token;
+        if (customName || data.player.name) bot.name = customName || data.player.name;
+        const currentAccounts = loadAccounts();
+        const index = currentAccounts.findIndex(acc => acc.line_uid === line_uid);
+        if (index !== -1) {
+          currentAccounts[index].session_token = session_token;
+          if (customName || data.player.name) currentAccounts[index].name = customName || data.player.name;
+          saveAccounts(currentAccounts);
+        }
+        if (req.method === 'GET') {
+          return res.send(`
+            <div style="background:#0f172a; color:#fff; height:100vh; display:flex; flex-direction:column; align-items:center; justify-content:center; font-family:sans-serif; text-align:center; padding:20px;">
+              <div style="font-size:60px; margin-bottom:10px;">🎉</div>
+              <h2 style="color:#34d399; margin-bottom:10px;">CẬP NHẬT TOKEN THÀNH CÔNG!</h2>
+              <p style="color:#94a3b8; font-size:16px;">Tài khoản <strong>${bot.name}</strong> đã được cập nhật Token mới.</p>
+              <p style="color:#a78bfa; font-size:14px; margin-top:15px;">⏳ Đang quay về Bảng điều khiển...</p>
+              <script>setTimeout(() => location.href='/', 1500);</script>
+            </div>
+          `);
+        }
+        return res.json({ success: true, name: bot.name, updated: true });
+      } else {
+        if (req.method === 'GET') {
+          return res.status(400).send('⚠️ Tài khoản game này đã thuộc về người dùng khác!');
+        }
+        return res.status(400).json({ error: 'Tài khoản game này đã thuộc về người dùng khác trong hệ thống!' });
+      }
+    }
+
+    // Check quota limit for non-admin users
+    const userAccounts = Object.values(botInstances).filter(bot => bot.userId === req.user.id);
+    const userQuota = req.user.maxAccounts || 1;
+    if (req.user.role !== 'admin' && userAccounts.length >= userQuota) {
+      if (req.method === 'GET') {
+        return res.status(400).send(`⚠️ Bạn đã đạt giới hạn tối đa (${userQuota} bot). Vui lòng liên hệ Admin.`);
+      }
+      return res.status(400).json({ error: `Bạn đã đạt giới hạn tối đa (${userQuota} bot). Vui lòng liên hệ Admin để nâng Quota.` });
+    }
+
+    const newAcc = {
+      name: accountName,
+      line_uid,
+      session_token,
+      userId: req.user.id
+    };
+
+    const currentAccounts = loadAccounts();
+    currentAccounts.push(newAcc);
+    saveAccounts(currentAccounts);
+
+    const bot = new BotInstance(newAcc);
+    botInstances[line_uid] = bot;
+    bot.start();
+
+    if (req.method === 'GET') {
+      return res.send(`
+        <div style="background:#0f172a; color:#fff; height:100vh; display:flex; flex-direction:column; align-items:center; justify-content:center; font-family:sans-serif; text-align:center; padding:20px;">
+          <div style="font-size:60px; margin-bottom:10px;">🎉</div>
+          <h2 style="color:#34d399; margin-bottom:10px;">THÊM BOT THÀNH CÔNG!</h2>
+          <p style="color:#94a3b8; font-size:16px;">Tài khoản <strong>${accountName}</strong> đã được thêm vào hệ thống.</p>
+          <p style="color:#a78bfa; font-size:14px; margin-top:15px;">⏳ Đang quay về Bảng điều khiển...</p>
+          <script>setTimeout(() => location.href='/', 1500);</script>
+        </div>
+      `);
+    }
+
+    res.json({ success: true, name: accountName, created: true });
+  } catch (e) {
+    console.error('Add by PHPSESSID error:', e.message);
+    if (req.method === 'GET') return res.status(500).send('Lỗi kết nối tới máy chủ game');
+    res.status(500).json({ error: 'Lỗi kết nối tới máy chủ game' });
+  }
+});
+
+app.all('/api/auto-add-account', requireAuth, (req, res) => {
+  const line_uid = req.body.line_uid || req.query.line_uid;
+  const session_token = req.body.session_token || req.query.session_token;
+  const name = req.body.name || req.query.name;
+
+  if (!line_uid || !session_token) {
+    return res.status(400).json({ error: 'Thiếu line_uid hoặc session_token' });
+  }
+
+  // Check if account already exists
+  if (botInstances[line_uid]) {
+    const bot = botInstances[line_uid];
+    if (bot.userId === req.user.id || req.user.role === 'admin') {
+      bot.session_token = session_token;
+      if (name) bot.name = name;
+      const currentAccounts = loadAccounts();
+      const index = currentAccounts.findIndex(acc => acc.line_uid === line_uid);
+      if (index !== -1) {
+        currentAccounts[index].session_token = session_token;
+        if (name) currentAccounts[index].name = name;
+        saveAccounts(currentAccounts);
+      }
+      if (req.method === 'GET') {
+        return res.send(`
+          <div style="background:#0f172a; color:#fff; height:100vh; display:flex; flex-direction:column; align-items:center; justify-content:center; font-family:sans-serif; text-align:center; padding:20px;">
+            <div style="font-size:60px; margin-bottom:10px;">🎉</div>
+            <h2 style="color:#34d399; margin-bottom:10px;">CẬP NHẬT TOKEN THÀNH CÔNG!</h2>
+            <p style="color:#94a3b8; font-size:16px;">Tài khoản <strong>${bot.name}</strong> đã được cập nhật Token mới.</p>
+            <p style="color:#a78bfa; font-size:14px; margin-top:15px;">⏳ Đang quay về Bảng điều khiển...</p>
+            <script>setTimeout(() => location.href='/', 1500);</script>
+          </div>
+        `);
+      }
+      return res.json({ success: true, name: bot.name, updated: true });
+    } else {
+      if (req.method === 'GET') {
+        return res.status(400).send('⚠️ Tài khoản game này đã thuộc về người dùng khác!');
+      }
+      return res.status(400).json({ error: 'Tài khoản game này đã thuộc về người dùng khác trong hệ thống!' });
+    }
+  }
+
+  // Check quota limit for non-admin users
+  const userAccounts = Object.values(botInstances).filter(bot => bot.userId === req.user.id);
+  const userQuota = req.user.maxAccounts || 1;
+  if (req.user.role !== 'admin' && userAccounts.length >= userQuota) {
+    if (req.method === 'GET') {
+      return res.status(400).send(`⚠️ Bạn đã đạt giới hạn tối đa (${userQuota} bot). Vui lòng liên hệ Admin.`);
+    }
+    return res.status(400).json({ error: `Bạn đã đạt giới hạn tối đa (${userQuota} bot). Vui lòng liên hệ Admin để nâng Quota.` });
+  }
+
+  const accountName = name || `Google Acc (${String(line_uid).slice(-4)})`;
+  const newAcc = {
+    name: accountName,
+    line_uid: String(line_uid),
+    session_token: String(session_token),
+    userId: req.user.id
+  };
+
+  const currentAccounts = loadAccounts();
+  currentAccounts.push(newAcc);
+  saveAccounts(currentAccounts);
+
+  const bot = new BotInstance(newAcc);
+  botInstances[line_uid] = bot;
+  bot.start();
+
+  if (req.method === 'GET') {
+    return res.send(`
+      <div style="background:#0f172a; color:#fff; height:100vh; display:flex; flex-direction:column; align-items:center; justify-content:center; font-family:sans-serif; text-align:center; padding:20px;">
+        <div style="font-size:60px; margin-bottom:10px;">🎉</div>
+        <h2 style="color:#34d399; margin-bottom:10px;">THÊM BOT THÀNH CÔNG!</h2>
+        <p style="color:#94a3b8; font-size:16px;">Tài khoản <strong>${accountName}</strong> đã được thêm vào hệ thống.</p>
+        <p style="color:#a78bfa; font-size:14px; margin-top:15px;">⏳ Đang quay về Bảng điều khiển...</p>
+        <script>setTimeout(() => location.href='/', 1500);</script>
+      </div>
+    `);
+  }
+
+  res.json({ success: true, name: accountName, created: true });
+});
+
 // ==================== GAME ACCOUNTS API ROUTES (Protected) ====================
 
 app.get('/api/accounts', requireAuth, (req, res) => {
@@ -1220,6 +1657,7 @@ app.get('/api/accounts', requireAuth, (req, res) => {
       error: bot.error,
       lastUpdate: bot.lastUpdate,
       settings: bot.settings,
+      proxyInfo: proxyPool.getBotProxyInfo(bot.line_uid),
       spots: bot.spots || null,
       player: bot.player ? {
         lv: bot.player.lv,
@@ -1382,6 +1820,7 @@ app.delete('/api/accounts/:line_uid', requireAuth, (req, res) => {
   if (!checkAccountOwnership(req, res, bot)) return;
 
   bot.stop();
+  proxyPool.releaseBot(line_uid);
   delete botInstances[line_uid];
 
   const currentAccounts = loadAccounts();
@@ -1498,7 +1937,7 @@ async function proxyRequest(req, res, targetUrl) {
       method: req.method,
       headers: headers,
       body: body,
-      dispatcher: gameAgent
+      dispatcher: proxyPool.getDefaultDispatcher()
     });
 
     res.status(response.status);
@@ -1523,7 +1962,7 @@ async function fetchGameHtml(req) {
   const targetUrl = `https://ragnalok.online/human/index.php?_cb=${now}`;
   
   const response = await fetch(targetUrl, {
-    dispatcher: gameAgent,
+    dispatcher: proxyPool.getDefaultDispatcher(),
     headers: {
       'user-agent': req.headers['user-agent'] || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     }
@@ -1599,7 +2038,140 @@ if (uid && token) {
   return html;
 }
 
+async function fetchGameLoginHtml(req) {
+  const now = Date.now();
+  const targetUrl = `https://ragnalok.online/human/index.php?_cb=${now}`;
+  
+  const response = await fetch(targetUrl, {
+    dispatcher: proxyPool.getDefaultDispatcher(),
+    headers: {
+      'user-agent': req.headers['user-agent'] || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    }
+  });
+  
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  let html = await response.text();
+  
+  // 1. Fix DOM: Hide loading screen and show login overlay
+  html = html.replace('id="log-list"', 'id="event-log"');
+  html = html.replace('id="loading-screen"', 'id="loading-screen" style="display:none;"');
+  html = html.replace('id="login-overlay" style="display:none"', 'id="login-overlay" style="display:flex; z-index:999999;"');
+  
+  html = html.replace(/src="js\/xhrpg_canvas\.js[^"]*"/, `src="/js/xhrpg_canvas.js?v=${now}"`);
+  html = html.replace(
+    /(<script src="\/js\/xhrpg_canvas\.js\?v=\d+"><\/script>)/,
+    `$1\n<script src="/js/xhrpg_lang_vi.js?v=${now}"></script>`
+  );
+
+  // 2. Inject Head Guard Script
+  const headGuard = `
+<script>
+window.ageGate = function() { return true; };
+window.liff = {
+  init: function() { return Promise.resolve(); },
+  isLoggedIn: function() { return false; },
+  login: function() {},
+  logout: function() {}
+};
+(function() {
+  const _origParse = JSON.parse;
+  JSON.parse = function(text, reviver) {
+    if (typeof text === 'string' && text.trim().startsWith('<')) {
+      return { ok: false, error: 'Chưa đăng nhập' };
+    }
+    return _origParse(text, reviver);
+  };
+})();
+</script>`;
+
+  html = html.replace('<head>', '<head>\n' + headGuard);
+
+  // 3. Inject Token Sniffer & Login Script
+  const loginProxyScript = `
+<script>
+const BASE_URL = "/";
+const CF_REGION = "VN";
+const _L = true;
+
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('loading-screen').style.display = 'none';
+  document.getElementById('game-screen').style.display = 'block';
+  document.getElementById('login-overlay').style.display = 'flex';
+  if (window.xhrpg && xhrpg.startDemo) {
+    xhrpg.startDemo('/');
+  }
+});
+
+(function() {
+  let captured = false;
+  function checkAndCapture(uid, token, name) {
+    if (captured || !uid || !token || uid === 'demo') return;
+    captured = true;
+    
+    const loadingDiv = document.createElement('div');
+    loadingDiv.style.cssText = 'position:fixed; inset:0; background:rgba(15,23,42,0.95); z-index:9999999; display:flex; flex-direction:column; align-items:center; justify-content:center; font-family:sans-serif; text-align:center; padding:20px; color:#fff;';
+    loadingDiv.innerHTML = '<div style="font-size:48px; margin-bottom:12px;">⏳</div><h3 style="color:#a78bfa;">Đang lưu token và thêm tài khoản vào Manager...</h3>';
+    document.body.appendChild(loadingDiv);
+
+    fetch('/api/auto-add-account', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        line_uid: uid,
+        session_token: token,
+        name: name || ('Google Acc (' + String(uid).slice(-4) + ')')
+      })
+    })
+    .then(res => res.json())
+    .then(data => {
+      if (data.error) {
+        loadingDiv.innerHTML = '<div style="font-size:48px; margin-bottom:12px;">❌</div><h3 style="color:#ef4444;">Lỗi: ' + data.error + '</h3><button onclick="location.href=\\'/\\'" style="margin-top:15px; padding:10px 20px; background:#7c3aed; color:#fff; border:none; border-radius:8px; font-weight:bold; cursor:pointer;">Quay lại Bảng điều khiển</button>';
+      } else {
+        loadingDiv.innerHTML = '<div style="font-size:60px; margin-bottom:12px;">🎉</div><h2 style="color:#34d399; margin-bottom:8px;">TỰ ĐỘNG LẤY TOKEN THÀNH CÔNG!</h2><p style="color:#94a3b8; font-size:15px;">' + (data.updated ? 'Đã cập nhật Token mới' : 'Đã thêm tài khoản mới') + ': <strong style="color:#fff;">' + (data.name || name || uid) + '</strong></p><p style="color:#a78bfa; font-size:13px; margin-top:12px;">⏳ Đang chuyển về Bảng điều khiển trong 1.5 giây...</p>';
+        setTimeout(() => { window.location.href = '/'; }, 1500);
+      }
+    })
+    .catch(err => {
+      loadingDiv.innerHTML = '<div style="font-size:48px; margin-bottom:12px;">❌</div><h3 style="color:#ef4444;">Lỗi kết nối tới máy chủ Manager</h3><button onclick="location.href=\\'/\\'" style="margin-top:15px; padding:10px 20px; background:#7c3aed; color:#fff; border:none; border-radius:8px; font-weight:bold; cursor:pointer;">Quay lại Bảng điều khiển</button>';
+    });
+  }
+
+  window.startGame = function(player, token, offlineReward) {
+    if (player && player.line_uid && token) {
+      checkAndCapture(player.line_uid, token, player.name);
+    }
+  };
+
+  const checkJQuery = setInterval(() => {
+    if (window.$ && $.post) {
+      clearInterval(checkJQuery);
+      const origPost = $.post;
+      $.post = function(url, data, ...rest) {
+        if (data && typeof data === 'object' && data.line_uid && data.session_token) {
+          checkAndCapture(data.line_uid, data.session_token, data.name);
+        }
+        return origPost.apply(this, [url, data, ...rest]);
+      };
+    }
+  }, 100);
+})();
+</script>`;
+
+  html = html.replace(/<script>[\s\S]*?LIFF_ID[\s\S]*?<\/script>/, loginProxyScript);
+  return html;
+}
+
 // Local game client routes (Protected)
+app.get('/login-helper', requireAuth, async (req, res) => {
+  try {
+    const html = await fetchGameLoginHtml(req);
+    res.send(html);
+  } catch (e) {
+    console.error('Fetch Login Helper HTML error:', e.message);
+    res.status(500).send('<h2 style="color:#ef4444; font-family:sans-serif; text-align:center; margin-top:50px;">⚠️ Không thể kết nối tới máy chủ game để lấy token!</h2>');
+  }
+});
+
 app.get('/play', requireAuth, async (req, res) => {
   const uid = req.query.line_uid;
   if (uid && botInstances[uid]) {
@@ -1632,7 +2204,7 @@ async function fetchGameAsset(urlPath) {
   // Thêm cache-buster để tránh tải nhầm bản cũ từ Cloudflare Cache của server game
   const targetUrl = `https://ragnalok.online/human${urlPath}?_cb=${now}`;
   const response = await fetch(targetUrl, {
-    dispatcher: gameAgent,
+    dispatcher: proxyPool.getDefaultDispatcher(),
     headers: {
       'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       'referer': 'https://ragnalok.online/human/'
@@ -1670,18 +2242,12 @@ app.get('/js/xhrpg_canvas.js', async (req, res) => {
   }
 });
 
-app.get('/js/xhrpg_lang_vi.js', async (req, res) => {
-  try {
-    const data = await fetchGameAsset('/js/xhrpg_lang_vi.js');
-    res.set({
-      'Cache-Control': 'public, max-age=1800',
-      'Content-Type': 'application/javascript; charset=utf-8'
-    });
-    res.send(data);
-  } catch (e) {
-    console.error('Fetch lang error:', e.message);
-    res.sendFile(path.join(__dirname, 'xhrpg_lang_vi.js'));
-  }
+app.get('/js/xhrpg_lang_vi.js', (req, res) => {
+  res.set({
+    'Cache-Control': 'public, max-age=1800',
+    'Content-Type': 'application/javascript; charset=utf-8'
+  });
+  res.sendFile(path.join(__dirname, 'xhrpg_lang_vi.js'));
 });
 
 app.get('/js/jquery-3.6.0.min.js', (req, res) => {
