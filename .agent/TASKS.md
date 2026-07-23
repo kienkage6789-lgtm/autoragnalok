@@ -63,3 +63,27 @@
 - Description: Create start/stop API routes and frontend toggle switch to pause/resume bots, and fix checkbox ID binding for Lock Position.
 - Files related: `server.js`, `public/app.js`
 - Status: done
+
+### [x] T09 - Bugfix: Auto Map Warp + Auto Farm Zone bị gãy hoàn toàn
+- Description: Điều tra và sửa 3 lỗi khiến tính năng "Bản đồ di chuyển" không nhận map hiện tại và Auto Farm Zone không hoạt động.
+- Files related: `server.js`, `public/app.js`
+- Lỗi đã sửa:
+  1. `MAP_DEFS` chưa được khai báo trong `server.js` → crash `pollGame()` tại bước Auto Warp.
+  2. So sánh type không an toàn `player.map !== settings.targetMap` (number vs string).
+  3. Zone dropdown không populate từ `acc.spots`; toggle autoMap/autoZone không sync về UI.
+- Status: done
+
+### [x] T10 - Hệ thống Xoay Proxy (Proxy Rotation Pool)
+- Description: Xây dựng ProxyPool động với thuật toán Bin-Packing, Admin UI quản lý proxy, proxy badge trên bot card.
+- Files related: `server.js`, `public/index.html`, `public/app.js`, `proxies.json`
+- Tính năng:
+  1. ProxyPool class thay thế gameAgent toàn cục cố định.
+  2. Bin-packing: Direct (miễn phí) → lấp đầy từng proxy trước khi mở proxy mới.
+  3. Admin tab "🌐 Proxy Pool": thêm/tắt/xóa proxy, cấu hình global, progress bar tải.
+  4. Proxy badge trên mỗi bot card (xanh lá = direct, tím = proxy).
+- Status: done
+
+### [x] T11 - Đăng Nhập Google Tự Động Lấy Token (Dành Cho Điện Thoại)
+- Description: Tích hợp cổng proxy `/login-helper` với Token Sniffer tự động bắt `line_uid` & `session_token` khi đăng nhập Google trên điện thoại.
+- Files related: `server.js`, `public/index.html`
+- Status: done

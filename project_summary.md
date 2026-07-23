@@ -44,6 +44,25 @@ Chúng ta đã xây dựng thành công một hệ thống **Headless Bot Manage
     *   Khắc phục lỗi sai lệch ID của thẻ chứa lịch sử sự kiện bằng cách sửa `log-list` thành `event-log` trong `play.html`.
     *   Đảo ngược thứ tự load script (cho `xhrpg_canvas.js` chạy trước `xhrpg_lang_vi.js`) để tránh crash đối tượng `window.XHRPG_I18N`.
 
+### F. Vá lỗi Auto Map Warp & Auto Farm Zone (2026-07-23)
+*   **Lỗi 1 — `MAP_DEFS` chưa được khai báo trong `server.js`** *(Critical)*: Hằng số danh sách bản đồ chỉ tồn tại trong client game `xhrpg_canvas.js`, không có trong `server.js`. Mỗi lần vòng poll chạy đến bước Auto Warp đều crash với `ReferenceError` → toàn bộ cơ chế `autoZone` và `autoFarm` bị vô hiệu hóa theo. Đã sửa bằng cách khai báo lại `MAP_DEFS` tĩnh trong `server.js`.
+*   **Lỗi 2 — So sánh kiểu không an toàn `player.map !== settings.targetMap`**: `player.map` là `number`, `settings.targetMap` đọc từ JSON có thể là `string` → so sánh `!==` luôn trả về `true` dù đang đúng map → bot warp liên tục không dừng. Đã sửa bằng `Number()` trên cả hai vế.
+*   **Lỗi 3 — Zone dropdown trống, toggle không sync**: `updateCard()` không populate danh sách Zone từ `acc.spots` trả về của server, đồng thời không sync trạng thái toggle `autoMap`/`autoZone` và giá trị select về UI. Đã sửa bằng hàm `populateZoneSelect(acc)` với anti-flicker và sync đầy đủ.
+
+### G. Hệ Thống Xoay Proxy Động (Proxy Rotation Pool) (2026-07-23)
+*   **ProxyPool Class (`server.js`)**: Thay thế `gameAgent` toàn cục cố định bằng lớp quản lý pool proxy động. Hỗ trợ cả kết nối trực tiếp (Direct Connection) và danh sách proxy HTTP/SOCKS5.
+*   **Thuật toán Bin-Packing (Tiết kiệm chi phí tối đa)**: Phân bổ từng bot vào slot rẻ nhất trước. Lấp đầy dung lượng 10 bot của Direct Connection → Lấp đầy 10 bot của Proxy 1 → Lấp đầy 10 bot của Proxy 2... Không mở proxy mới khi proxy hiện tại chưa đầy slot.
+*   **Gán & Giải phóng Động**: Mỗi `BotInstance` được gán proxy khi khởi tạo (`assignBot`) và giải phóng slot khi xóa tài khoản (`releaseBot`). Các cuộc gọi request game dùng `proxyPool.getDispatcher(line_uid)`.
+*   **Giao diện Quản trị Proxy (Admin UI)**: Modal Admin chuyển sang dạng Tabbed UI với tab **🌐 Proxy Pool**. Hỗ trợ Admin cấu hình bật/tắt Direct connection, đặt giới hạn bot/proxy, thêm proxy mới với kiểm tra URL, bật/tắt/xóa proxy đang có kèm thanh biểu đồ hiển thị tải (Progress bar).
+*   **Proxy Badge**: Hiển thị badge nhỏ trên mỗi Card tài khoản (Màu xanh lá = Direct, Màu tím = Proxy tên) để biết bot đang kết nối qua proxy nào.
+
+### H. Tự Động Bắt Token Đăng Nhập Điện Thoại qua PHPSESSID & Bookmarklet (2026-07-23)
+*   **Cơ chế Trích Xuất Token từ `PHPSESSID` (`/api/add-by-phpsessid`)**: Khi người dùng đăng nhập Google trên điện thoại (`ragnalok.online`), game khởi tạo cookie `PHPSESSID`. Server Manager nhận `PHPSESSID`, gọi tới `https://ragnalok.online/human/xhrpg_google_auth.php` với header `Cookie: PHPSESSID=...` để tự động đọc `line_uid`, `session_token` và tên nhân vật mà không cần F12/DevTools.
+*   **Nút Thêm Bot bằng `PHPSESSID` (Dành cho Điện thoại)**: Người dùng điện thoại chỉ cần dán `PHPSESSID` hoặc nguyên chuỗi cookie vào Modal Thêm Tài Khoản, bấm **Thêm Ngay** là hệ thống tự trích xuất token, tạo bot và khởi chạy lập tức.
+*   **Mã Dấu Trang 1-Tap (Bookmarklet)**: Cung cấp nút copy mã Bookmarklet. Khi lưu vào Bookmark trình duyệt điện thoại và bấm khi đang ở tab game, script tự động đọc `xhrpg_google_auth.php` thông qua Cookie của trình duyệt và gửi về Server Manager để thêm bot tự động.
+
+
+
 ---
 
 ## 🚀 2. Các hạng mục CHƯA HOÀN THÀNH (Roadmap / Future Upgrades)

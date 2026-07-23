@@ -166,9 +166,10 @@ document.addEventListener('DOMContentLoaded', () => {
     checkAuth();
   });
 
-  // Admin Modal Controls
+  // Admin Modal open: always reset to Users tab
   btnAdminPanel.addEventListener('click', () => {
     adminUsersModal.classList.add('open');
+    switchAdminTab('users');
     fetchAdminUsers();
   });
 
@@ -177,6 +178,23 @@ document.addEventListener('DOMContentLoaded', () => {
       adminUsersModal.classList.remove('open');
     });
   }
+
+  // Admin Tab Switching
+  window.switchAdminTab = function(tab) {
+    document.getElementById('admin-tab-users').style.display    = tab === 'users'   ? '' : 'none';
+    document.getElementById('admin-tab-proxies').style.display  = tab === 'proxies' ? '' : 'none';
+    const btnUsers   = document.getElementById('admin-tab-btn-users');
+    const btnProxies = document.getElementById('admin-tab-btn-proxies');
+    if (btnUsers && btnProxies) {
+      btnUsers.style.background   = tab === 'users'   ? 'rgba(165,180,252,0.2)' : 'transparent';
+      btnUsers.style.color        = tab === 'users'   ? '#a5b4fc' : 'var(--text-secondary)';
+      btnUsers.style.borderColor  = tab === 'users'   ? 'rgba(165,180,252,0.4)' : 'var(--border-color)';
+      btnProxies.style.background = tab === 'proxies' ? 'rgba(165,180,252,0.2)' : 'transparent';
+      btnProxies.style.color      = tab === 'proxies' ? '#a5b4fc' : 'var(--text-secondary)';
+      btnProxies.style.borderColor= tab === 'proxies' ? 'rgba(165,180,252,0.4)' : 'var(--border-color)';
+    }
+    if (tab === 'proxies') fetchAdminProxies();
+  };
 
   // Admin Fetch Users
   async function fetchAdminUsers() {
@@ -545,6 +563,7 @@ document.addEventListener('DOMContentLoaded', () => {
           <div class="acc-name-wrapper">
             <span class="acc-name" id="name-${acc.line_uid}">${acc.name}</span>
             <span class="badge badge-${acc.status}" id="status-badge-${acc.line_uid}">${acc.status}</span>
+            <span id="proxy-badge-${acc.line_uid}" style="font-size:0.7rem; padding:2px 6px; border-radius:6px; background:rgba(99,102,241,0.15); color:#818cf8; border:1px solid rgba(99,102,241,0.3); white-space:nowrap;">🌐 —</span>
           </div>
           <span class="acc-lv" id="lv-txt-${acc.line_uid}">Lv. --</span>
         </div>
@@ -796,6 +815,29 @@ document.addEventListener('DOMContentLoaded', () => {
     const chkAutoArena = document.getElementById(`chk-autoarena-${acc.line_uid}`);
     if (chkAutoArena && document.activeElement !== chkAutoArena) chkAutoArena.checked = acc.settings.autoArena === true;
 
+    // Auto Map toggle & map select sync
+    const chkAutoMap = document.getElementById(`chk-automap-${acc.line_uid}`);
+    if (chkAutoMap && document.activeElement !== chkAutoMap) chkAutoMap.checked = acc.settings.autoMap === true;
+
+    const selMap = document.getElementById(`sel-map-${acc.line_uid}`);
+    if (selMap && document.activeElement !== selMap) selMap.value = String(acc.settings.targetMap || 1);
+
+    // Auto Zone toggle & zone select: populate from acc.spots then sync value
+    const chkAutoZone = document.getElementById(`chk-autozone-${acc.line_uid}`);
+    if (chkAutoZone && document.activeElement !== chkAutoZone) chkAutoZone.checked = acc.settings.autoZone === true;
+
+    populateZoneSelect(acc);
+
+    // Proxy badge
+    const proxyBadge = document.getElementById(`proxy-badge-${acc.line_uid}`);
+    if (proxyBadge && acc.proxyInfo) {
+      const info = acc.proxyInfo;
+      proxyBadge.textContent = `🌐 ${info.label}`;
+      proxyBadge.style.background = info.isDirect ? 'rgba(16,185,129,0.15)' : 'rgba(99,102,241,0.15)';
+      proxyBadge.style.color      = info.isDirect ? '#34d399' : '#818cf8';
+      proxyBadge.style.borderColor= info.isDirect ? 'rgba(16,185,129,0.3)' : 'rgba(99,102,241,0.3)';
+    }
+
     // Core Stats allocation UI
     document.getElementById(`pts-val-${acc.line_uid}`).textContent = p.stat_pts || 0;
     renderStatsList(acc);
@@ -804,6 +846,44 @@ document.addEventListener('DOMContentLoaded', () => {
     const currentTab = activeTabs[acc.line_uid];
     if (currentTab === 'logs') {
       fetchLogs(acc.line_uid);
+    }
+  }
+
+  // Populate zone dropdown from spots data returned by server
+  function populateZoneSelect(acc) {
+    const sel = document.getElementById(`sel-zone-${acc.line_uid}`);
+    if (!sel) return;
+
+    const spots = acc.spots; // object keyed by zone id, or null
+    if (!spots || typeof spots !== 'object') {
+      // No spots data yet — keep placeholder, disable select
+      sel.innerHTML = `<option value="">⏳ Chờ tải dữ liệu Zone...</option>`;
+      return;
+    }
+
+    const spotsList = Object.values(spots);
+    if (spotsList.length === 0) {
+      sel.innerHTML = `<option value="">🗺️ Không có Zone trên bản đồ này</option>`;
+      return;
+    }
+
+    // Only re-render if spots list changed (avoid dropdown flicker)
+    const currentCount = sel.querySelectorAll('option[value]').length;
+    if (currentCount !== spotsList.length || sel.dataset.lastMap !== String(acc.player && acc.player.map)) {
+      sel.dataset.lastMap = String(acc.player && acc.player.map);
+      sel.innerHTML = `<option value="">🗺️ Chọn khu vực (Zone)...</option>`;
+      spotsList.forEach((spot, idx) => {
+        const opt = document.createElement('option');
+        opt.value = String(idx);
+        opt.textContent = `${spot.emoji || '📍'} ${spot.name}`;
+        sel.appendChild(opt);
+      });
+    }
+
+    // Sync selected value to settings (skip if user is interacting)
+    if (document.activeElement !== sel) {
+      const targetIdx = acc.settings.targetZone;
+      sel.value = (targetIdx !== undefined && targetIdx !== null) ? String(targetIdx) : '';
     }
   }
 
@@ -1047,6 +1127,149 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   };
 
+  window.copyAutoTokenCode = function() {
+    const origin = window.location.origin;
+    const code = `javascript:(function(){fetch('/human/xhrpg_google_auth.php').then(r=>r.json()).then(d=>{if(d&&d.ok&&d.player&&d.session_token){const u='${origin}/api/auto-add-account?line_uid='+encodeURIComponent(d.player.line_uid)+'&session_token='+encodeURIComponent(d.session_token)+'&name='+encodeURIComponent(d.player.name||'');location.href=u;}else{alert('⚠️ Chưa đăng nhập game! Vui lòng Đăng nhập Google trên game trước.');}}).catch(()=>alert('⚠️ Vui lòng mở game (ragnalok.online) trước khi bấm Bookmark này!'));})();`;
+    
+    const showNotice = () => {
+      alert('📋 ĐÃ COPY MÃ DẤU TRANG (BOOKMARKLET)!\n\nHướng dẫn cài trên Điện thoại (Chỉ cài 1 lần):\n1. Bấm Bookmark (Lưu dấu trang) trang web bất kỳ.\n2. Sửa tên dấu trang thành: ⚡ Lấy Token Bot\n3. Xóa URL cũ và DÁN đoạn mã vừa copy vào phần URL.\n4. Mở game (ragnalok.online), đăng nhập Google xong thì bấm Dấu trang này để tự động thêm Bot!');
+    };
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      prompt('Copy đoạn mã dưới đây và dán vào thanh địa chỉ trang game:', code);
+    }
+  };
+
+  // ==================== PROXY POOL MANAGEMENT ====================
+
+  async function fetchAdminProxies() {
+    try {
+      const res = await fetch('/api/admin/proxies');
+      if (!res.ok) return;
+      const data = await res.json();
+      renderProxySettings(data.settings);
+      renderProxyTable(data.list);
+    } catch (e) {
+      console.error('Error fetching proxies:', e);
+    }
+  }
+
+  function renderProxySettings(settings) {
+    const chkDirect = document.getElementById('proxy-use-direct');
+    const inpMax    = document.getElementById('proxy-max-bots');
+    if (chkDirect && document.activeElement !== chkDirect) chkDirect.checked = settings.useDirectConnection === true;
+    if (inpMax    && document.activeElement !== inpMax)    inpMax.value = settings.maxBotsPerProxy || 10;
+  }
+
+  function renderProxyTable(list) {
+    const tbody = document.getElementById('proxy-table-body');
+    if (!tbody) return;
+    if (!list || list.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="5" style="padding:14px; text-align:center; color:var(--text-secondary);">Chưa có proxy nào. Thêm proxy hoặc bật kết nối trực tiếp.</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = list.map(p => {
+      const pct = Math.round((p.botCount / p.maxBots) * 100);
+      const barColor = pct >= 100 ? '#ef4444' : pct >= 80 ? '#f59e0b' : '#34d399';
+      // Mask password in URL
+      let displayUrl = p.url;
+      try { displayUrl = p.url.replace(/(:)[^@]+(@)/, '$1****$2'); } catch(e) {}
+      const isDirect = p.isDirect;
+      return `
+        <tr style="border-bottom:1px solid rgba(255,255,255,0.05); ${!p.active ? 'opacity:0.5;' : ''}">
+          <td style="padding:7px; font-weight:600; color:${isDirect ? '#34d399' : '#a5b4fc'}">${p.label}</td>
+          <td style="padding:7px; font-family:monospace; font-size:0.78rem; color:var(--text-secondary); max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${p.url}">${displayUrl}</td>
+          <td style="padding:7px; text-align:center;">
+            <div style="font-size:0.78rem; font-weight:700; color:${barColor}">${p.botCount}/${p.maxBots}</div>
+            <div style="height:4px; border-radius:2px; background:#1e293b; margin-top:3px;">
+              <div style="height:4px; border-radius:2px; background:${barColor}; width:${Math.min(100,pct)}%;"></div>
+            </div>
+          </td>
+          <td style="padding:7px; text-align:center;">
+            ${isDirect
+              ? '<span style="color:#34d399; font-size:0.78rem;">🟢 Luôn bật</span>'
+              : p.active
+                ? '<span style="color:#34d399; font-size:0.78rem;">🟢 Hoạt động</span>'
+                : '<span style="color:#ef4444; font-size:0.78rem;">🔴 Tắt</span>'}
+          </td>
+          <td style="padding:7px; text-align:right;">
+            ${isDirect ? '' : `
+              <div style="display:flex; justify-content:flex-end; gap:4px;">
+                <button class="btn-mini" style="width:auto; padding:2px 8px; background:${p.active ? 'rgba(239,68,68,0.2)' : 'rgba(16,185,129,0.2)'}; color:${p.active ? '#ef4444' : '#34d399'}; border-color:${p.active ? 'rgba(239,68,68,0.4)' : 'rgba(16,185,129,0.4)'};" onclick="toggleAdminProxy('${p.id}', ${!p.active})">${p.active ? 'Tắt' : 'Bật'}</button>
+                <button class="btn-mini" style="width:auto; padding:2px 8px; background:rgba(239,68,68,0.2); color:#ef4444; border-color:rgba(239,68,68,0.4);" onclick="deleteAdminProxy('${p.id}', '${p.label}')">Xóa</button>
+              </div>
+            `}
+          </td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  window.updateProxySettings = async function() {
+    const chkDirect = document.getElementById('proxy-use-direct');
+    const inpMax    = document.getElementById('proxy-max-bots');
+    try {
+      await fetch('/api/admin/proxies/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          useDirectConnection: chkDirect ? chkDirect.checked : true,
+          maxBotsPerProxy: inpMax ? parseInt(inpMax.value) || 10 : 10
+        })
+      });
+      fetchAdminProxies();
+    } catch(e) { console.error(e); }
+  };
+
+  window.toggleAdminProxy = async function(id, active) {
+    try {
+      await fetch(`/api/admin/proxies/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ active })
+      });
+      fetchAdminProxies();
+    } catch(e) { console.error(e); }
+  };
+
+  window.deleteAdminProxy = async function(id, label) {
+    if (!confirm(`Xóa proxy "${label}"? Các bot đang dùng proxy này sẽ tự động được gán lại.`)) return;
+    try {
+      await fetch(`/api/admin/proxies/${id}`, { method: 'DELETE' });
+      fetchAdminProxies();
+    } catch(e) { console.error(e); }
+  };
+
+  // Add Proxy Form handler
+  const addProxyForm = document.getElementById('admin-add-proxy-form');
+  if (addProxyForm) {
+    addProxyForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const errEl = document.getElementById('proxy-add-error');
+      errEl.textContent = '';
+      const label = document.getElementById('proxy-new-label').value.trim();
+      const url   = document.getElementById('proxy-new-url').value.trim();
+      try {
+        const res = await fetch('/api/admin/proxies', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ label, url })
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+          addProxyForm.reset();
+          fetchAdminProxies();
+        } else {
+          errEl.textContent = data.error || 'Lỗi thêm proxy';
+        }
+      } catch(e) {
+        errEl.textContent = 'Không thể kết nối server';
+      }
+    });
+  }
+
+  // ==================== END PROXY MANAGEMENT ====================
+
   // Initial Startup
   checkAuth().then(authed => {
     if (authed) {
@@ -1060,7 +1283,13 @@ document.addEventListener('DOMContentLoaded', () => {
       fetchAccounts();
     }
     if (adminUsersModal && adminUsersModal.classList.contains('open')) {
-      fetchAdminUsers();
+      const proxyTabVisible = document.getElementById('admin-tab-proxies') &&
+        document.getElementById('admin-tab-proxies').style.display !== 'none';
+      if (proxyTabVisible) {
+        fetchAdminProxies();
+      } else {
+        fetchAdminUsers();
+      }
     }
   }, 1000);
 });

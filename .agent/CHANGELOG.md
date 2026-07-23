@@ -2,6 +2,59 @@
 
 > Changelog of actual changes implemented.
 
+## 2026-07-23 - Đăng Nhập Google Tự Động Lấy Token (Dành Cho Điện Thoại)
+
+- File đã đổi: `server.js` (sửa), `public/index.html` (sửa).
+- Đã làm:
+  - **Tích hợp Token Sniffer**: Tạo hàm `fetchGameLoginHtml(req)` tải trang game qua proxy và inject script tự động bắt (sniff) `line_uid` & `session_token` khi người dùng bấm Đăng nhập Google.
+  - **Route `/login-helper`**: Người dùng điện thoại chỉ cần vào `/login-helper` (bấm nút "⚡ Đăng Nhập Google Tự Động Lấy Token" trên Dashboard), đăng nhập Google bình thường.
+  - **API `/api/auto-add-account`**: Nhận token bắt được từ Sniffer, tự động tạo/cập nhật tài khoản trong `accounts.json`, khởi tạo `BotInstance` và trả kết quả về giao diện.
+  - **Giao diện tự chuyển hướng**: Khi bắt xong token, màn hình hiển thị thông báo thành công đẹp mắt ("🎉 TỰ ĐỘNG LẤY TOKEN THÀNH CÔNG!") và tự động chuyển về Dashboard sau 1.5 giây. Người dùng không cần nhìn hay gõ bất kỳ chuỗi token ngoằn ngoèo nào.
+- Đã test bằng: `node -e "require('./server.js')"` → PASS.
+
+---
+
+## 2026-07-23 - Hệ thống Xoay Proxy (Proxy Rotation Pool)
+
+- File đã đổi: `server.js` (sửa), `public/index.html` (sửa), `public/app.js` (sửa), `proxies.json` (tạo mới tự động).
+- Đã làm:
+  - **ProxyPool class** (`server.js` dòng 12-208): Thay thế `gameAgent` cố định bằng class quản lý pool proxy động. Hỗ trợ Agent trực tiếp (không proxy) và nhiều ProxyAgent.
+  - **Thuật toán Bin-Packing**: Lấp đầy slot rẻ nhất trước — Direct → lấp đầy proxy 1 → lấp đầy proxy 2 → ... Không mở proxy mới nếu proxy cũ còn slot trống. Overflow khi tất cả đầy.
+  - **Phân bổ tự động**: Mỗi `BotInstance` được assign proxy tại constructor (`proxyPool.assignBot()`), giải phóng tại xóa tài khoản (`proxyPool.releaseBot()`). `sendRequest()` gọi `proxyPool.getDispatcher(this.line_uid)` thay vì dùng agent toàn cục.
+  - **API Admin** (5 routes): `GET/POST /api/admin/proxies`, `PUT /api/admin/proxies/settings`, `PUT/DELETE /api/admin/proxies/:id`. Chỉ Admin mới có quyền.
+  - **Admin UI** (`index.html`): Admin modal chuyển sang dạng tabbed — Tab "👥 Người Dùng" (giữ nguyên) + Tab "🌐 Proxy Pool" mới.
+  - **Proxy Pool Tab**: Cấu hình global (toggle Direct Connection + max bots/proxy), form thêm proxy, bảng proxy với progress bar tải (màu xanh/vàng/đỏ theo %, mật khẩu bị che), nút Bật/Tắt/Xóa.
+  - **Proxy badge** trên bot card: Mỗi card tài khoản hiển thị badge nhỏ cho biết đang dùng proxy nào (xanh lá = direct, tím = proxy).
+  - **`proxies.json`**: File storage tự tạo khi thêm proxy đầu tiên. Cấu trúc: `{ settings: { useDirectConnection, maxBotsPerProxy }, list: [{id, label, url, active}] }`.
+- Đã test bằng: `node -e "require('./server.js')"` → No syntax errors, server khởi động thành công.
+
+---
+
+## 2026-07-23 - Bugfix: Auto Map Warp + Auto Farm Zone không hoạt động
+
+- File đã đổi: `server.js` (sửa), `public/app.js` (sửa).
+- Nguyên nhân gốc rễ (3 lỗi độc lập):
+
+  ### Lỗi 1 — `MAP_DEFS` không tồn tại trong `server.js` (Critical)
+  - `pollGame()` gọi `MAP_DEFS.find(...)` ở bước "6. Auto Map Warp" nhưng hằng số này **chưa bao giờ được khai báo** trong `server.js` (nó chỉ tồn tại bên trong client game `xhrpg_canvas.js`).
+  - Hậu quả: mỗi lần `pollGame()` chạy đến bước Auto Warp đều crash với `ReferenceError: MAP_DEFS is not defined`, khiến toàn bộ vòng poll bị ngắt → **autoZone và Auto Farm Zone không bao giờ chạy được**.
+  - Đã sửa: khai báo `const MAP_DEFS = [...]` trong `server.js` (dòng 245–251) với 4 bản đồ đúng theo `game_api_reference.md`.
+
+  ### Lỗi 2 — So sánh kiểu sai `player.map !== settings.targetMap`
+  - `player.map` trả về từ game server là kiểu `number`, còn `settings.targetMap` khi đọc từ JSON file có thể là `string`.
+  - Hậu quả: so sánh nghiêm ngặt `!==` luôn trả về `true` (ví dụ `1 !== "1"`) → bot liên tục cố warp dù đang đúng map.
+  - Đã sửa: dùng `Number()` trên cả hai vế: `Number(this.player.map) !== Number(this.settings.targetMap)`.
+
+  ### Lỗi 3 — Zone dropdown luôn trống, toggle autoMap/autoZone không sync
+  - Hàm `updateCard()` trong `public/app.js` không bao giờ đọc `acc.spots` từ server để populate dropdown `#sel-zone-{uid}`.
+  - Hai toggle checkbox `autoMap` và `autoZone` cũng không được sync trạng thái từ `acc.settings` về UI.
+  - Hậu quả: người dùng không chọn được Zone → `settings.targetZone` luôn là `0` mặc định → bot không biết phải đến đâu.
+  - Đã sửa: thêm hàm `populateZoneSelect(acc)` trong `updateCard()` để render Zone từ `acc.spots` (có anti-flicker, chỉ re-render khi danh sách thay đổi hoặc map đổi). Đồng thời sync lại checkbox và select value từ `acc.settings`.
+
+- Đã test bằng: Đọc code và kiểm tra luồng logic (manual code review).
+
+---
+
 ## 2026-07-22 - User Expiration Time Limit (Giới hạn thời gian sử dụng)
 - File đã đổi: `server.js` (sửa), `public/index.html` (sửa), `public/app.js` (sửa), `public/app.css` (sửa).
 - Đã làm:
