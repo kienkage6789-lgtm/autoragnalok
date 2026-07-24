@@ -116,6 +116,14 @@
 - Đã chọn: Phương án B.
 - Lý do: Đảm bảo khả năng tương thích 100% giữa quy chuẩn đặt tên biến CamelCase của JavaScript và quy chuẩn DOM ID viết thường có dấu gạch ngang của HTML mà không cần thay đổi cấu trúc dữ liệu ở backend.
 
+## 2026-07-24 - Thiết kế luồng xử lý và hiển thị Nhật ký Vật phẩm (Loot Logs)
+- Bối cảnh: Nhật ký hoạt động chung của bot quá tải do lượng thông tin cập nhật di chuyển và combat rất lớn, làm trôi hoàn toàn lịch sử nhặt vật phẩm giá trị. Cần tách biệt lịch sử nhặt đồ và lưu giữ lâu hơn để nâng cao trải nghiệm theo dõi.
+- Các phương án đã xét:
+  - A: Chỉ lọc log ở client (frontend) khi người dùng mở tab Vật phẩm → Cách này vô nghĩa khi bot chạy lâu, vì các logs cũ nhặt được cách đó vài tiếng đã bị xóa khỏi hàng đợi log chung ở backend (chỉ lưu 200 dòng).
+  - B: Xây dựng hàng đợi `lootLogs` riêng biệt ở backend (giới hạn 200 dòng) và thiết lập bộ phân loại sự kiện chuyên nghiệp để thu thập trực tiếp sự kiện khi poll game.
+- Đã chọn: Phương án B.
+- Lý do: Cho phép lưu trữ lâu dài lịch sử rơi đồ (bởi tần suất rơi đồ thấp hơn rất nhiều so với log di chuyển/bơm máu), bảo đảm người dùng không bị mất thông tin kể cả khi treo máy qua đêm. Đồng thời, cấu trúc dữ liệu dạng API sạch giúp dễ dàng nâng cấp bộ lọc hoặc xuất dữ liệu trong tương lai.
+
 
 
 

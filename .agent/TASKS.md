@@ -180,4 +180,16 @@
   - [x] Bổ sung log hoàn thành/mất dấu khi chuyển đổi trạng thái về hoạt động tự động.
 - Status: done
 
+### [x] T21 - Triển khai tab Nhật ký Vật phẩm (Loot Logs) riêng biệt
+- Description: Tách biệt hoàn toàn nhật ký nhặt đồ (thẻ bài, trứng, trang bị, nguyên liệu...) ra khỏi nhật ký hoạt động chung để giúp người dùng dễ dàng theo dõi thành quả treo máy mà không bị trôi thông tin.
+- Files related: `server.js`, `public/app.js`
+- Acceptance criteria:
+  - [x] Khởi tạo mảng `this.lootLogs = []` giới hạn 200 bản ghi trong `BotInstance` của `server.js`.
+  - [x] Bổ sung helper `addLootLog(msg)` để lưu vết đồ nhặt được kèm timestamp.
+  - [x] Viết regex và điều kiện nhận diện sự kiện loot ở backend (`pollGame()`) dựa trên Emoji và từ khóa đặc trưng.
+  - [x] Cập nhật API `/logs` trả về đối tượng gồm cả `logs` và `lootLogs`.
+  - [x] Thiết kế tab **Vật Phẩm** và khung hiển thị `pane-loot` trong giao diện card tài khoản ở `public/app.js`.
+  - [x] Nâng cấp hàm `fetchLogs()` để tải dữ liệu cho cả hai khung terminal và bổ sung hiệu ứng tô màu nổi bật (Highlight) cho các vật phẩm quý hiếm (Thẻ bài, Trứng, Trang bị).
+- Status: done
+
 

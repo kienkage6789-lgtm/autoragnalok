@@ -675,6 +675,7 @@ document.addEventListener('DOMContentLoaded', () => {
       <div class="card-tabs-nav">
         <button class="tab-link active" id="tab-btn-core-${acc.line_uid}" onclick="switchTab('${acc.line_uid}', 'core')">Cơ Bản</button>
         <button class="tab-link" id="tab-btn-mvp-${acc.line_uid}" onclick="switchTab('${acc.line_uid}', 'mvp')">Săn Boss</button>
+        <button class="tab-link" id="tab-btn-loot-${acc.line_uid}" onclick="switchTab('${acc.line_uid}', 'loot')">Vật Phẩm</button>
         <button class="tab-link" id="tab-btn-logs-${acc.line_uid}" onclick="switchTab('${acc.line_uid}', 'logs')">Nhật Ký</button>
       </div>
 
@@ -802,6 +803,13 @@ document.addEventListener('DOMContentLoaded', () => {
               <label for="txt-mvp-name-blacklist-${acc.line_uid}">🚫 Tên Boss bỏ qua (cách nhau bởi dấu phẩy)</label>
               <input type="text" id="txt-mvp-name-blacklist-${acc.line_uid}" placeholder="VD: Slime King, Goblin Leader" onchange="updateStringSetting('${acc.line_uid}', 'mvpNameBlacklist')" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; padding: 6px; font-family: inherit; font-size: 0.85rem; outline: none; margin-top:2px;">
             </div>
+          </div>
+        </div>
+
+        <!-- Loot Tab Pane -->
+        <div class="tab-pane" id="pane-loot-${acc.line_uid}">
+          <div class="log-terminal" id="loot-terminal-${acc.line_uid}">
+            <!-- Loot log lines will be appended here -->
           </div>
         </div>
 
@@ -1015,7 +1023,7 @@ document.addEventListener('DOMContentLoaded', () => {
       pane.classList.toggle('active', pane.id === `pane-${tabId}-${uid}`);
     });
 
-    if (tabId === 'logs') {
+    if (tabId === 'logs' || tabId === 'loot') {
       fetchLogs(uid);
     } else {
       fetchAccounts();
@@ -1026,37 +1034,74 @@ document.addEventListener('DOMContentLoaded', () => {
   async function fetchLogs(uid) {
     try {
       const response = await fetch(`/api/accounts/${uid}/logs`);
-      const logs = await response.json();
+      const data = await response.json();
       
+      // Update general logs
       const term = document.getElementById(`terminal-${uid}`);
-      if (!term) return;
-
-      term.innerHTML = '';
-      if (logs.length === 0) {
-        term.innerHTML = `<div class="log-line"><span class="log-text-content">Không có nhật ký hoạt động nào.</span></div>`;
-        return;
+      if (term) {
+        term.innerHTML = '';
+        const logsList = data.logs || [];
+        if (logsList.length === 0) {
+          term.innerHTML = `<div class="log-line"><span class="log-text-content">Không có nhật ký hoạt động nào.</span></div>`;
+        } else {
+          logsList.forEach(l => {
+            const line = document.createElement('div');
+            line.className = 'log-line';
+            
+            let typeClass = 'system';
+            if (l.type === 'kill') typeClass = 'kill';
+            else if (l.type === 'drop') typeClass = 'drop';
+            else if (l.type === 'levelup') typeClass = 'levelup';
+            else if (l.type === 'error') typeClass = 'error';
+            else if (l.type === 'action') typeClass = 'action';
+            
+            line.innerHTML = `
+              <span class="log-time">[${l.time}]</span>
+              <span class="log-type ${typeClass}">${l.type}</span>
+              <span class="log-text-content">${l.msg}</span>
+            `;
+            term.appendChild(line);
+          });
+        }
+        term.scrollTop = term.scrollHeight;
       }
 
-      logs.forEach(l => {
-        const line = document.createElement('div');
-        line.className = 'log-line';
-        
-        let typeClass = 'system';
-        if (l.type === 'kill') typeClass = 'kill';
-        else if (l.type === 'drop') typeClass = 'drop';
-        else if (l.type === 'levelup') typeClass = 'levelup';
-        else if (l.type === 'error') typeClass = 'error';
-        else if (l.type === 'action') typeClass = 'action';
-        
-        line.innerHTML = `
-          <span class="log-time">[${l.time}]</span>
-          <span class="log-type ${typeClass}">${l.type}</span>
-          <span class="log-text-content">${l.msg}</span>
-        `;
-        term.appendChild(line);
-      });
-
-      term.scrollTop = term.scrollHeight;
+      // Update loot logs
+      const lootTerm = document.getElementById(`loot-terminal-${uid}`);
+      if (lootTerm) {
+        lootTerm.innerHTML = '';
+        const lootList = data.lootLogs || [];
+        if (lootList.length === 0) {
+          lootTerm.innerHTML = `<div class="log-line"><span class="log-text-content">Chưa nhặt được vật phẩm nào.</span></div>`;
+        } else {
+          lootList.forEach(l => {
+            const line = document.createElement('div');
+            line.className = 'log-line';
+            
+            // Highlight rare items like Cards, Eggs, or Gear (T1-T10, Boss drops)
+            let typeClass = 'drop';
+            let extraStyle = '';
+            if (/🎴|card/i.test(l.msg)) {
+              typeClass = 'levelup'; // Orange/gold color for cards
+              extraStyle = 'font-weight: bold; border-left: 3px solid #f59e0b; padding-left: 5px;';
+            } else if (/🥚|egg/i.test(l.msg)) {
+              typeClass = 'levelup'; // Orange/gold for eggs
+              extraStyle = 'font-weight: bold; border-left: 3px solid #ec4899; padding-left: 5px;';
+            } else if (/⚔️|🛡️|trang bị/i.test(l.msg)) {
+              typeClass = 'kill'; // Red/crimson for gear
+              extraStyle = 'font-weight: bold; border-left: 3px solid #3b82f6; padding-left: 5px;';
+            }
+            
+            line.innerHTML = `
+              <span class="log-time">[${l.time}]</span>
+              <span class="log-type ${typeClass}">loot</span>
+              <span class="log-text-content" style="${extraStyle}">${l.msg}</span>
+            `;
+            lootTerm.appendChild(line);
+          });
+        }
+        lootTerm.scrollTop = lootTerm.scrollHeight;
+      }
     } catch (err) {
       console.error('Error fetching logs:', err);
     }

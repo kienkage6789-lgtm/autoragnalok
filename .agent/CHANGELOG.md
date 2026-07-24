@@ -2,6 +2,21 @@
 
 > Changelog of actual changes implemented.
 
+## 2026-07-24 - Triển khai tab Nhật ký Vật phẩm (Loot Logs) riêng biệt
+- File đã đổi: `server.js` (sửa), `public/app.js` (sửa).
+- Đã làm:
+  - **Lưu trữ dữ liệu Loot Logs chuyên biệt**:
+    *   Thêm thuộc tính `this.lootLogs` (mảng tối đa 200 vật phẩm) vào constructor lớp `BotInstance`.
+    *   Tạo phương thức helper `addLootLog(msg)` ghi nhận vật phẩm nhặt được kèm mốc thời gian thực.
+    *   Tích hợp bộ lọc sự kiện trong `pollGame()` để tự động nhận dạng các hoạt động nhặt vật phẩm dựa trên các Emoji quen thuộc (`🪵`, `🪨`, `⚙️`, `🟫`, `🌿`, `🎴`, `🥚`, `🎁`, `💎`, `💊`, `🔮`, `⚔️`, `🛡️`, `💍`) hoặc cụm từ như `Nhận được`/`nhận được` và lưu trữ trực tiếp vào danh sách.
+    *   Cập nhật API `/api/accounts/:line_uid/logs` chuyển sang định dạng JSON chứa cả `logs` và `lootLogs`.
+  - **Tối ưu hóa UI Dashboard**:
+    *   Bổ sung tab **Vật Phẩm** (`tab-btn-loot`) và màn hình hiển thị logs cuộn độc lập (`pane-loot`) vào tiêu chuẩn card tài khoản.
+    *   Nâng cấp cơ chế tải log (`fetchLogs`) và điều phối chuyển tab (`switchTab`) để kết xuất song song cả log chung lẫn log vật phẩm.
+    *   Tích hợp CSS nâng cao làm nổi bật trực quan các chiến lợi phẩm đặc biệt có giá trị: Thẻ bài `🎴` (viền vàng đậm), Trứng `🥚` (viền hồng), Trang bị `⚔️`/`🛡️` (viền xanh dương).
+
+---
+
 ## 2026-07-24 - Sửa lỗi lưu tiêu chí săn Boss & Thêm nhật ký đi săn MVP
 - File đã đổi: `server.js` (sửa), `public/app.js` (sửa).
 - Đã làm:

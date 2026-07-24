@@ -452,6 +452,7 @@ class BotInstance {
     this.arrivedAtZoneCenter = false;
     this.targetedMvp = false;
     this.lastTargetedBossId = null;
+    this.lootLogs = [];
 
     proxyPool.assignBot(this.line_uid);
     this.addLog('SYSTEM', `Khởi tạo bot cho tài khoản: ${this.name}`);
@@ -501,6 +502,17 @@ class BotInstance {
     });
     if (this.logs.length > 200) {
       this.logs.shift();
+    }
+  }
+
+  addLootLog(msg) {
+    const timestamp = new Date().toLocaleTimeString('vi-VN');
+    this.lootLogs.push({
+      time: timestamp,
+      msg: msg
+    });
+    if (this.lootLogs.length > 200) {
+      this.lootLogs.shift();
     }
   }
 
@@ -890,6 +902,17 @@ class BotInstance {
           // Clean HTML tags from messages
           const cleanMsg = e.msg.replace(/<[^>]*>/g, '');
           this.addLog(e.type, cleanMsg);
+
+          // Check if this is a loot/drop event
+          const isLoot = e.type === 'drop' || e.type === 'loot' || 
+                         cleanMsg.includes('Nhận được') || 
+                         cleanMsg.includes('nhận được') || 
+                         cleanMsg.startsWith('+') ||
+                         /^[🪵🪨⚙️🟫🌿🎴🥚🎁💎💊🔮⚔️🛡️💍]/.test(cleanMsg);
+                         
+          if (isLoot) {
+            this.addLootLog(cleanMsg);
+          }
         }
       });
     }
@@ -1967,7 +1990,10 @@ app.get('/api/accounts/:line_uid/logs', requireAuth, (req, res) => {
   const { line_uid } = req.params;
   const bot = botInstances[line_uid];
   if (!checkAccountOwnership(req, res, bot)) return;
-  res.json(bot.logs);
+  res.json({
+    logs: bot.logs,
+    lootLogs: bot.lootLogs || []
+  });
 });
 
 // Get detailed full player state
