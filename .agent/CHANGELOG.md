@@ -8,7 +8,8 @@
   - **Lưu trữ dữ liệu Loot Logs chuyên biệt**:
     *   Thêm thuộc tính `this.lootLogs` (mảng tối đa 200 vật phẩm) vào constructor lớp `BotInstance`.
     *   Tạo phương thức helper `addLootLog(msg)` ghi nhận vật phẩm nhặt được kèm mốc thời gian thực.
-    *   Tích hợp bộ lọc sự kiện trong `pollGame()` để tự động nhận dạng các hoạt động nhặt vật phẩm dựa trên các Emoji quen thuộc (`🪵`, `🪨`, `⚙️`, `🟫`, `🌿`, `🎴`, `🥚`, `🎁`, `💎`, `💊`, `🔮`, `⚔️`, `🛡️`, `💍`) hoặc cụm từ như `Nhận được`/`nhận được` và lưu trữ trực tiếp vào danh sách.
+    *   Tích hợp bộ lọc sự kiện nhạy bén trong `pollGame()` để **chỉ ghi nhận các vật phẩm giá trị cao** (Thẻ bài `🎴`, Trứng `🥚`, Trang bị/Vũ khí `⚔️`/`🛡️`/`💍`, Kim cương/Đá quý/Hộp quà `💎`/`🔮`/`👑`/`🏆`/`🎁`) vào tab **Vật Phẩm**.
+    *   Các vật phẩm thu hoạch thông thường (Gỗ `🪵`, Đá `🪨`, Sắt `⚙️`, Đồng `🟫`, Cỏ `🌿`, Bình máu `💊`) và các tin tức chiến đấu sẽ **chỉ hiển thị ở tab Nhật Ký chung** để tránh gây loãng tab Vật Phẩm.
     *   Cập nhật API `/api/accounts/:line_uid/logs` chuyển sang định dạng JSON chứa cả `logs` và `lootLogs`.
   - **Tối ưu hóa UI Dashboard**:
     *   Bổ sung tab **Vật Phẩm** (`tab-btn-loot`) và màn hình hiển thị logs cuộn độc lập (`pane-loot`) vào tiêu chuẩn card tài khoản.

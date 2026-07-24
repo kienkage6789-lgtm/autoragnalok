@@ -903,14 +903,14 @@ class BotInstance {
           const cleanMsg = e.msg.replace(/<[^>]*>/g, '');
           this.addLog(e.type, cleanMsg);
 
-          // Check if this is a loot/drop event
-          const isLoot = e.type === 'drop' || e.type === 'loot' || 
-                         cleanMsg.includes('Nhận được') || 
-                         cleanMsg.includes('nhận được') || 
-                         cleanMsg.startsWith('+') ||
-                         /^[🪵🪨⚙️🟫🌿🎴🥚🎁💎💊🔮⚔️🛡️💍]/.test(cleanMsg);
+          // Check if this is a valuable loot/drop event (Cards, Eggs, Gear, Gems/Treasures)
+          const isValuableLoot = (e.type === 'drop' || e.type === 'loot' || 
+                                 cleanMsg.includes('Nhận được') || 
+                                 cleanMsg.includes('nhận được') || 
+                                 cleanMsg.startsWith('+')) &&
+                                 /🎴|🥚|💎|🔮|👑|🏆|🎁|⚔️|🛡️|💍|card|egg|trang bị/i.test(cleanMsg);
                          
-          if (isLoot) {
+          if (isValuableLoot) {
             this.addLootLog(cleanMsg);
           }
         }

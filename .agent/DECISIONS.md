@@ -124,6 +124,14 @@
 - Đã chọn: Phương án B.
 - Lý do: Cho phép lưu trữ lâu dài lịch sử rơi đồ (bởi tần suất rơi đồ thấp hơn rất nhiều so với log di chuyển/bơm máu), bảo đảm người dùng không bị mất thông tin kể cả khi treo máy qua đêm. Đồng thời, cấu trúc dữ liệu dạng API sạch giúp dễ dàng nâng cấp bộ lọc hoặc xuất dữ liệu trong tương lai.
 
+## 2026-07-24 - Phân loại vật phẩm giá trị cao và vật phẩm thông thường
+- Bối cảnh: Việc lưu toàn bộ vật phẩm thu hoạch liên tục trên map (Gỗ, Đá, Sắt, Đồng, Cỏ, Bình máu) vào tab Vật Phẩm làm loãng tab và khiến log rơi đồ bị trôi rất nhanh do tần suất nhặt tài nguyên này cực kỳ cao.
+- Các phương án đã xét:
+  - A: Lưu mọi vật phẩm nhặt được vào tab Vật Phẩm → Tab sẽ bị quá tải bởi hàng trăm dòng "+1 Wood", "+1 Stone", làm mất đi mục đích theo dõi các vật phẩm hiếm của người dùng.
+  - B: Chỉ lọc các vật phẩm có giá trị cao (Thẻ bài, Trứng, Trang bị, Đá quý, Ngọc, Hộp quà) vào tab Vật Phẩm thông qua bộ lọc Regular Expression. Các vật phẩm thu hoạch nguyên liệu và thuốc men thông thường sẽ chỉ được ghi nhận ở tab Nhật Ký chung cùng với log combat.
+- Đã chọn: Phương án B.
+- Lý do: Giúp tab Vật Phẩm hoạt động đúng vai trò là "Nhật ký chiến lợi phẩm quý giá", cho phép người chơi dễ dàng kiểm tra các món đồ đắt tiền nhặt được sau thời gian dài treo máy mà không bị ngập trong log nguyên liệu cơ bản.
+
 
 
 
