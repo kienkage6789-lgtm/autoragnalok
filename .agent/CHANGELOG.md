@@ -2,6 +2,64 @@
 
 > Changelog of actual changes implemented.
 
+## 2026-07-24 - Thẻ Cài Đặt Săn Boss Riêng & Xử Lý Ưu Tiên MVP
+- File đã đổi: `server.js` (sửa), `public/app.js` (sửa).
+- Đã làm:
+  - **Logic chọn Boss tối ưu ở Backend**:
+    *   Thêm các tham số cấu hình: `mvpPriorityMode` (tiêu chí sắp xếp: distance, level_asc, level_desc), `mvpNamePriority` (whitelist tên), và `mvpNameBlacklist` (blacklist tên).
+    *   Cập nhật logic `pollGame()` săn boss MVP: Đầu tiên lọc bỏ các Boss có máu bằng 0 hoặc nằm trong `mvpNameBlacklist`. Sau đó, nếu có danh sách `mvpNamePriority`, lọc lấy các Boss này trước. Cuối cùng, sắp xếp danh sách Boss theo tiêu chí lựa chọn (Gần nhất tính bằng công thức Euclid, hoặc Lv thấp nhất/cao nhất) để nhắm mục tiêu chuẩn xác.
+  - **Tách giao diện Tab "Săn Boss" riêng biệt**:
+    *   Tạo tab mới `Săn Boss` (`pane-mvp`) để tách rời hoàn toàn `Auto Săn Boss MVP` và `Auto Đấu Trường` ra khỏi thẻ Cơ Bản.
+    *   Tích hợp dropdown chọn tiêu chí ưu tiên và hai input nhập danh sách ưu tiên/bỏ qua dưới dạng văn bản cách nhau bằng dấu phẩy.
+    *   Viết helper `updateStringSetting` để gửi cập nhật các chuỗi cấu hình về API backend.
+    *   Thực hiện đồng bộ hóa (sync) hai chiều trạng thái và giá trị input của tab mới trong hàm `updateCard()`.
+
+---
+
+## 2026-07-24 - Tinh chỉnh Giao diện Thẻ Cơ Bản (Dọn dẹp các nút phụ)
+- File đã đổi: `public/app.js` (sửa).
+- Đã làm:
+  - Ẩn/loại bỏ các nút `⚡ Auto Tăng Điểm`, `🛡️ Auto Nâng Armor` và ô nhập `explore_radius (m)` trên giao diện thẻ Cơ Bản nhằm làm sạch giao diện và giảm chiều cao thẻ trên điện thoại.
+  - Sắp xếp lại ô `🍷 Bơm Potion khi HP < (%)` sử dụng thuộc tính style `grid-column: span 2;` để hiển thị tràn đều hai cột, tạo cảm giác cân đối, chuyên nghiệp.
+  - Sửa logic sync trạng thái của các nút ẩn trong hàm `updateCard()` để kiểm tra sự tồn tại của phần tử trước khi gán (tránh lỗi `TypeError` làm dừng luồng JS).
+
+---
+
+## 2026-07-24 - Thêm Chức Năng Lock Tâm Zone (Khóa Vị Trí Vùng Farm)
+- File đã đổi: `server.js` (sửa), `public/app.js` (sửa).
+- Đã làm:
+  - **Logic di chuyển & khóa ở Backend**:
+    *   Tích hợp cờ `lock_zone_center` vào cài đặt bot mặc định (`getDefaultSettings`).
+    *   Trong `pollGame()`, nếu cờ `lock_zone_center` được bật: Khi khoảng cách tới tâm zone `dist > 30`, bot tự động kích hoạt `traveling = 1` và tắt `lockPos = 0` để cho phép nhân vật di chuyển về tâm zone.
+    *   **Vá lỗi khóa vị trí**: Sửa đổi tọa độ neo khóa khi khoảng cách `dist <= 30` từ tọa độ tâm zone gốc (`spot.cx/cy`) thành tọa độ hiện tại của nhân vật (`this.player.x/y`). Điều này ngăn không cho game server tiếp tục di chuyển nhân vật tới tâm hoặc cho nhân vật đi lang thang kiếm quái, đóng băng tọa độ nhân vật hoàn toàn 100%.
+    *   Bổ sung log hoạt động: In log một lần duy nhất khi vừa đến tâm và khóa vị trí (`🔒 [Tự động] Đã đến tâm Zone...`), đồng thời in log trạng thái di chuyển định kỳ 10 lượt poll một lần khi đang đi chuyển.
+    *   Reset cấu hình `lock_zone_center = false` khi phát hiện thay đổi bản đồ (Map Change).
+  - **Tích hợp UI**:
+    *   Thêm checkbox gạt `🔒 Lock tâm zone` trên Card UI thiết lập tài khoản.
+    *   Thực hiện đồng bộ hóa (sync) hai chiều trạng thái checkbox này giữa backend và frontend.
+- Đã test bằng: `npm test` -> PASS.
+
+---
+
+## 2026-07-24 - Sửa Lỗi Unexpected token '<' Khi Mở Client & Cải Thiện Cơ Chế Fallback
+- File đã đổi: `server.js` (sửa).
+- Đã làm:
+  - **Sửa lỗi `Unexpected token '<'`**: Cập nhật hàm `fetchGameAsset()` để kiểm tra xem dữ liệu tải về từ game server có phải là HTML hay không (bằng cách kiểm tra xem có bắt đầu bằng `<` hay không, ví dụ khi bị Cloudflare chặn hoặc redirect về trang login dạng HTML). Nếu là HTML, ném lỗi để tự động kích hoạt khối `catch` và fallback về việc phục vụ các file Javascript tĩnh trên local (`xhrpg_canvas.js`, `sdk.js`).
+  - **Cải thiện Fallback HTML**: Cập nhật hàm `fetchGameHtml()` và `fetchGameLoginHtml()` kiểm tra xem HTML trả về từ máy chủ game có chứa thẻ script của game (`xhrpg_canvas.js`) hay không. Nếu không (khi bị Cloudflare chặn hoặc trả về trang lỗi 404/Redirect), ném lỗi để `/play` tự động fallback về trang client local `play.html` tự đóng gói và hoạt động ổn định.
+- Đã test bằng: `npm test` và chạy thử request thử nghiệm (SDK 404/Html check) -> PASS.
+
+---
+
+## 2026-07-24 - Sửa Lỗi Submit PHPSESSID & Cấu Hình Trust Proxy
+- File đã đổi: `public/app.js` (sửa), `server.js` (sửa).
+- Đã làm:
+  - **Sửa lỗi submit PHPSESSID**: Thêm các DOM selectors (`addPhpsessidForm`, `inputPhpsessid`, `phpsessidError`) và đăng ký sự kiện submit form PHPSESSID ở frontend. Sự kiện sẽ chặn reload trang mặc định, vô hiệu hóa nút submit và gửi request `POST` qua fetch tới `/api/add-by-phpsessid`. Hiển thị lỗi trực quan lên `#phpsessid-error` nếu thất bại, và đóng modal, reload tài khoản, reset form khi thành công.
+  - **Reset Form khi Mở Modal**: Cập nhật hàm `openModal` trong `public/app.js` để tự động dọn dẹp các input và lỗi cũ của form PHPSESSID.
+  - **Tối ưu hóa Dynamic Domain**: Cấu hình `app.set('trust proxy', 1)` trong Express server (`server.js`) để hỗ trợ nhận diện protocol/IP qua proxy, load balancer trên môi trường production.
+- Đã test bằng: `npm test` và `node -e "require('./server.js')"` -> Cả hai đều PASS.
+
+---
+
 ## 2026-07-23 - Đăng Nhập Google Tự Động Lấy Token (Dành Cho Điện Thoại)
 
 - File đã đổi: `server.js` (sửa), `public/index.html` (sửa).

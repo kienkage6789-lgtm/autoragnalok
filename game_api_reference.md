@@ -78,6 +78,30 @@ Khai báo hằng số `SKILL_DEFS` nằm tại [xhrpg_canvas.js:L12140](file:///
 
 ---
 
+## 🔒 6. Các Endpoints Quản Lý của Bot Manager (Manager Authentication & Integration)
+
+Dưới đây là danh sách các API và Endpoint nội bộ của Server Bot Manager dùng để quản trị tài khoản game và xác thực phiên:
+
+### A. Quản lý Phiên & Token Đăng Nhập Game
+*   **API trích xuất Token qua PHPSESSID**: `POST /api/add-by-phpsessid`
+    *   **Tham số**: `{ phpsessid: "chuỗi_cookie_hoặc_raw_phpsessid" }`
+    *   **Cơ chế**: Server sử dụng proxy pool gửi GET request kèm header `cookie: PHPSESSID=...` tới `https://ragnalok.online/human/xhrpg_google_auth.php` để lấy về cấu trúc thông tin nhân vật (`line_uid`, `session_token`, tên nhân vật) và tự động tạo bot.
+*   **Trình bắt Token tự động (Token Sniffer Proxy)**: `GET /login-helper`
+    *   **Cơ chế**: Proxy tải giao diện game và inject script token sniffer ghi đè hàm `window.startGame` và `$.post` của game client. Ngay khi người dùng đăng nhập bằng Google thành công, script sẽ tự động capture `line_uid` & `session_token` rồi gửi về Endpoint `/api/auto-add-account`.
+*   **API Lưu Tài Khoản tự động**: `POST /api/auto-add-account`
+    *   **Tham số**: `{ line_uid, session_token, name }`
+    *   **Cơ chế**: Lưu trữ thông tin bot vào `accounts.json` và kích hoạt luồng bot chạy ngầm lập tức.
+
+### B. Client Treo Máy Cục Bộ (Local Play Interface)
+*   **Cổng Game Proxy**: `GET /play?line_uid=...&session_token=...`
+    *   **Cơ chế**: Trả về giao diện client game đã được inject các bản vá bypass chống idle kick (`_lastInputAt = Date.now()` và `_tabHiddenAt = 0`). Tất cả dữ liệu game đều đi qua proxy của Manager để vượt qua lỗi CORS và Cloudflare Block.
+
+### C. Quản lý Phiên làm việc (Dashboard Sessions)
+*   **Session Token**: Cookie `auth_token` được lưu tự động trên trình duyệt của người dùng (HttpOnly, SameSite=Lax) dùng để xác thực quyền truy cập Dashboard và các API quản lý bot.
+
+---
+
+
 ## 🔍 Nơi tìm kiếm thông tin khi thiếu sót
 
 *   **Tài liệu hướng dẫn của AGY**: Đọc tài liệu skill [antigravity-guide](file:///C:/Users/Admin/.gemini/antigravity-cli/builtin/skills/antigravity_guide/SKILL.md) để biết cách tinh chỉnh CLI, MCP và Customizations.

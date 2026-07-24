@@ -8,6 +8,8 @@ const { fetch, Agent, ProxyAgent } = require('undici');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+app.set('trust proxy', 1); // Trust first proxy (Render, Heroku, Nginx, Cloudflare, etc.)
+
 
 // ==================== PROXY POOL ====================
 const PROXIES_FILE = path.join(__dirname, 'proxies.json');
@@ -447,6 +449,7 @@ class BotInstance {
     this.pollCount = 0;
     this.timer = null;
     this.isPolling = false;
+    this.arrivedAtZoneCenter = false;
 
     proxyPool.assignBot(this.line_uid);
     this.addLog('SYSTEM', `Khởi tạo bot cho tài khoản: ${this.name}`);
@@ -472,8 +475,12 @@ class BotInstance {
       autoMap: false,
       targetMap: 1,
       autoZone: false,
+      lock_zone_center: false,
       targetZone: 0,
       autoMVP: false,
+      mvpPriorityMode: 'distance',
+      mvpNamePriority: '',
+      mvpNameBlacklist: '',
       autoArena: false
     };
   }
@@ -628,33 +635,81 @@ class BotInstance {
     let exploreRadius = this.settings.explore_radius;
     let traveling = 0;
     let targetedMvp = false;
+    let lockPos = this.settings.lock_pos ? 1 : 0;
 
     // 1. Auto MVP Hunting (Priority 1)
     if (this.settings.autoMVP && this.bosses && this.bosses.length > 0) {
-      const activeBoss = this.bosses.find(b => (b.hp || 0) > 0);
-      if (activeBoss) {
-        targetedMvp = true;
-        if (this.player) {
-          const dx = this.player.x - activeBoss.x;
-          const dy = this.player.y - activeBoss.y;
-          const dist = Math.sqrt(dx * dx + dy * dy);
-          if (dist > 40) {
-            exploreCx = activeBoss.x;
-            exploreCy = activeBoss.y;
-            exploreRadius = 300;
-            traveling = 1;
-            if (this.pollCount % 10 === 0) {
-              this.addLog('SYSTEM', `⚔️ [Auto MVP] Đang di chuyển săn Boss: ${activeBoss.emoji || '👾'} ${activeBoss.name || 'Boss'} (Khoảng cách: ${Math.round(dist)}m)`);
+      let aliveBosses = this.bosses.filter(b => (b.hp || 0) > 0);
+
+      // Filter out blacklisted bosses
+      if (this.settings.mvpNameBlacklist) {
+        const blacklist = this.settings.mvpNameBlacklist.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+        if (blacklist.length > 0) {
+          aliveBosses = aliveBosses.filter(b => {
+            const name = (b.name || '').toLowerCase();
+            return !blacklist.some(term => name.includes(term));
+          });
+        }
+      }
+
+      if (aliveBosses.length > 0) {
+        // Filter priority bosses
+        let priorityBosses = [];
+        if (this.settings.mvpNamePriority) {
+          const whitelist = this.settings.mvpNamePriority.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+          if (whitelist.length > 0) {
+            priorityBosses = aliveBosses.filter(b => {
+              const name = (b.name || '').toLowerCase();
+              return whitelist.some(term => name.includes(term));
+            });
+          }
+        }
+
+        let targetPool = priorityBosses.length > 0 ? priorityBosses : aliveBosses;
+
+        // Sort target pool based on settings
+        const px = this.player ? this.player.x : 0;
+        const py = this.player ? this.player.y : 0;
+
+        if (this.settings.mvpPriorityMode === 'level_asc') {
+          targetPool.sort((a, b) => (a.lv || 0) - (b.lv || 0));
+        } else if (this.settings.mvpPriorityMode === 'level_desc') {
+          targetPool.sort((a, b) => (b.lv || 0) - (a.lv || 0));
+        } else {
+          // Default: distance
+          targetPool.sort((a, b) => {
+            const distA = Math.sqrt((px - a.x) * (px - a.x) + (py - a.y) * (py - a.y));
+            const distB = Math.sqrt((px - b.x) * (px - b.x) + (py - b.y) * (py - b.y));
+            return distA - distB;
+          });
+        }
+
+        const activeBoss = targetPool[0];
+        if (activeBoss) {
+          targetedMvp = true;
+          if (this.player) {
+            const dx = this.player.x - activeBoss.x;
+            const dy = this.player.y - activeBoss.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist > 40) {
+              exploreCx = activeBoss.x;
+              exploreCy = activeBoss.y;
+              exploreRadius = 300;
+              traveling = 1;
+              lockPos = 0; // Force unlock to allow movement
+              if (this.pollCount % 10 === 0) {
+                this.addLog('SYSTEM', `⚔️ [Auto MVP] Đang di chuyển săn Boss: ${activeBoss.emoji || '👾'} ${activeBoss.name || 'Boss'} (Khoảng cách: ${Math.round(dist)}m)`);
+              }
+            } else {
+              exploreCx = this.player.x;
+              exploreCy = this.player.y;
+              exploreRadius = 100;
+              traveling = 0;
             }
           } else {
-            exploreCx = this.player.x;
-            exploreCy = this.player.y;
-            exploreRadius = 100;
-            traveling = 0;
+            exploreCx = activeBoss.x;
+            exploreCy = activeBoss.y;
           }
-        } else {
-          exploreCx = activeBoss.x;
-          exploreCy = activeBoss.y;
         }
       }
     }
@@ -669,19 +724,49 @@ class BotInstance {
           const dx = this.player.x - spot.cx;
           const dy = this.player.y - spot.cy;
           const dist = Math.sqrt(dx * dx + dy * dy);
-          if (dist > 90) {
-            exploreCx = spot.cx;
-            exploreCy = spot.cy;
-            exploreRadius = 300;
-            traveling = 1;
-            if (this.pollCount % 10 === 0) {
-              this.addLog('SYSTEM', `🏃 [Tự động] Đang di chuyển đến Zone: ${spot.name} (Khoảng cách: ${Math.round(dist)}m)`);
+          
+          if (this.settings.lock_zone_center) {
+            // Lock zone center active: walk to center and lock position
+            if (dist > 30) {
+              exploreCx = spot.cx;
+              exploreCy = spot.cy;
+              exploreRadius = 300;
+              traveling = 1;
+              lockPos = 0; // Force unlock to walk to center
+              if (this.arrivedAtZoneCenter) {
+                this.arrivedAtZoneCenter = false;
+              }
+              if (this.pollCount % 10 === 0) {
+                this.addLog('SYSTEM', `🏃 [Tự động] Đang di chuyển đến tâm Zone: ${spot.name} để khóa vị trí (Khoảng cách: ${Math.round(dist)}m)`);
+              }
+            } else {
+              exploreCx = this.player.x;
+              exploreCy = this.player.y;
+              exploreRadius = 100;
+              traveling = 0;
+              lockPos = 1; // Force lock at player's current position to freeze movement
+              if (!this.arrivedAtZoneCenter) {
+                this.arrivedAtZoneCenter = true;
+                this.addLog('SYSTEM', `🔒 [Tự động] Đã đến tâm Zone: ${spot.name}, kích hoạt khóa vị trí tại chỗ.`);
+              }
             }
           } else {
-            exploreCx = this.player.x;
-            exploreCy = this.player.y;
-            exploreRadius = 100; // Farm close when arrived
-            traveling = 0;
+            // Normal Auto Zone logic
+            if (dist > 90) {
+              exploreCx = spot.cx;
+              exploreCy = spot.cy;
+              exploreRadius = 300;
+              traveling = 1;
+              lockPos = 0; // Force unlock to allow movement
+              if (this.pollCount % 10 === 0) {
+                this.addLog('SYSTEM', `🏃 [Tự động] Đang di chuyển đến Zone: ${spot.name} (Khoảng cách: ${Math.round(dist)}m)`);
+              }
+            } else {
+              exploreCx = this.player.x;
+              exploreCy = this.player.y;
+              exploreRadius = 100; // Farm close when arrived
+              traveling = 0;
+            }
           }
         } else {
           exploreCx = spot.cx;
@@ -697,7 +782,7 @@ class BotInstance {
       act: 1,
       full: isFull,
       bot: this.settings.bot ? 1 : 0,
-      lock_pos: this.settings.lock_pos ? 1 : 0,
+      lock_pos: lockPos,
       explore_radius: exploreRadius,
       explore_cx: exploreCx,
       explore_cy: exploreCy,
@@ -744,6 +829,7 @@ class BotInstance {
       this.spots = null; // Force reload static zone details for the new map
       this.bosses = null; // Clear bosses list to refresh on new map
       this.settings.autoZone = false;
+      this.settings.lock_zone_center = false;
       this.settings.targetZone = 0;
       
       // Save settings changes to accounts.json
@@ -1971,6 +2057,10 @@ async function fetchGameHtml(req) {
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   let html = await response.text();
   
+  if (!html.includes('xhrpg_canvas.js')) {
+    throw new Error('Fetched HTML does not contain game scripts (likely Cloudflare block or redirect)');
+  }
+  
   // 1. Vá lỗi DOM: Đổi id log-list thành event-log (nếu có)
   html = html.replace('id="log-list"', 'id="event-log"');
   
@@ -2051,6 +2141,10 @@ async function fetchGameLoginHtml(req) {
   
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   let html = await response.text();
+  
+  if (!html.includes('xhrpg_canvas.js')) {
+    throw new Error('Fetched HTML does not contain game scripts (likely Cloudflare block or redirect)');
+  }
   
   // 1. Fix DOM: Hide loading screen and show login overlay
   html = html.replace('id="log-list"', 'id="event-log"');
@@ -2213,6 +2307,10 @@ async function fetchGameAsset(urlPath) {
   
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   let text = await response.text();
+  
+  if (text && text.trim().startsWith('<')) {
+    throw new Error(`Fetched asset ${urlPath} is HTML, not JavaScript (likely blocked by Cloudflare or redirected)`);
+  }
   
   // Inject bypass into main game engine file
   if (urlPath === '/js/xhrpg_canvas.js') {

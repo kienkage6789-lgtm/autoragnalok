@@ -1,54 +1,12 @@
 [
   {
-    "name": "Google Acc (1788)",
-    "line_uid": "google_103185435231211551788",
-    "session_token": "fe73134dacc88d0be2252305055c6341",
-    "userId": "usr_admin",
-    "settings": {
-      "bot": 1,
-      "lock_pos": 0,
-      "explore_radius": 300,
-      "explore_cx": 1125,
-      "explore_cy": 1125,
-      "auto_potion_threshold": 50,
-      "lang": "vi",
-      "autoStats": false,
-      "statsPriority": [
-        "str",
-        "agi",
-        "vit",
-        "intel",
-        "dex",
-        "luk"
-      ],
-      "autoGear": false,
-      "autoSkills": false,
-      "skillsPriority": [
-        "crit_shot",
-        "tough_body",
-        "hp_regen",
-        "armor_up",
-        "knife_atk"
-      ],
-      "autoCompanion": false,
-      "autoMines": false,
-      "defaultOre": "stone",
-      "autoMap": false,
-      "targetMap": 3,
-      "autoZone": true,
-      "targetZone": 0,
-      "autoMVP": false,
-      "autoArena": false
-    }
-  },
-  {
     "name": "Google Acc (6737)",
     "line_uid": "google_102125194405534596737",
-    "session_token": "0a966dc46dfca54a9326466ffde05baa",
+    "session_token": "c255778ca1d72ff400cdf814113b72a0",
     "userId": "usr_admin",
     "settings": {
       "bot": 1,
-      "lock_pos": 0,
+      "lock_pos": false,
       "explore_radius": 300,
       "explore_cx": 1125,
       "explore_cy": 1125,
@@ -76,11 +34,12 @@
       "autoMines": false,
       "defaultOre": "stone",
       "autoMap": false,
-      "targetMap": 2,
+      "targetMap": 1,
       "autoZone": true,
-      "targetZone": 1,
+      "targetZone": 4,
       "autoMVP": false,
-      "autoArena": false
+      "autoArena": false,
+      "lock_zone_center": true
     }
   }
 ]

@@ -12,6 +12,12 @@ document.addEventListener('DOMContentLoaded', () => {
   const noAccountsMsg = document.getElementById('no-accounts-msg');
   const accountsGrid = document.getElementById('accounts-grid');
 
+  // PHPSESSID Form Elements
+  const addPhpsessidForm = document.getElementById('add-phpsessid-form');
+  const inputPhpsessid = document.getElementById('input-phpsessid');
+  const phpsessidError = document.getElementById('phpsessid-error');
+
+
   // Edit Modal Elements
   const editAccountModal = document.getElementById('edit-account-modal');
   const editModalCloseBtn = document.getElementById('edit-modal-close-btn');
@@ -370,6 +376,8 @@ document.addEventListener('DOMContentLoaded', () => {
     addAccountModal.classList.add('open');
     modalError.textContent = '';
     addAccountForm.reset();
+    if (addPhpsessidForm) addPhpsessidForm.reset();
+    if (phpsessidError) phpsessidError.textContent = '';
   }
 
   // Close Add Account modal
@@ -431,6 +439,47 @@ document.addEventListener('DOMContentLoaded', () => {
       modalSubmitBtn.disabled = false;
     }
   });
+
+  // Add Account by PHPSESSID submission
+  if (addPhpsessidForm) {
+    addPhpsessidForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      phpsessidError.textContent = '';
+      const submitBtn = addPhpsessidForm.querySelector('button[type="submit"]');
+      const originalBtnText = submitBtn ? submitBtn.textContent : 'Thêm Ngay';
+
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Đang xử lý...';
+      }
+
+      const phpsessid = inputPhpsessid.value.trim();
+
+      try {
+        const response = await fetch('/api/add-by-phpsessid', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phpsessid })
+        });
+        const data = await response.json();
+
+        if (response.ok && data.success) {
+          closeModal();
+          fetchAccounts();
+          addPhpsessidForm.reset();
+        } else {
+          phpsessidError.textContent = data.error || 'PHPSESSID không hợp lệ hoặc hết hạn!';
+        }
+      } catch (err) {
+        phpsessidError.textContent = 'Không thể kết nối đến server quản lý';
+      } finally {
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.textContent = originalBtnText;
+        }
+      }
+    });
+  }
 
   // Edit Account form submission
   editAccountForm.addEventListener('submit', async (e) => {
@@ -625,6 +674,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       <div class="card-tabs-nav">
         <button class="tab-link active" id="tab-btn-core-${acc.line_uid}" onclick="switchTab('${acc.line_uid}', 'core')">Cơ Bản</button>
+        <button class="tab-link" id="tab-btn-mvp-${acc.line_uid}" onclick="switchTab('${acc.line_uid}', 'mvp')">Săn Boss</button>
         <button class="tab-link" id="tab-btn-logs-${acc.line_uid}" onclick="switchTab('${acc.line_uid}', 'logs')">Nhật Ký</button>
       </div>
 
@@ -654,28 +704,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 <span class="slider"></span>
               </label>
             </div>
-            <div class="toggle-control">
-              <span class="toggle-label">⚡ Auto Tăng Điểm</span>
-              <label class="switch">
-                <input type="checkbox" id="chk-autostats-${acc.line_uid}" onchange="toggleSetting('${acc.line_uid}', 'autoStats')">
-                <span class="slider"></span>
-              </label>
-            </div>
-            <div class="toggle-control">
-              <span class="toggle-label">🛡️ Auto Nâng Armor</span>
-              <label class="switch">
-                <input type="checkbox" id="chk-autogear-${acc.line_uid}" onchange="toggleSetting('${acc.line_uid}', 'autoGear')">
-                <span class="slider"></span>
-              </label>
-            </div>
           </div>
           <div class="settings-group">
-            <div class="input-control">
-              <label for="num-radius-${acc.line_uid}">explore_radius (m)</label>
-              <input type="number" id="num-radius-${acc.line_uid}" value="300" onchange="updateNumericSetting('${acc.line_uid}', 'explore_radius')">
-            </div>
-            <div class="input-control">
-              <label for="num-potion-${acc.line_uid}">Bơm Potion khi HP &lt; (%)</label>
+            <div class="input-control" style="grid-column: span 2;">
+              <label for="num-potion-${acc.line_uid}">🍷 Bơm Potion khi HP &lt; (%)</label>
               <input type="number" id="num-potion-${acc.line_uid}" value="50" onchange="updateNumericSetting('${acc.line_uid}', 'auto_potion_threshold')">
             </div>
           </div>
@@ -707,6 +739,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 <span class="slider"></span>
               </label>
             </div>
+            <div class="toggle-control">
+              <span class="toggle-label" title="Nhân vật tự đi tới tâm zone, sau đó tự bật Lock Position và chỉ đứng yên farm tại chỗ. Khi chết quay lại cũng sẽ làm tương tự.">🔒 Lock tâm zone</span>
+              <label class="switch">
+                <input type="checkbox" id="chk-lock_zone_center-${acc.line_uid}" onchange="toggleSetting('${acc.line_uid}', 'lock_zone_center')">
+                <span class="slider"></span>
+              </label>
+            </div>
             <div class="input-control">
               <label for="sel-zone-${acc.line_uid}">Khu vực farm (Zone)</label>
               <select id="sel-zone-${acc.line_uid}" onchange="changeTargetZone('${acc.line_uid}', this.value)" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; padding: 4px 6px; font-family: inherit; font-size: 0.85rem; outline: none; margin-top:2px;">
@@ -715,6 +754,14 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
           </div>
 
+          <div style="font-size:0.85rem; font-weight:700; color:var(--text-secondary); margin-top:5px;">Chỉ số chính (Stat Points còn lại: <span id="pts-val-${acc.line_uid}">0</span>)</div>
+          <div class="stats-list" id="stats-list-${acc.line_uid}">
+            <!-- Stat rows rendered dynamically -->
+          </div>
+        </div>
+
+        <!-- Săn Boss Tab Pane -->
+        <div class="tab-pane" id="pane-mvp-${acc.line_uid}">
           <div class="settings-group">
             <div class="toggle-control">
               <span class="toggle-label">👿 Auto Săn Boss MVP</span>
@@ -732,9 +779,29 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
           </div>
 
-          <div style="font-size:0.85rem; font-weight:700; color:var(--text-secondary); margin-top:5px;">Chỉ số chính (Stat Points còn lại: <span id="pts-val-${acc.line_uid}">0</span>)</div>
-          <div class="stats-list" id="stats-list-${acc.line_uid}">
-            <!-- Stat rows rendered dynamically -->
+          <div class="settings-group" style="margin-top: 10px;">
+            <div class="input-control" style="grid-column: span 2;">
+              <label for="sel-mvp-priority-mode-${acc.line_uid}">🎯 Tiêu chí ưu tiên săn Boss</label>
+              <select id="sel-mvp-priority-mode-${acc.line_uid}" onchange="updateStringSetting('${acc.line_uid}', 'mvpPriorityMode')" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; padding: 6px; font-family: inherit; font-size: 0.85rem; outline: none; margin-top:2px;">
+                <option value="distance">📍 Gần nhất (Khoảng cách)</option>
+                <option value="level_asc">🐣 Cấp độ thấp nhất (Lv tăng dần)</option>
+                <option value="level_desc">🦅 Cấp độ cao nhất (Lv giảm dần)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="settings-group" style="margin-top: 10px;">
+            <div class="input-control" style="grid-column: span 2;">
+              <label for="txt-mvp-name-priority-${acc.line_uid}">⭐ Tên Boss ưu tiên (cách nhau bởi dấu phẩy)</label>
+              <input type="text" id="txt-mvp-name-priority-${acc.line_uid}" placeholder="VD: Baphomet, Pharaoh (để trống nếu săn hết)" onchange="updateStringSetting('${acc.line_uid}', 'mvpNamePriority')" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; padding: 6px; font-family: inherit; font-size: 0.85rem; outline: none; margin-top:2px;">
+            </div>
+          </div>
+
+          <div class="settings-group" style="margin-top: 10px;">
+            <div class="input-control" style="grid-column: span 2;">
+              <label for="txt-mvp-name-blacklist-${acc.line_uid}">🚫 Tên Boss bỏ qua (cách nhau bởi dấu phẩy)</label>
+              <input type="text" id="txt-mvp-name-blacklist-${acc.line_uid}" placeholder="VD: Slime King, Goblin Leader" onchange="updateStringSetting('${acc.line_uid}', 'mvpNameBlacklist')" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; padding: 6px; font-family: inherit; font-size: 0.85rem; outline: none; margin-top:2px;">
+            </div>
           </div>
         </div>
 
@@ -804,16 +871,26 @@ document.addEventListener('DOMContentLoaded', () => {
     if (document.activeElement !== chkLock) chkLock.checked = acc.settings.lock_pos == 1;
 
     const chkAutoStats = document.getElementById(`chk-autostats-${acc.line_uid}`);
-    if (document.activeElement !== chkAutoStats) chkAutoStats.checked = acc.settings.autoStats === true;
+    if (chkAutoStats && document.activeElement !== chkAutoStats) chkAutoStats.checked = acc.settings.autoStats === true;
 
     const chkAutoGear = document.getElementById(`chk-autogear-${acc.line_uid}`);
-    if (document.activeElement !== chkAutoGear) chkAutoGear.checked = acc.settings.autoGear === true;
+    if (chkAutoGear && document.activeElement !== chkAutoGear) chkAutoGear.checked = acc.settings.autoGear === true;
 
     const chkAutoMVP = document.getElementById(`chk-automvp-${acc.line_uid}`);
     if (chkAutoMVP && document.activeElement !== chkAutoMVP) chkAutoMVP.checked = acc.settings.autoMVP === true;
 
     const chkAutoArena = document.getElementById(`chk-autoarena-${acc.line_uid}`);
     if (chkAutoArena && document.activeElement !== chkAutoArena) chkAutoArena.checked = acc.settings.autoArena === true;
+
+    // MVP Boss settings sync
+    const selMvpPriority = document.getElementById(`sel-mvp-priority-mode-${acc.line_uid}`);
+    if (selMvpPriority && document.activeElement !== selMvpPriority) selMvpPriority.value = acc.settings.mvpPriorityMode || 'distance';
+
+    const txtMvpPriority = document.getElementById(`txt-mvp-name-priority-${acc.line_uid}`);
+    if (txtMvpPriority && document.activeElement !== txtMvpPriority) txtMvpPriority.value = acc.settings.mvpNamePriority || '';
+
+    const txtMvpBlacklist = document.getElementById(`txt-mvp-name-blacklist-${acc.line_uid}`);
+    if (txtMvpBlacklist && document.activeElement !== txtMvpBlacklist) txtMvpBlacklist.value = acc.settings.mvpNameBlacklist || '';
 
     // Auto Map toggle & map select sync
     const chkAutoMap = document.getElementById(`chk-automap-${acc.line_uid}`);
@@ -825,6 +902,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // Auto Zone toggle & zone select: populate from acc.spots then sync value
     const chkAutoZone = document.getElementById(`chk-autozone-${acc.line_uid}`);
     if (chkAutoZone && document.activeElement !== chkAutoZone) chkAutoZone.checked = acc.settings.autoZone === true;
+
+    const chkLockZoneCenter = document.getElementById(`chk-lock_zone_center-${acc.line_uid}`);
+    if (chkLockZoneCenter && document.activeElement !== chkLockZoneCenter) chkLockZoneCenter.checked = acc.settings.lock_zone_center === true;
 
     populateZoneSelect(acc);
 
@@ -1041,6 +1121,26 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!input) return;
 
     const val = isNaN(parseInt(input.value)) ? 0 : parseInt(input.value);
+    try {
+      await fetch(`/api/accounts/${uid}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [settingKey]: val })
+      });
+    } catch (err) {
+      console.error('Error updating setting:', err);
+    }
+  };
+
+  // Update String Settings
+  window.updateStringSetting = async function(uid, settingKey) {
+    let input = document.getElementById(`txt-${settingKey.replace(/_/g, '-')}-${uid}`);
+    if (!input) {
+      input = document.getElementById(`sel-${settingKey.replace(/_/g, '-')}-${uid}`);
+    }
+    if (!input) return;
+
+    const val = input.value;
     try {
       await fetch(`/api/accounts/${uid}`, {
         method: 'PUT',

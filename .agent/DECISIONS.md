@@ -51,4 +51,40 @@
 - Đã chọn: Phương án C.
 - Lý do: An toàn, tương thích 100% với điện thoại (iOS & Android), không bị Google OAuth hay trình duyệt chặn.
 
+## 2026-07-24 - Hỗ trợ Dynamic Domain & Sửa lỗi PHPSESSID Form Submit
+- Bối cảnh: Khi deploy trên web với tên miền hoặc IP thay đổi động (đặc biệt khi đứng sau các dịch vụ proxy/load balancer như Cloudflare, Nginx, Render proxy), Express cần biết cách giải quyết giao thức HTTP/HTTPS và IP thật của client. Đồng thời form PHPSESSID ở frontend bị lỗi reload trang do thiếu sự kiện submit.
+- Các phương án đã xét:
+  - A: Hardcode các domain hợp lệ → Không khả thi cho dynamic domain.
+  - B: Cấu hình `trust proxy` trong Express + Sử dụng URL tương đối ở mọi API client và lấy origin động `window.location.origin` cho bookmarklet.
+- Đã chọn: Phương án B.
+- Lý do: Đảm bảo mã nguồn hoạt động 100% tự động trên bất kỳ tên miền nào mà không cần cấu hình lại. Form PHPSESSID được sửa bằng AJAX POST giúp tăng trải nghiệm người dùng, hiển thị lỗi động trực quan.
+
+## 2026-07-24 - Thiết lập cơ chế Lock tâm zone (Ngưỡng 30m và Tự động mở khóa)
+- Bối cảnh: Khi người dùng muốn nhân vật chỉ đứng yên auto-farm tại tâm zone chỉ định và quay trở lại đứng yên sau khi chết, chúng ta cần dùng tính năng `lock_pos` của game. Tuy nhiên, nếu gửi `lock_pos: 1` lúc nhân vật còn ở xa, nhân vật sẽ bị game server đóng băng vị trí và không thể di chuyển đến zone được.
+- Các phương án đã xét:
+  - A: Khóa vị trí ngay khi kích hoạt → Nhân vật bị kẹt cứng nếu đứng xa tâm zone hoặc sau khi chết hồi sinh ở town.
+  - B: Kích hoạt `traveling: 1` và gửi `lock_pos: 0` khi khoảng cách lớn hơn ngưỡng đến. Khi khoảng cách nhỏ hơn ngưỡng đến, dừng di chuyển và kích hoạt `lock_pos: 1`.
+- Đã chọn: Phương án B.
+- Ngưỡng khoảng cách đã chọn: **30m**.
+- Lý do: Ngưỡng 30m đảm bảo nhân vật di chuyển vào sát tâm zone trước khi kích hoạt khóa vị trí. Khi nhân vật hồi sinh ở town hoặc bị đẩy ra xa (khoảng cách > 30m), hệ thống tự động mở khóa để đi về tâm zone rồi lại tự động khóa lại.
+
+## 2026-07-24 - Điểm neo khóa vị trí trong Lock tâm zone (Tọa độ hiện tại vs Tọa độ tâm)
+- Bối cảnh: Khi gửi `lock_pos: 1` kết hợp `explore_cx/cy` là tâm zone gốc, game server vẫn điều hướng nhân vật di chuyển tới tâm zone hoặc cho phép di chuyển trong bán kính quét xung quanh tâm zone. Điều này làm tọa độ nhân vật tiếp tục biến động.
+- Các phương án đã xét:
+  - A: Gửi `explore_cx/cy` là tâm zone gốc (`spot.cx/cy`) khi khóa → Không khóa hoàn toàn, tọa độ vẫn thay đổi.
+  - B: Gửi `explore_cx/cy` là tọa độ hiện tại của nhân vật (`player.x/y`) khi khóa.
+- Đã chọn: Phương án B (phù hợp 100% với cách hoạt động của game client gốc).
+- Lý do: Khi game server nhận thấy tâm khám phá trùng khớp hoàn toàn với tọa độ hiện tại của nhân vật kèm cờ `lock_pos: 1`, nó sẽ đóng băng hoàn toàn nhân vật tại vị trí đó mà không kích hoạt bất kỳ chuyển động tìm đường hay tiếp cận nào khác.
+
+## 2026-07-24 - Thiết kế cấu trúc ưu tiên và lọc săn Boss MVP
+- Bối cảnh: Khi có nhiều Boss xuất hiện trên cùng một bản đồ, cần có cách thức sắp xếp ưu tiên và loại trừ các Boss không muốn săn để nhân vật đưa ra quyết định hợp lý.
+- Các phương án đã xét:
+  - A: Tự động nhắm mục tiêu cố định theo thứ tự server gửi về → Thiếu tùy biến, dễ nhắm vào Boss quá mạnh gây chết bot.
+  - B: Thiết kế tab cài đặt riêng, cho phép chọn tiêu chí (Gần nhất, Lv thấp/cao) kết hợp bộ lọc Whitelist (ưu tiên) và Blacklist (bỏ qua) theo từ khóa tên Boss.
+- Đã chọn: Phương án B.
+- Lý do: Tối đa hóa khả năng kiểm soát của người chơi, giúp bot an toàn hơn (né boss cấp cao trong blacklist) và hiệu quả hơn (ưu tiên boss cấp thấp dễ ăn trước hoặc boss có drop ngon trong whitelist).
+
+
+
+
 

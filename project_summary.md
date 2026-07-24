@@ -20,11 +20,12 @@ Chúng ta đã xây dựng thành công một hệ thống **Headless Bot Manage
 *   **Auto Mines**: Tự động xây mỏ, nâng cấp mỏ lên tối đa và bật khai thác loại quặng đã chọn trên phi thuyền Orion.
 *   **Auto Warp Map**: Tự động chuyển sang bản đồ mục tiêu khi nhân vật đứng sai map và đủ cấp độ yêu cầu.
 *   **Auto Farm Zone**: Tự động dẫn đường nhân vật di chuyển vào khu vực farm (Zone), tự động hạ bán kính quét mục tiêu về 100m để farm tại chỗ khi đã tới tâm Zone.
+*   **Lock tâm zone**: Khi kích hoạt, nhân vật tự động di chuyển về tâm zone chỉ định (tự động mở khóa `lock_pos = 0` khi khoảng cách > 30m). Khi đến sát tâm zone (khoảng cách <= 30m), bot tự động dừng di chuyển và kích hoạt khóa vị trí `lock_pos = 1` để đứng yên farm tại chỗ. Nếu chết và hồi sinh ở thành, bot tự động đi lại về tâm zone và khóa vị trí tiếp tục.
 
 ### C. Các tính năng nâng cấp nâng cao mới bổ sung
 *   **Sửa lỗi Khóa Vị Trí (Lock Position)**: Khắc phục lỗi sai lệch ID checkbox giữa frontend và backend, giúp bật/tắt chức năng Lock Position mượt mà, nhân vật đứng yên hoặc di chuyển đi farm chuẩn xác theo ý muốn.
 *   **Đồng bộ Map & Zone cực nhạy**: Tự động xóa bộ nhớ đệm Zone và yêu cầu game server tải lại danh sách Zone mới ngay khi phát hiện nhân vật thay đổi bản đồ (Map).
-*   **Săn Boss MVP (Auto MVP)**: Tự động phát hiện Boss thế giới còn sống trên map hiện tại. Bot sẽ ưu tiên chuyển sang đi săn Boss trước (chạy tới tọa độ Boss, giảm bán kính quét mục tiêu để tiêu diệt Boss), sau khi Boss chết sẽ tự động quay lại farm Zone.
+*   **Săn Boss MVP (Auto MVP)**: Tự động phát hiện Boss thế giới còn sống trên map hiện tại. Hỗ trợ cấu hình nâng cao trong thẻ **Săn Boss** riêng biệt: sắp xếp ưu tiên săn theo Khoảng cách gần nhất hoặc Cấp độ (thấp/cao), lọc bỏ Boss theo danh sách đen (Blacklist) và ưu tiên săn Boss theo danh sách trắng (Whitelist). Bot sẽ tự động di chuyển tiếp cận mục tiêu tối ưu, tự động hạ bán kính quét mục tiêu để tiêu diệt Boss, và sau khi Boss chết sẽ tự động quay lại farm Zone.
 *   **Tự động Đấu Trường (Auto Arena)**: Định kỳ quét đấu trường 1v1 mỗi 5 phút. Nếu còn lượt miễn phí (`free_runs > 0`), bot tự động thực hiện **Skip (Càn quét)** Boss đã từng thắng có cấp độ cao nhất để nhận thưởng lập tức, hoặc tự động **Enter (Khiêu chiến)** Boss cấp thấp nhất nếu là tài khoản mới.
 
 ### D. Hệ thống Kết Nối Chống Idle & Tránh CORS
@@ -60,6 +61,16 @@ Chúng ta đã xây dựng thành công một hệ thống **Headless Bot Manage
 *   **Cơ chế Trích Xuất Token từ `PHPSESSID` (`/api/add-by-phpsessid`)**: Khi người dùng đăng nhập Google trên điện thoại (`ragnalok.online`), game khởi tạo cookie `PHPSESSID`. Server Manager nhận `PHPSESSID`, gọi tới `https://ragnalok.online/human/xhrpg_google_auth.php` với header `Cookie: PHPSESSID=...` để tự động đọc `line_uid`, `session_token` và tên nhân vật mà không cần F12/DevTools.
 *   **Nút Thêm Bot bằng `PHPSESSID` (Dành cho Điện thoại)**: Người dùng điện thoại chỉ cần dán `PHPSESSID` hoặc nguyên chuỗi cookie vào Modal Thêm Tài Khoản, bấm **Thêm Ngay** là hệ thống tự trích xuất token, tạo bot và khởi chạy lập tức.
 *   **Mã Dấu Trang 1-Tap (Bookmarklet)**: Cung cấp nút copy mã Bookmarklet. Khi lưu vào Bookmark trình duyệt điện thoại và bấm khi đang ở tab game, script tự động đọc `xhrpg_google_auth.php` thông qua Cookie của trình duyệt và gửi về Server Manager để thêm bot tự động.
+
+### I. Đồng bộ AJAX Form PHPSESSID & Hỗ trợ Dynamic Domain (2026-07-24)
+*   **Sửa lỗi Submit PHPSESSID**: Tích hợp sự kiện lắng nghe submit AJAX cho form `#add-phpsessid-form` ở frontend giúp chặn reload trang mặc định. Trình duyệt gửi request `POST` qua fetch đến `/api/add-by-phpsessid` để trích xuất token tự động, hiển thị thông báo lỗi trực quan lên giao diện (#phpsessid-error) và reload danh sách bot khi thành công.
+*   **Cấu hình Trust Proxy**: Thiết lập `app.set('trust proxy', 1)` trong Express giúp server phân giải đúng protocol (HTTP/HTTPS) và IP thực của người dùng đằng sau các proxy/load balancer như Nginx, Cloudflare, Render.
+*   **Tên miền động (Dynamic Domain)**: Thiết kế toàn bộ API route sử dụng đường dẫn tương đối và lấy origin động `window.location.origin` cho bookmarklet, đảm bảo hệ thống chạy tốt trên mọi tên miền/hosting mà không cần sửa cấu hình cứng.
+
+### J. Tự động Nhận diện & Tránh crash client do chặn CDN (2026-07-24)
+*   **Nhận diện nội dung HTML thay vì JS**: Hàm `fetchGameAsset` tự động kiểm tra nếu file tải về từ CDN game là trang HTML (bắt đầu bằng `<` do bị Cloudflare chặn hoặc game server bảo trì/redirect), server chủ động ném lỗi (throw error) thay vì trả về HTML dạng script làm crash trình duyệt với lỗi `Uncaught SyntaxError: Unexpected token '<'`.
+*   **Cơ chế Fallback File tĩnh cục bộ (Local Fallback)**: Khi việc tải asset hoặc HTML từ máy chủ game thất bại (hoặc không chứa mã scripts game hợp lệ), Express tự động chuyển sang phục vụ file tĩnh và client game lưu cục bộ trong thư mục root project (`xhrpg_canvas.js`, `sdk.js`, `play.html`), giúp duy trì trải nghiệm treo máy 24/7 ổn định kể cả khi CDN game bị chặn hoàn toàn.
+
 
 
 
