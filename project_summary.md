@@ -24,7 +24,7 @@ Chúng ta đã xây dựng thành công một hệ thống **Headless Bot Manage
 
 ### C. Các tính năng nâng cấp nâng cao mới bổ sung
 *   **Sửa lỗi Khóa Vị Trí (Lock Position)**: Khắc phục lỗi sai lệch ID checkbox giữa frontend và backend, giúp bật/tắt chức năng Lock Position mượt mà, nhân vật đứng yên hoặc di chuyển đi farm chuẩn xác theo ý muốn.
-*   **Đồng bộ Map & Zone cực nhạy**: Tự động xóa bộ nhớ đệm Zone và yêu cầu game server tải lại danh sách Zone mới ngay khi phát hiện nhân vật thay đổi bản đồ (Map).
+*   **Đồng bộ Map & Zone cực nhạy**: Tự động phát hiện thay đổi bản đồ (kể cả khi di chuyển bằng lệnh warp thủ công lúc bot đang dừng). Server tự động thực hiện tải ngầm (background fetch) danh sách spots/zones mới của bản đồ đó từ game server để cập nhật dropdown Zone ngay lập tức. Đồng thời, tự động bật cấu hình `autoMap = true` trên backend khi warp thành công.
 *   **Săn Boss MVP (Auto MVP)**: Tự động phát hiện Boss thế giới còn sống trên map hiện tại. Hỗ trợ cấu hình nâng cao trong thẻ **Săn Boss** riêng biệt: sắp xếp ưu tiên săn theo Khoảng cách gần nhất hoặc Cấp độ (thấp/cao), lọc bỏ Boss theo danh sách đen (Blacklist) và ưu tiên săn Boss theo danh sách trắng (Whitelist). Bot sẽ tự động di chuyển tiếp cận mục tiêu tối ưu, tự động hạ bán kính quét mục tiêu để tiêu diệt Boss, và sau khi Boss chết sẽ tự động quay lại farm Zone.
 *   **Tự động Đấu Trường (Auto Arena)**: Định kỳ quét đấu trường 1v1 mỗi 5 phút. Nếu còn lượt miễn phí (`free_runs > 0`), bot tự động thực hiện **Skip (Càn quét)** Boss đã từng thắng có cấp độ cao nhất để nhận thưởng lập tức, hoặc tự động **Enter (Khiêu chiến)** Boss cấp thấp nhất nếu là tài khoản mới.
 

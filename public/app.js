@@ -1114,9 +1114,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Update Numeric Settings
   window.updateNumericSetting = async function(uid, settingKey) {
-    let input = document.getElementById(`num-${settingKey.replace(/_/g, '-')}-${uid}`);
+    const hyphenated = settingKey.replace(/([a-z0-9])([A-Z])/g, '$1-$2').replace(/_/g, '-').toLowerCase();
+    let input = document.getElementById(`num-${hyphenated}-${uid}`);
     if (!input) {
-      input = document.getElementById(`sel-${settingKey.replace(/_/g, '-')}-${uid}`);
+      input = document.getElementById(`sel-${hyphenated}-${uid}`);
     }
     if (!input) return;
 
@@ -1134,9 +1135,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Update String Settings
   window.updateStringSetting = async function(uid, settingKey) {
-    let input = document.getElementById(`txt-${settingKey.replace(/_/g, '-')}-${uid}`);
+    const hyphenated = settingKey.replace(/([a-z0-9])([A-Z])/g, '$1-$2').replace(/_/g, '-').toLowerCase();
+    let input = document.getElementById(`txt-${hyphenated}-${uid}`);
     if (!input) {
-      input = document.getElementById(`sel-${settingKey.replace(/_/g, '-')}-${uid}`);
+      input = document.getElementById(`sel-${hyphenated}-${uid}`);
     }
     if (!input) return;
 
@@ -1156,11 +1158,6 @@ document.addEventListener('DOMContentLoaded', () => {
   window.changeTargetMap = async function(uid, mapId) {
     const val = parseInt(mapId) || 1;
     try {
-      await fetch(`/api/accounts/${uid}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ targetMap: val })
-      });
       await triggerAction(uid, 'warp', val);
     } catch (err) {
       console.error('Error changing target map:', err);

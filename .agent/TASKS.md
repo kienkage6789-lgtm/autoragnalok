@@ -139,4 +139,45 @@
   - [x] Logic backend lọc bỏ Boss trong blacklist, lọc lấy Boss trong whitelist trước (nếu trùng), và sắp xếp theo tiêu chí đã cấu hình để tìm ra Boss cần săn mục tiêu tối ưu nhất.
 - Status: done
 
+### [x] T17 - Đồng bộ Bản đồ di chuyển và Khu vực farm (Zone)
+- Description: Khắc phục lỗi bất đồng bộ giữa bản đồ di chuyển và danh sách zone hiển thị trên giao diện, đặc biệt khi bot đang dừng hoặc gặp lỗi di chuyển.
+- Files related: `server.js`, `public/app.js`
+- Acceptance criteria:
+  - [x] Cập nhật hàm `changeTargetMap` phía frontend chỉ gọi hành động `warp` thủ công thay vì lưu targetMap qua API trước, giúp tránh lưu sai bản đồ khi lệnh di chuyển thất bại (ví dụ do level_locked).
+  - [x] Khi thực hiện warp thủ công thành công, backend cập nhật `targetMap = mapId` và tự động kích hoạt `autoMap = true`.
+  - [x] Nếu phát hiện thay đổi bản đồ trong tiến trình warp thủ công (kể cả khi bot đang dừng/offline), tự động kích hoạt tiến trình tải ngầm (background fetch) danh sách spots/zones mới của bản đồ đó từ game server.
+  - [x] Giúp giao diện dropdown Zone tự động tải lại và hiển thị chính xác các khu vực farm của bản đồ mới ngay lập tức.
+- Status: done
+
+### [x] T18 - Tối ưu hóa tập trung săn Boss MVP (Tạm dừng nâng cấp)
+- Description: Tạm dừng toàn bộ các tác vụ tự động nâng cấp và đấu trường khi đang nhắm mục tiêu Boss MVP để bot dồn 100% tài nguyên và lượt poll vào việc di chuyển/tấn công Boss.
+- Files related: `server.js`
+- Acceptance criteria:
+  - [x] Tạo thuộc tính `this.targetedMvp` trên lớp `BotInstance` để theo dõi trạng thái nhắm mục tiêu Boss toàn cục.
+  - [x] Gán `this.targetedMvp = true` khi phát hiện Boss MVP thỏa mãn điều kiện lọc và bắt đầu di chuyển săn Boss.
+  - [x] Chèn khối kiểm tra đầu hàm `runAutomation()`, nếu `this.targetedMvp` là `true`, dừng thực thi hàm ngay lập tức (skip toàn bộ việc nâng Stats, Armor, Skills, Companion, Mines, Arena và Map Warp).
+  - [x] Khi Boss bị tiêu diệt hoặc rời khỏi map, tự động khôi phục lại toàn bộ chu trình nâng cấp tự động.
+- Status: done
+
+### [x] T19 - Tạm thời vô hiệu hóa các chức năng tự động nâng cấp (Chờ phát triển)
+- Description: Tạm thời vô hiệu hóa các tác vụ tự động nâng cấp (Stats, Giáp, Kỹ năng, Companion, Mỏ khai thác) để tối ưu hóa hiệu suất chạy bộ/săn boss, lưu tài liệu để hoàn thiện sau này.
+- Files related: `server.js`
+- Acceptance criteria:
+  - [x] Khai báo cờ cấu hình `const enableUpgrades = false` ở đầu hàm `runAutomation()`.
+  - [x] Bao bọc 5 nhóm tác vụ tự động nâng cấp (Stats, Giáp, Kỹ năng, Companion, Mỏ) trong khối điều kiện `if (enableUpgrades)`.
+  - [x] Đảm bảo các tác vụ di chuyển (Map Warp) và đấu trường (Arena) vẫn hoạt động bình thường.
+  - [x] Ghi nhận quyết định tạm dừng này vào tài liệu kỹ thuật để tiếp tục triển khai khi cần thiết.
+- Status: done
+
+### [x] T20 - Sửa lỗi lưu tiêu chí săn Boss & Thêm nhật ký đi săn MVP
+- Description: Sửa lỗi bất đồng bộ định dạng tên DOM ID của các trường cài đặt Boss mới (camelCase sang hyphen-case) làm không lưu được dữ liệu, đồng thời bổ sung thông tin chi tiết vào nhật ký hoạt động khi bắt đầu, đang chiến đấu và kết thúc săn Boss MVP.
+- Files related: `server.js`, `public/app.js`
+- Acceptance criteria:
+  - [x] Cấu hình lại bộ phân giải DOM ID trong `updateNumericSetting` và `updateStringSetting` để chuyển đổi camelCase (như `mvpPriorityMode`) sang hyphen-case (như `mvp-priority-mode`) một cách chuẩn xác.
+  - [x] Khai báo thuộc tính `this.lastTargetedBossId` để ghi nhận Boss mục tiêu đang được săn.
+  - [x] Bổ sung log bắt đầu săn Boss ngay khi phát hiện mục tiêu mới thỏa mãn bộ lọc.
+  - [x] Bổ sung log trạng thái tấn công Boss định kỳ khi tiếp cận gần.
+  - [x] Bổ sung log hoàn thành/mất dấu khi chuyển đổi trạng thái về hoạt động tự động.
+- Status: done
+
 

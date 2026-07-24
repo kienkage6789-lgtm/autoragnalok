@@ -84,6 +84,38 @@
 - Đã chọn: Phương án B.
 - Lý do: Tối đa hóa khả năng kiểm soát của người chơi, giúp bot an toàn hơn (né boss cấp cao trong blacklist) và hiệu quả hơn (ưu tiên boss cấp thấp dễ ăn trước hoặc boss có drop ngon trong whitelist).
 
+## 2026-07-24 - Thiết kế cơ chế đồng bộ map và zone (Tải spots ngầm khi bot offline)
+- Bối cảnh: Khi người dùng đổi bản đồ bằng dropdown, bot gửi lệnh warp thủ công. Tuy nhiên, game server chỉ trả về danh sách spots/zones của map mới khi client thực hiện request poll `xhrpg_game.php`. Nếu bot đang offline/idle, poller không chạy, dẫn tới spots không được tải, và dropdown Zone trên UI vẫn hiển thị các khu vực của map cũ gây lỗi bất đồng bộ.
+- Các phương án đã xét:
+  - A: Yêu cầu người dùng bật bot lên để tự cập nhật spots → Trải nghiệm kém, người dùng muốn cài đặt cấu hình hoàn chỉnh trước khi bật bot.
+  - B: Khi phát hiện warp thủ công thành công và bot đang offline, server tự động kích hoạt một luồng chạy ngầm (background fetch) để tải trước spots của map mới từ game server, sau đó lưu vào bộ nhớ đệm bot.
+- Đã chọn: Phương án B.
+- Lý do: Giải quyết triệt để bất đồng bộ map-zone dù bot đang chạy hay dừng, nâng cao trải nghiệm người dùng, giúp giao diện dropdown zone luôn chính xác theo map đang đứng. Đồng thời, tự động bật `autoMap = true` khi warp thành công giúp khóa cứng hoạt động của nhân vật trên map mới.
+
+## 2026-07-24 - Thiết lập cơ chế tạm dừng nâng cấp khi săn Boss MVP
+- Bối cảnh: Khi bot đang săn Boss MVP, nếu các tiến trình nâng Stats, Armor, Skills, Companion hay Đấu trường được kích hoạt, hệ thống phải gửi các gói tin HTTP POST riêng biệt đến `xhrpg_upgrade.php` hoặc `xhrpg_arena.php`. Việc này chiếm dụng lượt poll của chu kỳ hiện tại, khiến bot tạm ngưng gửi tọa độ di chuyển/tấn công đến `xhrpg_game.php`, làm nhân vật khựng lại và mất ưu thế cạnh tranh Boss.
+- Các phương án đã xét:
+  - A: Chạy song song nâng cấp và săn Boss → Gây xung đột poll, dễ dính lỗi `too_fast` từ game server, làm nhân vật khựng lại trong trận đánh Boss quan trọng.
+  - B: Phát hiện trạng thái đang săn Boss MVP (`targetedMvp = true`) và tạm dừng toàn bộ mọi hoạt động tự động hóa nâng cấp, đấu trường cho đến khi Boss chết.
+- Đã chọn: Phương án B.
+- Lý do: Đảm bảo nhân vật luôn phản ứng nhanh nhất, dồn 100% thời gian poll để tiếp cận và tấn công Boss liên tục mà không bị gián đoạn bởi các tác vụ nâng cấp ngoài lề. Các hoạt động nâng cấp tự động sẽ ngay lập tức được khôi phục sau khi trận đánh kết thúc.
+
+## 2026-07-24 - Tạm thời vô hiệu hóa các tính năng tự động nâng cấp (Chờ phát triển)
+- Bối cảnh: Các chức năng tự động nâng cấp như tăng chỉ số (Stats), nâng cấp Giáp (Armor), nâng kỹ năng (Skills), nâng cấp Companion (priest, archer, cat, drone...) và xây mỏ (Mines) chưa được phát triển và hoàn thiện kiểm thử thực tế. Để tránh việc bot thực hiện các hành động nâng cấp sai lệch hoặc gây lag poll, người dùng yêu cầu tạm thời tắt toàn bộ các tính năng này và ghi nhận vào tài liệu.
+- Các phương án đã xét:
+  - A: Xóa bỏ hoàn toàn mã nguồn nâng cấp → Lãng phí code cũ, gây khó khăn cho việc phát triển lại sau này.
+  - B: Sử dụng một biến cờ cấu hình cục bộ `const enableUpgrades = false` bao bọc toàn bộ 5 khối chức năng này.
+- Đã chọn: Phương án B.
+- Lý do: Giúp vô hiệu hóa các tác vụ nâng cấp một cách an toàn và sạch sẽ mà không làm xáo trộn mã nguồn. Việc này cho phép chúng ta dễ dàng kích hoạt lại từng phần khi tiến hành phát triển và kiểm thử tiếp ở tương lai. Các hoạt động di chuyển cốt lõi (Map Warp) và càn quét Đấu trường (Arena) nằm ngoài cờ này nên vẫn được giữ lại hoạt động bình thường.
+
+## 2026-07-24 - Giải quyết ánh xạ DOM ID lỗi của các cấu hình camelCase ở frontend
+- Bối cảnh: Khi người dùng đổi cấu hình camelCase (VD: `mvpPriorityMode`), hàm `updateStringSetting` tìm kiếm phần tử DOM theo công thức `settingKey.replace(/_/g, '-')`. Do `mvpPriorityMode` không có dấu gạch dưới, kết quả trả về vẫn là `mvpPriorityMode`, trong khi ID thực tế trên HTML template là `sel-mvp-priority-mode-...` (dạng hyphen-case). Điều này khiến hàm trả về `null` và cấu hình không bao giờ được gửi về backend để lưu trữ.
+- Các phương án đã xét:
+  - A: Đổi tên toàn bộ biến cài đặt trong backend sang dạng snake_case hoặc hyphen-case → Tốn kém và dễ gây vỡ cấu trúc dữ liệu JSON hiện tại.
+  - B: Thêm bộ phân giải biểu thức chính quy `.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase()` vào hàm xử lý cập nhật ở frontend để tự động chuyển camelCase sang hyphen-case một cách linh hoạt.
+- Đã chọn: Phương án B.
+- Lý do: Đảm bảo khả năng tương thích 100% giữa quy chuẩn đặt tên biến CamelCase của JavaScript và quy chuẩn DOM ID viết thường có dấu gạch ngang của HTML mà không cần thay đổi cấu trúc dữ liệu ở backend.
+
 
 
 

@@ -450,6 +450,8 @@ class BotInstance {
     this.timer = null;
     this.isPolling = false;
     this.arrivedAtZoneCenter = false;
+    this.targetedMvp = false;
+    this.lastTargetedBossId = null;
 
     proxyPool.assignBot(this.line_uid);
     this.addLog('SYSTEM', `Khởi tạo bot cho tài khoản: ${this.name}`);
@@ -634,7 +636,7 @@ class BotInstance {
     let exploreCy = this.player ? (this.settings.explore_cy || this.player.y) : this.settings.explore_cy;
     let exploreRadius = this.settings.explore_radius;
     let traveling = 0;
-    let targetedMvp = false;
+    this.targetedMvp = false;
     let lockPos = this.settings.lock_pos ? 1 : 0;
 
     // 1. Auto MVP Hunting (Priority 1)
@@ -686,7 +688,14 @@ class BotInstance {
 
         const activeBoss = targetPool[0];
         if (activeBoss) {
-          targetedMvp = true;
+          this.targetedMvp = true;
+
+          // Log when a new boss is first targeted
+          if (this.lastTargetedBossId !== activeBoss.id) {
+            this.lastTargetedBossId = activeBoss.id;
+            this.addLog('SYSTEM', `⚔️ [Auto MVP] Phát hiện Boss MVP: ${activeBoss.emoji || '👾'} ${activeBoss.name || 'Boss'} (Lv.${activeBoss.lv || 1} - HP: ${Math.round((activeBoss.hp || 0) / (activeBoss.hp_max || 1) * 100)}%) -> Bắt đầu săn Boss!`);
+          }
+
           if (this.player) {
             const dx = this.player.x - activeBoss.x;
             const dy = this.player.y - activeBoss.y;
@@ -705,6 +714,9 @@ class BotInstance {
               exploreCy = this.player.y;
               exploreRadius = 100;
               traveling = 0;
+              if (this.pollCount % 10 === 0) {
+                this.addLog('SYSTEM', `⚔️ [Auto MVP] Đang tấn công Boss: ${activeBoss.emoji || '👾'} ${activeBoss.name || 'Boss'} (HP: ${Math.round((activeBoss.hp || 0) / (activeBoss.hp_max || 1) * 100)}%)`);
+              }
             }
           } else {
             exploreCx = activeBoss.x;
@@ -714,8 +726,14 @@ class BotInstance {
       }
     }
 
+    // Clear targeted boss state and log when done
+    if (!this.targetedMvp && this.lastTargetedBossId !== null) {
+      this.addLog('SYSTEM', `✅ [Auto MVP] Đã tiêu diệt hoặc mất dấu Boss MVP. Quay lại hoạt động tự động.`);
+      this.lastTargetedBossId = null;
+    }
+
     // 2. Auto Zone checking (Priority 2, only runs if no MVP is being targeted)
-    if (!targetedMvp && this.settings.autoZone && this.spots) {
+    if (!this.targetedMvp && this.settings.autoZone && this.spots) {
       const spotsList = Object.values(this.spots);
       const targetIdx = parseInt(this.settings.targetZone) || 0;
       if (spotsList[targetIdx]) {
@@ -883,8 +901,17 @@ class BotInstance {
   async runAutomation() {
     if (!this.player) return;
 
-    // 1. Auto allocation of stats
-    if (this.settings.autoStats && this.player.stat_pts > 0) {
+    // Pause all automation tasks (upgrades, mines, arena, map warp) while hunting MVP boss
+    if (this.targetedMvp) {
+      return;
+    }
+
+    // TEMPORARILY DISABLED AUTOMATION (Stats, Gear, Skills, Companion, Mines)
+    // We haven't developed them yet. Set to false to disable.
+    const enableUpgrades = false;
+    if (enableUpgrades) {
+      // 1. Auto allocation of stats
+      if (this.settings.autoStats && this.player.stat_pts > 0) {
       const targetStat = this.settings.statsPriority.find(s => s === 'str' || s === 'agi' || s === 'vit' || s === 'intel' || s === 'dex' || s === 'luk');
       if (targetStat) {
         const amount = this.player.stat_pts;
@@ -1099,6 +1126,7 @@ class BotInstance {
         }
       }
     }
+    } // End of temporarily disabled automation
 
     // 6. Auto Map Warp
     if (this.settings.autoMap && Number(this.player.map) !== Number(this.settings.targetMap)) {

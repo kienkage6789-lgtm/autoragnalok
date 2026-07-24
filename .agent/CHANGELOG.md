@@ -2,6 +2,49 @@
 
 > Changelog of actual changes implemented.
 
+## 2026-07-24 - Sửa lỗi lưu tiêu chí săn Boss & Thêm nhật ký đi săn MVP
+- File đã đổi: `server.js` (sửa), `public/app.js` (sửa).
+- Đã làm:
+  - **Sửa lỗi lưu cài đặt**: Cập nhật hàm `updateNumericSetting` và `updateStringSetting` trong `public/app.js` để tự động chuyển đổi định dạng tên cấu hình camelCase (VD: `mvpPriorityMode`, `mvpNamePriority`) sang định dạng tên thẻ DOM ID tương ứng dạng hyphen-case (VD: `mvp-priority-mode`, `mvp-name-priority`), giúp hàm tìm thấy chính xác phần tử DOM và lưu thông tin về backend thành công.
+  - **Nâng cấp log nhật ký săn Boss MVP**:
+    *   Tích hợp thuộc tính `this.lastTargetedBossId` để phát hiện sự kiện bắt đầu chọn mục tiêu săn Boss.
+    *   Thêm dòng thông tin hệ thống ngay lập tức khi phát hiện mục tiêu mới thỏa mãn bộ lọc: `⚔️ [Auto MVP] Phát hiện Boss MVP... -> Bắt đầu săn Boss!`.
+    *   Thêm dòng nhật ký cập nhật trạng thái lượng máu (%) của Boss theo chu kỳ khi nhân vật tiếp cận gần để chiến đấu: `⚔️ [Auto MVP] Đang tấn công Boss...`.
+    *   Tự động ghi nhận thông báo hoàn tất/mất dấu khi Boss chết và chuyển trạng thái về hoạt động tự động thông thường: `✅ [Auto MVP] Đã tiêu diệt hoặc mất dấu Boss MVP...`.
+
+---
+
+## 2026-07-24 - Tạm thời vô hiệu hóa các chức năng tự động nâng cấp (Chờ phát triển)
+- File đã đổi: `server.js` (sửa).
+- Đã làm:
+  - **Vô hiệu hóa 5 nhóm tác vụ nâng cấp tự động**: Khai báo cờ `const enableUpgrades = false` ở đầu hàm `runAutomation()`, và bao bọc toàn bộ 5 khối tự động nâng Stats, nâng Giáp, nâng Kỹ năng, nâng cấp Companion (priest, archer, cat, drone, robot body, house, gun) và quản lý mỏ (mine_build, mine_up) bên trong khối `if (enableUpgrades)`.
+  - **Giữ lại các tự động hóa di chuyển/combat**: Đảm bảo các tác vụ Auto Map Warp (di chuyển map tự động) và Auto Arena (tự động càn quét/khiêu chiến đấu trường) nằm ngoài khối bao bọc và hoạt động bình thường.
+  - **Cập nhật tài liệu**: Ghi nhận trạng thái "Tạm dừng phát triển" đối với 5 chức năng này để phục vụ phát triển sau này.
+
+---
+
+## 2026-07-24 - Tối ưu hóa tập trung săn Boss MVP (Tạm dừng nâng cấp)
+- File đã đổi: `server.js` (sửa).
+- Đã làm:
+  - **Tạo thuộc tính trạng thái nhắm mục tiêu Boss**: Khởi tạo cờ trạng thái `this.targetedMvp` trong constructor của `BotInstance` (mặc định là `false`).
+  - **Cập nhật cờ khi săn Boss**: Trong logic `pollGame()`, thiết lập `this.targetedMvp = true` khi phát hiện Boss MVP đáp ứng các tiêu chí lọc (máu > 0, không nằm trong blacklist, thỏa whitelist nếu có) và bắt đầu di chuyển săn Boss.
+  - **Tạm dừng toàn bộ tự động hóa ngoài lề**: Thêm khối kiểm tra đầu hàm `runAutomation()`. Nếu `this.targetedMvp` là `true`, lập tức ngắt hàm bằng lệnh `return`. Điều này giúp bỏ qua toàn bộ các thao tác nâng điểm chỉ số, nâng giáp, nâng kỹ năng, nâng phi thuyền/companion, quản lý mỏ, tự động chuyển bản đồ và khiêu chiến/càn quét Đấu trường để dồn 100% tài nguyên poll di chuyển/đánh Boss MVP nhanh nhất.
+
+---
+
+## 2026-07-24 - Đồng bộ Bản đồ di chuyển và Khu vực farm (Zone)
+- File đã đổi: `server.js` (sửa), `public/app.js` (sửa).
+- Đã làm:
+  - **Sửa bất đồng bộ khi đổi Map**:
+    *   Cập nhật `changeTargetMap` trong `public/app.js` loại bỏ việc gọi PUT API cập nhật targetMap trước khi warp. Chỉ gọi trực tiếp triggerAction `warp`. Điều này giúp ngăn chặn việc dropdown Map hiển thị sai map mong muốn khi lệnh warp thực tế bị lỗi (ví dụ do level_locked).
+    *   Cập nhật route xử lý action `warp` trong `server.js`: Khi lệnh warp thực tế trả về thành công (`response.ok`), server tự động cập nhật `bot.settings.targetMap = bot.player.map` và kích hoạt cờ `bot.settings.autoMap = true`.
+  - **Tự động tải lại Spots/Zones ngay khi warp thủ công (Kể cả khi bot dừng)**:
+    *   Cập nhật logic warp action trong `server.js` để phát hiện thay đổi map của người chơi. Nếu map thay đổi, reset các thuộc tính `spots`, `bosses`, `autoZone`, `lock_zone_center` và `targetZone` giống như trong poll.
+    *   Đặc biệt, nếu bot đang ở trạng thái dừng (`bot.status !== 'running'`), server tự động kích hoạt một luồng chạy ngầm gửi yêu cầu `xhrpg_game.php` với tham số `have_static: 0` để lấy danh sách spots/zones mới từ game server.
+    *   Nhờ đó, dropdown Zone trên giao diện frontend tự động hiển thị đúng và đầy đủ danh sách khu vực farm mới ngay lập tức mà không cần khởi động bot.
+
+---
+
 ## 2026-07-24 - Thẻ Cài Đặt Săn Boss Riêng & Xử Lý Ưu Tiên MVP
 - File đã đổi: `server.js` (sửa), `public/app.js` (sửa).
 - Đã làm:
