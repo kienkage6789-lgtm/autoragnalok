@@ -192,4 +192,25 @@
   - [x] Nâng cấp hàm `fetchLogs()` để tải dữ liệu cho cả hai khung terminal và bổ sung hiệu ứng tô màu nổi bật (Highlight) cho các vật phẩm quý hiếm (Thẻ bài, Trứng, Trang bị).
 - Status: done
 
+### [x] T22 - Sửa lỗi không cập nhật mục 'Bản đồ di chuyển' khi dịch chuyển bản đồ
+- Description: Đồng bộ `targetMap` trong `settings` ở cả Backend và Frontend khi bấm dịch chuyển bản đồ, đảm bảo dropdown select luôn hiển thị đúng bản đồ đã chọn.
+- Files related: `server.js`, `public/app.js`
+- Acceptance criteria:
+  - [x] Khi người dùng chọn bản đồ trong dropdown "Bản đồ di chuyển", backend cập nhật `bot.settings.targetMap = Number(target_map)` và gọi `saveAccounts()`.
+  - [x] Frontend `changeTargetMap` gửi request cập nhật `targetMap` vào settings trước/đồng thời với lệnh warp thủ công.
+  - [x] Khi render `selMap`, nếu `acc.settings.targetMap` chưa có thì fallback theo `acc.player.map` hiện tại.
+  - [x] Dropdown "Bản đồ di chuyển" giữ đúng giá trị bản đồ đã chọn, không bị nảy về map 1.
+- Status: done
+
+### [x] T23 - Tải Nhật ký Vật phẩm theo Yêu cầu (On-Demand Droplogs qua `xhrpg_droplog.php`)
+- Description: Tạo endpoint backend gọi trực tiếp API `xhrpg_droplog.php` của game server và giao diện frontend tải dữ liệu khi người dùng chuyển sang tab Vật Phẩm hoặc bấm nút Làm mới.
+- Files related: `server.js`, `public/app.js`
+- Acceptance criteria:
+  - [x] Tạo endpoint `GET /api/accounts/:line_uid/droplogs` ở backend gửi POST request tới `https://ragnalok.online/human/xhrpg_droplog.php`.
+  - [x] Phân loại icon/badge Online/Offline, format timestamp Unix thành ngày giờ thực `HH:mm:ss DD/MM`.
+  - [x] Frontend chỉ tải dữ liệu khi người dùng click chọn tab **Vật Phẩm** hoặc bấm nút **🔄 Cập nhật** (Không tự động poll định kỳ gây spam server).
+- Status: done
+
+
+
 

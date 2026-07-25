@@ -71,6 +71,16 @@ Chúng ta đã xây dựng thành công một hệ thống **Headless Bot Manage
 *   **Nhận diện nội dung HTML thay vì JS**: Hàm `fetchGameAsset` tự động kiểm tra nếu file tải về từ CDN game là trang HTML (bắt đầu bằng `<` do bị Cloudflare chặn hoặc game server bảo trì/redirect), server chủ động ném lỗi (throw error) thay vì trả về HTML dạng script làm crash trình duyệt với lỗi `Uncaught SyntaxError: Unexpected token '<'`.
 *   **Cơ chế Fallback File tĩnh cục bộ (Local Fallback)**: Khi việc tải asset hoặc HTML từ máy chủ game thất bại (hoặc không chứa mã scripts game hợp lệ), Express tự động chuyển sang phục vụ file tĩnh và client game lưu cục bộ trong thư mục root project (`xhrpg_canvas.js`, `sdk.js`, `play.html`), giúp duy trì trải nghiệm treo máy 24/7 ổn định kể cả khi CDN game bị chặn hoàn toàn.
 
+### K. Sửa lỗi Đồng bộ ô chọn Bản đồ di chuyển (2026-07-25)
+*   **Đồng bộ Backend `targetMap`**: Trong handler `POST /api/accounts/:line_uid/action` khi `action === 'warp'`, server tự động cập nhật `bot.settings.targetMap = Number(target_map)` và ghi nhận vĩnh viễn vào `accounts.json` qua `saveAccounts()`.
+*   **Tối ưu Frontend `changeTargetMap`**: Gửi request cập nhật `targetMap` qua API `PUT` ngay lập tức để giữ đúng giá trị bản đồ đã chọn, đồng thời tự động fallback theo bản đồ thực tế của nhân vật (`acc.player.map`) khi render `selMap`, khắc phục hoàn toàn lỗi ô dropdown bị nảy về Map 1.
+
+### L. Nâng cấp Tab Nhật ký Vật phẩm Trực tiếp từ DB Máy Chủ (On-Demand Droplogs) (2026-07-25)
+*   **Kết nối API chính thức `xhrpg_droplog.php`**: Xây dựng endpoint `GET /api/accounts/:line_uid/droplogs` truy xuất dữ liệu chiến lợi phẩm chính xác 100% trực tiếp từ Database máy chủ game.
+*   **Phân loại & Định dạng Thời gian Thực**: Tự động phân loại biểu tượng (Thẻ bài `🎴`, Trứng `🥚`, Mô-đun `⚙️`, Trang bị `⚔️`, Đá quý `💎`), quy đổi Unix timestamp `t` sang ngày giờ Việt Nam `HH:mm:ss DD/MM` chính xác từng giây, và gắn nhãn phân biệt đồ nhặt khi `🟢 Online` vs `🌙 Offline`.
+*   **Cơ chế Tải Theo Yêu Cầu (On-Demand - Không Spam Server)**: Chỉ kích hoạt lệnh tải khi người dùng nhấp chọn tab **Vật Phẩm** hoặc bấm nút **`🔄 Cập nhật`**. Hoàn toàn không phát sinh bất kỳ request thừa nào trong vòng lặp chạy ngầm của bot.
+*   **Bảo vệ Content-Type**: Thêm bộ kiểm tra Content-Type phía frontend để cảnh báo trực quan khi server chưa khởi động lại, tránh tình trạng ném lỗi `SyntaxError` trên giao diện.
+
 
 
 

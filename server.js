@@ -1996,6 +1996,64 @@ app.get('/api/accounts/:line_uid/logs', requireAuth, (req, res) => {
   });
 });
 
+// Get official drop logs from game server on-demand
+app.get('/api/accounts/:line_uid/droplogs', requireAuth, async (req, res) => {
+  const { line_uid } = req.params;
+  const bot = botInstances[line_uid];
+  if (!checkAccountOwnership(req, res, bot)) return;
+
+  try {
+    const rawData = await bot.sendRequest('https://ragnalok.online/human/xhrpg_droplog.php', {
+      line_uid: bot.line_uid,
+      session_token: bot.session_token
+    });
+
+    if (rawData && rawData.ok && Array.isArray(rawData.drops)) {
+      const formattedDrops = rawData.drops.map(item => {
+        const actionType = item.a || '';
+        const isOffline = actionType.startsWith('off_');
+        
+        let typeIcon = '🎁';
+        let category = 'item';
+        if (actionType.includes('card')) { typeIcon = '🎴'; category = 'card'; }
+        else if (actionType.includes('egg')) { typeIcon = '🥚'; category = 'egg'; }
+        else if (actionType.includes('module')) { typeIcon = '⚙️'; category = 'module'; }
+        else if (actionType.includes('eq2')) { typeIcon = '⚔️'; category = 'equipment'; }
+        else if (actionType.includes('diamond')) { typeIcon = '💎'; category = 'gem'; }
+
+        // Format unix timestamp t (seconds) to HH:mm:ss DD/MM
+        let timeStr = '';
+        if (item.t) {
+          const d = new Date(item.t * 1000);
+          const hours = String(d.getHours()).padStart(2, '0');
+          const mins = String(d.getMinutes()).padStart(2, '0');
+          const secs = String(d.getSeconds()).padStart(2, '0');
+          const day = String(d.getDate()).padStart(2, '0');
+          const month = String(d.getMonth() + 1).padStart(2, '0');
+          timeStr = `${hours}:${mins}:${secs} ${day}/${month}`;
+        }
+
+        return {
+          name: item.n || 'Vật phẩm không tên',
+          quantity: item.q || 1,
+          time: timeStr,
+          timestamp: item.t || 0,
+          isOffline,
+          icon: typeIcon,
+          category,
+          rawAction: actionType
+        };
+      });
+
+      return res.json({ ok: true, drops: formattedDrops });
+    }
+
+    res.json({ ok: true, drops: [] });
+  } catch (err) {
+    res.status(500).json({ error: `Không thể tải lịch sử rơi đồ: ${err.message}` });
+  }
+});
+
 // Get detailed full player state
 app.get('/api/accounts/:line_uid/status', requireAuth, (req, res) => {
   const { line_uid } = req.params;
@@ -2037,11 +2095,32 @@ app.post('/api/accounts/:line_uid/action', requireAuth, async (req, res) => {
       } else if (extra && extra.target_map !== undefined) {
         payload.target_map = extra.target_map;
       }
+
+      if (payload.target_map !== undefined) {
+        const targetMapNum = Number(payload.target_map);
+        bot.updateSettings({ targetMap: targetMapNum, autoMap: true });
+        const currentAccounts = loadAccounts();
+        const index = currentAccounts.findIndex(acc => acc.line_uid === line_uid);
+        if (index !== -1) {
+          currentAccounts[index].settings = bot.settings;
+          saveAccounts(currentAccounts);
+        }
+      }
     }
 
     const response = await bot.sendRequest(url, payload);
     if (response.player) {
       bot.player = response.player;
+      if (bot.player.map !== undefined) {
+        const currentMapNum = Number(bot.player.map);
+        bot.updateSettings({ targetMap: currentMapNum });
+        const currentAccounts = loadAccounts();
+        const index = currentAccounts.findIndex(acc => acc.line_uid === line_uid);
+        if (index !== -1) {
+          currentAccounts[index].settings = bot.settings;
+          saveAccounts(currentAccounts);
+        }
+      }
     }
     
     if (response.msg) {

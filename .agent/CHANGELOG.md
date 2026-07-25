@@ -2,6 +2,32 @@
 
 > Changelog of actual changes implemented.
 
+## 2026-07-25 - Nâng cấp Tab Nhật ký Vật phẩm Trực tiếp từ Máy chủ (On-Demand Droplogs)
+- File đã đổi: `server.js` (sửa), `public/app.js` (sửa).
+- Đã làm:
+  - **Tạo Endpoint API On-Demand (`server.js`)**:
+    * Khai báo endpoint `GET /api/accounts/:line_uid/droplogs` gửi request tới `https://ragnalok.online/human/xhrpg_droplog.php`.
+    * Phân loại biểu tượng (Thẻ bài `🎴`, Trứng `🥚`, Mô-đun `⚙️`, Trang bị `⚔️`, Đá quý `💎`) và tự động chuyển đổi Unix timestamp `t` thành chuỗi thời gian thực `HH:mm:ss DD/MM`.
+    * Phân biệt rõ nguồn gốc rơi đồ: `🟢 Online` vs `🌙 Offline`.
+  - **Tối ưu hóa Frontend Không Spam Request (`public/app.js`)**:
+    * Bổ sung nút **🔄 Cập nhật** và thanh tiêu đề thông tin trực quan trong tab **Vật Phẩm**.
+    * Viết hàm `fetchDropLogs(uid)` chỉ thực hiện tải dữ liệu khi người dùng chuyển tab sang **Vật Phẩm** hoặc chủ động bấm nút **🔄 Cập nhật**.
+    * Loại bỏ hoàn toàn các request thừa trong tiến trình chạy ngầm của bot.
+
+---
+
+## 2026-07-25 - Sửa lỗi không cập nhật mục 'Bản đồ di chuyển' khi dịch chuyển bản đồ
+- File đã đổi: `server.js` (sửa), `public/app.js` (sửa).
+- Đã làm:
+  - **Cập nhật & Đồng bộ `targetMap` ở Backend (`server.js`)**:
+    * Trong handler `POST /api/accounts/:line_uid/action`, khi `action === 'warp'`, tự động cập nhật `bot.settings.targetMap = Number(payload.target_map)` và bật `autoMap = true`, đồng thời lưu ngay vào `accounts.json` qua `saveAccounts()`.
+    * Cập nhật `bot.settings.targetMap` đồng bộ với `bot.player.map` sau khi warp thành công.
+  - **Tối ưu hóa UI & Sync Frontend (`public/app.js`)**:
+    * Nâng cấp `changeTargetMap(uid, mapId)`: Lưu cấu hình `targetMap` và `autoMap` qua `PUT /api/accounts/${uid}` trước khi gửi lệnh `warp` thủ công, đảm bảo trạng thái settings được ghi nhận lập tức.
+    * Trong `updateCard(acc)`: Khi render `selMap` (ô chọn Bản đồ di chuyển), tự động fallback theo `acc.player.map` nếu `acc.settings.targetMap` chưa được khởi tạo, giúp giao diện dropdown hiển thị chính xác 100% bản đồ đã chọn mà không bị nảy về map 1.
+
+---
+
 ## 2026-07-24 - Triển khai tab Nhật ký Vật phẩm (Loot Logs) riêng biệt
 - File đã đổi: `server.js` (sửa), `public/app.js` (sửa).
 - Đã làm:

@@ -132,6 +132,15 @@
 - Đã chọn: Phương án B.
 - Lý do: Giúp tab Vật Phẩm hoạt động đúng vai trò là "Nhật ký chiến lợi phẩm quý giá", cho phép người chơi dễ dàng kiểm tra các món đồ đắt tiền nhặt được sau thời gian dài treo máy mà không bị ngập trong log nguyên liệu cơ bản.
 
+## 2026-07-25 - Chuyển sang lấy Nhật ký Vật phẩm Trực tiếp từ `xhrpg_droplog.php` theo Yêu cầu (On-Demand)
+- Bối cảnh: Việc tự ghi nhận và lọc Regex log nhặt đồ khi poll game ngầm tốn tài nguyên và dễ bỏ sót đồ khi treo offline. Phát hiện server game hỗ trợ endpoint chính thức `xhrpg_droplog.php` trả về toàn bộ dữ liệu rơi đồ chính xác từ DB.
+- Các phương án đã xét:
+  - A: Tạo poll ngầm liên tục gọi `xhrpg_droplog.php` → Gây ra request thừa không cần thiết (spam server).
+  - B: Chỉ tải dữ liệu theo yêu cầu (On-Demand) khi người dùng chủ động bấm chuyển sang tab **Vật Phẩm** hoặc click nút **🔄 Cập nhật**.
+- Đã chọn: Phương án B.
+- Lý do: Tối ưu 100% tài nguyên mạng và hiệu năng backend, không phát sinh bất kỳ request thừa nào lúc bot đang chạy ngầm, đồng thời dữ liệu hiển thị đạt độ chính xác tuyệt đối từ máy chủ game.
+
+
 
 
 

@@ -808,8 +808,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
         <!-- Loot Tab Pane -->
         <div class="tab-pane" id="pane-loot-${acc.line_uid}">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; padding:0 2px;">
+            <span style="font-size:0.8rem; color:var(--text-secondary); font-weight:600;">🎁 Nhật ký rơi đồ (Database Máy Chủ)</span>
+            <button class="btn btn-secondary btn-sm" onclick="fetchDropLogs('${acc.line_uid}')" style="padding:2px 8px; font-size:0.75rem;">🔄 Cập nhật</button>
+          </div>
           <div class="log-terminal" id="loot-terminal-${acc.line_uid}">
-            <!-- Loot log lines will be appended here -->
+            <div class="log-line"><span class="log-text-content">Chuyển sang tab này để tải lịch sử rơi đồ từ máy chủ.</span></div>
           </div>
         </div>
 
@@ -905,7 +909,10 @@ document.addEventListener('DOMContentLoaded', () => {
     if (chkAutoMap && document.activeElement !== chkAutoMap) chkAutoMap.checked = acc.settings.autoMap === true;
 
     const selMap = document.getElementById(`sel-map-${acc.line_uid}`);
-    if (selMap && document.activeElement !== selMap) selMap.value = String(acc.settings.targetMap || 1);
+    if (selMap && document.activeElement !== selMap) {
+      const currentTargetMap = acc.settings.targetMap !== undefined ? acc.settings.targetMap : (acc.player ? acc.player.map : 1);
+      selMap.value = String(currentTargetMap || 1);
+    }
 
     // Auto Zone toggle & zone select: populate from acc.spots then sync value
     const chkAutoZone = document.getElementById(`chk-autozone-${acc.line_uid}`);
@@ -1023,8 +1030,10 @@ document.addEventListener('DOMContentLoaded', () => {
       pane.classList.toggle('active', pane.id === `pane-${tabId}-${uid}`);
     });
 
-    if (tabId === 'logs' || tabId === 'loot') {
+    if (tabId === 'logs') {
       fetchLogs(uid);
+    } else if (tabId === 'loot') {
+      fetchDropLogs(uid);
     } else {
       fetchAccounts();
     }
@@ -1065,47 +1074,64 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         term.scrollTop = term.scrollHeight;
       }
-
-      // Update loot logs
-      const lootTerm = document.getElementById(`loot-terminal-${uid}`);
-      if (lootTerm) {
-        lootTerm.innerHTML = '';
-        const lootList = data.lootLogs || [];
-        if (lootList.length === 0) {
-          lootTerm.innerHTML = `<div class="log-line"><span class="log-text-content">Chưa nhặt được vật phẩm nào.</span></div>`;
-        } else {
-          lootList.forEach(l => {
-            const line = document.createElement('div');
-            line.className = 'log-line';
-            
-            // Highlight rare items like Cards, Eggs, or Gear (T1-T10, Boss drops)
-            let typeClass = 'drop';
-            let extraStyle = '';
-            if (/🎴|card/i.test(l.msg)) {
-              typeClass = 'levelup'; // Orange/gold color for cards
-              extraStyle = 'font-weight: bold; border-left: 3px solid #f59e0b; padding-left: 5px;';
-            } else if (/🥚|egg/i.test(l.msg)) {
-              typeClass = 'levelup'; // Orange/gold for eggs
-              extraStyle = 'font-weight: bold; border-left: 3px solid #ec4899; padding-left: 5px;';
-            } else if (/⚔️|🛡️|trang bị/i.test(l.msg)) {
-              typeClass = 'kill'; // Red/crimson for gear
-              extraStyle = 'font-weight: bold; border-left: 3px solid #3b82f6; padding-left: 5px;';
-            }
-            
-            line.innerHTML = `
-              <span class="log-time">[${l.time}]</span>
-              <span class="log-type ${typeClass}">loot</span>
-              <span class="log-text-content" style="${extraStyle}">${l.msg}</span>
-            `;
-            lootTerm.appendChild(line);
-          });
-        }
-        lootTerm.scrollTop = lootTerm.scrollHeight;
-      }
     } catch (err) {
       console.error('Error fetching logs:', err);
     }
   }
+
+  // Fetch official drop logs on-demand from server game
+  window.fetchDropLogs = async function(uid) {
+    const lootTerm = document.getElementById(`loot-terminal-${uid}`);
+    if (!lootTerm) return;
+
+    lootTerm.innerHTML = `<div class="log-line"><span class="log-text-content" style="color:#a7f3d0;">⏳ Đang tải lịch sử rơi đồ từ máy chủ...</span></div>`;
+
+    try {
+      const response = await fetch(`/api/accounts/${uid}/droplogs`);
+      const contentType = response.headers.get('content-type') || '';
+      
+      if (!response.ok || !contentType.includes('application/json')) {
+        const text = await response.text();
+        throw new Error(!contentType.includes('application/json') 
+          ? 'Server chưa nạp API mới (Vui lòng khởi động lại server.js bằng Ctrl+C và npm start)' 
+          : `Lỗi HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      lootTerm.innerHTML = '';
+      if (!data.ok || !data.drops || data.drops.length === 0) {
+        lootTerm.innerHTML = `<div class="log-line"><span class="log-text-content">Chưa có lịch sử rơi đồ nào trên máy chủ.</span></div>`;
+        return;
+      }
+
+      data.drops.forEach(item => {
+        const line = document.createElement('div');
+        line.className = 'log-line';
+        line.style.cssText = 'display:flex; align-items:center; gap:8px; padding:4px 6px; border-bottom:1px solid rgba(255,255,255,0.05);';
+
+        const badgeStyle = item.isOffline ? 'background:rgba(147,51,234,0.2); color:#c084fc; border:1px solid rgba(147,51,234,0.4);' : 'background:rgba(16,185,129,0.2); color:#34d399; border:1px solid rgba(16,185,129,0.4);';
+        const badgeText = item.isOffline ? '🌙 Offline' : '🟢 Online';
+
+        let highlightStyle = '';
+        if (item.category === 'card') highlightStyle = 'color:#fbbf24; font-weight:700;';
+        else if (item.category === 'egg') highlightStyle = 'color:#f472b6; font-weight:700;';
+        else if (item.category === 'equipment') highlightStyle = 'color:#60a5fa; font-weight:700;';
+        else if (item.category === 'gem') highlightStyle = 'color:#38bdf8; font-weight:700;';
+
+        line.innerHTML = `
+          <span style="color:var(--text-muted); font-size:0.75rem; min-width:115px;">[${item.time}]</span>
+          <span style="font-size:0.7rem; padding:1px 5px; border-radius:4px; ${badgeStyle}">${badgeText}</span>
+          <span style="font-size:0.9rem;">${item.icon}</span>
+          <span style="flex:1; font-size:0.85rem; ${highlightStyle}">${item.name} ${item.quantity > 1 ? `(x${item.quantity})` : ''}</span>
+        `;
+        lootTerm.appendChild(line);
+      });
+    } catch (err) {
+      console.error('Error fetching droplogs:', err);
+      lootTerm.innerHTML = `<div class="log-line"><span class="log-text-content" style="color:#ef4444;">❌ Lỗi kết nối máy chủ: ${err.message}</span></div>`;
+    }
+  };
 
   // Open Client game window
   window.openGameLink = function(uid, token) {
@@ -1203,7 +1229,13 @@ document.addEventListener('DOMContentLoaded', () => {
   window.changeTargetMap = async function(uid, mapId) {
     const val = parseInt(mapId) || 1;
     try {
+      await fetch(`/api/accounts/${uid}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targetMap: val, autoMap: true })
+      });
       await triggerAction(uid, 'warp', val);
+      fetchAccounts();
     } catch (err) {
       console.error('Error changing target map:', err);
     }
