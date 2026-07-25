@@ -1,3 +1,27 @@
+const SKILL_DEFS = [
+  { id: 'crit_shot', name: 'Ném chí mạng', emoji: '🎯', type: 'passive', tree: 'atk' },
+  { id: 'kill_shot', name: 'Dao ném sấm sét', emoji: '⚡', type: 'active', tree: 'atk' },
+  { id: 'explosive_shot', name: 'Dao ném phát nổ', emoji: '💥', type: 'active', tree: 'atk' },
+  { id: 'lock_on', name: 'Khóa mục tiêu', emoji: '🧿', type: 'active', tree: 'atk' },
+  { id: 'triple_knife', name: 'Phóng tam đao', emoji: '🔱', type: 'active', tree: 'atk' },
+  { id: 'tough_body', name: 'Cơ thể cường tráng', emoji: '❤️', type: 'passive', tree: 'def' },
+  { id: 'armor_up', name: 'Tăng cường giáp', emoji: '🛡️', type: 'passive', tree: 'def' },
+  { id: 'hp_regen', name: 'Tự phục hồi HP', emoji: '💚', type: 'passive', tree: 'def' },
+  { id: 'pull_monster', name: 'Từ trường hút quái', emoji: '🧲', type: 'active', tree: 'def' },
+  { id: 'melee_return', name: 'Phản đòn cận chiến', emoji: '🛡️', type: 'passive', tree: 'def' },
+  { id: 'melee_charge', name: 'Tích tụ kịch độc', emoji: '🔥', type: 'active', tree: 'def' },
+  { id: 'knife_atk', name: 'Rèn luyện kiếm thuật', emoji: '🗡️', type: 'passive', tree: 'melee' },
+  { id: 'double_attack', name: 'Liên hoàn chém song kích', emoji: '⚔️', type: 'active', tree: 'melee' },
+  { id: 'spin_attack', name: 'Chém xoáy vòng tròn', emoji: '🌀', type: 'active', tree: 'melee' },
+  { id: 'sword_cross', name: 'Chém chữ Thập (+)', emoji: '➕', type: 'active', tree: 'melee' },
+  { id: 'sword_x', name: 'Chém chữ X (x)', emoji: '✖️', type: 'active', tree: 'melee' },
+  { id: 'deploy_turret', name: 'Triển khai tháp pháo', emoji: '🗼', type: 'passive', tree: 'turret' },
+  { id: 'turret_rapid', name: 'Gia cố tháp pháo nhanh', emoji: '⏳', type: 'passive', tree: 'turret' },
+  { id: 'twin_turret', name: 'Tháp pháo đôi', emoji: '🗼', type: 'passive', tree: 'turret' },
+  { id: 'turret_shock', name: 'Tháp pháo phóng điện SHOCK', emoji: '🌩️', type: 'active', tree: 'turret' },
+  { id: 'turret_cannon', name: 'Đại pháo hủy diệt', emoji: '💣', type: 'active', tree: 'turret' }
+];
+
 document.addEventListener('DOMContentLoaded', () => {
   // DOM Elements
   const btnAddAccount = document.getElementById('btn-add-account');
@@ -612,7 +636,7 @@ document.addEventListener('DOMContentLoaded', () => {
           <div class="acc-name-wrapper">
             <span class="acc-name" id="name-${acc.line_uid}">${acc.name}</span>
             <span class="badge badge-${acc.status}" id="status-badge-${acc.line_uid}">${acc.status}</span>
-            <span id="proxy-badge-${acc.line_uid}" style="font-size:0.7rem; padding:2px 6px; border-radius:6px; background:rgba(99,102,241,0.15); color:#818cf8; border:1px solid rgba(99,102,241,0.3); white-space:nowrap;">🌐 —</span>
+            <span id="proxy-badge-${acc.line_uid}" style="font-size:0.7rem; padding:2px 6px; border-radius:6px; background:rgba(99,102,241,0.15); color:#818cf8; border:1px solid rgba(99,102,241,0.3); white-space:nowrap; display: none;">🌐 —</span>
           </div>
           <span class="acc-lv" id="lv-txt-${acc.line_uid}">Lv. --</span>
         </div>
@@ -636,6 +660,21 @@ document.addEventListener('DOMContentLoaded', () => {
             <div class="bar-fill bar-armor" id="armor-bar-${acc.line_uid}" style="width: 0%"></div>
             <div class="bar-text" id="armor-txt-${acc.line_uid}">-- / --</div>
           </div>
+        </div>
+      </div>
+
+      <div class="card-rates">
+        <div class="rate-item" title="Số quái hạ gục mỗi phút">
+          <span>⚔️</span>
+          <span class="rate-val" id="rate-kills-${acc.line_uid}">0 /m</span>
+        </div>
+        <div class="rate-item" title="Vàng nhận được mỗi phút">
+          <span>💰</span>
+          <span class="rate-val" id="rate-gold-${acc.line_uid}">+0 /m</span>
+        </div>
+        <div class="rate-item" title="EXP nhận được mỗi phút">
+          <span>⭐</span>
+          <span class="rate-val" id="rate-exp-${acc.line_uid}">+0 /m</span>
         </div>
       </div>
 
@@ -676,6 +715,7 @@ document.addEventListener('DOMContentLoaded', () => {
         <button class="tab-link active" id="tab-btn-core-${acc.line_uid}" onclick="switchTab('${acc.line_uid}', 'core')">Cơ Bản</button>
         <button class="tab-link" id="tab-btn-mvp-${acc.line_uid}" onclick="switchTab('${acc.line_uid}', 'mvp')">Săn Boss</button>
         <button class="tab-link" id="tab-btn-loot-${acc.line_uid}" onclick="switchTab('${acc.line_uid}', 'loot')">Vật Phẩm</button>
+        <button class="tab-link" id="tab-btn-skills-${acc.line_uid}" onclick="switchTab('${acc.line_uid}', 'skills')">Kỹ Năng</button>
         <button class="tab-link" id="tab-btn-logs-${acc.line_uid}" onclick="switchTab('${acc.line_uid}', 'logs')">Nhật Ký</button>
       </div>
 
@@ -727,7 +767,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 <option value="1">🌿 Thung lũng Trung tâm (Lv.1+)</option>
                 <option value="2">🏜️ Sa mạc Vĩnh hằng (Lv.25+)</option>
                 <option value="3">❄️ Vùng đất Băng giá (Lv.40+)</option>
-                <option value="4">🏛️ Đấu trường Arena (Lv.20+)</option>
+                <option value="4">⚔️ Đấu trường Arena (Lv.20+)</option>
+                <option value="5">🏛️ Tàn tích Cổ đại (Lv.55+)</option>
+                <option value="6">🌋 Núi lửa Sôi trào (Lv.70+)</option>
               </select>
             </div>
           </div>
@@ -817,6 +859,19 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
         </div>
 
+        <!-- Skills Tab Pane -->
+        <div class="tab-pane" id="pane-skills-${acc.line_uid}">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; padding:0 2px;">
+            <span style="font-size:0.8rem; color:var(--text-secondary); font-weight:600;">⚡ Bật/Tắt Tự Động Kỹ Năng</span>
+            <span style="font-size:0.75rem; color:#a78bfa; font-weight:700;" id="skills-sp-${acc.line_uid}">Skill Points: --</span>
+          </div>
+          <div class="skills-grid" id="skills-grid-${acc.line_uid}">
+            <div style="grid-column: 1 / -1; font-size: 0.8rem; color: var(--text-secondary); text-align: center; padding: 12px 0;">
+              Chưa có dữ liệu kỹ năng.
+            </div>
+          </div>
+        </div>
+
         <!-- Logs Tab Pane -->
         <div class="tab-pane" id="pane-logs-${acc.line_uid}">
           <div class="log-terminal" id="terminal-${acc.line_uid}">
@@ -872,6 +927,87 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById(`res-copper-${acc.line_uid}`).textContent = p.copper ? p.copper.toLocaleString() : '0';
     document.getElementById(`res-herb-${acc.line_uid}`).textContent = p.herb ? p.herb.toLocaleString() : '0';
 
+    // Combat rates
+    const rates = acc.combatRates || { killsPerMin: 0, goldPerMin: 0, expPerMin: 0 };
+    const formatRateValue = (val, isKills = false) => {
+      const prefix = isKills ? '' : '+';
+      const suffix = ' /m';
+      if (val >= 1000) {
+        return `${prefix}${(val / 1000).toFixed(1)}k${suffix}`;
+      }
+      return `${prefix}${val.toLocaleString()}${suffix}`;
+    };
+
+    const elKills = document.getElementById(`rate-kills-${acc.line_uid}`);
+    if (elKills) elKills.textContent = formatRateValue(rates.killsPerMin, true);
+
+    const elGold = document.getElementById(`rate-gold-${acc.line_uid}`);
+    if (elGold) elGold.textContent = formatRateValue(rates.goldPerMin, false);
+
+    const elExp = document.getElementById(`rate-exp-${acc.line_uid}`);
+    if (elExp) elExp.textContent = formatRateValue(rates.expPerMin, false);
+
+    // Render skills tab content
+    const skillsSpEl = document.getElementById(`skills-sp-${acc.line_uid}`);
+    if (skillsSpEl) {
+      skillsSpEl.textContent = `Skill Points: ${p.skill_pts || 0}`;
+    }
+
+    const skillsGridEl = document.getElementById(`skills-grid-${acc.line_uid}`);
+    if (skillsGridEl) {
+      let skillsObj = {};
+      let skillAutoObj = {};
+      try {
+        skillsObj = typeof p.skills === 'string' ? JSON.parse(p.skills || '{}') : (p.skills || {});
+        skillAutoObj = typeof p.skill_auto === 'string' ? JSON.parse(p.skill_auto || '{}') : (p.skill_auto || {});
+      } catch (e) {
+        console.error('Error parsing player skills:', e);
+      }
+
+      // Filter owned skills (level > 0)
+      const ownedSkills = SKILL_DEFS.filter(def => (skillsObj[def.id] || 0) > 0);
+
+      if (ownedSkills.length === 0) {
+        skillsGridEl.innerHTML = `
+          <div style="grid-column: 1 / -1; font-size: 0.8rem; color: var(--text-secondary); text-align: center; padding: 12px 0;">
+            Chưa sở hữu kỹ năng nào (Hãy cộng điểm trong game).
+          </div>
+        `;
+      } else {
+        skillsGridEl.innerHTML = ownedSkills.map(def => {
+          const lv = skillsObj[def.id] || 0;
+          const isToggleable = def.type === 'active' || def.id === 'twin_turret';
+          const autoOn = (skillAutoObj[def.id] ?? 1) ? true : false;
+          
+          let toggleBtnHtml = '';
+          if (isToggleable) {
+            toggleBtnHtml = `
+              <button class="btn-skill-toggle ${autoOn ? 'on' : 'off'}" onclick="toggleSkillAuto('${acc.line_uid}', '${def.id}', this)">
+                ${autoOn ? '✓ Auto' : '✕ Tắt'}
+              </button>
+            `;
+          }
+
+          const typeLabel = def.type === 'active' ? 'Chủ động' : 'Bị động';
+          const typeClass = def.type === 'active' ? 'active' : 'passive';
+
+          return `
+            <div class="skill-item-card" id="skill-card-${acc.line_uid}-${def.id}">
+              <div class="skill-item-info">
+                <span class="skill-item-icon">${def.emoji}</span>
+                <div class="skill-item-details">
+                  <span class="skill-item-name" title="${def.name}">${def.name}</span>
+                  <span class="skill-item-lv">Lv. ${lv}</span>
+                  <span class="skill-item-tag ${typeClass}">${typeLabel}</span>
+                </div>
+              </div>
+              ${toggleBtnHtml}
+            </div>
+          `;
+        }).join('');
+      }
+    }
+
     // Settings checkboxes states
     const chkBotLoop = document.getElementById(`chk-bot-loop-${acc.line_uid}`);
     if (chkBotLoop && document.activeElement !== chkBotLoop) chkBotLoop.checked = acc.status === 'running';
@@ -925,12 +1061,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Proxy badge
     const proxyBadge = document.getElementById(`proxy-badge-${acc.line_uid}`);
-    if (proxyBadge && acc.proxyInfo) {
-      const info = acc.proxyInfo;
-      proxyBadge.textContent = `🌐 ${info.label}`;
-      proxyBadge.style.background = info.isDirect ? 'rgba(16,185,129,0.15)' : 'rgba(99,102,241,0.15)';
-      proxyBadge.style.color      = info.isDirect ? '#34d399' : '#818cf8';
-      proxyBadge.style.borderColor= info.isDirect ? 'rgba(16,185,129,0.3)' : 'rgba(99,102,241,0.3)';
+    if (proxyBadge) {
+      if (currentUser && currentUser.role === 'admin' && acc.proxyInfo) {
+        const info = acc.proxyInfo;
+        proxyBadge.textContent = `🌐 ${info.label}`;
+        proxyBadge.style.background = info.isDirect ? 'rgba(16,185,129,0.15)' : 'rgba(99,102,241,0.15)';
+        proxyBadge.style.color      = info.isDirect ? '#34d399' : '#818cf8';
+        proxyBadge.style.borderColor= info.isDirect ? 'rgba(16,185,129,0.3)' : 'rgba(99,102,241,0.3)';
+        proxyBadge.style.display    = '';
+      } else {
+        proxyBadge.style.display    = 'none';
+      }
     }
 
     // Core Stats allocation UI
@@ -1228,16 +1369,70 @@ document.addEventListener('DOMContentLoaded', () => {
   // Save map and warp immediately
   window.changeTargetMap = async function(uid, mapId) {
     const val = parseInt(mapId) || 1;
+    
+    // Check level requirement client-side
+    const MAP_REQS = { 1: 1, 2: 25, 3: 40, 4: 20, 5: 55, 6: 70 };
+    const MAP_NAMES = {
+      1: 'Thung lũng Trung tâm',
+      2: 'Sa mạc Vĩnh hằng',
+      3: 'Vùng đất Băng giá',
+      4: 'Đấu trường Arena',
+      5: 'Tàn tích Cổ đại',
+      6: 'Núi lửa Sôi trào'
+    };
+    
+    const reqLv = MAP_REQS[val] || 1;
+    const lvEl = document.getElementById(`lv-txt-${uid}`);
+    if (lvEl) {
+      const match = lvEl.textContent.match(/Lv\.\s*(\d+)/i);
+      if (match) {
+        const currentLv = parseInt(match[1]) || 1;
+        if (currentLv < reqLv) {
+          alert(`Cấp độ không đủ! Bản đồ ${MAP_NAMES[val]} yêu cầu Lv.${reqLv}+. Nhân vật của bạn hiện tại là Lv.${currentLv}.`);
+          fetchAccounts(); // Restore select box selection
+          return;
+        }
+      }
+    }
+
     try {
-      await fetch(`/api/accounts/${uid}`, {
+      const res = await fetch(`/api/accounts/${uid}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ targetMap: val, autoMap: true })
       });
+      if (!res.ok) {
+        const data = await res.json();
+        alert(data.error || 'Lỗi thay đổi bản đồ');
+        fetchAccounts();
+        return;
+      }
       await triggerAction(uid, 'warp', val);
       fetchAccounts();
     } catch (err) {
       console.error('Error changing target map:', err);
+    }
+  };
+
+  // Toggle skill auto utilization status
+  window.toggleSkillAuto = async function(uid, skillId, btn) {
+    if (btn) btn.disabled = true;
+    try {
+      const res = await fetch(`/api/accounts/${uid}/action`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'skill_toggle', extra: { skill_id: skillId } })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || 'Lỗi bật tắt kỹ năng');
+      }
+      fetchAccounts();
+    } catch (err) {
+      console.error('Error toggling skill auto:', err);
+      alert('Không thể kết nối đến máy chủ.');
+    } finally {
+      if (btn) btn.disabled = false;
     }
   };
 

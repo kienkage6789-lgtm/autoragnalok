@@ -14,7 +14,9 @@ Game quản lý bản đồ thông qua file PHP trung chuyển `/xhrpg_warp.php`
       { id: 1, name: 'ทุ่งกลาง', emoji: '🌿', req: 1 },      // Thung lũng Trung tâm
       { id: 2, name: 'ทะเลทรายนิรันดร์', emoji: '🏜️', req: 25 }, // Sa mạc Vĩnh hằng
       { id: 3, name: 'ดินแดนเยือกแข็ง', emoji: '❄️', req: 40 }, // Vùng đất Băng giá
-      { id: 4, name: 'สนามประลอง', emoji: '🏛️', req: 20 }     // Đấu trường Arena (PVP)
+      { id: 5, name: 'ซากอารยธรรมโบราณ', emoji: '🏛️', req: 55 }, // Tàn tích Cổ đại
+      { id: 6, name: 'ภูเขาไฟเดือด', emoji: '🌋', req: 70 }, // Núi lửa Sôi trào
+      { id: 4, name: 'สนามประลอง', emoji: '⚔️', req: 20 }     // Đấu trường Arena (PVP)
     ];
     ```
 *   **Hàm dịch chuyển**: [warpToMap](file:///C:/Users/Admin/Desktop/auto/xhrpg_canvas.js#L10957-L10972) gửi POST đến `/xhrpg_warp.php` với tham số `target_map`.
@@ -98,6 +100,24 @@ Dưới đây là danh sách các API và Endpoint nội bộ của Server Bot M
 
 ### C. Quản lý Phiên làm việc (Dashboard Sessions)
 *   **Session Token**: Cookie `auth_token` được lưu tự động trên trình duyệt của người dùng (HttpOnly, SameSite=Lax) dùng để xác thực quyền truy cập Dashboard và các API quản lý bot.
+
+### D. Các API Quản trị Tài khoản & Proxy Pool
+*   **API Lấy danh sách Tài khoản**: `GET /api/accounts`
+    *   **Mô tả**: Trả về danh sách tài khoản game của user hiện tại (hoặc tất cả nếu là admin).
+    *   **Bảo mật**: Trường `proxyInfo` chỉ được trả về nếu người dùng đăng nhập có vai trò `admin`.
+    *   **Thống kê hiệu suất**: Trả về trường `combatRates` chứa các chỉ số `{ killsPerMin, goldPerMin, expPerMin }` được tính toán thời gian thực theo cơ chế Sliding Window (cửa sổ trượt 5 phút).
+*   **API Cập nhật Cấu hình**: `PUT /api/accounts/:line_uid`
+    *   **Tham số**: `{ settings: { targetMap, ... } }`
+    *   **Cơ chế xác thực**: Xác thực cấp độ yêu cầu của bản đồ đích. Trả về mã lỗi HTTP 400 nếu cấp độ của nhân vật (`bot.player.lv`) nhỏ hơn yêu cầu tối thiểu của bản đồ đó.
+*   **API Kích hoạt Hành động**: `POST /api/accounts/:line_uid/action`
+    *   **Tham số**: 
+        *   Dịch chuyển bản đồ: `{ action: 'warp', param: target_map_id }` (Xác thực cấp độ tương ứng).
+        *   Bật/tắt kỹ năng tự động: `{ action: 'skill_toggle', extra: { skill_id: 'skill_id_string' } }` (Tự động chuyển tiếp yêu cầu đến `xhrpg_upgrade.php` của game server).
+*   **API Thêm Proxy Pool**: `POST /api/admin/proxies` (Chỉ dành cho Admin)
+    *   **Tham số**: `{ label, url }`
+    *   **Cơ chế**: Backend tự động phân tích cú pháp nếu `url` là chuỗi dạng thô (không bắt đầu bằng http/socks):
+        *   `IP:PORT:USER:PASS` -> Tự động chuyển đổi thành `http://USER:PASS@IP:PORT` và tự sinh nhãn (label) `IP:PORT` an toàn (tránh lộ thông tin tài khoản/mật khẩu).
+        *   `IP:PORT` -> Tự động chuyển đổi thành `http://IP:PORT` và tự sinh nhãn `IP:PORT`.
 
 ---
 

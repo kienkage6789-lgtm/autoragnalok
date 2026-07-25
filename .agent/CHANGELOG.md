@@ -2,6 +2,75 @@
 
 > Changelog of actual changes implemented.
 
+## 2026-07-25 - Thêm Tab hiển thị Kỹ năng sở hữu và Bật/Tắt Tự động sử dụng (Auto Use Toggle)
+- File đã đổi: `server.js` (sửa), `public/app.js` (sửa), `public/app.css` (sửa).
+- Đã làm:
+  - **Cập nhật Backend (`server.js`)**:
+    * Trong endpoint `GET /api/accounts`, bổ sung hai trường `skills` và `skill_auto` từ `bot.player` vào trong payload phản hồi để gửi về Client.
+  - **Thiết kế Styling CSS (`public/app.css`)**:
+    * Định nghĩa lưới hiển thị kỹ năng `.skills-grid`, thẻ kỹ năng `.skill-item-card`, nhãn loại kỹ năng chủ động/bị động `.skill-item-tag.active` / `.skill-item-tag.passive`.
+    * Thiết kế nút bấm `.btn-skill-toggle` với hiệu ứng màu sắc nổi bật tương thích với 2 trạng thái Bật (Xanh lá) và Tắt (Đỏ).
+    * Giới hạn chiều cao tối đa của lưới kỹ năng (`max-height: 220px`), thiết lập thanh cuộn dọc (scroll) thẩm mỹ đồng bộ và bổ sung media query để tự động xếp 1 cột trên giao diện mobile nhằm giữ sự cân đối, hài hòa tuyệt đối với các tab thông số khác.
+  - **Cập nhật Frontend Dashboard (`public/app.js`)**:
+    * Khai báo danh sách metadata kỹ năng tĩnh `SKILL_DEFS` bao gồm dịch tên tiếng Việt, emoji biểu tượng, phân loại kiểu và nhánh.
+    * Thêm tab điều hướng "Kỹ Năng" (`#tab-btn-skills-...`) vào cấu trúc card skeleton và container tương ứng (`#pane-skills-...`).
+    * Trong hàm `updateCard()`, tiến hành lọc ra những kỹ năng nhân vật đang sở hữu (Level > 0). Đối với các kỹ năng chủ động (hoặc tháp pháo đôi), hiển thị nút bật tắt tự động.
+    * Xây dựng hàm gọi hành động `toggleSkillAuto(uid, skillId, btn)` để gửi request thay đổi trạng thái tự động sử dụng của kỹ năng đến máy chủ game.
+
+---
+
+## 2026-07-25 - Ngăn chặn chọn Bản đồ vượt cấp (Map Level Validation)
+- File đã đổi: `server.js` (sửa), `public/app.js` (sửa).
+- Đã làm:
+  - **Kiểm soát & Ngăn chặn Client (`public/app.js`)**:
+    * Cập nhật hàm `changeTargetMap` để lấy cấp độ hiện tại của nhân vật từ DOM `#lv-txt-...`.
+    * So sánh cấp độ nhân vật với cấp độ yêu cầu tối thiểu của bản đồ đích (Map 1: Lv.1, Map 2: Lv.25, Map 3: Lv.40, Map 4: Lv.20, Map 5: Lv.55, Map 6: Lv.70).
+    * Nếu không đủ điều kiện, hiển thị hộp thoại cảnh báo `alert` trực quan và lập tức gọi `fetchAccounts()` để hồi phục (revert) lựa chọn dropdown về bản đồ cũ thay vì gửi API.
+    * Bổ sung kiểm tra HTTP status trả về khi gọi PUT API, hiển thị thông báo lỗi từ server nếu có.
+  - **Xác thực an toàn Backend (`server.js`)**:
+    * Trong endpoint cập nhật cấu hình `PUT /api/accounts/:line_uid`, kiểm tra nếu tham số cập nhật chứa `targetMap` thì so sánh cấp độ hiện tại của nhân vật (`bot.player.lv`) với cấp độ tối thiểu của map đó trong `MAP_DEFS`. Nếu không đủ, chặn lưu và trả về mã lỗi HTTP 400.
+    * Trong endpoint kích hoạt di chuyển trực tiếp `POST /api/accounts/:line_uid/action` khi `action === 'warp'`, kiểm tra cấp độ tương tự trước khi gửi lệnh tới game server. Trả về HTTP 400 nếu vi phạm cấp độ.
+
+---
+
+## 2026-07-25 - Cập nhật Bản đồ Mới (Lv.55 và Lv.70) và Đồng bộ Đấu trường
+- File đã đổi: `server.js` (sửa), `public/app.js` (sửa), `game_api_reference.md` (sửa), `project_summary.md` (sửa).
+- Đã làm:
+  - **Cập nhật Backend (`server.js`)**:
+    * Khai báo Map 5 (`Tàn tích Cổ đại`, yêu cầu Lv.55+, emoji `🏛️`) và Map 6 (`Núi lửa Sôi trào`, yêu cầu Lv.70+, emoji `🌋`) vào mảng tĩnh `MAP_DEFS`.
+    * Đổi emoji của Map 4 (Đấu trường Arena) từ `🏛️` thành `⚔️` để đồng bộ 100% với cập nhật mới từ client game.
+  - **Cập nhật Frontend UI (`public/app.js`)**:
+    * Bổ sung các tùy chọn `<option>` tương ứng cho Map 5 và Map 6 vào dropdown select bản đồ di chuyển `#sel-map-...` trong hàm `buildCardSkeleton()`.
+    * Cập nhật lại emoji và nhãn hiển thị của Map 4 trong dropdown select bản đồ.
+  - **Tài liệu và tóm tắt**:
+    * Đồng bộ danh sách bản đồ mới trong tài liệu hướng dẫn tra cứu nhanh `game_api_reference.md` và tài liệu tổng kết `project_summary.md`.
+
+---
+
+## 2026-07-25 - Tự động nhận diện định dạng Proxy thô (IP:PORT:USER:PASS hoặc IP:PORT)
+- File đã đổi: `server.js` (sửa), `public/index.html` (sửa).
+- Đã làm:
+  - **Tự động phân giải định dạng thô (`server.js`)**:
+    * Cập nhật route `POST /api/admin/proxies` để tự động kiểm tra định dạng proxy đầu vào.
+    * Hỗ trợ tự động phân tích cú pháp chuỗi dạng `IP:PORT:USER:PASS` thành URL chuẩn `http://USER:PASS@IP:PORT`.
+    * Hỗ trợ tự động phân tích cú pháp chuỗi dạng `IP:PORT` thành URL chuẩn `http://IP:PORT`.
+    * Tự động đặt nhãn hiển thị (label) mặc định cho proxy bằng chuỗi `IP:PORT` sạch để tránh làm hiển thị thông tin tài khoản mật khẩu ra ngoài giao diện (kể cả khi admin không nhập nhãn).
+  - **Cập nhật Placeholder UI (`public/index.html`)**:
+    * Thay đổi placeholder của ô nhập URL Proxy mới để gợi ý và hỗ trợ các định dạng proxy dạng thô ngăn cách bằng dấu hai chấm.
+
+---
+
+## 2026-07-25 - Ẩn thông tin Proxy đối với Người dùng thường
+- File đã đổi: `server.js` (sửa), `public/app.js` (sửa).
+- Đã làm:
+  - **Giới hạn API Backend (`server.js`)**:
+    * Trong route `GET /api/accounts`, trường `proxyInfo` chỉ được gán giá trị từ `proxyPool.getBotProxyInfo(...)` nếu user yêu cầu là `admin`. Đối với user thường, trường này được gán là `null` để tránh lộ thông tin proxy.
+  - **Tối ưu hóa & Ẩn Badge Frontend (`public/app.js`)**:
+    * Ẩn badge hiển thị thông tin proxy mặc định bằng CSS `display: none` trên template khung tài khoản trong hàm `buildCardSkeleton`.
+    * Trong hàm `updateCard`, bổ sung điều kiện kiểm tra vai trò người dùng `currentUser.role === 'admin'`. Chỉ hiển thị và cập nhật Badge khi người dùng đăng nhập là admin và có dữ liệu `proxyInfo` từ server. Ngược lại, ẩn hoàn toàn badge này khỏi giao diện của người dùng thường.
+
+---
+
 ## 2026-07-25 - Nâng cấp Tab Nhật ký Vật phẩm Trực tiếp từ Máy chủ (On-Demand Droplogs)
 - File đã đổi: `server.js` (sửa), `public/app.js` (sửa).
 - Đã làm:

@@ -211,6 +211,56 @@
   - [x] Frontend chỉ tải dữ liệu khi người dùng click chọn tab **Vật Phẩm** hoặc bấm nút **🔄 Cập nhật** (Không tự động poll định kỳ gây spam server).
 - Status: done
 
+### [x] T24 - Ẩn thông tin Proxy đối với Người dùng thường
+- Description: Giới hạn chỉ hiển thị Badge Proxy trên Card tài khoản và chỉ gửi thông tin proxy qua API đối với các tài khoản Admin để bảo mật thông tin proxy pool.
+- Files related: `server.js`, `public/app.js`
+- Acceptance criteria:
+  - [x] Backend `server.js` chỉ gửi trường `proxyInfo` trong API `/api/accounts` nếu user là `admin`.
+  - [x] Frontend `public/app.js` mặc định ẩn badge proxy trên card skeleton (`display: none`).
+  - [x] Frontend `public/app.js` chỉ hiển thị badge proxy khi user là `admin` và có `proxyInfo` hợp lệ.
+- Status: done
+
+### [x] T25 - Tự động nhận diện định dạng Proxy thô (IP:PORT:USER:PASS hoặc IP:PORT)
+- Description: Cho phép nhập proxy dạng thô ngăn cách bằng dấu hai chấm vào Admin UI, tự động chuyển đổi sang URL chuẩn `http://user:pass@ip:port` ở backend.
+- Files related: `server.js`, `public/index.html`
+- Acceptance criteria:
+  - [x] Khi add proxy, backend tự nhận diện và chuyển đổi `ip:port:user:pass` thành `http://user:pass@ip:port`.
+  - [x] Backend tự nhận diện và chuyển đổi `ip:port` thành `http://ip:port`.
+  - [x] Nếu nhãn (label) không được cung cấp, backend tự sinh nhãn an toàn là `IP:PORT` (không chứa tài khoản mật khẩu).
+  - [x] Cập nhật placeholder cho ô nhập proxy trên Admin UI.
+- Status: done
+
+### [x] T26 - Cập nhật Bản đồ Mới (Lv.55 và Lv.70) và Đồng bộ Đấu trường
+- Description: Tích hợp 2 bản đồ mới được phát hành trên live game (Map 5 - Tàn tích Cổ đại và Map 6 - Núi lửa Sôi trào) cùng với việc cập nhật lại icon cho bản đồ số 4 (Đấu trường Arena).
+- Files related: `server.js`, `public/app.js`, `game_api_reference.md`, `project_summary.md`
+- Acceptance criteria:
+  - [x] Khai báo Map 5 (req: 55) và Map 6 (req: 70) trong `MAP_DEFS` ở backend `server.js`.
+  - [x] Cập nhật emoji của Map 4 từ `🏛️` thành `⚔️` trong `MAP_DEFS` ở backend `server.js`.
+  - [x] Cập nhật các tùy chọn dropdown select `sel-map` ở frontend `public/app.js` để bao gồm 2 map mới và update emoji map 4.
+  - [x] Cập nhật tài liệu hướng dẫn nhanh và báo cáo tóm tắt dự án.
+- Status: done
+
+### [x] T27 - Ngăn chặn chọn Bản đồ vượt cấp (Map Level Validation)
+- Description: Bổ sung cơ chế xác thực cấp độ yêu cầu của bản đồ trên cả Frontend và Backend khi người dùng thay đổi bản đồ di chuyển bằng dropdown select.
+- Files related: `server.js`, `public/app.js`
+- Acceptance criteria:
+  - [x] Client-side: `changeTargetMap` kiểm tra cấp độ hiện tại của nhân vật qua DOM element `#lv-txt-...` với cấp độ yêu cầu của map đích. Nếu không đủ, hiển thị hộp thoại alert cảnh báo lỗi và tự động khôi phục lại giá trị dropdown cũ bằng cách gọi `fetchAccounts()`.
+  - [x] Backend-side: Validate trường `targetMap` trong API `PUT /api/accounts/:line_uid`. Trả về lỗi 400 nếu cấp độ nhân vật hiện tại không đủ yêu cầu của bản đồ đích.
+  - [x] Backend-side: Validate hành động `warp` trong API `POST /api/accounts/:line_uid/action`. Trả về lỗi 400 nếu cấp độ nhân vật không đủ.
+- Status: done
+
+### [x] T28 - Thêm Tab hiển thị Kỹ năng sở hữu và Bật/Tắt Tự động sử dụng (Auto Use Toggle)
+- Description: Tích hợp tab "Kỹ Năng" hiển thị các kỹ năng nhân vật đang sở hữu (Lv > 0) và cung cấp nút bấm bật/tắt tự động sử dụng (gửi action `skill_toggle` tới `xhrpg_upgrade.php`).
+- Files related: `server.js`, `public/app.js`, `public/app.css`
+- Acceptance criteria:
+  - [x] Backend-side: Trả về trường `skills` và `skill_auto` trong payload của API `GET /api/accounts`.
+  - [x] Frontend-side: Định nghĩa danh sách `SKILL_DEFS` bao gồm ID, tên dịch tiếng Việt, emoji, kiểu (passive/active) và nhánh kỹ năng.
+  - [x] Frontend-side: Thêm tab "Kỹ Năng" và container hiển thị lưới kỹ năng.
+  - [x] Frontend-side: Hiển thị danh sách kỹ năng nhân vật đang sở hữu (có cấp độ > 0). Đối với kỹ năng chủ động (hoặc tháp đôi), hiển thị nút Bật/Tắt Auto.
+  - [x] Frontend-side: Bấm nút gửi request tới `/api/accounts/:line_uid/action` với payload `{ action: 'skill_toggle', extra: { skill_id: ... } }`.
+  - [x] Frontend-side: Tối ưu hóa UI: giới hạn chiều cao tối đa của lưới kỹ năng (`max-height: 220px`), hỗ trợ thanh cuộn dọc (scroll) thẩm mỹ đồng bộ và tự động chuyển đổi sang layout 1 cột trên màn hình điện thoại/màn hình nhỏ để cân đối tổng thể Card.
+- Status: done
+
 
 
 

@@ -429,7 +429,9 @@ const MAP_DEFS = [
   { id: 1, name: 'Thung lũng Trung tâm',  emoji: '🌿', req: 1  },
   { id: 2, name: 'Sa mạc Vĩnh hằng',      emoji: '🏜️', req: 25 },
   { id: 3, name: 'Vùng đất Băng giá',     emoji: '❄️', req: 40 },
-  { id: 4, name: 'Đấu trường Arena (PVP)', emoji: '🏛️', req: 20 },
+  { id: 4, name: 'Đấu trường Arena (PVP)', emoji: '⚔️', req: 20 },
+  { id: 5, name: 'Tàn tích Cổ đại',      emoji: '🏛️', req: 55 },
+  { id: 6, name: 'Núi lửa Sôi trào',      emoji: '🌋', req: 70 },
 ];
 
 // Background poller manager
@@ -453,6 +455,8 @@ class BotInstance {
     this.targetedMvp = false;
     this.lastTargetedBossId = null;
     this.lootLogs = [];
+    this.combatStatsHistory = [];
+    this.startTime = null;
 
     proxyPool.assignBot(this.line_uid);
     this.addLog('SYSTEM', `Khởi tạo bot cho tài khoản: ${this.name}`);
@@ -516,10 +520,45 @@ class BotInstance {
     }
   }
 
+  getCombatRates() {
+    const now = Date.now();
+    const windowMs = 5 * 60 * 1000; // 5 minute window
+    const cutoff = now - windowMs;
+    
+    // Prune history older than 5 minutes
+    this.combatStatsHistory = this.combatStatsHistory.filter(h => h.time >= cutoff);
+    
+    let totalKills = 0;
+    let totalGold = 0;
+    let totalExp = 0;
+    
+    this.combatStatsHistory.forEach(h => {
+      totalKills += h.kills;
+      totalGold += h.gold;
+      totalExp += h.exp;
+    });
+    
+    let elapsedMin = 5;
+    if (this.combatStatsHistory.length > 0) {
+      const oldestTime = this.combatStatsHistory[0].time;
+      const startOfMeasurement = this.startTime ? Math.max(this.startTime, oldestTime) : oldestTime;
+      const diffMs = now - startOfMeasurement;
+      elapsedMin = Math.max(0.1, diffMs / 60000); // min 6 seconds
+    }
+    
+    return {
+      killsPerMin: Math.round((totalKills / elapsedMin) * 10) / 10,
+      goldPerMin: Math.round(totalGold / elapsedMin),
+      expPerMin: Math.round(totalExp / elapsedMin)
+    };
+  }
+
   start() {
     if (this.timer) return;
     this.status = 'running';
     this.pollCount = 0;
+    this.startTime = Date.now();
+    this.combatStatsHistory = [];
     this.addLog('SYSTEM', 'Bắt đầu hoạt động (đang kết nối...)');
     
     const runPoll = async () => {
@@ -890,6 +929,42 @@ class BotInstance {
 
     // Process events
     if (d.events && d.events.length) {
+      let pollKills = 0;
+      let pollGold = 0;
+      let pollExp = 0;
+
+      d.events.forEach(e => {
+        if (!e.msg) return;
+        const cleanMsg = e.msg.replace(/<[^>]*>/g, '');
+        
+        // Count kills
+        if (e.type === 'kill' || cleanMsg.includes('💀')) {
+          pollKills++;
+        }
+        
+        // Count EXP
+        const expMatch = cleanMsg.match(/EXP\+(\d+)/i);
+        if (expMatch) {
+          pollExp += parseInt(expMatch[1]);
+        }
+        
+        // Count Gold
+        const goldMatch = cleanMsg.match(/(?:G|Gold)\+(\d+)/i);
+        if (goldMatch) {
+          pollGold += parseInt(goldMatch[1]);
+        }
+      });
+
+      // Save history
+      if (pollKills > 0 || pollGold > 0 || pollExp > 0) {
+        this.combatStatsHistory.push({
+          time: Date.now(),
+          kills: pollKills,
+          gold: pollGold,
+          exp: pollExp
+        });
+      }
+
       const filtered = d.events.filter(e =>
         e.type !== 'beam' && e.type !== 'explosion' && e.type !== 'orion' && e.type !== 'cannon' &&
         e.type !== 'lockon' && e.type !== 'tri_knife' && e.type !== 'shock_ring' && e.type !== 'sword_skill' &&
@@ -1538,12 +1613,46 @@ app.get('/api/admin/proxies', requireAuth, (req, res) => {
 
 app.post('/api/admin/proxies', requireAuth, (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'Chỉ Admin mới có quyền truy cập' });
-  const { label, url } = req.body;
+  let { label, url } = req.body;
   if (!url) return res.status(400).json({ error: 'Thiếu URL proxy' });
+
+  url = url.trim();
+
+  // Auto-parse raw proxy format (IP:PORT:USER:PASS or IP:PORT)
+  if (!url.startsWith('http://') && !url.startsWith('https://') && !url.startsWith('socks')) {
+    const parts = url.split(':');
+    if (parts.length === 4) {
+      const [ip, port, user, pass] = parts;
+      url = `http://${user}:${pass}@${ip}:${port}`;
+      if (!label) {
+        label = `${ip}:${port}`;
+      }
+    } else if (parts.length === 2) {
+      const [ip, port] = parts;
+      url = `http://${ip}:${port}`;
+      if (!label) {
+        label = `${ip}:${port}`;
+      }
+    } else {
+      return res.status(400).json({ error: 'Định dạng proxy không hợp lệ. Vui lòng nhập http://..., socks5://... hoặc dạng IP:PORT:USER:PASS hoặc IP:PORT' });
+    }
+  }
+
+  // Mask password or get clean label from URL if not specified
+  if (!label) {
+    try {
+      const parsed = new URL(url);
+      label = parsed.host;
+    } catch (e) {
+      label = url;
+    }
+  }
+
   if (!url.startsWith('http://') && !url.startsWith('https://') && !url.startsWith('socks')) {
     return res.status(400).json({ error: 'URL proxy không hợp lệ (phải bắt đầu bằng http:// hoặc socks5://)' });
   }
-  const proxy = proxyPool.addProxy(label || url, url);
+
+  const proxy = proxyPool.addProxy(label, url);
   res.json({ success: true, proxy });
 });
 
@@ -1794,7 +1903,8 @@ app.get('/api/accounts', requireAuth, (req, res) => {
       error: bot.error,
       lastUpdate: bot.lastUpdate,
       settings: bot.settings,
-      proxyInfo: proxyPool.getBotProxyInfo(bot.line_uid),
+      proxyInfo: req.user.role === 'admin' ? proxyPool.getBotProxyInfo(bot.line_uid) : null,
+      combatRates: bot.getCombatRates ? bot.getCombatRates() : { killsPerMin: 0, goldPerMin: 0, expPerMin: 0 },
       spots: bot.spots || null,
       player: bot.player ? {
         lv: bot.player.lv,
@@ -1814,7 +1924,9 @@ app.get('/api/accounts', requireAuth, (req, res) => {
         skill_pts: bot.player.skill_pts,
         mine_lv: bot.player.mine_lv,
         house_lv: bot.player.house_lv,
-        house_energy: bot.player.house_energy
+        house_energy: bot.player.house_energy,
+        skills: bot.player.skills || '{}',
+        skill_auto: bot.player.skill_auto || '{}',
       } : null
     }));
   res.json(list);
@@ -1932,6 +2044,13 @@ app.put('/api/accounts/:line_uid', requireAuth, async (req, res) => {
     }
 
     if (Object.keys(settings).length > 0) {
+      if (settings.targetMap !== undefined) {
+        const targetMapNum = Number(settings.targetMap);
+        const mapDef = MAP_DEFS.find(m => m.id === targetMapNum);
+        if (mapDef && bot.player && (bot.player.lv || 1) < mapDef.req) {
+          return res.status(400).json({ error: `Cấp độ không đủ! Bản đồ ${mapDef.name} yêu cầu Lv.${mapDef.req}+.` });
+        }
+      }
       bot.updateSettings(settings);
     }
 
@@ -2098,6 +2217,10 @@ app.post('/api/accounts/:line_uid/action', requireAuth, async (req, res) => {
 
       if (payload.target_map !== undefined) {
         const targetMapNum = Number(payload.target_map);
+        const mapDef = MAP_DEFS.find(m => m.id === targetMapNum);
+        if (mapDef && bot.player && (bot.player.lv || 1) < mapDef.req) {
+          return res.status(400).json({ error: `Cấp độ không đủ! Bản đồ ${mapDef.name} yêu cầu Lv.${mapDef.req}+.` });
+        }
         bot.updateSettings({ targetMap: targetMapNum, autoMap: true });
         const currentAccounts = loadAccounts();
         const index = currentAccounts.findIndex(acc => acc.line_uid === line_uid);

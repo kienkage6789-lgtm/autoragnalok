@@ -81,8 +81,36 @@ Chúng ta đã xây dựng thành công một hệ thống **Headless Bot Manage
 *   **Cơ chế Tải Theo Yêu Cầu (On-Demand - Không Spam Server)**: Chỉ kích hoạt lệnh tải khi người dùng nhấp chọn tab **Vật Phẩm** hoặc bấm nút **`🔄 Cập nhật`**. Hoàn toàn không phát sinh bất kỳ request thừa nào trong vòng lặp chạy ngầm của bot.
 *   **Bảo vệ Content-Type**: Thêm bộ kiểm tra Content-Type phía frontend để cảnh báo trực quan khi server chưa khởi động lại, tránh tình trạng ném lỗi `SyntaxError` trên giao diện.
 
+### M. Tự động nhận diện định dạng Proxy thô (Proxy Auto-Parsing) (2026-07-25)
+*   **Phân giải định dạng thô**: Backend tự động phát hiện và chuyển đổi các chuỗi proxy thô dạng `IP:PORT:USER:PASS` thành URL chuẩn `http://USER:PASS@IP:PORT` và dạng `IP:PORT` thành `http://IP:PORT`.
+*   **Nhãn hiển thị an toàn**: Tự động sinh nhãn (label) là `IP:PORT` khi Admin không nhập nhãn gợi nhớ, ngăn ngừa việc hiển thị và lộ thông tin mật khẩu proxy ra giao diện.
+*   **Cải thiện UI**: Cập nhật placeholder ô nhập proxy mới trên Dashboard quản trị để hỗ trợ các cú pháp thô này.
 
+### N. Đo lường Hiệu suất Farm Thời gian Thực (Combat Rates per Minute) (2026-07-25)
+*   **Tính toán bằng Cửa sổ trượt (Sliding Window)**: `BotInstance` lưu trữ lịch sử tiêu diệt quái, lượng EXP và Vàng nhận được trong 5 phút gần nhất. Tính toán ra giá trị trung bình mỗi phút (Kills/phút, Vàng/phút, EXP/phút).
+*   **Tự động nhận diện Sự kiện**: Đọc trực tiếp từ logs sự kiện game poll:
+    *   Hạ quái: Tìm sự kiện `type === 'kill'` hoặc thông điệp có icon `💀`.
+    *   Lượng EXP: Regex bắt các chuỗi `EXP+N` (bắt được cả dòng boost Premium `🅿️ EXP+N`).
+    *   Lượng Vàng: Regex bắt các chuỗi `G+N` hoặc `Gold+N` (bắt được cả dòng boost Premium `🅿️ G+N`).
+*   **Thiết kế Hàng Rate UI đẹp mắt**: Thêm hàng `.card-rates` ngay phía trên mục hiển thị tài nguyên với tông màu tím mờ cao cấp, hiển thị real-time các chỉ số và tự động rút gọn hiển thị (ví dụ: `+1.2k /m` thay vì `+1200 /m` khi chỉ số vượt quá 1000).
 
+### O. Cập nhật Bản đồ Mới và Đồng bộ Đấu trường (2026-07-25)
+*   **Hỗ trợ 2 bản đồ mới**: Tích hợp các hằng số và cấp độ yêu cầu của bản đồ mới vào backend và frontend:
+    *   Map 5: `Tàn tích Cổ đại` (`🏛️`, Yêu cầu Lv.55+).
+    *   Map 6: `Núi lửa Sôi trào` (`🌋`, Yêu cầu Lv.70+).
+*   **Đồng bộ icon đấu trường**: Cập nhật icon của bản đồ số 4 (Đấu trường Arena) từ `🏛️` thành `⚔️` để đồng bộ 100% với sự thay đổi của client game chính thức.
+
+### P. Ngăn chặn chọn Bản đồ vượt cấp (Map Level Validation) (2026-07-25)
+*   **Kiểm soát thời gian thực tại Client**: Khi thay đổi dropdown select bản đồ di chuyển ở frontend, hàm `changeTargetMap` so sánh cấp độ hiện tại của nhân vật (`#lv-txt-...`) với yêu cầu tối thiểu của bản đồ đó. Nếu không đủ cấp độ, hệ thống hiển thị `alert` cảnh báo và tự động `revert` dropdown trở về bản đồ cũ.
+*   **Xác thực bảo mật kép tại Server**:
+    *   API Cấu hình (`PUT /api/accounts/:line_uid`): Ngăn chặn việc lưu `targetMap` vượt cấp bằng cách trả về mã lỗi HTTP 400.
+    *   API Di chuyển hành động (`POST /api/accounts/:line_uid/action`): Ngăn chặn yêu cầu `warp` thủ công vượt cấp, trả về HTTP 400 và không gửi gói tin tới game server.
+
+### Q. Quản lý Kỹ năng đang sở hữu & Bật/Tắt Tự động sử dụng (2026-07-25)
+*   **Đồng bộ dữ liệu kỹ năng**: Cập nhật endpoint `GET /api/accounts` để trả về chi tiết `skills` và `skill_auto` của đối tượng `player` về frontend.
+*   **Tab điều hướng "Kỹ Năng"**: Tích hợp tab hiển thị danh sách kỹ năng nhân vật đang sở hữu (Level > 0). Đối với các kỹ năng chủ động (hoặc tháp đôi `twin_turret`), hiển thị nút Auto Toggle để điều chỉnh bật/tắt tự động sử dụng.
+*   **API Bật/tắt kỹ năng**: Xây dựng cơ chế gọi API `POST /api/accounts/:line_uid/action` gửi lệnh `skill_toggle` kèm `skill_id` tới game server `xhrpg_upgrade.php` để lưu trạng thái trực tuyến.
+*   **Tối ưu thiết kế nhỏ gọn (Compact UI)**: Giảm kích thước vùng đệm, kích thước icon, font chữ và các nút bấm của lưới kỹ năng đi 15%, thiết lập chiều cao giới hạn (`max-height: 220px`) kèm thanh cuộn mượt mà và tự động co giãn về 1 cột trên giao diện mobile để đảm bảo cân đối tuyệt đối cho bảng điều khiển.
 
 ---
 
