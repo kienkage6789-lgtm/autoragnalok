@@ -289,6 +289,16 @@
   - [x] Frontend-side: Thiết kế các nút bấm: Gửi backup Telegram, Tải backup về máy, Chọn file khôi phục dữ liệu đi kèm cảnh báo an toàn.
 - Status: done
 
-
-
+### [x] T31 - Hiển thị thanh EXP (real-time), HP max đúng, và thanh MP mới
+- Description: Thanh EXP render được nhưng không cập nhật do server chưa expose `exp`. HP hiển thị sai (hp > hp_max) vì dùng `hp_max` thô thay vì đã tính VIT bonus. Chưa có thanh MP vì game không có field `mp_max` raw — mp_max phải được tính từ intel.
+- Files related: `public/app.js`, `public/app.css`, `server.js`
+- Acceptance criteria:
+  - [x] Server expose `exp`, `mp` trong object `player` của `GET /api/accounts`.
+  - [x] Server tính sẵn `hp_max_eff` đồng bộ công thức `xhrpg_canvas.js` line 3791: `floor((hp_max + VIT_bonus) × rag_mult)`.
+  - [x] Server tính sẵn `mp_max_calc` đồng bộ công thức `xhrpg_canvas.js` line 3810: `floor((50 + intel_eff × 5) × rag_mult)`.
+  - [x] `updateCard()` dùng `p.hp_max_eff` cho HP bar — không còn hiện hp > max.
+  - [x] Thêm vital-row 💧 MP với `mp-bar-{uid}` / `mp-txt-{uid}` dùng `p.mp_max_calc`.
+  - [x] CSS `.bar-mp` gradient xanh lam nhạt cyan (`#38bdf8 → #0ea5e9`).
+  - [x] EXP bar cập nhật real-time mỗi 1 giây theo vòng poll frontend.
+- Status: done
 

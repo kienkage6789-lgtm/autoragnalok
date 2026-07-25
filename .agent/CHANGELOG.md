@@ -2,6 +2,29 @@
 
 > Changelog of actual changes implemented.
 
+## 2026-07-25 - Fix thanh HP Max, thêm thanh MP mới, fix EXP real-time
+- File đã đổi: `server.js` (sửa), `public/app.js` (sửa), `public/app.css` (sửa).
+- Đã làm:
+  - **Chẩn đoán lỗi**:
+    * HP hiển thị sai (ví dụ "287 / 237") do `GET /api/accounts` trả về `hp_max` thô (base stat) trong khi `player.hp` là giá trị thực đã cộng thêm VIT bonus và Ragnalok multiplier từ server game.
+    * MP hiển thị "-- / --" do game API **không có field `mp_max`** — đây là giá trị được tính toán từ `intel_eff` trong client, không phải field raw.
+    * EXP bar không cập nhật do server chưa expose field `exp` và `mp` trong object `player` của response `GET /api/accounts`.
+  - **Backend `server.js` — Refactor khối `player` trong `GET /api/accounts`**:
+    * Thêm `exp: p.exp` và `mp: p.mp` vào response (đúng tên field game API trả về).
+    * Tính và expose `hp_max_eff`: đồng bộ công thức `xhrpg_canvas.js` line 3791: `floor((hp_max + VIT_bonus) × rag_mult)` trong đó `VIT_bonus = max(0, (vit_eff-5)*2 - max(0, vit-5))`.
+    * Tính và expose `mp_max_calc`: đồng bộ công thức `xhrpg_canvas.js` line 3810: `floor((50 + intel_eff × 5) × rag_mult)`.
+    * Xóa `mp_max: bot.player.mp_max` (field không tồn tại, luôn trả về `undefined`).
+  - **Frontend `public/app.js`**:
+    * Template HTML card: thêm `vital-row` 💧 MP với element `mp-bar-{uid}` và `mp-txt-{uid}`, đặt ngay sau HP row và trước Armor.
+    * `updateCard()` — HP bar: dùng `p.hp_max_eff || p.hp_max || 100` thay vì `p.hp_max` thô. Hiển thị `"HP / MAX (PCT%)"`.
+    * `updateCard()` — MP bar: dùng `p.mp_max_calc || 75` (fallback intel=5: 50+5×5=75). Nếu `p.mp` undefined thì hiển thị `p.mp ?? mpMax` (giả định đầy).
+    * `updateCard()` — EXP: không thay đổi công thức `expNext()`, chỉ cần field `exp` được server trả về đúng là hoạt động.
+  - **Frontend `public/app.css`**:
+    * Thêm class `.bar-mp { background: linear-gradient(to right, #38bdf8, #0ea5e9); }` — màu cyan nhạt, phân biệt với `.bar-armor` (xanh đậm) và `.bar-hp` (xanh lá).
+
+---
+
+
 ## 2026-07-25 - Tích hợp hệ thống Sao lưu qua Telegram Bot & Phục hồi qua Web UI
 - File đã đổi: `package.json` (sửa), `server.js` (sửa), `public/index.html` (sửa), `public/app.js` (sửa).
 - Đã làm:

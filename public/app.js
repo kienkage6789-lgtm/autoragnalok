@@ -664,10 +664,24 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
         </div>
         <div class="vital-row">
+          <span class="vital-label">💧 MP</span>
+          <div class="bar-container">
+            <div class="bar-fill bar-mp" id="mp-bar-${acc.line_uid}" style="width: 0%"></div>
+            <div class="bar-text" id="mp-txt-${acc.line_uid}">-- / --</div>
+          </div>
+        </div>
+        <div class="vital-row">
           <span class="vital-label">🛡️ Giáp</span>
           <div class="bar-container">
             <div class="bar-fill bar-armor" id="armor-bar-${acc.line_uid}" style="width: 0%"></div>
             <div class="bar-text" id="armor-txt-${acc.line_uid}">-- / --</div>
+          </div>
+        </div>
+        <div class="vital-row">
+          <span class="vital-label">⭐ EXP</span>
+          <div class="bar-container">
+            <div class="bar-fill bar-exp" id="exp-bar-${acc.line_uid}" style="width: 0%"></div>
+            <div class="bar-text" id="exp-txt-${acc.line_uid}">0 %</div>
           </div>
         </div>
       </div>
@@ -928,15 +942,45 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById(`name-${acc.line_uid}`).textContent = acc.name;
     document.getElementById(`lv-txt-${acc.line_uid}`).textContent = `Lv. ${p.lv || 1} (Tọa độ: ${p.x}, ${p.y} - Map: ${p.map})`;
 
-    // Vitals
-    const hpPct = p.hp_max > 0 ? (p.hp / p.hp_max) * 100 : 0;
+    // Vitals — dùng hp_max_eff (base + VIT bonus, tính bởi server đồng bộ canvas.js)
+    const hpMax = p.hp_max_eff || p.hp_max || 100;
+    const hpPct = hpMax > 0 ? Math.min(100, Math.round((p.hp / hpMax) * 100)) : 0;
     const hpBar = document.getElementById(`hp-bar-${acc.line_uid}`);
     hpBar.style.width = `${hpPct}%`;
-    document.getElementById(`hp-txt-${acc.line_uid}`).textContent = `${p.hp} / ${p.hp_max}`;
+    document.getElementById(`hp-txt-${acc.line_uid}`).textContent = `${p.hp ?? '--'} / ${hpMax} (${hpPct}%)`;
 
     const armorBar = document.getElementById(`armor-bar-${acc.line_uid}`);
     armorBar.style.width = `${Math.min(100, (p.armor_lv / 50) * 100)}%`;
     document.getElementById(`armor-txt-${acc.line_uid}`).textContent = `Cấp giáp: ${p.armor_lv || 0}`;
+
+    // MP — dùng mp_max_calc (tính từ intel, đồng bộ canvas.js line 3810)
+    const mpBar = document.getElementById(`mp-bar-${acc.line_uid}`);
+    if (mpBar) {
+      const mpMax = p.mp_max_calc || 75; // fallback: intel=5 → 50+5*5=75
+      const mpPct = mpMax > 0 ? Math.min(100, Math.round(((p.mp ?? mpMax) / mpMax) * 100)) : 0;
+      mpBar.style.width = `${mpPct}%`;
+      document.getElementById(`mp-txt-${acc.line_uid}`).textContent = `${p.mp ?? '--'} / ${mpMax} (${mpPct}%)`;
+    }
+
+    // EXP — tính expNeeded theo công thức đồng bộ canvas.js expNext()
+    const expBar = document.getElementById(`exp-bar-${acc.line_uid}`);
+    if (expBar) {
+      const lv = p.lv || 1;
+      const expCur = p.exp || 0;
+      const expNeeded = (function(lv) {
+        if (lv >= 41) return 100000000 + (lv - 41) * 15000000;
+        let e = 100;
+        for (let k = 2; k <= lv; k++) {
+          const b = k <= 10 ? 1.50 : k <= 20 ? 1.45 : k <= 30 ? 1.40 : 1.35;
+          e = Math.round(e * b);
+        }
+        return e;
+      })(lv);
+      const expPct = expNeeded > 0 ? Math.min(100, Math.round(expCur / expNeeded * 100)) : 0;
+      expBar.style.width = `${expPct}%`;
+      const fmt = (n) => n >= 1000000 ? `${(n/1000000).toFixed(1)}M` : n >= 1000 ? `${(n/1000).toFixed(1)}K` : String(n);
+      document.getElementById(`exp-txt-${acc.line_uid}`).textContent = `${fmt(expCur)} / ${fmt(expNeeded)} (${expPct}%)`;
+    }
 
     // Resource row
     document.getElementById(`res-gold-${acc.line_uid}`).textContent = p.gold ? p.gold.toLocaleString() : '0';

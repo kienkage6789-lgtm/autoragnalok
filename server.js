@@ -2244,28 +2244,50 @@ app.get('/api/accounts', requireAuth, (req, res) => {
       proxyInfo: req.user.role === 'admin' ? proxyPool.getBotProxyInfo(bot.line_uid) : null,
       combatRates: bot.getCombatRates ? bot.getCombatRates() : { killsPerMin: 0, goldPerMin: 0, expPerMin: 0 },
       spots: bot.spots || null,
-      player: bot.player ? {
-        lv: bot.player.lv,
-        hp: bot.player.hp,
-        hp_max: bot.player.hp_max,
-        gold: bot.player.gold,
-        wood: bot.player.wood,
-        stone: bot.player.stone,
-        iron: bot.player.iron,
-        copper: bot.player.copper,
-        herb: bot.player.herb,
-        x: bot.player.x,
-        y: bot.player.y,
-        map: bot.player.map,
-        armor_lv: bot.player.armor_lv,
-        stat_pts: bot.player.stat_pts,
-        skill_pts: bot.player.skill_pts,
-        mine_lv: bot.player.mine_lv,
-        house_lv: bot.player.house_lv,
-        house_energy: bot.player.house_energy,
-        skills: bot.player.skills || '{}',
-        skill_auto: bot.player.skill_auto || '{}',
-      } : null
+      player: bot.player ? (() => {
+        const p = bot.player;
+        // hp_max_eff: đồng bộ công thức xhrpg_canvas.js line 3791
+        // hpMaxEff = floor((hp_max + VIT_bonus) × rag_mult)
+        // VIT_bonus = max(0, (vit_eff - 5)*2 - max(0, vit-5))  ≈ 2 HP/điểm VIT hiệu quả
+        const vitEff = p.vit_eff ?? p.vit ?? 5;
+        const vitBase = p.vit ?? 5;
+        const vitHpBonus = Math.max(0, Math.max(0, vitEff - 5) * 2 - Math.max(0, vitBase - 5));
+        const ragHp = 1 + 0.001 * Math.max(0, parseInt(p.rag_hp) || 0);
+        const hp_max_eff = Math.floor(((p.hp_max || 100) + vitHpBonus) * ragHp);
+
+        // mp_max_calc: đồng bộ công thức xhrpg_canvas.js line 3810
+        // mpMax = floor((50 + intel_eff * 5) × rag_mult)
+        const intelEff = p.intel_eff ?? p.intel ?? 5;
+        const ragMp = 1 + 0.001 * Math.max(0, parseInt(p.rag_mp) || 0);
+        const mp_max_calc = Math.floor((50 + intelEff * 5) * ragMp);
+
+        return {
+          lv: p.lv,
+          hp: p.hp,
+          hp_max: p.hp_max,
+          hp_max_eff,
+          mp: p.mp,
+          mp_max_calc,
+          exp: p.exp,
+          gold: p.gold,
+          wood: p.wood,
+          stone: p.stone,
+          iron: p.iron,
+          copper: p.copper,
+          herb: p.herb,
+          x: p.x,
+          y: p.y,
+          map: p.map,
+          armor_lv: p.armor_lv,
+          stat_pts: p.stat_pts,
+          skill_pts: p.skill_pts,
+          mine_lv: p.mine_lv,
+          house_lv: p.house_lv,
+          house_energy: p.house_energy,
+          skills: p.skills || '{}',
+          skill_auto: p.skill_auto || '{}',
+        };
+      })() : null
     }));
   res.json(list);
 });

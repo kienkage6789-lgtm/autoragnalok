@@ -140,8 +140,22 @@
 - Đã chọn: Phương án B.
 - Lý do: Tối ưu 100% tài nguyên mạng và hiệu năng backend, không phát sinh bất kỳ request thừa nào lúc bot đang chạy ngầm, đồng thời dữ liệu hiển thị đạt độ chính xác tuyệt đối từ máy chủ game.
 
+## 2026-07-25 - Tính hp_max_eff và mp_max_calc trên Server, không đẩy công thức về Client Dashboard
 
+- Bối cảnh: `GET /api/accounts` trả về `hp_max` (giá trị base stat thô) dẫn đến HP bar hiển thị sai vì `player.hp` thực tế đã cộng VIT bonus + Ragnalok multiplier từ server game. Field `mp_max` hoàn toàn không tồn tại trong game API — client game tự tính từ `intel_eff`.
+- Các phương án đã xét:
+  - A: Đẩy `vit_eff`, `intel_eff`, `rag_hp`, `rag_mp` về frontend và tính công thức trên client Dashboard → Client dashboard phải duy trì công thức đồng bộ với `xhrpg_canvas.js`, dễ lệch khi game update.
+  - B: Server tính sẵn `hp_max_eff` và `mp_max_calc` theo đúng công thức `xhrpg_canvas.js` và expose 2 giá trị đã tính sẵn → Client chỉ việc dùng, không cần biết công thức.
+- Đã chọn: Phương án B.
+- Lý do: Single source of truth — logic công thức chỉ tồn tại ở 1 nơi (server.js comment rõ ref line xhrpg_canvas.js). Frontend dashboard không cần maintain công thức game phức tạp.
+- Trade-off: Mỗi lần game update công thức, phải cập nhật cả server.js (tuy nhiên dễ tìm vì có comment ref line số).
+- Công thức cụ thể đã dùng (2026-07-25):
+  - `hp_max_eff = floor((hp_max + max(0, (vit_eff-5)*2 - max(0,vit-5))) × (1 + 0.001 × rag_hp))`
+  - `mp_max_calc = floor((50 + intel_eff × 5) × (1 + 0.001 × rag_mp))`
 
+## 2026-07-25 - Game API không có field mp_max — MP là giá trị tính toán thuần túy
 
-
+- Bối cảnh: User confirm game API (`xhrpg_game.php`) trả về field `mp` (current mana) nhưng **không có `mp_max`**. Dashboard cần hiển thị thanh MP nhưng không có mẫu số.
+- Kết luận sau khi đọc `xhrpg_canvas.js` line 3810: `mpMax = floor((50 + intel_eff * 5) * rag_mult)` — đây là giá trị 100% được tính toán trong client, không bao giờ được trả về từ server game dưới dạng field.
+- Quyết định: Server Bot Manager tính `mp_max_calc` bằng công thức trên và expose trong API. Fallback mặc định `75` khi thiếu data (intel=5 → 50+5×5=75).
 

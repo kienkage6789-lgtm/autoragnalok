@@ -324,6 +324,14 @@ body {
   background: linear-gradient(to right, #3b82f6, #1d4ed8);
   box-shadow: 0 0 10px rgba(59, 130, 246, 0.4);
 }
+.bar-mp {
+  background: linear-gradient(to right, #38bdf8, #0ea5e9);
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.4);
+}
+.bar-exp {
+  background: linear-gradient(to right, #f59e0b, #d97706);
+  box-shadow: 0 0 10px rgba(245, 158, 11, 0.4);
+}
 .bar-text {
   position: absolute;
   font-size: 0.75rem;
