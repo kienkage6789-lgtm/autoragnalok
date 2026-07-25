@@ -5,6 +5,10 @@ const path = require('path');
 const compression = require('compression');
 const crypto = require('crypto');
 const { fetch, Agent, ProxyAgent } = require('undici');
+const AdmZip = require('adm-zip');
+const multer = require('multer');
+const upload = multer({ storage: multer.memoryStorage() });
+const https = require('https');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -1392,14 +1396,18 @@ class BotInstance {
   }
 }
 
-// Initialize active bots if run directly
-if (require.main === module) {
+// Initialize active bots
+function startAllBots() {
   const accounts = loadAccounts();
   accounts.forEach(acc => {
     const instance = new BotInstance(acc);
     botInstances[acc.line_uid] = instance;
     instance.start();
   });
+}
+
+if (require.main === module) {
+  startAllBots();
 }
 
 // Extract token helper
@@ -1750,10 +1758,22 @@ app.post('/api/admin/proxies', requireAuth, (req, res) => {
 
 app.put('/api/admin/proxies/settings', requireAuth, (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'Chỉ Admin mới có quyền truy cập' });
-  const { useDirectConnection, maxBotsPerProxy } = req.body;
+  const { useDirectConnection, maxBotsPerProxy, telegramBotToken, telegramChatId, backupIntervalHours, autoBackupEnabled } = req.body;
+  
+  if (telegramBotToken && telegramChatId) {
+    const botId = telegramBotToken.trim().split(':')[0];
+    if (telegramChatId.trim() === botId) {
+      return res.status(400).json({ error: 'Chat ID không được trùng với ID của Bot (phần số trước dấu hai chấm ở Token). Vui lòng điền Chat ID cá nhân!' });
+    }
+  }
+
   const update = {};
   if (useDirectConnection !== undefined) update.useDirectConnection = Boolean(useDirectConnection);
   if (maxBotsPerProxy !== undefined) update.maxBotsPerProxy = Math.max(1, parseInt(maxBotsPerProxy) || 10);
+  if (telegramBotToken !== undefined) update.telegramBotToken = String(telegramBotToken).trim();
+  if (telegramChatId !== undefined) update.telegramChatId = String(telegramChatId).trim();
+  if (backupIntervalHours !== undefined) update.backupIntervalHours = Math.max(1, parseInt(backupIntervalHours) || 12);
+  if (autoBackupEnabled !== undefined) update.autoBackupEnabled = Boolean(autoBackupEnabled);
   proxyPool.updateSettings(update);
   res.json({ success: true, settings: proxyPool.getSettings() });
 });
@@ -1827,6 +1847,177 @@ app.post('/api/admin/proxies/:id/test', requireAuth, async (req, res) => {
     }
   } catch (err) {
     res.json({ success: false, error: err.message });
+  }
+});
+
+// ==================== BACKUP & RESTORE ROUTES (Admin only) ====================
+
+async function performTelegramBackup() {
+  const settings = proxyPool.getSettings();
+  const token = settings.telegramBotToken;
+  const chatId = settings.telegramChatId;
+  if (!token || !chatId) {
+    throw new Error('Chưa cấu hình Telegram Bot Token hoặc Chat ID.');
+  }
+
+  const zip = new AdmZip();
+  const files = ['users.json', 'proxies.json', 'accounts.json'];
+  for (const file of files) {
+    const filePath = path.join(__dirname, file);
+    if (fs.existsSync(filePath)) {
+      zip.addLocalFile(filePath);
+    }
+  }
+  const zipBuffer = zip.toBuffer();
+
+  const dateStr = new Date().toISOString().replace(/T/, '_').replace(/\..+/, '').replace(/:/g, '-');
+  const filename = `rag_backup_${dateStr}.zip`;
+  const caption = `📦 **Ragnalok Bot Dashboard Backup**\n🕒 Thời gian: ${new Date().toLocaleString('vi-VN')}\n💻 Máy chủ: ${require('os').hostname()}`;
+
+  // Build raw multipart body manually to support all Node.js and OS versions flawlessly
+  const boundary = '----NodeTelegramBackupBoundary' + crypto.randomBytes(8).toString('hex');
+  const parts = [];
+
+  parts.push(Buffer.from(
+    `--${boundary}\r\n` +
+    `Content-Disposition: form-data; name="chat_id"\r\n\r\n` +
+    `${chatId}\r\n`
+  ));
+
+  parts.push(Buffer.from(
+    `--${boundary}\r\n` +
+    `Content-Disposition: form-data; name="caption"\r\n\r\n` +
+    `${caption}\r\n`
+  ));
+
+  parts.push(Buffer.from(
+    `--${boundary}\r\n` +
+    `Content-Disposition: form-data; name="document"; filename="${filename}"\r\n` +
+    `Content-Type: application/zip\r\n\r\n`
+  ));
+  parts.push(zipBuffer);
+  parts.push(Buffer.from('\r\n'));
+  parts.push(Buffer.from(`--${boundary}--\r\n`));
+
+  const body = Buffer.concat(parts);
+
+  const result = await new Promise((resolve, reject) => {
+    const options = {
+      hostname: 'api.telegram.org',
+      port: 443,
+      path: `/bot${token}/sendDocument`,
+      method: 'POST',
+      family: 4, // Force IPv4 to bypass any IPv6 DNS resolution bugs on Ubuntu VPS
+      headers: {
+        'Content-Type': `multipart/form-data; boundary=${boundary}`,
+        'Content-Length': body.length.toString(),
+        'User-Agent': 'Mozilla/5.0'
+      }
+    };
+
+    const req = https.request(options, (res) => {
+      let resData = '';
+      res.on('data', (chunk) => {
+        resData += chunk;
+      });
+      res.on('end', () => {
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          try {
+            resolve(JSON.parse(resData));
+          } catch (e) {
+            reject(new Error(`Failed to parse Telegram response: ${resData}`));
+          }
+        } else {
+          reject(new Error(`Telegram API Error: ${res.statusCode} - ${resData}`));
+        }
+      });
+    });
+
+    req.on('error', (err) => {
+      reject(err);
+    });
+
+    req.write(body);
+    req.end();
+  });
+
+  if (!result.ok) {
+    throw new Error(`Telegram API returned ok:false - ${JSON.stringify(result)}`);
+  }
+
+  proxyPool.updateSettings({ lastBackupTime: Date.now() });
+  return result;
+}
+
+app.post('/api/admin/backup-now', requireAuth, async (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Chỉ Admin mới có quyền truy cập' });
+  try {
+    const result = await performTelegramBackup();
+    res.json({ success: true, result });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/admin/backup-download', requireAuth, (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Chỉ Admin mới có quyền truy cập' });
+  try {
+    const zip = new AdmZip();
+    const files = ['users.json', 'proxies.json', 'accounts.json'];
+    for (const file of files) {
+      const filePath = path.join(__dirname, file);
+      if (fs.existsSync(filePath)) {
+        zip.addLocalFile(filePath);
+      }
+    }
+    const zipBuffer = zip.toBuffer();
+    const dateStr = new Date().toISOString().replace(/T/, '_').replace(/\..+/, '').replace(/:/g, '-');
+    res.setHeader('Content-Disposition', `attachment; filename=rag_backup_${dateStr}.zip`);
+    res.setHeader('Content-Type', 'application/zip');
+    res.send(zipBuffer);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/admin/restore-upload', requireAuth, upload.single('backupFile'), async (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Chỉ Admin mới có quyền truy cập' });
+  if (!req.file) return res.status(400).json({ error: 'Không tìm thấy file tải lên' });
+
+  try {
+    const zip = new AdmZip(req.file.buffer);
+    const zipEntries = zip.getEntries();
+
+    const fileNamesInZip = zipEntries.map(e => e.entryName);
+    const hasRequiredFiles = ['users.json', 'proxies.json', 'accounts.json'].every(f => fileNamesInZip.includes(f));
+
+    if (!hasRequiredFiles) {
+      return res.status(400).json({ error: 'File backup không hợp lệ. Phải chứa đầy đủ các file: users.json, proxies.json, accounts.json' });
+    }
+
+    // Extract and overwrite files
+    zip.extractAllTo(__dirname, true);
+
+    // Hot-reload system
+    // 1. Stop all current bots
+    Object.keys(botInstances).forEach(uid => {
+      try {
+        botInstances[uid].stop();
+      } catch (e) {
+        console.error(`Error stopping bot ${uid}:`, e);
+      }
+      delete botInstances[uid];
+    });
+
+    // 2. Reload proxies settings
+    proxyPool._load();
+
+    // 3. Reload and start all bots
+    startAllBots();
+
+    res.json({ success: true, message: 'Khôi phục dữ liệu và khởi động lại toàn bộ bot thành công!' });
+  } catch (err) {
+    res.status(500).json({ error: `Lỗi giải nén hoặc nạp dữ liệu: ${err.message}` });
   }
 });
 
@@ -2832,6 +3023,24 @@ if (require.main === module) {
     console.log(`👉 http://localhost:${PORT}`);
     console.log(`===============================================`);
   });
+
+  // Setup periodic Telegram backup (Check every 5 minutes if it's time to backup)
+  setInterval(async () => {
+    try {
+      const settings = proxyPool.getSettings();
+      if (settings.autoBackupEnabled && settings.telegramBotToken && settings.telegramChatId) {
+        const lastBackup = settings.lastBackupTime || 0;
+        const intervalMs = (settings.backupIntervalHours || 12) * 60 * 60 * 1000;
+        if (Date.now() - lastBackup >= intervalMs) {
+          console.log('[Auto-Backup] Tracing auto-backup payload to Telegram...');
+          await performTelegramBackup();
+          console.log('[Auto-Backup] Backup successfully sent to Telegram!');
+        }
+      }
+    } catch (e) {
+      console.error('[Auto-Backup] Error running auto-backup interval:', e.message);
+    }
+  }, 5 * 60 * 1000);
 }
 
 module.exports = {

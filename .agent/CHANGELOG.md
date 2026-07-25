@@ -2,6 +2,27 @@
 
 > Changelog of actual changes implemented.
 
+## 2026-07-25 - Tích hợp hệ thống Sao lưu qua Telegram Bot & Phục hồi qua Web UI
+- File đã đổi: `package.json` (sửa), `server.js` (sửa), `public/index.html` (sửa), `public/app.js` (sửa).
+- Đã làm:
+  - **Cài đặt thư viện mới**:
+    * Cài đặt `adm-zip` để đóng gói dữ liệu và `multer` để xử lý file upload từ Web UI.
+  - **API Backend (`server.js`)**:
+    * Mở rộng endpoint `PUT /api/admin/proxies/settings` để cập nhật cấu hình Telegram Bot.
+    * Xây dựng hàm helper `performTelegramBackup()` thực hiện nén `users.json`, `proxies.json` và `accounts.json` thành file ZIP tạm thời trong RAM và gửi document trực tiếp lên API Telegram `sendDocument` (Sử dụng module `https` nguyên bản của Node.js, xây dựng thủ công body `multipart/form-data` và ép kết nối qua IPv4 bằng cấu hình `family: 4` để khắc phục triệt để lỗi DNS/IPv6 resolution gây ra lỗi mạng `fetch failed` trên các VPS Ubuntu).
+    * Xây dựng route `POST /api/admin/backup-now` cho phép tạo và gửi sao lưu thủ công lên Telegram ngay lập tức.
+    * Xây dựng route `GET /api/admin/backup-download` cho phép tải trực tiếp file zip sao lưu về máy tính cá nhân.
+    * Xây dựng route `POST /api/admin/restore-upload` nhận file zip, giải nén ghi đè cấu hình, dừng toàn bộ bot đang chạy và reload toàn bộ hệ thống (hot-reload) để chạy bot lại theo cấu hình phục hồi mà không cần restart server.
+    * Thiết lập `setInterval` chạy ngầm kiểm tra định kỳ mỗi 5 phút để kích hoạt sao lưu tự động nếu đã tới thời điểm quy định.
+  - **Giao diện Frontend (`public/index.html` & `public/app.js`)**:
+    * Thêm tab "Sao Lưu" vào Admin Panel modal và thiết lập chuyển đổi hiển thị tab (`switchAdminTab`).
+    * Thiết kế form cấu hình Telegram settings và nút bấm Lưu cấu hình (`saveBackupSettings`).
+    * Thiết kế nút bấm Gửi sao lưu Telegram (`triggerTelegramBackupNow`) và Tải backup về máy (`downloadBackupNow`).
+    * Thiết kế input file ẩn và nút tải lên khôi phục dữ liệu (`handleRestoreUpload`) có hiển thị cảnh báo xác nhận nguy cơ ghi đè.
+    * Tích hợp cảnh báo và chặn lưu cấu hình ở cả Frontend và Backend nếu người dùng nhập nhầm ID Bot vào ô Chat ID.
+
+---
+
 ## 2026-07-25 - Cải tiến Toàn diện Hệ thống Proxy Pool
 - File đã đổi: `server.js` (sửa), `public/app.js` (sửa).
 - Đã làm:

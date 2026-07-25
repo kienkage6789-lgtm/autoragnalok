@@ -273,6 +273,22 @@
   - [x] Frontend-side: Thêm dropdown chọn Proxy thủ công trên Card nhân vật tại tab "Cơ Bản" (chỉ hiển thị với vai trò Admin), đồng bộ hóa trực tiếp với máy chủ.
 - Status: done
 
+### [x] T30 - Tích hợp hệ thống Sao lưu qua Telegram Bot & Phục hồi qua Web UI
+- Description: Đóng gói backup dưới dạng ZIP, tự động gửi lên Telegram chat định kỳ và hỗ trợ download/upload khôi phục trực tiếp trên giao diện Dashboard Admin.
+- Files related: `package.json`, `server.js`, `public/index.html`, `public/app.js`
+- Acceptance criteria:
+  - [x] Backend-side: Cài đặt thêm thư viện `adm-zip` và `multer`.
+  - [x] Backend-side: Mở rộng API cập nhật cấu hình proxy settings để lưu các thiết lập Telegram Bot (`telegramBotToken`, `telegramChatId`, `backupIntervalHours`, `autoBackupEnabled`).
+  - [x] Backend-side: Xây dựng helper `performTelegramBackup()` nén 3 file (`users.json`, `proxies.json`, `accounts.json`) thành tệp ZIP trong RAM và gửi document lên Telegram qua API `sendDocument`.
+  - [x] Backend-side: Tạo API `POST /api/admin/backup-now` để backup thủ công gửi lên Telegram.
+  - [x] Backend-side: Tạo API `GET /api/admin/backup-download` để tải tệp nén ZIP trực tiếp về máy.
+  - [x] Backend-side: Tạo API `POST /api/admin/restore-upload` nhận tệp ZIP tải lên, giải nén ghi đè, dừng toàn bộ bot cũ, nạp lại dữ liệu người dùng/proxy/tài khoản và khởi chạy lại các bot có trạng thái chạy (Hot-Reload).
+  - [x] Backend-side: Thiết lập vòng lặp `setInterval` chạy ngầm kiểm tra định kỳ mỗi 5 phút để kích hoạt sao lưu tự động nếu đủ thời gian giãn cách.
+  - [x] Frontend-side: Thêm tab "Sao Lưu" vào Admin Panel modal.
+  - [x] Frontend-side: Thiết kế form cấu hình Telegram Bot và hiển thị trạng thái hoạt động trực quan.
+  - [x] Frontend-side: Thiết kế các nút bấm: Gửi backup Telegram, Tải backup về máy, Chọn file khôi phục dữ liệu đi kèm cảnh báo an toàn.
+- Status: done
+
 
 
 

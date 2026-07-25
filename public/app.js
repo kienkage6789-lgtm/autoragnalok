@@ -214,17 +214,25 @@ document.addEventListener('DOMContentLoaded', () => {
   window.switchAdminTab = function(tab) {
     document.getElementById('admin-tab-users').style.display    = tab === 'users'   ? '' : 'none';
     document.getElementById('admin-tab-proxies').style.display  = tab === 'proxies' ? '' : 'none';
+    document.getElementById('admin-tab-backup').style.display   = tab === 'backup'  ? '' : 'none';
+    
     const btnUsers   = document.getElementById('admin-tab-btn-users');
     const btnProxies = document.getElementById('admin-tab-btn-proxies');
-    if (btnUsers && btnProxies) {
-      btnUsers.style.background   = tab === 'users'   ? 'rgba(165,180,252,0.2)' : 'transparent';
-      btnUsers.style.color        = tab === 'users'   ? '#a5b4fc' : 'var(--text-secondary)';
-      btnUsers.style.borderColor  = tab === 'users'   ? 'rgba(165,180,252,0.4)' : 'var(--border-color)';
-      btnProxies.style.background = tab === 'proxies' ? 'rgba(165,180,252,0.2)' : 'transparent';
-      btnProxies.style.color      = tab === 'proxies' ? '#a5b4fc' : 'var(--text-secondary)';
-      btnProxies.style.borderColor= tab === 'proxies' ? 'rgba(165,180,252,0.4)' : 'var(--border-color)';
-    }
-    if (tab === 'proxies') fetchAdminProxies();
+    const btnBackup  = document.getElementById('admin-tab-btn-backup');
+    
+    const tabs = ['users', 'proxies', 'backup'];
+    const buttons = { users: btnUsers, proxies: btnProxies, backup: btnBackup };
+    
+    tabs.forEach(t => {
+      const btn = buttons[t];
+      if (btn) {
+        btn.style.background = tab === t ? 'rgba(165,180,252,0.2)' : 'transparent';
+        btn.style.color      = tab === t ? '#a5b4fc' : 'var(--text-secondary)';
+        btn.style.borderColor= tab === t ? 'rgba(165,180,252,0.4)' : 'var(--border-color)';
+      }
+    });
+    
+    if (tab === 'proxies' || tab === 'backup') fetchAdminProxies();
   };
 
   // Admin Fetch Users
@@ -1576,6 +1584,7 @@ document.addEventListener('DOMContentLoaded', () => {
       adminProxiesList = data.list || [];
       renderProxySettings(data.settings);
       renderProxyTable(data.list);
+      renderBackupSettings(data.settings);
     } catch (e) {
       console.error('Error fetching proxies:', e);
     }
@@ -1615,6 +1624,148 @@ document.addEventListener('DOMContentLoaded', () => {
     if (chkDirect && document.activeElement !== chkDirect) chkDirect.checked = settings.useDirectConnection === true;
     if (inpMax    && document.activeElement !== inpMax)    inpMax.value = settings.maxBotsPerProxy || 10;
   }
+
+  function renderBackupSettings(settings) {
+    const txtToken = document.getElementById('backup-tele-token');
+    const txtChatId = document.getElementById('backup-tele-chatid');
+    const numInterval = document.getElementById('backup-interval');
+    const chkAuto = document.getElementById('backup-auto-enabled');
+    const statusText = document.getElementById('backup-status-text');
+
+    if (txtToken && document.activeElement !== txtToken) txtToken.value = settings.telegramBotToken || '';
+    if (txtChatId && document.activeElement !== txtChatId) txtChatId.value = settings.telegramChatId || '';
+    if (numInterval && document.activeElement !== numInterval) numInterval.value = settings.backupIntervalHours || 12;
+    if (chkAuto && document.activeElement !== chkAuto) chkAuto.checked = settings.autoBackupEnabled === true;
+
+    if (statusText) {
+      if (settings.telegramBotToken && settings.telegramChatId) {
+        if (settings.autoBackupEnabled) {
+          const lastStr = settings.lastBackupTime ? new Date(settings.lastBackupTime).toLocaleString('vi-VN') : 'Chưa sao lưu';
+          statusText.textContent = `Auto ON (Lần cuối: ${lastStr})`;
+          statusText.style.color = '#34d399';
+        } else {
+          statusText.textContent = 'Auto OFF (Đã cấu hình)';
+          statusText.style.color = '#fbbf24';
+        }
+      } else {
+        statusText.textContent = 'Chưa cấu hình';
+        statusText.style.color = '#ef4444';
+      }
+    }
+  }
+
+  window.saveBackupSettings = async function(e) {
+    if (e) e.preventDefault();
+    const token = document.getElementById('backup-tele-token').value.trim();
+    const chatId = document.getElementById('backup-tele-chatid').value.trim();
+    const interval = parseInt(document.getElementById('backup-interval').value) || 12;
+    const enabled = document.getElementById('backup-auto-enabled').checked;
+
+    if (token && chatId) {
+      const botId = token.split(':')[0];
+      if (chatId === botId) {
+        alert('🔴 Lỗi: Chat ID không được trùng với ID của Bot (phần số trước dấu hai chấm ở Token). Vui lòng điền Chat ID cá nhân của bạn!');
+        return;
+      }
+    }
+
+    try {
+      const res = await fetch('/api/admin/proxies/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          telegramBotToken: token,
+          telegramChatId: chatId,
+          backupIntervalHours: interval,
+          autoBackupEnabled: enabled
+        })
+      });
+      if (res.ok) {
+        alert('🟢 Đã lưu cấu hình sao lưu Telegram thành công!');
+        fetchAdminProxies();
+      } else {
+        const err = await res.json();
+        alert(`🔴 Lỗi: ${err.error || 'Không thể lưu cấu hình'}`);
+      }
+    } catch (err) {
+      console.error('Error saving backup settings:', err);
+      alert('Không thể kết nối đến máy chủ.');
+    }
+  };
+
+  window.triggerTelegramBackupNow = async function(btn) {
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = '⏳ Đang gửi...';
+    }
+    try {
+      const res = await fetch('/api/admin/backup-now', {
+        method: 'POST'
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        alert('🟢 Đã gửi bản sao lưu thành công lên Telegram chat của bạn!');
+        fetchAdminProxies();
+      } else {
+        alert(`🔴 Gửi thất bại: ${data.error || 'Vui lòng kiểm tra lại token/chat ID'}`);
+      }
+    } catch (err) {
+      console.error('Error triggering backup:', err);
+      alert('Lỗi kết nối đến máy chủ.');
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = '⚡ Gửi Backup Lên Telegram';
+      }
+    }
+  };
+
+  window.downloadBackupNow = function() {
+    window.open('/api/admin/backup-download', '_blank');
+  };
+
+  window.handleRestoreUpload = async function(input) {
+    const file = input.files[0];
+    const fileNameSpan = document.getElementById('restore-file-name');
+    if (!file) {
+      if (fileNameSpan) fileNameSpan.textContent = 'Chưa chọn file';
+      return;
+    }
+    
+    if (fileNameSpan) fileNameSpan.textContent = file.name;
+    
+    const confirmRestore = confirm(`⚠️ CẢNH BÁO AN TOÀN QUAN TRỌNG:\n\nHành động này sẽ giải nén ghi đè toàn bộ dữ liệu hiện tại (bao gồm người dùng, proxy, bot) và khởi động lại tất cả bot.\n\nBạn có chắc chắn muốn khôi phục từ tệp "${file.name}" không?`);
+    if (!confirmRestore) {
+      input.value = '';
+      if (fileNameSpan) fileNameSpan.textContent = 'Chưa chọn file';
+      return;
+    }
+    
+    const formData = new FormData();
+    formData.append('backupFile', file);
+    
+    try {
+      fileNameSpan.textContent = '⏳ Đang khôi phục...';
+      const res = await fetch('/api/admin/restore-upload', {
+        method: 'POST',
+        body: formData
+      });
+      const data = await res.json();
+      if (res.ok) {
+        alert(`🟢 Khôi phục thành công!\n\n${data.message}`);
+        location.reload();
+      } else {
+        alert(`🔴 Lỗi phục hồi: ${data.error || 'File không hợp lệ'}`);
+        fileNameSpan.textContent = 'Lỗi phục hồi';
+      }
+    } catch (err) {
+      console.error('Error during restore upload:', err);
+      alert('Lỗi kết nối khi gửi file khôi phục.');
+      fileNameSpan.textContent = 'Lỗi kết nối';
+    } finally {
+      input.value = '';
+    }
+  };
 
   function renderProxyTable(list) {
     const tbody = document.getElementById('proxy-table-body');

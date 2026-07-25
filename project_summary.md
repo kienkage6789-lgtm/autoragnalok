@@ -121,6 +121,14 @@ Chúng ta đã xây dựng thành công một hệ thống **Headless Bot Manage
 *   **Proxy Connection Tester**: Xây dựng API và nút "⚡ Test" trên giao diện Admin quản lý proxy để Admin có thể kiểm tra độ trễ (latency) và trạng thái sống/chết của từng proxy kết nối tới game server.
 *   **Manual Proxy Assignment (Gán Proxy Thủ công)**: Cho phép Admin chọn proxy mong muốn cho từng bot thông qua dropdown lựa chọn tại tab Cơ Bản (chỉ hiển thị với Admin).
 
+### S. Tích hợp Hệ thống Sao lưu & Phục hồi Dữ liệu (2026-07-25)
+*   **Đóng gói dữ liệu**: Sử dụng thư viện `adm-zip` để đóng gói 3 file dữ liệu cấu hình quan trọng (`users.json`, `proxies.json`, `accounts.json`) thành 1 file ZIP duy nhất trong RAM mà không cần tạo file rác tại VPS.
+*   **Sao lưu tự động qua Telegram**: Tích hợp gửi file backup ZIP trực tiếp vào chat Telegram của Admin. Sử dụng module `https` nguyên bản của Node với tùy chọn `family: 4` để tránh lỗi DNS/IPv6 resolution trên hệ điều hành Ubuntu/Linux.
+    *   *Tính năng an toàn:* Tự động chặn và cảnh báo từ cả Frontend và Backend nếu Admin nhập nhầm ID của Bot (phần số trước dấu hai chấm ở Token) làm Chat ID của Admin.
+    *   *Lịch chạy ngầm:* Kiểm tra định kỳ mỗi 5 phút và tự động gửi bản sao lưu lên Telegram sau mỗi 12 giờ (hoặc khoảng cách tùy cấu hình).
+*   **Khôi phục trực tuyến (Hot-Reload)**: Cho phép Admin tải file ZIP backup lên trực tiếp thông qua giao diện Web (`POST /api/admin/restore-upload`). Hệ thống tự động giải nén ghi đè, dừng hoạt động toàn bộ bot cũ, nạp lại dữ liệu người dùng/proxy/tài khoản và khởi chạy lại các bot có trạng thái chạy trước đó mà không cần restart server thủ công.
+*   **Tải bản sao lưu trực tiếp**: Nút bấm tải trực tiếp file zip sao lưu về máy tính cá nhân để lưu trữ ngoại tuyến.
+
 ---
 
 ## 🚀 2. Các hạng mục CHƯA HOÀN THÀNH (Roadmap / Future Upgrades)

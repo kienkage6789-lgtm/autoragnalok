@@ -99,6 +99,10 @@
           style="padding:6px 14px; font-size:0.85rem; font-weight:700; border-radius:8px; border:1px solid var(--border-color); background:transparent; color:var(--text-secondary); cursor:pointer;">
           🌐 Proxy Pool
         </button>
+        <button id="admin-tab-btn-backup" onclick="switchAdminTab('backup')"
+          style="padding:6px 14px; font-size:0.85rem; font-weight:700; border-radius:8px; border:1px solid var(--border-color); background:transparent; color:var(--text-secondary); cursor:pointer;">
+          💾 Sao Lưu
+        </button>
       </div>
 
       <!-- ═══ TAB: USERS ═══ -->
@@ -195,6 +199,62 @@
               <tr><td colspan="5" style="padding:12px; text-align:center; color:var(--text-secondary);">Đang tải...</td></tr>
             </tbody>
           </table>
+        </div>
+      </div>
+
+      <!-- ═══ TAB: BACKUP & RESTORE ═══ -->
+      <div id="admin-tab-backup" style="display:none;">
+        <!-- Telegram Config -->
+        <div style="background:rgba(0,0,0,0.2); padding:14px; border-radius:12px; border:1px solid var(--border-color); margin-bottom:14px;">
+          <h4 style="font-size:0.9rem; color:#a78bfa; margin-bottom:12px;">📢 Cấu HÌnh Sao Lưu Tự Động Qua Telegram</h4>
+          <form id="admin-backup-settings-form" onsubmit="saveBackupSettings(event)" style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
+            <div class="input-control">
+              <label for="backup-tele-token" style="font-size:0.8rem; color:var(--text-secondary); display:block; margin-bottom:4px;">Telegram Bot Token</label>
+              <input type="password" id="backup-tele-token" placeholder="Nhập Bot Token từ @BotFather" style="width:100%; padding:8px; font-size:0.85rem; background:rgba(0,0,0,0.3); border:1px solid var(--border-color); border-radius:6px; color:#fff; outline:none;">
+            </div>
+            <div class="input-control">
+              <label for="backup-tele-chatid" style="font-size:0.8rem; color:var(--text-secondary); display:block; margin-bottom:4px;">Telegram Chat ID</label>
+              <input type="text" id="backup-tele-chatid" placeholder="Nhập Chat ID từ @userinfobot" style="width:100%; padding:8px; font-size:0.85rem; background:rgba(0,0,0,0.3); border:1px solid var(--border-color); border-radius:6px; color:#fff; outline:none;">
+            </div>
+            <div class="input-control">
+              <label for="backup-interval" style="font-size:0.8rem; color:var(--text-secondary); display:block; margin-bottom:4px;">Tần suất sao lưu (Giờ)</label>
+              <input type="number" id="backup-interval" value="12" min="1" style="width:100%; padding:8px; font-size:0.85rem; background:rgba(0,0,0,0.3); border:1px solid var(--border-color); border-radius:6px; color:#fff; outline:none;">
+            </div>
+            <div style="display:flex; align-items:center; gap:8px; font-size:0.85rem; margin-top:20px;">
+              <span class="switch" style="display:inline-block; position:relative; width:36px; height:20px;">
+                <input type="checkbox" id="backup-auto-enabled" style="opacity:0; width:0; height:0; position:absolute;">
+                <span class="slider" style="position:absolute; inset:0; border-radius:20px; cursor:pointer; background:#334155; transition:.3s;"></span>
+              </span>
+              Tự động gửi bản sao lưu định kỳ
+            </div>
+            <div style="grid-column: span 2; display:flex; justify-content:space-between; align-items:center; margin-top:6px; border-top:1px dashed rgba(255,255,255,0.05); padding-top:10px;">
+              <span style="font-size:0.75rem; color:var(--text-secondary);">
+                💡 Trạng thái: <span id="backup-status-text" style="font-weight:700; color:#ef4444;">Chưa hoạt động</span>
+              </span>
+              <button type="submit" class="btn btn-primary" style="padding:6px 16px; font-size:0.8rem;">Lưu Cấu Hình</button>
+            </div>
+          </form>
+        </div>
+
+        <!-- Manual Backup / Restore -->
+        <div style="background:rgba(0,0,0,0.2); padding:14px; border-radius:12px; border:1px solid var(--border-color); margin-bottom:14px;">
+          <h4 style="font-size:0.9rem; color:#a78bfa; margin-bottom:12px;">⚡ Thao Tác Sao Lưu & Phục Hồi</h4>
+          <div style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:18px;">
+            <button class="btn btn-primary" onclick="triggerTelegramBackupNow(this)" style="padding:8px 16px; font-size:0.82rem; background:#6366f1; border-color:#4f46e5;">⚡ Gửi Backup Lên Telegram</button>
+            <button class="btn btn-secondary" onclick="downloadBackupNow()" style="padding:8px 16px; font-size:0.82rem;">📥 Tải Backup Về Máy (.zip)</button>
+          </div>
+          
+          <div style="border-top:1px dashed rgba(255,255,255,0.1); padding-top:14px;">
+            <label style="font-size:0.85rem; font-weight:700; color:#f59e0b; display:block; margin-bottom:6px;">⚠️ Khôi Phục Dữ Liệu Từ File Backup (.zip)</label>
+            <p style="font-size:0.78rem; color:var(--text-secondary); margin-bottom:10px; line-height:1.4;">
+              Chọn tệp sao lưu dạng tệp nén `.zip` đã tải về trước đó. Hệ thống sẽ tự động giải nén ghi đè cấu hình, nạp lại trạng thái người dùng, proxy và khởi chạy lại các bot.
+            </p>
+            <div style="display:flex; align-items:center; gap:12px;">
+              <input type="file" id="restore-file-input" accept=".zip" style="display:none;" onchange="handleRestoreUpload(this)">
+              <button class="btn btn-danger" onclick="document.getElementById('restore-file-input').click()" style="padding:8px 16px; font-size:0.82rem; background:rgba(239,68,68,0.15); color:#ef4444; border-color:rgba(239,68,68,0.35);">📤 Chọn File & Khôi Phục Ngay</button>
+              <span id="restore-file-name" style="font-size:0.8rem; color:var(--text-secondary); font-family:monospace;">Chưa chọn file</span>
+            </div>
+          </div>
         </div>
       </div>
     </div>
