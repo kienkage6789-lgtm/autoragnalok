@@ -75,10 +75,23 @@ class ProxyPool {
   }
 
   // Bin-packing: fill cheapest slots first, then fill each proxy fully before opening next
-  assignBot(line_uid) {
+  assignBot(line_uid, preferredProxyId) {
     if (this._assignments[line_uid]) return this._assignments[line_uid];
     const max = this._settings.maxBotsPerProxy || 10;
     const counts = this._getCounts();
+
+    // Check preferred proxy first
+    if (preferredProxyId) {
+      if (preferredProxyId === 'direct') {
+        this._assignments[line_uid] = 'direct';
+        return 'direct';
+      }
+      const found = this._proxies.find(p => p.id === preferredProxyId && p.active && p.url);
+      if (found) {
+        this._assignments[line_uid] = preferredProxyId;
+        return preferredProxyId;
+      }
+    }
 
     // 1. Direct connection (free) — fill first
     if (this._settings.useDirectConnection && (counts['direct'] || 0) < max) {
@@ -108,6 +121,42 @@ class ProxyPool {
     return 'direct';
   }
 
+  forceAssignBot(line_uid, proxyId) {
+    if (proxyId === 'direct') {
+      this._assignments[line_uid] = 'direct';
+    } else if (proxyId === 'auto') {
+      delete this._assignments[line_uid];
+      this.assignBot(line_uid);
+    } else {
+      const found = this._proxies.find(p => p.id === proxyId && p.active && p.url);
+      if (found) {
+        this._assignments[line_uid] = proxyId;
+      } else {
+        delete this._assignments[line_uid];
+        this.assignBot(line_uid);
+      }
+    }
+    return this._assignments[line_uid];
+  }
+
+  failoverAssignment(line_uid, failedProxyId) {
+    if (failedProxyId && failedProxyId !== 'direct') {
+      const p = this._proxies.find(x => x.id === failedProxyId);
+      if (p) {
+        p.errorCount = (p.errorCount || 0) + 1;
+        if (p.errorCount >= 3) {
+          p.active = false;
+          try { if (this._agents[failedProxyId]) this._agents[failedProxyId].destroy(); } catch (e) {}
+          delete this._agents[failedProxyId];
+          this._save();
+          console.log(`Proxy ${p.label} has been deactivated due to consecutive failures.`);
+        }
+      }
+    }
+    delete this._assignments[line_uid];
+    return this.assignBot(line_uid);
+  }
+
   releaseBot(line_uid) {
     delete this._assignments[line_uid];
   }
@@ -130,7 +179,25 @@ class ProxyPool {
 
   _reassignFrom(proxyId) {
     for (const uid of Object.keys(this._assignments)) {
-      if (this._assignments[uid] === proxyId) delete this._assignments[uid];
+      if (this._assignments[uid] === proxyId) {
+        delete this._assignments[uid];
+        const newAssigned = this.assignBot(uid);
+        
+        if (typeof botInstances !== 'undefined' && botInstances[uid]) {
+          botInstances[uid].proxyId = newAssigned;
+          
+          try {
+            const currentAccounts = loadAccounts();
+            const index = currentAccounts.findIndex(acc => acc.line_uid === uid);
+            if (index !== -1) {
+              currentAccounts[index].proxyId = newAssigned;
+              saveAccounts(currentAccounts);
+            }
+          } catch (e) {
+            console.error('Error saving accounts during proxy reassignment:', e.message);
+          }
+        }
+      }
     }
   }
 
@@ -458,7 +525,10 @@ class BotInstance {
     this.combatStatsHistory = [];
     this.startTime = null;
 
-    proxyPool.assignBot(this.line_uid);
+    this.proxyId = account.proxyId || null;
+    const assigned = proxyPool.assignBot(this.line_uid, this.proxyId);
+    this.proxyId = assigned;
+    this.consecutiveErrors = 0;
     this.addLog('SYSTEM', `Khởi tạo bot cho tài khoản: ${this.name}`);
   }
 
@@ -585,10 +655,32 @@ class BotInstance {
       this.isPolling = true;
       try {
         await this.pollGame();
+        this.consecutiveErrors = 0;
       } catch (err) {
         console.error(`Poll error for ${this.name}:`, err);
+        this.consecutiveErrors = (this.consecutiveErrors || 0) + 1;
         this.error = err.message;
-        this.addLog('ERROR', `Lỗi kết nối: ${err.message}`);
+        this.addLog('ERROR', `Lỗi kết nối: ${err.message} (Lần ${this.consecutiveErrors}/3)`);
+
+        if (this.consecutiveErrors >= 3) {
+          const oldProxyId = this.proxyId;
+          const newAssigned = proxyPool.failoverAssignment(this.line_uid, oldProxyId);
+          if (newAssigned !== oldProxyId) {
+            this.proxyId = newAssigned;
+            this.consecutiveErrors = 0;
+            
+            // Save updated proxyId to accounts.json
+            const currentAccounts = loadAccounts();
+            const index = currentAccounts.findIndex(acc => acc.line_uid === this.line_uid);
+            if (index !== -1) {
+              currentAccounts[index].proxyId = newAssigned;
+              saveAccounts(currentAccounts);
+            }
+            
+            const newProxyInfo = proxyPool.getBotProxyInfo(this.line_uid);
+            this.addLog('SYSTEM', `🔄 Proxy cũ gặp sự cố liên tiếp. Đã tự động đổi sang cấu hình IP mới: ${newProxyInfo.label}`);
+          }
+        }
       } finally {
         this.isPolling = false;
         // Schedule next poll staggering
@@ -1686,6 +1778,58 @@ app.delete('/api/admin/proxies/:id', requireAuth, (req, res) => {
   res.json({ success: true });
 });
 
+app.post('/api/admin/proxies/:id/test', requireAuth, async (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Chỉ Admin mới có quyền truy cập' });
+  const { id } = req.params;
+  
+  let url = null;
+  if (id === 'direct') {
+    url = 'direct';
+  } else {
+    const p = proxyPool._proxies.find(x => x.id === id);
+    if (!p) return res.status(404).json({ error: 'Không tìm thấy proxy' });
+    url = p.url;
+  }
+  
+  try {
+    const start = Date.now();
+    let dispatcher;
+    if (url === 'direct') {
+      dispatcher = proxyPool._directAgent;
+    } else {
+      dispatcher = proxyPool._createAgent(url);
+    }
+    
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 6000); // 6s timeout
+    
+    try {
+      const response = await fetch('https://ragnalok.online/human/index.php', {
+        method: 'GET',
+        headers: {
+          'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        },
+        dispatcher,
+        signal: controller.signal
+      });
+      
+      const latency = Date.now() - start;
+      if (response.ok) {
+        res.json({ success: true, latency });
+      } else {
+        res.json({ success: false, error: `HTTP Error ${response.status}`, latency });
+      }
+    } finally {
+      clearTimeout(timeout);
+      if (url !== 'direct') {
+        try { dispatcher.destroy(); } catch (e) {}
+      }
+    }
+  } catch (err) {
+    res.json({ success: false, error: err.message });
+  }
+});
+
 // ==================== AUTO ADD ACCOUNT BY PHPSESSID / GOOGLE LOGIN ====================
 
 app.all('/api/add-by-phpsessid', requireAuth, async (req, res) => {
@@ -1775,12 +1919,13 @@ app.all('/api/add-by-phpsessid', requireAuth, async (req, res) => {
       userId: req.user.id
     };
 
+    const bot = new BotInstance(newAcc);
+    botInstances[line_uid] = bot;
+    newAcc.proxyId = bot.proxyId;
+
     const currentAccounts = loadAccounts();
     currentAccounts.push(newAcc);
     saveAccounts(currentAccounts);
-
-    const bot = new BotInstance(newAcc);
-    botInstances[line_uid] = bot;
     bot.start();
 
     if (req.method === 'GET') {
@@ -1863,12 +2008,13 @@ app.all('/api/auto-add-account', requireAuth, (req, res) => {
     userId: req.user.id
   };
 
+  const bot = new BotInstance(newAcc);
+  botInstances[line_uid] = bot;
+  newAcc.proxyId = bot.proxyId;
+
   const currentAccounts = loadAccounts();
   currentAccounts.push(newAcc);
   saveAccounts(currentAccounts);
-
-  const bot = new BotInstance(newAcc);
-  botInstances[line_uid] = bot;
   bot.start();
 
   if (req.method === 'GET') {
@@ -1903,6 +2049,7 @@ app.get('/api/accounts', requireAuth, (req, res) => {
       error: bot.error,
       lastUpdate: bot.lastUpdate,
       settings: bot.settings,
+      proxyId: bot.proxyId,
       proxyInfo: req.user.role === 'admin' ? proxyPool.getBotProxyInfo(bot.line_uid) : null,
       combatRates: bot.getCombatRates ? bot.getCombatRates() : { killsPerMin: 0, goldPerMin: 0, expPerMin: 0 },
       spots: bot.spots || null,
@@ -2011,7 +2158,7 @@ app.put('/api/accounts/:line_uid', requireAuth, async (req, res) => {
   const bot = botInstances[line_uid];
   if (!checkAccountOwnership(req, res, bot)) return;
 
-  const { session_token, name, ...settings } = req.body;
+  const { session_token, name, proxyId, ...settings } = req.body;
 
   try {
     if (session_token && session_token !== bot.session_token) {
@@ -2043,6 +2190,11 @@ app.put('/api/accounts/:line_uid', requireAuth, async (req, res) => {
       bot.name = name;
     }
 
+    if (proxyId !== undefined && req.user.role === 'admin') {
+      const assigned = proxyPool.forceAssignBot(bot.line_uid, proxyId);
+      bot.proxyId = assigned;
+    }
+
     if (Object.keys(settings).length > 0) {
       if (settings.targetMap !== undefined) {
         const targetMapNum = Number(settings.targetMap);
@@ -2060,10 +2212,11 @@ app.put('/api/accounts/:line_uid', requireAuth, async (req, res) => {
       currentAccounts[index].session_token = bot.session_token;
       currentAccounts[index].name = bot.name;
       currentAccounts[index].settings = bot.settings;
+      currentAccounts[index].proxyId = bot.proxyId;
       saveAccounts(currentAccounts);
     }
 
-    res.json({ success: true, settings: bot.settings, session_token: bot.session_token, name: bot.name });
+    res.json({ success: true, settings: bot.settings, session_token: bot.session_token, name: bot.name, proxyId: bot.proxyId });
   } catch (err) {
     res.status(400).json({ error: `Không thể kết nối đến máy chủ game: ${err.message}` });
   }

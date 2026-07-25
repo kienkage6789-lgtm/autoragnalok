@@ -112,6 +112,15 @@ Chúng ta đã xây dựng thành công một hệ thống **Headless Bot Manage
 *   **API Bật/tắt kỹ năng**: Xây dựng cơ chế gọi API `POST /api/accounts/:line_uid/action` gửi lệnh `skill_toggle` kèm `skill_id` tới game server `xhrpg_upgrade.php` để lưu trạng thái trực tuyến.
 *   **Tối ưu thiết kế nhỏ gọn (Compact UI)**: Giảm kích thước vùng đệm, kích thước icon, font chữ và các nút bấm của lưới kỹ năng đi 15%, thiết lập chiều cao giới hạn (`max-height: 220px`) kèm thanh cuộn mượt mà và tự động co giãn về 1 cột trên giao diện mobile để đảm bảo cân đối tuyệt đối cho bảng điều khiển.
 
+### R. Cải tiến Toàn diện Hệ thống Proxy Pool (2026-07-25)
+*   **IP Persistence (Nhất quán IP)**: Lưu trường `proxyId` của bot trực tiếp vào file cấu hình `accounts.json` thay vì chỉ lưu trong RAM. Điều này đảm bảo bot giữ nguyên địa chỉ IP của mình khi khởi động lại server.
+*   **Cơ chế Failover & Auto Re-route**: Tự động phát hiện khi bot gặp lỗi kết nối liên tiếp 3 lần (khoảng 6-10 giây do khoảng cách gửi request 2 giây). Khi đó, hệ thống sẽ tự động gán bot sang một proxy khỏe mạnh khác (hoặc kết nối trực tiếp), đồng thời cập nhật file cấu hình và ghi log thông báo. 
+    *   *Cơ chế hoạt động:* 
+        *   Nếu tắt/xóa trực tiếp proxy trên giao diện Web Admin: Re-assignment sẽ diễn ra **ngay lập tức** cho các bot đang chạy trên proxy đó.
+        *   Nếu dịch vụ proxy bị die vật lý (tắt proxy từ máy): Bot cần trải qua 3 lần lỗi kết nối liên tiếp (tốn khoảng 6-10 giây) để phát hiện trạng thái lỗi của proxy và tiến hành chuyển vùng tự động.
+*   **Proxy Connection Tester**: Xây dựng API và nút "⚡ Test" trên giao diện Admin quản lý proxy để Admin có thể kiểm tra độ trễ (latency) và trạng thái sống/chết của từng proxy kết nối tới game server.
+*   **Manual Proxy Assignment (Gán Proxy Thủ công)**: Cho phép Admin chọn proxy mong muốn cho từng bot thông qua dropdown lựa chọn tại tab Cơ Bản (chỉ hiển thị với Admin).
+
 ---
 
 ## 🚀 2. Các hạng mục CHƯA HOÀN THÀNH (Roadmap / Future Upgrades)

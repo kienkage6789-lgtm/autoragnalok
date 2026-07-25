@@ -107,8 +107,9 @@ Dưới đây là danh sách các API và Endpoint nội bộ của Server Bot M
     *   **Bảo mật**: Trường `proxyInfo` chỉ được trả về nếu người dùng đăng nhập có vai trò `admin`.
     *   **Thống kê hiệu suất**: Trả về trường `combatRates` chứa các chỉ số `{ killsPerMin, goldPerMin, expPerMin }` được tính toán thời gian thực theo cơ chế Sliding Window (cửa sổ trượt 5 phút).
 *   **API Cập nhật Cấu hình**: `PUT /api/accounts/:line_uid`
-    *   **Tham số**: `{ settings: { targetMap, ... } }`
-    *   **Cơ chế xác thực**: Xác thực cấp độ yêu cầu của bản đồ đích. Trả về mã lỗi HTTP 400 nếu cấp độ của nhân vật (`bot.player.lv`) nhỏ hơn yêu cầu tối thiểu của bản đồ đó.
+    *   **Tham số**: `{ settings: { targetMap, ... }, proxyId }`
+    *   **Cấu hình Proxy (Chỉ Admin)**: Hỗ trợ trường `proxyId` (`'auto'`, `'direct'`, hoặc ID proxy cụ thể) để thay đổi proxy gán cho bot và cập nhật cấu hình tài khoản.
+    *   **Cơ chế xác thực bản đồ**: Xác thực cấp độ yêu cầu của bản đồ đích. Trả về mã lỗi HTTP 400 nếu cấp độ của nhân vật (`bot.player.lv`) nhỏ hơn yêu cầu tối thiểu của bản đồ đó.
 *   **API Kích hoạt Hành động**: `POST /api/accounts/:line_uid/action`
     *   **Tham số**: 
         *   Dịch chuyển bản đồ: `{ action: 'warp', param: target_map_id }` (Xác thực cấp độ tương ứng).
@@ -118,6 +119,8 @@ Dưới đây là danh sách các API và Endpoint nội bộ của Server Bot M
     *   **Cơ chế**: Backend tự động phân tích cú pháp nếu `url` là chuỗi dạng thô (không bắt đầu bằng http/socks):
         *   `IP:PORT:USER:PASS` -> Tự động chuyển đổi thành `http://USER:PASS@IP:PORT` và tự sinh nhãn (label) `IP:PORT` an toàn (tránh lộ thông tin tài khoản/mật khẩu).
         *   `IP:PORT` -> Tự động chuyển đổi thành `http://IP:PORT` và tự sinh nhãn `IP:PORT`.
+*   **API Kiểm tra Kết nối Proxy**: `POST /api/admin/proxies/:id/test` (Chỉ dành cho Admin)
+    *   **Mô tả**: Ping thử qua proxy (hoặc direct) tới game server `https://ragnalok.online/human/index.php`. Trả về trạng thái hoạt động `{ success: true, latency }` hoặc `{ success: false, error }`.
 
 ---
 

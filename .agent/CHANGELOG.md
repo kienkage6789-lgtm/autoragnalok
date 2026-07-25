@@ -2,6 +2,25 @@
 
 > Changelog of actual changes implemented.
 
+## 2026-07-25 - Cải tiến Toàn diện Hệ thống Proxy Pool
+- File đã đổi: `server.js` (sửa), `public/app.js` (sửa).
+- Đã làm:
+  - **Nhất quán IP (IP Persistence)**:
+    * Lưu trữ trường `proxyId` trực tiếp vào file `accounts.json` của mỗi tài khoản game.
+    * Khi khởi chạy server hoặc bot khởi động, hệ thống sẽ ưu tiên dùng `proxyId` đã lưu để kết nối, đảm bảo IP nhất quán tuyệt đối.
+  - **Tự động chuyển vùng (Failover & Auto Re-route)**:
+    * Thiết lập bộ đếm lỗi kết nối `consecutiveErrors` trong poller loop.
+    * Nếu xảy ra lỗi kết nối liên tiếp 3 lần, hệ thống tự động gọi hàm `failoverAssignment()` để đổi bot sang proxy dự phòng khỏe mạnh khác, hủy agent cũ, đồng thời lưu cấu hình mới và ghi log thông báo. Nếu proxy bị lỗi quá 3 lần sẽ tự động chuyển sang trạng thái tạm dừng (`active = false`).
+    * Sửa lỗi khi tắt (deactivate) hoặc xóa (delete) proxy từ Admin Panel: Cập nhật hàm `_reassignFrom` để kích hoạt việc tự động gán lại proxy mới ngay lập tức cho các bot bị ảnh hưởng, cập nhật biến `bot.proxyId` trong RAM và tự động lưu cấu hình mới vào file `accounts.json` (trước đó chỉ xóa trong RAM `_assignments` dẫn đến bot vẫn ghi nhớ và cố kết nối qua proxy đã bị tắt).
+  - **Công cụ đo đạc kết nối (Proxy Connection Tester)**:
+    * Xây dựng route `POST /api/admin/proxies/:id/test` sử dụng dispatcher của proxy tương ứng để ping thử tới game server và trả về độ trễ thời gian thực.
+    * Thêm nút "⚡ Test" bên cạnh mỗi proxy trong danh sách quản trị Admin để quản trị viên kiểm tra nhanh độ ổn định.
+  - **Gán Proxy thủ công**:
+    * Cho phép thay đổi gán proxy của từng bot qua API `PUT /api/accounts/:line_uid` đối với tài khoản Admin.
+    * Thêm dropdown Cấu hình Proxy dưới tab "Cơ Bản" trên card bot (chỉ hiển thị khi vai trò là Admin).
+
+---
+
 ## 2026-07-25 - Thêm Tab hiển thị Kỹ năng sở hữu và Bật/Tắt Tự động sử dụng (Auto Use Toggle)
 - File đã đổi: `server.js` (sửa), `public/app.js` (sửa), `public/app.css` (sửa).
 - Đã làm:

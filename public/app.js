@@ -81,6 +81,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // State
   let currentUser = null;
+  let adminProxiesList = [];
   const activeTabs = {}; // line_uid -> tab_id
 
   function formatRemainingTime(expiresAt) {
@@ -797,6 +798,16 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
           </div>
 
+          <div class="settings-group" id="admin-proxy-ctrl-${acc.line_uid}" style="display: none; border-top: 1px dashed rgba(255,255,255,0.05); padding-top: 10px; margin-top: 10px;">
+            <div class="input-control" style="grid-column: span 2;">
+              <label for="sel-proxy-${acc.line_uid}">🌐 Cấu hình Proxy (Chỉ Admin)</label>
+              <select id="sel-proxy-${acc.line_uid}" onchange="changeBotProxy('${acc.line_uid}', this.value)" style="width: 100%; background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; padding: 4px 6px; font-family: inherit; font-size: 0.85rem; outline: none; margin-top:2px;">
+                <option value="auto">🔄 Tự động gán (Auto)</option>
+                <option value="direct">🖥️ Kết nối trực tiếp (Direct)</option>
+              </select>
+            </div>
+          </div>
+
           <div style="font-size:0.85rem; font-weight:700; color:var(--text-secondary); margin-top:5px;">Chỉ số chính (Stat Points còn lại: <span id="pts-val-${acc.line_uid}">0</span>)</div>
           <div class="stats-list" id="stats-list-${acc.line_uid}">
             <!-- Stat rows rendered dynamically -->
@@ -1071,6 +1082,32 @@ document.addEventListener('DOMContentLoaded', () => {
         proxyBadge.style.display    = '';
       } else {
         proxyBadge.style.display    = 'none';
+      }
+    }
+
+    // Admin proxy configuration sync
+    const proxyCtrl = document.getElementById(`admin-proxy-ctrl-${acc.line_uid}`);
+    if (proxyCtrl) {
+      if (currentUser && currentUser.role === 'admin') {
+        proxyCtrl.style.display = 'block';
+        const selProxy = document.getElementById(`sel-proxy-${acc.line_uid}`);
+        if (selProxy) {
+          const currentVal = acc.proxyId || 'auto';
+          let optionsHtml = `
+            <option value="auto" ${currentVal === 'auto' ? 'selected' : ''}>🔄 Tự động gán (Auto)</option>
+            <option value="direct" ${currentVal === 'direct' ? 'selected' : ''}>🖥️ Kết nối trực tiếp (Direct)</option>
+          `;
+          adminProxiesList.forEach(p => {
+            optionsHtml += `<option value="${p.id}" ${currentVal === p.id ? 'selected' : ''}>🌐 ${p.label}</option>`;
+          });
+          if (selProxy.getAttribute('data-loaded-count') !== String(adminProxiesList.length) || selProxy.value !== currentVal) {
+            selProxy.innerHTML = optionsHtml;
+            selProxy.setAttribute('data-loaded-count', String(adminProxiesList.length));
+            selProxy.value = currentVal;
+          }
+        }
+      } else {
+        proxyCtrl.style.display = 'none';
       }
     }
 
@@ -1452,6 +1489,26 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   };
 
+  // Change bot proxy assignment (Admin only)
+  window.changeBotProxy = async function(uid, value) {
+    try {
+      const res = await fetch(`/api/accounts/${uid}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ proxyId: value })
+      });
+      if (!res.ok) {
+        const errData = await res.json();
+        alert(`🔴 Lỗi: ${errData.error || 'Không thể cập nhật Proxy'}`);
+        return;
+      }
+      fetchAccounts();
+    } catch (e) {
+      console.error('Error changing bot proxy:', e);
+      alert('Không thể kết nối đến máy chủ.');
+    }
+  };
+
   // Start or Stop bot loop
   window.toggleBotLoop = async function(uid) {
     const chk = document.getElementById(`chk-bot-loop-${uid}`);
@@ -1516,12 +1573,41 @@ document.addEventListener('DOMContentLoaded', () => {
       const res = await fetch('/api/admin/proxies');
       if (!res.ok) return;
       const data = await res.json();
+      adminProxiesList = data.list || [];
       renderProxySettings(data.settings);
       renderProxyTable(data.list);
     } catch (e) {
       console.error('Error fetching proxies:', e);
     }
   }
+
+  window.testAdminProxy = async function(id, btn) {
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = '⏳';
+      btn.style.opacity = '0.7';
+    }
+    try {
+      const res = await fetch(`/api/admin/proxies/${id}/test`, {
+        method: 'POST'
+      });
+      const data = await res.json();
+      if (data.success) {
+        alert(`🟢 Kết nối thành công!\nĐộ trễ (Latency): ${data.latency}ms`);
+      } else {
+        alert(`🔴 Kết nối thất bại!\nLỗi: ${data.error || 'Timeout hoặc không khả dụng'}`);
+      }
+    } catch (e) {
+      console.error('Error testing proxy:', e);
+      alert('Không thể kết nối đến máy chủ.');
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = 'Test';
+        btn.style.opacity = '1';
+      }
+    }
+  };
 
   function renderProxySettings(settings) {
     const chkDirect = document.getElementById('proxy-use-direct');
@@ -1562,12 +1648,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 : '<span style="color:#ef4444; font-size:0.78rem;">🔴 Tắt</span>'}
           </td>
           <td style="padding:7px; text-align:right;">
-            ${isDirect ? '' : `
-              <div style="display:flex; justify-content:flex-end; gap:4px;">
+            <div style="display:flex; justify-content:flex-end; gap:4px;">
+              <button class="btn-mini" style="width:auto; padding:2px 8px; background:rgba(99,102,241,0.15); color:#a5b4fc; border-color:rgba(99,102,241,0.3);" onclick="testAdminProxy('${p.id}', this)">⚡ Test</button>
+              ${isDirect ? '' : `
                 <button class="btn-mini" style="width:auto; padding:2px 8px; background:${p.active ? 'rgba(239,68,68,0.2)' : 'rgba(16,185,129,0.2)'}; color:${p.active ? '#ef4444' : '#34d399'}; border-color:${p.active ? 'rgba(239,68,68,0.4)' : 'rgba(16,185,129,0.4)'};" onclick="toggleAdminProxy('${p.id}', ${!p.active})">${p.active ? 'Tắt' : 'Bật'}</button>
                 <button class="btn-mini" style="width:auto; padding:2px 8px; background:rgba(239,68,68,0.2); color:#ef4444; border-color:rgba(239,68,68,0.4);" onclick="deleteAdminProxy('${p.id}', '${p.label}')">Xóa</button>
-              </div>
-            `}
+              `}
+            </div>
           </td>
         </tr>
       `;
@@ -1643,13 +1730,26 @@ document.addEventListener('DOMContentLoaded', () => {
   checkAuth().then(authed => {
     if (authed) {
       fetchAccounts();
+      if (currentUser && currentUser.role === 'admin') {
+        fetchAdminProxies();
+      }
     }
   });
 
   // Periodic account polling & live Admin table tick
+  let adminProxyTick = 0;
   setInterval(() => {
     if (currentUser) {
       fetchAccounts();
+      
+      // Fetch admin proxies list every 5 seconds for cards selector mapping
+      if (currentUser.role === 'admin') {
+        adminProxyTick++;
+        if (adminProxyTick >= 5) {
+          adminProxyTick = 0;
+          fetchAdminProxies();
+        }
+      }
     }
     if (adminUsersModal && adminUsersModal.classList.contains('open')) {
       const proxyTabVisible = document.getElementById('admin-tab-proxies') &&

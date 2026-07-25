@@ -261,6 +261,18 @@
   - [x] Frontend-side: Tối ưu hóa UI: giới hạn chiều cao tối đa của lưới kỹ năng (`max-height: 220px`), hỗ trợ thanh cuộn dọc (scroll) thẩm mỹ đồng bộ và tự động chuyển đổi sang layout 1 cột trên màn hình điện thoại/màn hình nhỏ để cân đối tổng thể Card.
 - Status: done
 
+### [x] T29 - Cải tiến Toàn diện Hệ thống Proxy Pool
+- Description: Xây dựng cơ chế lưu IP Persistent, tự động chuyển vùng khi lỗi (failover), bổ sung API Connection Tester & tính năng gán Proxy thủ công cho từng Bot.
+- Files related: `server.js`, `public/app.js`
+- Acceptance criteria:
+  - [x] Backend-side: Lưu trữ trường `proxyId` của Bot trực tiếp vào `accounts.json`. Khi khởi động lại server, bot sử dụng đúng proxy được lưu này.
+  - [x] Backend-side: Implement cơ chế đếm lỗi mạng liên tiếp `consecutiveErrors` trong poller loop. Nếu đạt 3 lần, tự động kích hoạt `proxyPool.failoverAssignment()`, đánh dấu proxy cũ là inactive/error, gán sang proxy mới (hoặc direct), cập nhật file cấu hình và thông báo lỗi.
+  - [x] Backend-side: Tạo API `POST /api/admin/proxies/:id/test` để ping kiểm tra độ trễ kết nối tới game server.
+  - [x] Backend-side: Cho phép cập nhật `proxyId` qua API `PUT /api/accounts/:line_uid` (chỉ dành cho Admin).
+  - [x] Frontend-side: Thêm nút "⚡ Test" bên cạnh mỗi proxy trong bảng quản trị Proxy Admin để đo độ trễ và kiểm tra độ ổn định trực tuyến.
+  - [x] Frontend-side: Thêm dropdown chọn Proxy thủ công trên Card nhân vật tại tab "Cơ Bản" (chỉ hiển thị với vai trò Admin), đồng bộ hóa trực tiếp với máy chủ.
+- Status: done
+
 
 
 
