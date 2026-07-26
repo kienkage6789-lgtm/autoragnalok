@@ -374,4 +374,16 @@
   - [x] Test: `node -c server.js`, `node -c public/app.js`, `npm test` -> PASS 100%.
 - Status: done
 
+### [x] T39 - Fix Auth Switch DOM Persistence & Mobile Layout Overflow
+- Description: Fix required hard refresh (Ctrl+F5) when switching Admin/User accounts by resetting global DOM state on logout/login, and fix mobile UI overflow in user bot grid and header accordion.
+- Files related: `public/app.js`, `public/app.css`
+- Acceptance criteria:
+  - [x] Implement `resetAppState()` in `app.js` to clear `#accounts-grid`, reset `activeTabs`, `expandedUserGroups`, `isUserGroupInitialized`, `lastFetchedAccounts`.
+  - [x] Clear DOM state when switching display mode (Admin Accordion <-> User Grid) in `renderAccounts()`.
+  - [x] Fix mobile CSS: `@media (max-width: 640px)` for `.user-bot-grid { grid-template-columns: 1fr; padding: 8px; }`.
+  - [x] Fix `.user-group-header` & `.user-batch-proxy-box` layout on mobile (< 640px) to prevent horizontal scrolling.
+  - [x] Test: `node -c public/app.js`, `npm test` -> PASS 100%.
+- Status: done
+
+
 

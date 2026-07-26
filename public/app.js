@@ -172,6 +172,19 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  function resetAppState() {
+    currentUser = null;
+    adminProxiesList = [];
+    Object.keys(activeTabs).forEach(k => delete activeTabs[k]);
+    expandedUserGroups.clear();
+    isUserGroupInitialized = false;
+    lastFetchedAccounts = [];
+    if (accountsGrid) {
+      accountsGrid.innerHTML = '';
+      delete accountsGrid.dataset.renderMode;
+    }
+  }
+
   // Check Auth State
   async function checkAuth() {
     try {
@@ -189,7 +202,7 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (e) {}
 
     // Unauthenticated
-    currentUser = null;
+    resetAppState();
     loginScreen.style.display = 'flex';
     userHeaderActions.style.display = 'none';
     if (appMain) appMain.style.display = 'none';
@@ -216,6 +229,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const data = await response.json();
       if (response.ok && data.success) {
         loginForm.reset();
+        resetAppState();
         const authed = await checkAuth();
         if (authed) fetchAccounts();
       } else {
@@ -234,6 +248,7 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       await fetch('/api/auth/logout', { method: 'POST' });
     } catch (e) {}
+    resetAppState();
     checkAuth();
   });
 
@@ -650,6 +665,12 @@ document.addEventListener('DOMContentLoaded', () => {
     if (currentUser && currentUser.role === 'admin' && adminProxiesList.length === 0) {
       fetchAdminProxies();
     }
+
+    const targetMode = (currentUser && currentUser.role === 'admin') ? 'admin' : 'user';
+    if (accountsGrid.dataset.renderMode && accountsGrid.dataset.renderMode !== targetMode) {
+      accountsGrid.innerHTML = '';
+    }
+    accountsGrid.dataset.renderMode = targetMode;
 
     if (currentUser && currentUser.role === 'admin') {
       // Group accounts by userId

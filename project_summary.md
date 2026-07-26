@@ -146,6 +146,13 @@ Chúng ta đã xây dựng thành công một hệ thống **Headless Bot Manage
 *   **Nút `🔍 Test IP Public Tất Cả Luồng` trong Admin Proxy Modal**: Cho phép kiểm tra toàn bộ luồng Proxy trong hệ thống chỉ với 1 click.
 *   **Tài liệu Kế hoạch Kiểm tra Proxy**: Lưu trữ tại [proxy_verification_plan.md](file:///C:/Users/Admin/.gemini/antigravity-cli/brain/343ac94d-c203-4624-bcb8-112b1fcfe816/proxy_verification_plan.md).
 
+### W. Sửa lỗi Dọn dẹp DOM khi Chuyển Tài Khoản & Tối ưu Responsive Mobile (2026-07-26)
+*   **Hàm dọn dẹp bộ nhớ `resetAppState()`**: Tự động dọn sạch DOM `#accounts-grid` (`accountsGrid.innerHTML = ''`) và reset các biến trạng thái JS toàn cục (`activeTabs`, `expandedUserGroups`, `isUserGroupInitialized`, `lastFetchedAccounts`) khi đăng xuất, đăng nhập hoặc thay đổi phiên làm việc.
+*   **Tự động chuyển đổi Render Mode**: Bổ sung kiểm tra `dataset.renderMode` trong `renderAccounts` để tự động làm sạch DOM cũ khi chuyển đổi giữa chế độ Admin Accordion và User Grid, khắc phục 100% việc phải nhấn `Ctrl + F5` cứng.
+*   **Tối ưu Responsive Layout Mobile**: 
+    *   Bổ sung CSS `@media (max-width: 640px)` cho `.user-bot-grid { grid-template-columns: 1fr; padding: 8px; }` loại bỏ chiều rộng tối thiểu 360px cũ, giúp các thẻ bot co giãn vừa vặn màn hình điện thoại.
+    *   Cấu hình `.user-group-header` và `.user-batch-proxy-box` phân hàng linh hoạt, thêm giới hạn `max-width: 100%` tránh tràn lề phải.
+
 ---
 
 ## 🚀 2. Các hạng mục CHƯA HOÀN THÀNH (Roadmap / Future Upgrades)

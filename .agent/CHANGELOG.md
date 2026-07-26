@@ -437,7 +437,18 @@
   - Loại bỏ 3 tab "Kỹ Năng", "Phi Thuyền", "Companion" khỏi thanh chuyển tab của thẻ tài khoản theo yêu cầu tối giản UI.
   - Loại bỏ các tab-pane tương ứng và dọn dẹp các hàm render UI không còn sử dụng (`renderSkillsList`, `renderAirshipPanel`, `renderFollowersList`).
   - Đảm bảo tab mặc định tự chuyển về "Cơ Bản" hoặc "Nhật Ký".
-- Đã test bằng: `npm test` -> PASS.
+## 2026-07-26 - Sửa lỗi Chuyển đổi Tài khoản (Auth Switch) & Responsive Mobile (T39)
+- File đã đổi: `public/app.js` (sửa), `public/app.css` (sửa).
+- Đã làm:
+  - **Sửa lỗi Ctrl+F5 khi chuyển tài khoản**:
+    - Viết hàm `resetAppState()` làm sạch bộ nhớ DOM `#accounts-grid` (`accountsGrid.innerHTML = ''`) và reset các biến trạng thái toàn cục (`activeTabs`, `expandedUserGroups`, `isUserGroupInitialized`, `lastFetchedAccounts`).
+    - Gắn `resetAppState()` vào hàm `checkAuth()`, sự kiện đăng nhập `loginForm` và sự kiện đăng xuất `btnLogout`.
+    - Bổ sung bộ kiểm tra `dataset.renderMode` trong `renderAccounts()` để tự động dọn sạch DOM cũ khi chuyển đổi chế độ hiển thị giữa Admin (Accordion) và User (Grid).
+  - **Tối ưu Responsive Giao diện Mobile**:
+    - Cấu hình lại CSS `@media (max-width: 640px)` cho `.user-bot-grid { grid-template-columns: 1fr; padding: 8px; }` giúp card bot chiếm vừa 100% màn hình thay vì bị ép `minmax(360px)`.
+    - Điều chỉnh khối `.user-group-header` và `.user-group-actions` tự động phân hàng gọn gàng trên màn hình nhỏ.
+    - Giới hạn `max-width: 100%` và `min-width: 0` cho ô select proxy `.user-batch-proxy-select` tránh tràn lề phải.
+- Đã test bằng: `node -c public/app.js`, `npm test` -> PASS 100%.
 
 ## 2026-07-17 - Full Implementation & Dashboard Launch
 - File đã đổi: `server.js` (tạo mới/sửa), `package.json` (tạo mới), `accounts.json` (tạo mới), `test.js` (tạo mới), `public/index.html` (tạo mới), `public/app.css` (tạo mới), `public/app.js` (tạo mới/sửa), `play.html` (tạo mới), `xhrpg_canvas.js` (sửa).
