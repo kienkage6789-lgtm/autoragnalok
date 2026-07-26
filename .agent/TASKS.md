@@ -331,4 +331,47 @@
   - [x] Test: `npm test` và `node -c public/app.js` -> PASS.
 - Status: done
 
+### [x] T35 - Soften Stats & Rates UI Text Colors
+- Description: Tinh chỉnh màu sắc và giảm phông chữ các hàng chỉ số (Kills/m, Gold/m, EXP/m, Tài nguyên) từ màu trắng tinh chói mắt sang tông màu bạc dịu (Slate-300 #cbd5e1 / Slate-400 #94a3b8).
+- Files related: `public/app.css`
+- Acceptance criteria:
+  - [x] CSS: Chuyển màu chữ `.stat-pill strong` và `.vital-num` từ `var(--text-primary)` trắng tinh sang màu xám/bạc dịu `#cbd5e1` (Slate-300).
+  - [x] CSS: Giảm phông chữ `.combat-rates-strip` xuống `0.70rem` và `.resources-strip` xuống `0.68rem`.
+  - [x] CSS: Giảm độ mờ phông nền các khối strip xuống nhẹ nhàng hơn (rgba opacity 0.05 / 0.2).
+  - [x] Test: `npm test` -> PASS.
+- Status: done
+
+### [x] T36 - Admin User-Grouped Accordion & Batch Proxy Assignment
+- Description: Tái thiết kế giao diện Admin gom nhóm bot theo từng User (Accordion view), hỗ trợ mở/đóng danh sách bot card của user và tính năng đổi Proxy hàng loạt cho tất cả bot của user.
+- Files related: `server.js`, `public/app.css`, `public/app.js`
+- Acceptance criteria:
+  - [x] Backend: Thêm API `PUT /api/admin/users/:userId/proxy` thực hiện cập nhật proxy hàng loạt cho tất cả bot của user.
+  - [x] Backend: Bổ sung metadata `ownerUsername`, `ownerRole`, `ownerExpiresAt` vào response `GET /api/accounts`.
+  - [x] CSS: Bổ sung các class `.user-group-card`, `.user-group-header`, `.user-batch-proxy-box`, `.user-bot-grid` với thiết kế không gian tối mượt mà.
+  - [x] JS Frontend: Hiển thị các User Group Card khi role là admin, tính năng bấm click đóng/mở xổ bot card, lưu trạng thái expanded trong `expandedUserGroups`, dropdown gán Proxy hàng loạt 1-click.
+  - [x] Test: `node -c server.js`, `node -c public/app.js`, `npm test` -> PASS 100%.
+- Status: done
+
+### [x] T37 - Fix Admin UI 'Node cannot be found in the current page' DOM Bug
+- Description: Khắc phục lỗi DOM Node bị phá hủy liên tục do gán lại groupCard.innerHTML mỗi 1s trong renderAccounts.
+- Files related: `public/app.js`
+- Acceptance criteria:
+  - [x] Chỉ khởi tạo `groupCard.innerHTML` một lần duy nhất khi tạo mới phần tử `groupCard`.
+  - [x] Cập nhật các trường văn bản động (`user-bot-count`, `user-expiry`, proxy options) trực tiếp bằng DOM setter mà không ghi đè `innerHTML`.
+  - [x] Bảo toàn nguyên vẹn cây DOM của `user-bot-grid` và các bot card bên trong.
+  - [x] Test: `node -c public/app.js`, `npm test` -> PASS 100%.
+- Status: done
+
+### [x] T38 - Outbound Public IP Proxy Verification Tool
+- Description: Xây dựng kế hoạch và tích hợp API + nút kiểm tra Outbound IP thực tế cho từng bot và toàn bộ luồng Proxy trong Pool.
+- Files related: `server.js`, `public/app.js`, `public/index.html`, `proxy_verification_plan.md`
+- Acceptance criteria:
+  - [x] Backend: Xây dựng route `GET /api/accounts/:line_uid/proxy-check` gửi request qua Dispatcher của bot tới `api.ipify.org` lấy IP thực tế và đo latency.
+  - [x] Backend: Xây dựng route `GET /api/admin/proxies/verify-all` test đồng loạt tất cả luồng Direct & Proxy trong Pool.
+  - [x] Frontend: Thêm nút **`🔍 Test IP`** bên cạnh dropdown Proxy của từng bot card (tab Cơ Bản).
+  - [x] Frontend: Thêm nút **`🔍 Test IP Public Tất Cả Luồng`** vào Admin Proxy Pool Modal.
+  - [x] Lập tài liệu Kế hoạch kiểm tra Proxy tại `proxy_verification_plan.md`.
+  - [x] Test: `node -c server.js`, `node -c public/app.js`, `npm test` -> PASS 100%.
+- Status: done
+
 

@@ -2,6 +2,30 @@
 
 > Captured architectural decisions and trade-offs.
 
+## 2026-07-26 - Single-Pass DOM Initialization cho Accordion & Công cụ Outbound IP Proxy Verification
+
+- Bối cảnh:
+  1. Mỗi lần poll `fetchAccounts` 1s/lần, việc gán lại `groupCard.innerHTML` làm hủy toàn bộ DOM Node trong Admin UI, gây lỗi `Node cannot be found in the current page` khi người dùng thao tác.
+  2. Người dùng muốn có công cụ kiểm tra thực tế xem bot có thực sự gửi gói tin đi qua IP Proxy được gán hay không.
+- Quyết định:
+  1. **Single-Pass DOM Initialization**: Thẻ Accordion `groupCard` chỉ dựng HTML 1 lần duy nhất khi vừa khởi tạo (`if (!groupCard)`). Tất cả các lần poll refresh tiếp theo chỉ cập nhật textContent động, bảo toàn 100% cây DOM của `user-bot-grid` và các bot card bên trong.
+  2. **Outbound Public IP Verification**: Sử dụng `fetch('https://api.ipify.org?format=json', { dispatcher })` đi qua đúng `Dispatcher` của bot/proxy tương ứng để xác minh IP public thực tế đi ra ngoài internet, tránh bị phán đoán nhầm lẫn.
+- Lý do: Khắc phục triệt để lỗi mất Node trên trình duyệt, đồng thời cung cấp công cụ xác minh độ định tuyến IP minh bạch 100% cho Admin.
+
+---
+
+## 2026-07-26 - Giao diện Admin Phân Nhóm theo User & Đổi Proxy Hàng Loạt (User-Centric Accordion Dashboard)
+
+- Bối cảnh: Admin gặp khó khăn trong việc quản lý khi số lượng bot tăng nhiều (tất cả bot card hiển thị tràn màn hình), đồng thời việc đổi proxy phải thực hiện thủ công từng bot rườm rà.
+- Quyết định:
+  1. Thay đổi cấu trúc Dashboard chính của Admin thành dạng **User Grouped Accordion**: Gom nhóm các bot card theo từng tài khoản User sở hữu.
+  2. Mỗi User Group Card hiển thị thanh Header chứa thông tin User (Tên, Role, Hạn dùng, Số bot đang chạy) và nút mũi tên `▼` để đóng/mở xổ các bot card bên dưới.
+  3. Thêm bộ chọn dropdown **🌐 Đổi Proxy Hàng Loạt** ngay trên thanh Header của User. Chỉ với 1 lần đổi, API backend `PUT /api/admin/users/:userId/proxy` sẽ force assign và lưu vĩnh viễn proxy mới cho tất cả các bot của user đó cùng lúc.
+  4. Quản lý trạng thái mở rộng (`expandedUserGroups`) phía Client để chống giật/nảy thẻ khi poll dữ liệu định kỳ mỗi 1 giây.
+- Lý do: Tối ưu hóa trải nghiệm quản lý tài khoản cho Admin, giảm bớt thao tác rườm rà khi đổi proxy hàng loạt cho khách hàng.
+
+---
+
 ## 2026-07-16 - Tabbed Dashboard Card Architecture
 - Bối cảnh: Card giao diện của từng tài khoản ban đầu quá dài do chứa nhiều hệ thống (Stats, Gear, Maps, Logs) và cần tích hợp thêm hệ thống kỹ năng, mỏ khoáng, phi thuyền, đệ tử.
 - Các phương án đã xét:
@@ -152,6 +176,16 @@
 - Công thức cụ thể đã dùng (2026-07-25):
   - `hp_max_eff = floor((hp_max + max(0, (vit_eff-5)*2 - max(0,vit-5))) × (1 + 0.001 × rag_hp))`
   - `mp_max_calc = floor((50 + intel_eff × 5) × (1 + 0.001 × rag_mp))`
+
+## 2026-07-26 - Tinh chỉnh màu sắc phông chữ các hàng chỉ số chống chói mắt (Soft & Muted Text UI)
+
+- Bối cảnh: Người dùng phản hồi các con số trên giao diện Dashboard bị chói mắt do sử dụng font trắng tinh (`var(--text-primary)`) tương phản quá mạnh với nền đen/tím.
+- Quyết định:
+  1. Chuyển đổi màu sắc con số trong `.stat-pill strong` và `.vital-num` từ trắng sặc sỡ sang tông màu bạc/xám dịu mắt `#cbd5e1` (Slate-300) với `font-weight: 500/600`.
+  2. Đổi màu nhãn tên chỉ số `.stat-pill` sang `#94a3b8` (Slate-400).
+  3. Giảm kích thước phông chữ `.combat-rates-strip` (0.70rem) và `.resources-strip` (0.68rem).
+  4. Hạ độ mờ phông nền các khối strip (`rgba(99, 102, 241, 0.05)` và `rgba(0, 0, 0, 0.2)`) để tổng thể giao diện êm dịu, dễ chịu khi quan sát liên tục trong thời gian dài.
+- Lý do: Tăng trải nghiệm người dùng, chống mỏi mắt khi treo máy theo dõi nhiều bot.
 
 ## 2026-07-25 - Game API không có field mp_max — MP là giá trị tính toán thuần túy
 

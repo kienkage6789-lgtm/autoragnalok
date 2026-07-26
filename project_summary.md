@@ -129,6 +129,23 @@ Chúng ta đã xây dựng thành công một hệ thống **Headless Bot Manage
 *   **Khôi phục trực tuyến (Hot-Reload)**: Cho phép Admin tải file ZIP backup lên trực tiếp thông qua giao diện Web (`POST /api/admin/restore-upload`). Hệ thống tự động giải nén ghi đè, dừng hoạt động toàn bộ bot cũ, nạp lại dữ liệu người dùng/proxy/tài khoản và khởi chạy lại các bot có trạng thái chạy trước đó mà không cần restart server thủ công.
 *   **Tải bản sao lưu trực tiếp**: Nút bấm tải trực tiếp file zip sao lưu về máy tính cá nhân để lưu trữ ngoại tuyến.
 
+### T. Giao diện Admin Phân Nhóm theo User & Đổi Proxy Hàng Loạt (2026-07-26)
+*   **Giao diện Accordion Phân nhóm theo User**: Khi Admin đăng nhập, màn hình chính hiển thị các khối User Card gọn gàng chứa thông tin tên user, role, hạn dùng và số lượng bot đang chạy.
+*   **Mặc định Thu nhỏ tiết kiệm tài nguyên (Collapsed by Default)**: Tất cả các thẻ User Accordion mặc định thu nhỏ khi vừa mở trang, không render DOM các bot card bên trong, tiết kiệm 100% CPU/RAM cho máy chủ/trình duyệt. Bấm vào User Header để mở rộng danh sách bot card.
+*   **Đổi Proxy Hàng Loạt 1-Click**: Tích hợp dropdown trên mỗi User Card cho phép Admin thay đổi Proxy đồng loạt cho tất cả các bot của user đó qua API `PUT /api/admin/users/:userId/proxy`.
+*   **Phân quyền Nghiêm ngặt**: Giao diện nhóm User và các công cụ quản lý chỉ xuất hiện đối với tài khoản Admin. Người dùng thường (`role === 'user'`) chỉ nhìn thấy danh sách bot card của chính họ ở dạng lưới chuẩn.
+
+### U. Sửa lỗi Admin UI Phá hủy DOM Node (`Node cannot be found in the current page`) (2026-07-26)
+*   **Tối ưu khởi tạo Single-Pass**: Thay vì xóa và gán lại `groupCard.innerHTML` mỗi 1 giây trong hàm `renderAccounts`, mã nguồn chuyển sang khởi tạo HTML 1 lần duy nhất khi tạo thẻ `groupCard`.
+*   **Bảo toàn cây DOM**: Các lần poll refresh tiếp theo chỉ cập nhật textContent của các trường thông tin tĩnh mà không ghi đè `innerHTML`, giúp giữ nguyên vẹn cây DOM của `user-bot-grid` và các `card` bên trong. Thao tác đóng/mở Accordion, chọn Proxy, hay bấm các nút bấm không bị mất Node trên trình duyệt.
+
+### V. Tích hợp Công cụ Xác minh Outbound Public IP Proxy (2026-07-26)
+*   **Endpoint `/api/accounts/:line_uid/proxy-check`**: Gửi HTTP request qua đúng `Dispatcher` của bot tới IP echo service (`api.ipify.org`), trả về Public IP thực tế mà gói tin đi ra bên ngoài cùng độ trễ ms.
+*   **Endpoint `/api/admin/proxies/verify-all`**: Thực hiện test đồng loạt tất cả các luồng Direct Connection và Proxy HTTP/SOCKS5 trong Pool, đối chiếu IP public thực tế của từng luồng.
+*   **Nút `🔍 Test IP` trên Card Bot**: Cho phép Admin bấm kiểm tra tức thì IP public thực tế của bot đó trực tiếp tại tab Cơ Bản.
+*   **Nút `🔍 Test IP Public Tất Cả Luồng` trong Admin Proxy Modal**: Cho phép kiểm tra toàn bộ luồng Proxy trong hệ thống chỉ với 1 click.
+*   **Tài liệu Kế hoạch Kiểm tra Proxy**: Lưu trữ tại [proxy_verification_plan.md](file:///C:/Users/Admin/.gemini/antigravity-cli/brain/343ac94d-c203-4624-bcb8-112b1fcfe816/proxy_verification_plan.md).
+
 ---
 
 ## 🚀 2. Các hạng mục CHƯA HOÀN THÀNH (Roadmap / Future Upgrades)

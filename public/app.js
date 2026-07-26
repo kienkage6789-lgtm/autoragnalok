@@ -83,6 +83,46 @@ document.addEventListener('DOMContentLoaded', () => {
   let currentUser = null;
   let adminProxiesList = [];
   const activeTabs = {}; // line_uid -> tab_id
+  let expandedUserGroups = new Set();
+  let isUserGroupInitialized = false;
+  let lastFetchedAccounts = [];
+
+  window.toggleUserGroup = function(userId, event) {
+    if (event) event.stopPropagation();
+    const groupCard = document.getElementById(`user-group-card-${userId}`);
+    if (!groupCard) return;
+    if (expandedUserGroups.has(userId)) {
+      expandedUserGroups.delete(userId);
+      groupCard.classList.remove('expanded');
+    } else {
+      expandedUserGroups.add(userId);
+      groupCard.classList.add('expanded');
+      if (lastFetchedAccounts && lastFetchedAccounts.length > 0) {
+        renderAccounts(lastFetchedAccounts);
+      }
+    }
+  };
+
+  window.changeUserBatchProxy = async function(userId, username, proxyId) {
+    try {
+      const res = await fetch(`/api/admin/users/${userId}/proxy`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ proxyId })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        const proxyLabel = proxyId === 'direct' ? 'Direct Connection' : (proxyId === 'auto' ? 'Auto Rotation Pool' : (adminProxiesList.find(p => p.id === proxyId)?.label || proxyId));
+        alert(`✅ Đã gán Proxy [${proxyLabel}] thành công cho ${data.updatedCount} bot của user ${username}!`);
+        fetchAccounts();
+      } else {
+        alert(`🔴 Lỗi gán Proxy: ${data.error || 'Thất bại'}`);
+      }
+    } catch (e) {
+      console.error('Error changing batch proxy:', e);
+      alert('Không thể kết nối máy chủ');
+    }
+  };
 
   function formatRemainingTime(expiresAt) {
     if (!expiresAt) return '⏳ Vô hạn';
@@ -595,7 +635,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // Render accounts list
+  // Render accounts list (Grouped by User for Admin)
   function renderAccounts(accounts) {
     if (!Array.isArray(accounts) || accounts.length === 0) {
       noAccountsMsg.style.display = 'block';
@@ -603,38 +643,194 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
+    lastFetchedAccounts = accounts;
     noAccountsMsg.style.display = 'none';
-    accountsGrid.style.display = 'grid';
 
-    accounts.forEach(acc => {
-      // Set default tab if not set or invalid
-      if (!activeTabs[acc.line_uid] || !['core', 'logs'].includes(activeTabs[acc.line_uid])) {
-        activeTabs[acc.line_uid] = 'core';
-      }
-      
-      let card = document.getElementById(`card-${acc.line_uid}`);
-      if (!card) {
-        // Create new card skeleton
-        card = document.createElement('div');
-        card.id = `card-${acc.line_uid}`;
-        card.className = `account-card ${acc.status}`;
-        accountsGrid.appendChild(card);
-        buildCardSkeleton(card, acc);
-      }
-      
-      // Update values
-      updateCard(acc);
-    });
+    // Auto fetch proxies list if Admin and list empty
+    if (currentUser && currentUser.role === 'admin' && adminProxiesList.length === 0) {
+      fetchAdminProxies();
+    }
 
-    // Remove cards for deleted accounts
-    const cardElements = accountsGrid.querySelectorAll('.account-card');
-    cardElements.forEach(cardEl => {
-      const uid = cardEl.id.replace('card-', '');
-      if (!accounts.some(acc => acc.line_uid === uid)) {
-        cardEl.remove();
-        delete activeTabs[uid];
+    if (currentUser && currentUser.role === 'admin') {
+      // Group accounts by userId
+      accountsGrid.className = 'user-grouped-container';
+      accountsGrid.style.display = 'flex';
+      accountsGrid.style.flexDirection = 'column';
+
+      const userGroups = {};
+      accounts.forEach(acc => {
+        const uid = acc.userId || 'default';
+        if (!userGroups[uid]) userGroups[uid] = [];
+        userGroups[uid].push(acc);
+      });
+
+      // Collapsed by default on initial load
+      if (!isUserGroupInitialized) {
+        isUserGroupInitialized = true;
       }
-    });
+
+      Object.entries(userGroups).forEach(([userId, userAccs]) => {
+        const sample = userAccs[0];
+        const ownerUsername = sample.ownerUsername || 'User';
+        const ownerRole = sample.ownerRole || 'user';
+        const ownerExpiresAt = sample.ownerExpiresAt;
+        const activeCount = userAccs.filter(a => a.status === 'running').length;
+        const isExpanded = expandedUserGroups.has(userId);
+
+        let expiryText = 'Vô hạn';
+        let isExpired = false;
+        if (ownerExpiresAt) {
+          const expDate = new Date(ownerExpiresAt);
+          if (expDate < new Date()) {
+            expiryText = 'Đã hết hạn';
+            isExpired = true;
+          } else {
+            const diffDays = Math.ceil((expDate - new Date()) / (1000 * 60 * 60 * 24));
+            expiryText = `Còn ${diffDays} ngày`;
+          }
+        }
+
+        let groupCard = document.getElementById(`user-group-card-${userId}`);
+        if (!groupCard) {
+          groupCard = document.createElement('div');
+          groupCard.id = `user-group-card-${userId}`;
+          groupCard.className = `user-group-card ${isExpanded ? 'expanded' : ''}`;
+
+          groupCard.innerHTML = `
+            <div class="user-group-header" onclick="toggleUserGroup('${userId}', event)">
+              <div class="user-group-info">
+                <div class="user-avatar-badge">${ownerRole === 'admin' ? '👑' : '👤'}</div>
+                <div class="user-title-wrap">
+                  <div class="user-name-row">
+                    <span class="user-group-username">${ownerUsername}</span>
+                    <span class="badge-role ${ownerRole}">${ownerRole}</span>
+                  </div>
+                  <div class="user-group-meta">
+                    <span class="user-bot-count-badge" id="user-bot-count-${userId}">⚡ ${activeCount}/${userAccs.length} Bot đang chạy</span>
+                    <span class="user-expiry-badge ${isExpired ? 'expired' : ''}" id="user-expiry-${userId}">⏱️ Hạn dùng: ${expiryText}</span>
+                  </div>
+                </div>
+              </div>
+              <div class="user-group-actions" onclick="event.stopPropagation()">
+                <div class="user-batch-proxy-box">
+                  <span class="user-batch-proxy-label">🌐 Đổi Proxy Hàng Loạt:</span>
+                  <select class="user-batch-proxy-select" id="user-batch-proxy-${userId}" onchange="changeUserBatchProxy('${userId}', '${ownerUsername}', this.value)">
+                    <option value="direct">🌐 Direct Connection</option>
+                    <option value="auto">🔄 Auto Rotation Pool</option>
+                    ${adminProxiesList.map(p => `<option value="${p.id}">${p.label}${!p.active ? ' (Off)' : ''}</option>`).join('')}
+                  </select>
+                </div>
+                <span class="user-chevron">▼</span>
+              </div>
+            </div>
+            <div class="user-bot-grid" id="user-bot-grid-${userId}"></div>
+          `;
+          accountsGrid.appendChild(groupCard);
+        } else {
+          if (isExpanded && !groupCard.classList.contains('expanded')) groupCard.classList.add('expanded');
+          if (!isExpanded && groupCard.classList.contains('expanded')) groupCard.classList.remove('expanded');
+
+          const botCountEl = document.getElementById(`user-bot-count-${userId}`);
+          if (botCountEl) {
+            botCountEl.textContent = `⚡ ${activeCount}/${userAccs.length} Bot đang chạy`;
+          }
+
+          const expiryEl = document.getElementById(`user-expiry-${userId}`);
+          if (expiryEl) {
+            expiryEl.className = `user-expiry-badge ${isExpired ? 'expired' : ''}`;
+            expiryEl.textContent = `⏱️ Hạn dùng: ${expiryText}`;
+          }
+
+          const batchSel = document.getElementById(`user-batch-proxy-${userId}`);
+          if (batchSel) {
+            const expectedCount = 2 + adminProxiesList.length;
+            if (batchSel.options.length !== expectedCount) {
+              const currentVal = batchSel.value;
+              batchSel.innerHTML = `
+                <option value="direct">🌐 Direct Connection</option>
+                <option value="auto">🔄 Auto Rotation Pool</option>
+                ${adminProxiesList.map(p => `<option value="${p.id}">${p.label}${!p.active ? ' (Off)' : ''}</option>`).join('')}
+              `;
+              if (currentVal) batchSel.value = currentVal;
+            }
+          }
+        }
+
+        // Render bot cards inside user-bot-grid ONLY when expanded for maximum performance
+        const botGrid = groupCard.querySelector(`#user-bot-grid-${userId}`);
+        if (isExpanded) {
+          userAccs.forEach(acc => {
+            if (!activeTabs[acc.line_uid] || !['core', 'logs'].includes(activeTabs[acc.line_uid])) {
+              activeTabs[acc.line_uid] = 'core';
+            }
+            let card = document.getElementById(`card-${acc.line_uid}`);
+            if (!card) {
+              card = document.createElement('div');
+              card.id = `card-${acc.line_uid}`;
+              card.className = `account-card ${acc.status}`;
+              botGrid.appendChild(card);
+              buildCardSkeleton(card, acc);
+            } else if (card.parentElement !== botGrid) {
+              botGrid.appendChild(card);
+            }
+            updateCard(acc);
+          });
+        }
+
+        // Clean up deleted bot cards within this user group
+        const botCards = botGrid.querySelectorAll('.account-card');
+        botCards.forEach(cardEl => {
+          const uid = cardEl.id.replace('card-', '');
+          if (!userAccs.some(a => a.line_uid === uid)) {
+            cardEl.remove();
+            delete activeTabs[uid];
+          }
+        });
+      });
+
+      // Remove deleted user group cards
+      const groupCards = accountsGrid.querySelectorAll('.user-group-card');
+      groupCards.forEach(gCard => {
+        const uid = gCard.id.replace('user-group-card-', '');
+        if (!userGroups[uid]) {
+          gCard.remove();
+        }
+      });
+
+    } else {
+      // Normal User View Mode (Grid layout)
+      accountsGrid.className = '';
+      accountsGrid.style.display = 'grid';
+      accountsGrid.style.gridTemplateColumns = 'repeat(auto-fill, minmax(360px, 1fr))';
+      accountsGrid.style.flexDirection = '';
+
+      accounts.forEach(acc => {
+        if (!activeTabs[acc.line_uid] || !['core', 'logs'].includes(activeTabs[acc.line_uid])) {
+          activeTabs[acc.line_uid] = 'core';
+        }
+        let card = document.getElementById(`card-${acc.line_uid}`);
+        if (!card) {
+          card = document.createElement('div');
+          card.id = `card-${acc.line_uid}`;
+          card.className = `account-card ${acc.status}`;
+          accountsGrid.appendChild(card);
+          buildCardSkeleton(card, acc);
+        } else if (card.parentElement !== accountsGrid) {
+          accountsGrid.appendChild(card);
+        }
+        updateCard(acc);
+      });
+
+      // Remove deleted cards
+      const cardElements = accountsGrid.querySelectorAll('.account-card');
+      cardElements.forEach(cardEl => {
+        const uid = cardEl.id.replace('card-', '');
+        if (!accounts.some(acc => acc.line_uid === uid)) {
+          cardEl.remove();
+          delete activeTabs[uid];
+        }
+      });
+    }
   }
 
   // Build the skeleton structure for the card
@@ -797,10 +993,13 @@ document.addEventListener('DOMContentLoaded', () => {
           <div class="settings-group" id="admin-proxy-ctrl-${acc.line_uid}" style="display: none; border-top: 1px dashed rgba(255,255,255,0.05); padding-top: 10px; margin-top: 10px;">
             <div class="input-control" style="grid-column: span 2;">
               <label for="sel-proxy-${acc.line_uid}">🌐 Cấu hình Proxy (Chỉ Admin)</label>
-              <select id="sel-proxy-${acc.line_uid}" onchange="changeBotProxy('${acc.line_uid}', this.value)" style="width: 100%; background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; padding: 4px 6px; font-family: inherit; font-size: 0.85rem; outline: none; margin-top:2px;">
-                <option value="auto">🔄 Tự động gán (Auto)</option>
-                <option value="direct">🖥️ Kết nối trực tiếp (Direct)</option>
-              </select>
+              <div style="display: flex; gap: 6px; align-items: center; margin-top:2px;">
+                <select id="sel-proxy-${acc.line_uid}" onchange="changeBotProxy('${acc.line_uid}', this.value)" style="flex: 1; background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; padding: 4px 6px; font-family: inherit; font-size: 0.85rem; outline: none;">
+                  <option value="auto">🔄 Tự động gán (Auto)</option>
+                  <option value="direct">🖥️ Kết nối trực tiếp (Direct)</option>
+                </select>
+                <button type="button" onclick="verifyBotProxyIp('${acc.line_uid}')" style="background: rgba(99,102,241,0.25); border: 1px solid rgba(99,102,241,0.5); color: #a5b4fc; border-radius: 6px; padding: 4px 8px; font-size: 0.78rem; cursor: pointer; white-space: nowrap; font-weight: 600;" title="Kiểm tra IP Public thực tế mà Bot đang dùng gửi request">🔍 Test IP</button>
+              </div>
             </div>
           </div>
 
@@ -1532,6 +1731,52 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (e) {
       console.error('Error changing bot proxy:', e);
       alert('Không thể kết nối đến máy chủ.');
+    }
+  };
+
+  // Verify outbound public IP for a specific bot instance
+  window.verifyBotProxyIp = async function(uid) {
+    try {
+      const res = await fetch(`/api/accounts/${uid}/proxy-check`);
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        alert(`🔴 KIỂM TRA PROXY THẤT BẠI!\n\nLỗi: ${data.error || 'Không thể kết nối qua Proxy'}`);
+        return;
+      }
+      const p = data.proxyInfo || {};
+      alert(
+        `🟢 XÁC MINH KẾT NỐI PROXY THÀNH CÔNG!\n\n` +
+        `・ Bot Target: ${data.accountName} (${data.line_uid})\n` +
+        `・ Cấu hình Proxy: ${p.label || 'Direct'}\n` +
+        `・ Public IP thực tế đi ra: ${data.outboundIp}\n` +
+        `・ Độ trễ (Latency): ${data.latencyMs}ms\n\n` +
+        `✅ Gói tin của bot ĐÃ ĐƯỢC ĐỊNH TUYẾN CHUẨN XÁC qua Proxy!`
+      );
+    } catch (e) {
+      alert(`❌ Lỗi kết nối: ${e.message}`);
+    }
+  };
+
+  // Verify outbound public IPs for all proxy streams (Admin only)
+  window.verifyAllProxiesIp = async function() {
+    try {
+      const res = await fetch('/api/admin/proxies/verify-all');
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        alert(`🔴 Lỗi: ${data.error || 'Không thể kiểm tra'}`);
+        return;
+      }
+      let msg = `🔍 KẾT QUẢ KIỂM TRA KẾT NỐI OUTBOUND IP CÁC LUỒNG PROXY (${data.results.length} luồng):\n\n`;
+      data.results.forEach((r, idx) => {
+        if (r.ok) {
+          msg += `${idx + 1}. ${r.label} [${r.botCount}/${r.maxBots} Bot]\n   👉 Outbound IP thực tế: ${r.outboundIp} (${r.latencyMs}ms) ✅\n\n`;
+        } else {
+          msg += `${idx + 1}. ${r.label} [Off/Lỗi]\n   ❌ Lỗi: ${r.error}\n\n`;
+        }
+      });
+      alert(msg);
+    } catch (e) {
+      alert(`❌ Lỗi kết nối: ${e.message}`);
     }
   };
 

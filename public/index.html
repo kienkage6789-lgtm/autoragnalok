@@ -152,7 +152,12 @@
       <div id="admin-tab-proxies" style="display:none;">
         <!-- Global Settings -->
         <div style="background:rgba(0,0,0,0.2); padding:14px; border-radius:12px; border:1px solid var(--border-color); margin-bottom:14px;">
-          <h4 style="font-size:0.9rem; color:#a78bfa; margin-bottom:12px;">⚙️ Cấu Hình Chung</h4>
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h4 style="font-size:0.9rem; color:#a78bfa; margin:0;">⚙️ Cấu Hình Chung & Kiểm Tra Outbound IP</h4>
+            <button type="button" onclick="verifyAllProxiesIp()" style="background:rgba(99,102,241,0.25); border:1px solid rgba(99,102,241,0.5); color:#a5b4fc; border-radius:6px; padding:4px 10px; font-size:0.8rem; cursor:pointer; font-weight:600;">
+              🔍 Test IP Public Tất Cả Luồng
+            </button>
+          </div>
           <div style="display:flex; gap:20px; flex-wrap:wrap; align-items:center;">
             <label style="display:flex; align-items:center; gap:8px; font-size:0.85rem; cursor:pointer;">
               <label class="switch">

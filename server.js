@@ -1664,6 +1664,38 @@ app.put('/api/admin/users/:userId', requireAdmin, (req, res) => {
   res.json({ success: true, user: { id: users[index].id, username: users[index].username, role: users[index].role, maxAccounts: users[index].maxAccounts } });
 });
 
+// Batch update proxy for all bots owned by a specific user (Admin only)
+app.put('/api/admin/users/:userId/proxy', requireAdmin, (req, res) => {
+  const { userId } = req.params;
+  const { proxyId } = req.body;
+
+  if (proxyId === undefined) {
+    return res.status(400).json({ error: 'Thiếu tham số proxyId' });
+  }
+
+  const currentAccounts = loadAccounts();
+  let updatedCount = 0;
+
+  Object.values(botInstances).forEach(bot => {
+    if (bot.userId === userId) {
+      const assigned = proxyPool.forceAssignBot(bot.line_uid, proxyId);
+      bot.proxyId = assigned;
+      updatedCount++;
+
+      const index = currentAccounts.findIndex(acc => acc.line_uid === bot.line_uid);
+      if (index !== -1) {
+        currentAccounts[index].proxyId = assigned;
+      }
+    }
+  });
+
+  if (updatedCount > 0) {
+    saveAccounts(currentAccounts);
+  }
+
+  res.json({ success: true, userId, proxyId, updatedCount });
+});
+
 // Delete user (Admin only)
 app.delete('/api/admin/users/:userId', requireAdmin, (req, res) => {
   const { userId } = req.params;
@@ -2225,22 +2257,29 @@ app.all('/api/auto-add-account', requireAuth, (req, res) => {
 app.get('/api/accounts', requireAuth, (req, res) => {
   res.setHeader('X-User-Expires-At', req.user.expiresAt || '');
   res.setHeader('X-User-Max-Accounts', req.user.maxAccounts || 1);
+  const users = loadUsers();
   const list = Object.values(botInstances)
     .filter(bot => req.user.role === 'admin' || bot.userId === req.user.id)
-    .map(bot => ({
-      line_uid: bot.line_uid,
-      session_token: bot.session_token,
-      name: bot.name,
-      userId: bot.userId,
-      status: bot.status,
-      clientActive: !!(bot.lastClientActive && (Date.now() - bot.lastClientActive < 12000)),
-      error: bot.error,
-      lastUpdate: bot.lastUpdate,
-      settings: bot.settings,
-      proxyId: bot.proxyId,
-      proxyInfo: req.user.role === 'admin' ? proxyPool.getBotProxyInfo(bot.line_uid) : null,
-      combatRates: bot.getCombatRates ? bot.getCombatRates() : { killsPerMin: 0, goldPerMin: 0, expPerMin: 0 },
-      spots: bot.spots || null,
+    .map(bot => {
+      const ownerUser = users.find(u => u.id === bot.userId);
+      return {
+        line_uid: bot.line_uid,
+        session_token: bot.session_token,
+        name: bot.name,
+        userId: bot.userId,
+        ownerUsername: ownerUser ? ownerUser.username : (req.user.username || 'Admin'),
+        ownerRole: ownerUser ? ownerUser.role : 'user',
+        ownerExpiresAt: ownerUser ? ownerUser.expiresAt : null,
+        ownerMaxAccounts: ownerUser ? ownerUser.maxAccounts : 1,
+        status: bot.status,
+        clientActive: !!(bot.lastClientActive && (Date.now() - bot.lastClientActive < 12000)),
+        error: bot.error,
+        lastUpdate: bot.lastUpdate,
+        settings: bot.settings,
+        proxyId: bot.proxyId,
+        proxyInfo: req.user.role === 'admin' ? proxyPool.getBotProxyInfo(bot.line_uid) : null,
+        combatRates: bot.getCombatRates ? bot.getCombatRates() : { killsPerMin: 0, goldPerMin: 0, expPerMin: 0 },
+        spots: bot.spots || null,
       player: bot.player ? (() => {
         const p = bot.player;
         // hp_max_eff: đồng bộ công thức xhrpg_canvas.js line 3791
@@ -2285,7 +2324,8 @@ app.get('/api/accounts', requireAuth, (req, res) => {
           skill_auto: p.skill_auto || '{}',
         };
       })() : null
-    }));
+    };
+  });
   res.json(list);
 });
 
@@ -2547,6 +2587,102 @@ app.get('/api/accounts/:line_uid/status', requireAuth, (req, res) => {
     error: bot.error,
     lastUpdate: bot.lastUpdate
   });
+});
+
+// Verify outbound public IP for a specific bot instance
+app.get('/api/accounts/:line_uid/proxy-check', requireAuth, async (req, res) => {
+  const { line_uid } = req.params;
+  const bot = botInstances[line_uid];
+  if (!bot) return res.status(404).json({ error: 'Không tìm thấy tài khoản.' });
+  if (!checkAccountOwnership(req, res, bot)) return;
+
+  const proxyInfo = proxyPool.getBotProxyInfo(line_uid);
+  const dispatcher = proxyPool.getDispatcher(line_uid);
+
+  try {
+    const startTime = Date.now();
+    const response = await fetch('https://api.ipify.org?format=json', {
+      dispatcher,
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+    });
+    const latencyMs = Date.now() - startTime;
+    if (!response.ok) {
+      throw new Error(`HTTP Status ${response.status}`);
+    }
+    const data = await response.json();
+    const outboundIp = data.ip || 'Unknown';
+
+    res.json({
+      ok: true,
+      line_uid,
+      accountName: bot.username || bot.line_uid,
+      proxyInfo,
+      outboundIp,
+      latencyMs,
+      timestamp: new Date().toISOString()
+    });
+  } catch (err) {
+    res.status(502).json({
+      ok: false,
+      line_uid,
+      proxyInfo,
+      error: `Lỗi kết nối qua Proxy: ${err.message}`
+    });
+  }
+});
+
+// Verify outbound public IPs for all proxy streams in pool (Admin only)
+app.get('/api/admin/proxies/verify-all', requireAuth, async (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Chỉ Admin mới có quyền' });
+
+  const stats = proxyPool.getStats();
+  const results = [];
+
+  for (const p of stats) {
+    const dispatcher = p.isDirect ? proxyPool._directAgent : proxyPool._agents[p.id];
+    if (!dispatcher) {
+      results.push({ ...p, ok: false, error: 'Dispatcher chưa khởi tạo / Proxy đang tắt' });
+      continue;
+    }
+    const startTime = Date.now();
+    try {
+      const resp = await fetch('https://api.ipify.org?format=json', {
+        dispatcher,
+        headers: { 'User-Agent': 'Mozilla/5.0' }
+      });
+      const latencyMs = Date.now() - startTime;
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      results.push({
+        id: p.id,
+        label: p.label,
+        isDirect: p.isDirect,
+        configuredUrl: p.url,
+        outboundIp: data.ip,
+        latencyMs,
+        botCount: p.botCount,
+        maxBots: p.maxBots,
+        active: p.active,
+        ok: true
+      });
+    } catch (e) {
+      results.push({
+        id: p.id,
+        label: p.label,
+        isDirect: p.isDirect,
+        configuredUrl: p.url,
+        outboundIp: null,
+        latencyMs: Date.now() - startTime,
+        botCount: p.botCount,
+        maxBots: p.maxBots,
+        active: p.active,
+        ok: false,
+        error: e.message
+      });
+    }
+  }
+
+  res.json({ ok: true, timestamp: new Date().toISOString(), results });
 });
 
 // Trigger manual action

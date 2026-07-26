@@ -2,6 +2,59 @@
 
 > Changelog of actual changes implemented.
 
+## 2026-07-26 - Tích hợp Công cụ Xác minh Outbound Public IP cho từng Bot & Proxy Pool
+- File đã đổi: `server.js` (sửa), `public/app.js` (sửa), `public/index.html` (sửa).
+- Đã làm:
+  - **Backend `server.js`**:
+    * Xây dựng route `GET /api/accounts/:line_uid/proxy-check`: Thực hiện gửi HTTP request qua đúng `Dispatcher` của bot tới IP echo service (`api.ipify.org`), trả về thông tin Outbound IP thực tế mà bot đang gửi gói tin ra bên ngoài cùng độ trễ ms.
+    * Xây dựng route `GET /api/admin/proxies/verify-all`: Thực hiện test đồng loạt tất cả các luồng Proxy (Direct + HTTP/SOCKS5) trong Pool, trả về bảng đối chiếu IP public thực tế của từng luồng.
+  - **Frontend `public/app.js` & `public/index.html`**:
+    * Thêm nút **`🔍 Test IP`** bên cạnh dropdown Cấu hình Proxy trên Card từng bot (tab Cơ Bản), cho phép bấm kiểm tra ngay lập tức IP outbound thực tế của bot đó.
+    * Thêm nút **`🔍 Test IP Public Tất Cả Luồng`** vào Admin Proxy Pool Modal, hỗ trợ Admin kiểm tra toàn bộ luồng kết nối trong hệ thống với 1 click.
+- Đã test bằng: `node -c server.js`, `node -c public/app.js`, `npm test` -> PASS 100%.
+
+---
+
+## 2026-07-26 - Sửa lỗi Admin UI "Node cannot be found in the current page"
+- File đã đổi: `public/app.js` (sửa).
+- Nguyên nhân: Trước đó trong hàm `renderAccounts()`, khi người dùng đăng nhập quyền Admin, mỗi 1s khi poll cập nhật dữ liệu (`fetchAccounts`), mã nguồn thực hiện gán lại toàn bộ `groupCard.innerHTML = ...`. Việc này xóa sạch và tạo lại toàn bộ DOM Header, Select proxy, Chevron và cả container `user-bot-grid` mỗi 1 giây. Kết quả là khi người dùng hoặc công cụ tự động click/thao tác trên giao diện Admin, các thẻ DOM Node mục tiêu đã bị hủy và thay thế, gây ra lỗi `Node cannot be found in the current page`.
+- Khắc phục:
+  * Chỉ gán `groupCard.innerHTML` **một lần duy nhất** khi tạo mới thẻ `groupCard` của User (`if (!groupCard)`).
+  * Đối với các lần poll refresh tiếp theo (`else`), chỉ cập nhật các phần tử văn bản động (`user-bot-count`, `user-expiry`, options proxy) mà **không ghi đè hay phá hủy `innerHTML`** của `groupCard`.
+  * Giữ nguyên 100% các DOM Node `card` và `user-bot-grid` trong bộ nhớ DOM.
+- Đã test bằng: `node -c public/app.js`, `npm test` -> PASS 100%.
+
+---
+
+## 2026-07-26 - Triển khai Giao diện Admin Phân Nhóm theo User & Đổi Proxy Hàng Loạt
+- File đã đổi: `server.js` (sửa), `public/app.css` (sửa), `public/app.js` (sửa).
+- Đã làm:
+  - **Backend `server.js`**:
+    * Xây dựng route `PUT /api/admin/users/:userId/proxy` thực hiện cập nhật và force assign Proxy đồng loạt cho tất cả các bot thuộc sở hữu của User đó, lưu tức thì vào `accounts.json`.
+    * Bổ sung các thuộc tính metadata `ownerUsername`, `ownerRole`, `ownerExpiresAt` vào response `GET /api/accounts` đối với Admin.
+  - **Frontend Styling `public/app.css`**:
+    * Thiết kế các class UI Accordion `.user-group-card`, `.user-group-header`, `.user-avatar-badge`, `.user-bot-count-badge`, `.user-batch-proxy-box`, `.user-bot-grid`.
+    * Tích hợp hiệu ứng trượt xoay chevron `▼` khi đóng/mở thẻ.
+  - **Frontend Logic `public/app.js`**:
+    * Trong `renderAccounts()`, khi người dùng đăng nhập là `admin`, hệ thống tự động nhóm các bot card theo User và render dưới dạng các thẻ Accordion chứa thông tin user + số lượng bot + hạn dùng.
+    * **Tối ưu hiệu năng & Mặc định thu nhỏ (Collapsed by Default)**: Tất cả các thẻ User Accordion mặc định thu nhỏ lại khi vừa vào trang để tiết kiệm 100% tài nguyên CPU/RAM render DOM. Bot card chỉ được render và cập nhật khi Admin chủ động click mở rộng User đó.
+    * Tích hợp hàm `toggleUserGroup(userId)` quản lý trạng thái đóng/mở trong `expandedUserGroups` để giao diện không bị giật hay nảy thẻ khi tự động refresh 1s/lần.
+    * Tích hợp hàm `changeUserBatchProxy(userId, username, proxyId)` gửi request API đổi Proxy hàng loạt 1-click cho tất cả bot của user đó.
+- Đã test bằng: `node -c server.js`, `node -c public/app.js`, `npm test` -> PASS 100%.
+
+---
+
+## 2026-07-26 - Tinh chỉnh màu sắc các hàng chỉ số (Soft & Muted Text Color UI)
+- File đã đổi: `public/app.css` (sửa).
+- Đã làm:
+  - **Làm dịu màu con số**: Đổi màu phông chữ của `.stat-pill strong` và `.vital-num` từ màu trắng tinh chói mắt `var(--text-primary)` sang màu xám/bạc dịu nhẹ `#cbd5e1` (Slate-300) với `font-weight: 500/600`.
+  - **Đồng bộ nhãn chỉ số**: Đổi màu nhãn `.stat-pill` sang màu Slate-400 `#94a3b8`.
+  - **Thu nhỏ phông chữ**: Giảm kích thước phông chữ của hàng tỉ lệ farm `.combat-rates-strip` xuống `0.70rem` và hàng tài nguyên `.resources-strip` xuống `0.68rem`.
+  - **Tối ưu phông nền strip**: Hạ độ mờ phông nền các khối strip xuống nhẹ nhàng (`rgba(99, 102, 241, 0.05)` và `rgba(0, 0, 0, 0.2)`), loại bỏ độ viền chói tương phản cao.
+- Đã test bằng: `npm test` -> PASS 100%.
+
+---
+
 ## 2026-07-25 - Fix thanh HP Max, thêm thanh MP mới, fix EXP real-time
 - File đã đổi: `server.js` (sửa), `public/app.js` (sửa), `public/app.css` (sửa).
 - Đã làm:
