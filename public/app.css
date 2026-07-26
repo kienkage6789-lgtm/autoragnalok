@@ -1424,4 +1424,225 @@ input:checked + .slider:before {
   }
 }
 
+/* Refined Character Panel & Stats Layout */
+.char-section-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: rgba(0, 0, 0, 0.15);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.section-header-wrap {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  width: 100%;
+}
+
+.section-title {
+  font-size: 0.82rem;
+  font-weight: 700;
+  opacity: 0.9;
+  letter-spacing: 0.2px;
+}
+
+/* Stat Allocation Grid: 2 equal columns (3 rows x 2 cols = 6 stats) */
+/* Stat Allocation Grid: 3 equal columns on PC (STR, AGI, VIT / INT, DEX, LUK) */
+.stat-alloc-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.stat-alloc-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 6px;
+  background: rgba(15, 23, 42, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  padding: 8px;
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.stat-alloc-card:hover {
+  border-color: rgba(165, 180, 252, 0.25);
+  background: rgba(15, 23, 42, 0.65);
+}
+
+.stat-alloc-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.stat-alloc-name {
+  font-size: 0.82rem;
+  font-weight: 700;
+  opacity: 0.9;
+}
+
+.stat-alloc-val {
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.stat-alloc-btns {
+  display: flex;
+  gap: 4px;
+  width: 100%;
+}
+
+.stat-alloc-btns .btn-stat-up {
+  flex: 1;
+  text-align: center;
+  justify-content: center;
+}
+
+.btn-stat-up {
+  background: rgba(99, 102, 241, 0.15);
+  border: 1px solid rgba(99, 102, 241, 0.25);
+  color: rgba(165, 180, 252, 0.85);
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 3px 6px;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-stat-up:hover:not(:disabled) {
+  background: rgba(99, 102, 241, 0.3);
+  color: #ffffff;
+  border-color: #818cf8;
+}
+
+.btn-stat-up:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.btn-stat-all {
+  background: rgba(124, 58, 237, 0.2);
+  border-color: rgba(167, 139, 250, 0.3);
+  color: rgba(196, 181, 253, 0.85);
+  padding: 3px 5px;
+}
+
+.btn-stat-all:hover:not(:disabled) {
+  background: rgba(124, 58, 237, 0.4);
+  color: #ffffff;
+}
+
+/* Combat Summary Grid: 3 equal columns */
+.combat-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.combat-summary-card {
+  background: rgba(15, 23, 42, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  padding: 5px 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  transition: border-color 0.2s ease;
+}
+
+.combat-summary-card:hover {
+  border-color: rgba(165, 180, 252, 0.2);
+}
+
+.combat-summary-label {
+  font-size: 0.68rem;
+  color: var(--text-secondary);
+  opacity: 0.85;
+  margin-bottom: 2px;
+  white-space: nowrap;
+}
+
+.combat-summary-value {
+  font-size: 0.82rem;
+  font-weight: 700;
+  opacity: 0.85;
+}
+
+/* Subtabs nav inside Character Pane */
+.subtabs-nav {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  padding-bottom: 6px;
+}
+
+.subtab-btn {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.subtab-btn:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-primary);
+}
+
+.subtab-btn.active {
+  background: rgba(124, 58, 237, 0.2);
+  border-color: rgba(167, 139, 250, 0.4);
+  color: #a78bfa;
+}
+
+@media (max-width: 640px) {
+  .stat-alloc-grid {
+    grid-template-columns: 1fr;
+  }
+  .stat-alloc-row {
+    padding: 6px 8px;
+  }
+  .stat-alloc-btns {
+    gap: 4px;
+  }
+  .btn-stat-up {
+    padding: 4px 8px;
+    font-size: 0.75rem;
+    min-height: 28px;
+    min-width: 28px;
+  }
+  .combat-summary-grid {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 4px;
+  }
+  .combat-summary-card {
+    padding: 4px 3px;
+  }
+  .combat-summary-label {
+    font-size: 0.60rem;
+  }
+  .combat-summary-value {
+    font-size: 0.76rem;
+  }
+}
+
 

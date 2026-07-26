@@ -1097,9 +1097,8 @@ class BotInstance {
       return;
     }
 
-    // TEMPORARILY DISABLED AUTOMATION (Stats, Gear, Skills, Companion, Mines)
-    // We haven't developed them yet. Set to false to disable.
-    const enableUpgrades = false;
+    // Enable automation routines based on individual user settings
+    const enableUpgrades = true;
     if (enableUpgrades) {
       // 1. Auto allocation of stats
       if (this.settings.autoStats && this.player.stat_pts > 0) {
@@ -2318,78 +2317,120 @@ app.all('/api/auto-add-account', requireAuth, (req, res) => {
 // ==================== GAME ACCOUNTS API ROUTES (Protected) ====================
 
 app.get('/api/accounts', requireAuth, (req, res) => {
-  res.setHeader('X-User-Expires-At', req.user.expiresAt || '');
-  res.setHeader('X-User-Max-Accounts', req.user.maxAccounts || 1);
-  const users = loadUsers();
-  const list = Object.values(botInstances)
-    .filter(bot => req.user.role === 'admin' || bot.userId === req.user.id)
-    .map(bot => {
-      const ownerUser = users.find(u => u.id === bot.userId);
-      return {
-        line_uid: bot.line_uid,
-        session_token: bot.session_token,
-        name: bot.name,
-        userId: bot.userId,
-        ownerUsername: ownerUser ? ownerUser.username : (req.user.username || 'Admin'),
-        ownerRole: ownerUser ? ownerUser.role : 'user',
-        ownerExpiresAt: ownerUser ? ownerUser.expiresAt : null,
-        ownerMaxAccounts: ownerUser ? ownerUser.maxAccounts : 1,
-        status: bot.status,
-        clientActive: !!(bot.lastClientActive && (Date.now() - bot.lastClientActive < 12000)),
-        error: bot.error,
-        lastUpdate: bot.lastUpdate,
-        settings: bot.settings,
-        proxyId: bot.proxyId,
-        proxyInfo: req.user.role === 'admin' ? proxyPool.getBotProxyInfo(bot.line_uid) : null,
-        combatRates: bot.getCombatRates ? bot.getCombatRates() : { killsPerMin: 0, goldPerMin: 0, expPerMin: 0 },
-        spots: bot.spots || null,
-      player: bot.player ? (() => {
-        const p = bot.player;
-        // hp_max_eff: đồng bộ công thức xhrpg_canvas.js line 3791
-        // hpMaxEff = floor((hp_max + VIT_bonus) × rag_mult)
-        // VIT_bonus = max(0, (vit_eff - 5)*2 - max(0, vit-5))  ≈ 2 HP/điểm VIT hiệu quả
-        const vitEff = p.vit_eff ?? p.vit ?? 5;
-        const vitBase = p.vit ?? 5;
-        const vitHpBonus = Math.max(0, Math.max(0, vitEff - 5) * 2 - Math.max(0, vitBase - 5));
-        const ragHp = 1 + 0.001 * Math.max(0, parseInt(p.rag_hp) || 0);
-        const hp_max_eff = Math.floor(((p.hp_max || 100) + vitHpBonus) * ragHp);
-
-        // mp_max_calc: đồng bộ công thức xhrpg_canvas.js line 3810
-        // mpMax = floor((50 + intel_eff * 5) × rag_mult)
-        const intelEff = p.intel_eff ?? p.intel ?? 5;
-        const ragMp = 1 + 0.001 * Math.max(0, parseInt(p.rag_mp) || 0);
-        const mp_max_calc = Math.floor((50 + intelEff * 5) * ragMp);
-
+  try {
+    res.setHeader('X-User-Expires-At', req.user.expiresAt || '');
+    res.setHeader('X-User-Max-Accounts', req.user.maxAccounts || 1);
+    const users = loadUsers();
+    const list = Object.values(botInstances)
+      .filter(bot => req.user.role === 'admin' || bot.userId === req.user.id)
+      .map(bot => {
+        const ownerUser = users.find(u => u.id === bot.userId);
         return {
-          lv: p.lv,
-          hp: p.hp,
-          hp_max: p.hp_max,
-          hp_max_eff,
-          mp: p.mp,
-          mp_max_calc,
-          exp: p.exp,
-          gold: p.gold,
-          wood: p.wood,
-          stone: p.stone,
-          iron: p.iron,
-          copper: p.copper,
-          herb: p.herb,
-          x: p.x,
-          y: p.y,
-          map: p.map,
-          armor_lv: p.armor_lv,
-          stat_pts: p.stat_pts,
-          skill_pts: p.skill_pts,
-          mine_lv: p.mine_lv,
-          house_lv: p.house_lv,
-          house_energy: p.house_energy,
-          skills: p.skills || '{}',
-          skill_auto: p.skill_auto || '{}',
+          line_uid: bot.line_uid,
+          session_token: bot.session_token,
+          name: bot.name,
+          userId: bot.userId,
+          ownerUsername: ownerUser ? ownerUser.username : (req.user.username || 'Admin'),
+          ownerRole: ownerUser ? ownerUser.role : 'user',
+          ownerExpiresAt: ownerUser ? ownerUser.expiresAt : null,
+          ownerMaxAccounts: ownerUser ? ownerUser.maxAccounts : 1,
+          status: bot.status,
+          clientActive: !!(bot.lastClientActive && (Date.now() - bot.lastClientActive < 12000)),
+          error: bot.error,
+          lastUpdate: bot.lastUpdate,
+          settings: bot.settings,
+          proxyId: bot.proxyId,
+          proxyInfo: req.user.role === 'admin' ? proxyPool.getBotProxyInfo(bot.line_uid) : null,
+          combatRates: bot.getCombatRates ? bot.getCombatRates() : { killsPerMin: 0, goldPerMin: 0, expPerMin: 0 },
+          spots: bot.spots || null,
+          player: bot.player ? (() => {
+            const p = bot.player;
+            const vitEff = p.vit_eff ?? p.vit ?? 5;
+            const vitBase = p.vit ?? 5;
+            const vitHpBonus = Math.max(0, Math.max(0, vitEff - 5) * 2 - Math.max(0, vitBase - 5));
+            const ragHp = 1 + 0.001 * Math.max(0, parseInt(p.rag_hp) || 0);
+            const hp_max_eff = Math.floor(((p.hp_max || 100) + vitHpBonus) * ragHp);
+
+            const intelEff = p.intel_eff ?? p.intel ?? 5;
+            const ragMp = 1 + 0.001 * Math.max(0, parseInt(p.rag_mp) || 0);
+            const mp_max_calc = Math.floor((50 + intelEff * 5) * ragMp);
+
+            const vitEffArm = p.vit_eff ?? p.vit ?? 5;
+            const strEffArm = p.str ?? 5;
+            const armorUpSkillLv = (() => {
+              try {
+                const sk = typeof p.skills === 'object' ? p.skills : JSON.parse(p.skills || '{}');
+                return parseInt(sk.armor_up) || 0;
+              } catch (e) {
+                return 0;
+              }
+            })();
+            const ragArmor = 1 + 0.001 * Math.max(0, parseInt(p.rag_armor) || 0);
+            const armor_max_calc = Math.floor((100 + Math.floor(Math.max(0, vitEffArm - 5) / 5) + Math.floor(Math.max(0, strEffArm - 5) / 2) + (p.armor_lv || 0) * 10 + armorUpSkillLv * 5) * ragArmor);
+
+            const dexEff = p.dex_eff ?? p.dex ?? 5;
+            const lukEff = p.luk_eff ?? p.luk ?? 5;
+            const atk_pistol = Math.round(20 + Math.max(0, dexEff - 5) * 2 + ((p.gun_pistol_lv || 1) - 1) * 2);
+            const atk_sniper = Math.round(120 + Math.max(0, dexEff - 5) * 2.5 + ((p.gun_sniper_lv || 1) - 1) * 5);
+            const atk_knife = Math.round(Math.max(0, strEffArm - 5) * 3 + 10 + ((p.knife_lv || 1) - 1) * 8);
+            const atk_turret = Math.round(20 + intelEff * 3 + ((p.turret_lv || 1) - 1) * 2);
+            const crit_pct = Math.min(50, Math.floor((lukEff + strEffArm) / 10));
+            const def_calc = 10 + Math.max(0, vitEffArm - 5) + Math.max(0, parseInt(p.armor_lv) || 0);
+
+            return {
+              lv: p.lv,
+              hp: p.hp,
+              hp_max: p.hp_max,
+              hp_max_eff,
+              mp: p.mp,
+              mp_max_calc,
+              armor: p.armor,
+              armor_max_calc,
+              str: p.str ?? 5,
+              agi: p.agi ?? 5,
+              vit: p.vit ?? 5,
+              intel: p.intel ?? 5,
+              dex: p.dex ?? 5,
+              luk: p.luk ?? 5,
+              str_eff: p.str_eff ?? p.str ?? 5,
+              agi_eff: p.agi_eff ?? p.agi ?? 5,
+              vit_eff: p.vit_eff ?? p.vit ?? 5,
+              intel_eff: p.intel_eff ?? p.intel ?? 5,
+              dex_eff: p.dex_eff ?? p.dex ?? 5,
+              luk_eff: p.luk_eff ?? p.luk ?? 5,
+              atk_pistol,
+              atk_sniper,
+              atk_knife,
+              atk_turret,
+              crit_pct,
+              def_calc,
+              exp: p.exp,
+              gold: p.gold,
+              wood: p.wood,
+              stone: p.stone,
+              iron: p.iron,
+              copper: p.copper,
+              herb: p.herb,
+              x: p.x,
+              y: p.y,
+              map: p.map,
+              armor_lv: p.armor_lv,
+              stat_pts: p.stat_pts,
+              skill_pts: p.skill_pts,
+              mine_lv: p.mine_lv,
+              house_lv: p.house_lv,
+              house_energy: p.house_energy,
+              skills: p.skills || '{}',
+              skill_auto: p.skill_auto || '{}',
+            };
+          })() : null
         };
-      })() : null
-    };
-  });
-  res.json(list);
+      });
+    res.json(list);
+  } catch (err) {
+    console.error('Error in GET /api/accounts:', err);
+    res.status(500).json({ error: 'Lỗi máy chủ khi lấy danh sách tài khoản: ' + err.message });
+  }
 });
 
 // Add account (Protected + Quota check)

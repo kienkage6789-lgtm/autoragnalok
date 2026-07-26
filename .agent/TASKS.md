@@ -31,6 +31,16 @@
   - Auto-manage mining slots (build/upgrade/select ore).
 - Status: done
 
+### [x] T22 - Character Tab UI Refinement & Layout Fix
+- Description: Refactor Character Tab UI into sub-tabs (`📊 Chỉ Số & Tiềm Năng` & `⚡ Kỹ Năng & Auto`), fix layout overflow issue in Capture.PNG by replacing `.settings-group` with `.char-section-block`, and move `👤 Nhân Vật` tab before `Vật Phẩm` tab.
+- Files related: `public/app.js`, `public/app.css`
+- Acceptance criteria:
+  - Sub-tabs separate stats allocation and skill management cleanly.
+  - Section titles sit on 100% full-width header rows.
+  - Stat cards (STR, AGI, VIT, INT, DEX, LUK) lay out evenly in 3 columns without overflowing card boundaries.
+  - Tab `👤 Nhân Vật` ordered before `Vật Phẩm`.
+- Status: done
+
 ### [x] T04 - Frontend Space-Dark Premium Dashboard UI
 - Description: Create public/index.html, app.css, and app.js with a premium modern dashboard containing tabs (Core, Skills, Airship, Followers, Logs) for each account.
 - Files related: `public/index.html`, `public/app.css`, `public/app.js`
@@ -395,7 +405,44 @@
   - [x] Frontend CSS: Style `.admin-stats-grid`, `.admin-stat-card`, `.btn-quota-step`, `.quota-input-field` with touch-friendly 30x30px controls and responsive mobile rules (`@media (max-width: 640px)`).
   - [x] Frontend JS: Implement `fetchAdminStats()`, `renderAdminStats()`, `window.stepUserQuota(userId, delta)` with real-time sync.
   - [x] Test: `node -c server.js`, `node -c public/app.js`, `npm test` -> PASS 100%.
+### [x] T41 - Dashboard Real Armor Points & Max Armor Bar Synchronization
+- Description: Fix incorrect armor bar percentage calculation ((armor_lv / 50) * 100%) and missing current armor vs max armor text display on account cards.
+- Files related: `server.js`, `public/app.js`
+- Acceptance criteria:
+  - [x] Backend: Expose `armor: p.armor` in `GET /api/accounts` response.
+  - [x] Backend: Calculate `armor_max_calc` in `GET /api/accounts` using game engine formula `floor((100 + floor((vit_eff-5)/5) + floor((str-5)/2) + armor_lv*10 + armor_up_skill*5) * rag_armor)`.
+  - [x] Frontend: Calculate armor bar width using real armor points `armorPct = (armorCur / armorMax) * 100%`.
+  - [x] Frontend: Display formatted armor text `${armorCur} / ${armorMax} (${armorPct}%)` in `#armor-txt-{uid}` element.
+  - [x] Test: `node -c server.js`, `node -c public/app.js` -> PASS 100%.
 - Status: done
+
+### [x] T42 - Auto/Manual Stat Points Allocation & In-Game Character Stats Panel
+- Description: Refactor Skills tab into Character Information tab, add manual +1, +5, ALL stat allocation buttons, auto stat allocation toggle, and in-game combat stat summary panel.
+- Files related: `server.js`, `public/app.js`, `public/app.css`
+- Acceptance criteria:
+  - [x] Backend: Expose `str`, `agi`, `vit`, `intel`, `dex`, `luk`, `str_eff`...`luk_eff`, and calculated combat stats (`atk_pistol`, `atk_sniper`, `atk_knife`, `atk_turret`, `crit_pct`, `def_calc`) in `GET /api/accounts`.
+  - [x] Backend: Enable `enableUpgrades = true` in `BotInstance.runAutomation()` for auto stat allocation.
+  - [x] Frontend UI: Rename `Kỹ Năng` tab to `👤 Nhân Vật`.
+  - [x] Frontend UI: Add 📊 Stat Points allocation panel with `+1`, `+5`, `ALL` buttons per attribute and `⚡ Tự động cộng Stat Points` toggle.
+  - [x] Frontend UI: Add ⚔️ In-Game Combat Stats grid (HP Max, MP Max, Armor Max, DEF, CRIT %, Pistol ATK, Sniper ATK, Knife ATK, Turret ATK).
+  - [x] Frontend UI: Retain 100% skill management list, skill priority, and auto skill toggle.
+  - [x] Test: `node -c server.js`, `node -c public/app.js` -> PASS 100%.
+- Status: done
+
+### [x] T43 - Refine Character Tab UI Layout & Server Process Shutdown
+- Description: Clean up UI layout in Character tab (1-row section headers, balanced 2-column stat grid, 15% text color softening, remove redundant auto toggles), fix 500 error & JS syntax error, and shutdown server processes.
+- Files related: `server.js`, `public/app.js`, `public/app.css`
+- Acceptance criteria:
+  - [x] Frontend UI: 1-row header layout for Stat Points section.
+  - [x] Frontend UI: Balanced 2-column grid fitting inside control card container without overflow.
+  - [x] Frontend UI: 15% text opacity softening (`opacity: 0.85`) across character panel elements.
+  - [x] Frontend UI: Clean up redundant auto-stat & auto-skills toggle switches from Character tab.
+  - [x] Backend: Wrap `GET /api/accounts` in try-catch to prevent 500 crashes.
+  - [x] Server: Stop node background processes and free port 3000 for manual restart.
+  - [x] Test: `node -c server.js`, `node -c public/app.js` -> PASS 100%.
+- Status: done
+
+
 
 
 

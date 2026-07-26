@@ -972,8 +972,8 @@ document.addEventListener('DOMContentLoaded', () => {
       <div class="card-tabs-nav">
         <button class="tab-link active" id="tab-btn-core-${acc.line_uid}" onclick="switchTab('${acc.line_uid}', 'core')">Cơ Bản</button>
         <button class="tab-link" id="tab-btn-mvp-${acc.line_uid}" onclick="switchTab('${acc.line_uid}', 'mvp')">Săn Boss</button>
+        <button class="tab-link" id="tab-btn-skills-${acc.line_uid}" onclick="switchTab('${acc.line_uid}', 'skills')">👤 Nhân Vật</button>
         <button class="tab-link" id="tab-btn-loot-${acc.line_uid}" onclick="switchTab('${acc.line_uid}', 'loot')">Vật Phẩm</button>
-        <button class="tab-link" id="tab-btn-skills-${acc.line_uid}" onclick="switchTab('${acc.line_uid}', 'skills')">Kỹ Năng</button>
         <button class="tab-link" id="tab-btn-logs-${acc.line_uid}" onclick="switchTab('${acc.line_uid}', 'logs')">Nhật Ký</button>
       </div>
 
@@ -1067,11 +1067,6 @@ document.addEventListener('DOMContentLoaded', () => {
               </div>
             </div>
           </div>
-
-          <div style="font-size:0.85rem; font-weight:700; color:var(--text-secondary); margin-top:5px; display: none;">Chỉ số chính (Stat Points còn lại: <span id="pts-val-${acc.line_uid}">0</span>)</div>
-          <div class="stats-list" id="stats-list-${acc.line_uid}" style="display: none;">
-            <!-- Stat rows rendered dynamically -->
-          </div>
         </div>
 
         <!-- Săn Boss Tab Pane -->
@@ -1130,15 +1125,52 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
         </div>
 
-        <!-- Skills Tab Pane -->
+        <!-- Character & Skills Tab Pane -->
         <div class="tab-pane" id="pane-skills-${acc.line_uid}">
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; padding:0 2px;">
-            <span style="font-size:0.8rem; color:var(--text-secondary); font-weight:600;">⚡ Bật/Tắt Tự Động Kỹ Năng</span>
-            <span style="font-size:0.75rem; color:#a78bfa; font-weight:700;" id="skills-sp-${acc.line_uid}">Skill Points: --</span>
+          <div class="subtabs-nav" style="display:flex; gap:6px; margin-bottom:10px; border-bottom:1px solid rgba(255,255,255,0.08); padding-bottom:6px;">
+            <button class="subtab-btn active" id="subtab-btn-stats-${acc.line_uid}" onclick="switchSubTab('${acc.line_uid}', 'stats')">📊 Chỉ Số & Tiềm Năng</button>
+            <button class="subtab-btn" id="subtab-btn-skills-${acc.line_uid}" onclick="switchSubTab('${acc.line_uid}', 'skills')">⚡ Kỹ Năng & Auto</button>
           </div>
-          <div class="skills-grid" id="skills-grid-${acc.line_uid}">
-            <div style="grid-column: 1 / -1; font-size: 0.8rem; color: var(--text-secondary); text-align: center; padding: 12px 0;">
-              Chưa có dữ liệu kỹ năng.
+
+          <!-- Sub-pane 1: Stats & Stat Points -->
+          <div class="subtab-pane" id="subpane-stats-${acc.line_uid}" style="display:block;">
+            <!-- Section 1: 📊 Stat Points Allocation -->
+            <div class="char-section-block">
+              <div class="section-header-wrap">
+                <span class="section-title" style="color:#a5b4fc; font-weight:700;">📊 Điểm Tiềm Năng (Stat Points)</span>
+                <span style="font-size:0.75rem; background:rgba(124, 58, 237, 0.15); color:rgba(196, 181, 253, 0.85); padding:2px 8px; border-radius:10px; font-weight:700; border:1px solid rgba(167, 139, 250, 0.25);" id="stat-pts-badge-${acc.line_uid}">
+                  Stat Points: <b id="pts-val-${acc.line_uid}">0</b> pt
+                </span>
+              </div>
+
+              <div class="stat-alloc-grid" id="stats-list-${acc.line_uid}">
+                <!-- Populated dynamically by renderStatsList(acc) -->
+              </div>
+            </div>
+
+            <!-- Section 2: ⚔️ In-Game Combat Stats Summary -->
+            <div class="char-section-block">
+              <div class="section-header-wrap">
+                <span class="section-title" style="color:#f472b6; font-weight:700;">⚔️ Chỉ Số Chiến Đấu (Combat Stats)</span>
+              </div>
+              <div class="combat-summary-grid" id="combat-summary-${acc.line_uid}">
+                <!-- Populated dynamically by renderCombatSummary(acc) -->
+              </div>
+            </div>
+          </div>
+
+          <!-- Sub-pane 2: Skill List -->
+          <div class="subtab-pane" id="subpane-skills-${acc.line_uid}" style="display:none;">
+            <div class="char-section-block">
+              <div class="section-header-wrap">
+                <span class="section-title" style="color:#a78bfa; font-weight:700;">⚡ Kỹ Năng Nhân Vật (Skills)</span>
+                <span style="font-size:0.75rem; color:var(--text-secondary); opacity:0.85; font-weight:600;" id="skills-sp-${acc.line_uid}">Skill Points: --</span>
+              </div>
+              <div class="skills-grid" id="skills-grid-${acc.line_uid}">
+                <div style="grid-column: 1 / -1; font-size: 0.8rem; color: var(--text-secondary); opacity: 0.85; text-align: center; padding: 12px 0;">
+                  Chưa có dữ liệu kỹ năng.
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -1188,8 +1220,13 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById(`hp-txt-${acc.line_uid}`).textContent = `${p.hp ?? '--'} / ${hpMax} (${hpPct}%)`;
 
     const armorBar = document.getElementById(`armor-bar-${acc.line_uid}`);
-    armorBar.style.width = `${Math.min(100, (p.armor_lv / 50) * 100)}%`;
-    document.getElementById(`armor-txt-${acc.line_uid}`).textContent = `Cấp giáp: ${p.armor_lv || 0}`;
+    if (armorBar) {
+      const armorMax = p.armor_max_calc || (100 + (p.armor_lv || 0) * 10);
+      const armorCur = p.armor ?? armorMax;
+      const armorPct = armorMax > 0 ? Math.min(100, Math.round((armorCur / armorMax) * 100)) : 0;
+      armorBar.style.width = `${armorPct}%`;
+      document.getElementById(`armor-txt-${acc.line_uid}`).textContent = `${armorCur} / ${armorMax} (${armorPct}%)`;
+    }
 
     // MP — dùng mp_max_calc (tính từ intel, đồng bộ canvas.js line 3810)
     const mpBar = document.getElementById(`mp-bar-${acc.line_uid}`);
@@ -1319,9 +1356,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const chkLock = document.getElementById(`chk-lock_pos-${acc.line_uid}`);
     if (document.activeElement !== chkLock) chkLock.checked = acc.settings.lock_pos == 1;
 
-    const chkAutoStats = document.getElementById(`chk-autostats-${acc.line_uid}`);
-    if (chkAutoStats && document.activeElement !== chkAutoStats) chkAutoStats.checked = acc.settings.autoStats === true;
-
     const chkAutoGear = document.getElementById(`chk-autogear-${acc.line_uid}`);
     if (chkAutoGear && document.activeElement !== chkAutoGear) chkAutoGear.checked = acc.settings.autoGear === true;
 
@@ -1401,9 +1435,12 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }
 
-    // Core Stats allocation UI
-    document.getElementById(`pts-val-${acc.line_uid}`).textContent = p.stat_pts || 0;
+    // Core Stats allocation & Combat summary UI
+    const ptsBadge = document.getElementById(`pts-val-${acc.line_uid}`);
+    if (ptsBadge) ptsBadge.textContent = p.stat_pts || 0;
+
     renderStatsList(acc);
+    renderCombatSummary(acc);
 
     // Render tab contents based on active state
     const currentTab = activeTabs[acc.line_uid];
@@ -1451,13 +1488,13 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // Render stats list
-  const statLabels = {
-    str: 'STR (Sức mạnh)',
-    agi: 'AGI (Linh hoạt)',
-    vit: 'VIT (Thể lực)',
-    intel: 'INT (Trí tuệ)',
-    dex: 'DEX (Khéo léo)',
-    luk: 'LUK (May mắn)'
+  const STAT_DESCS = {
+    str: { label: 'STR', name: 'Sức mạnh', color: '#f43f5e', desc: '+ATK Cận chiến & +Max Armor' },
+    agi: { label: 'AGI', name: 'Linh hoạt', color: '#10b981', desc: '+Tốc bắn & Né tránh' },
+    vit: { label: 'VIT', name: 'Thể lực', color: '#0ea5e9', desc: '+Max HP, +DEF & +Max Armor' },
+    intel: { label: 'INT', name: 'Trí tuệ', color: '#8b5cf6', desc: '+Max MP & +Sát thương ป้อม' },
+    dex: { label: 'DEX', name: 'Khéo léo', color: '#f59e0b', desc: '+ATK Dao nổ & Dao dài' },
+    luk: { label: 'LUK', name: 'May mắn', color: '#ec4899', desc: '+Tỷ lệ Chí mạng CRIT %' }
   };
 
   function renderStatsList(acc) {
@@ -1466,18 +1503,58 @@ document.addEventListener('DOMContentLoaded', () => {
     
     const p = acc.player;
     const stats = ['str', 'agi', 'vit', 'intel', 'dex', 'luk'];
-    const hasPoints = p.stat_pts > 0;
+    const pts = p.stat_pts || 0;
+    const canUp1 = pts >= 1;
+    const canUp5 = pts >= 5;
 
     let html = '';
     stats.forEach(st => {
-      const val = p[st] || 5;
+      const meta = STAT_DESCS[st];
+      const baseVal = p[st] || 5;
+      const effVal = p[`${st}_eff`] || baseVal;
+      const bonus = effVal - baseVal;
+      const bonusText = bonus > 0 ? `<span style="color:#10b981; font-size:0.75rem; font-weight:700;">(+${bonus})</span>` : '';
+      
       html += `
-        <div class="stat-up-item">
-          <span class="stat-up-label" title="${statLabels[st]}">${st.toUpperCase()}: <b style="color:#a78bfa;">${val}</b></span>
-          <div class="stat-up-actions">
-            <button class="btn-mini" ${hasPoints ? '' : 'disabled'} onclick="triggerAction('${acc.line_uid}', 'stat_up', '${st}')">+</button>
-            <button class="btn-mini" style="width:36px; background:rgba(124, 58, 237, 0.1);" ${hasPoints ? '' : 'disabled'} onclick="triggerAction('${acc.line_uid}', 'stat_up', '${st}', { amount: ${p.stat_pts} })">ALL</button>
+        <div class="stat-alloc-card">
+          <div class="stat-alloc-head">
+            <span class="stat-alloc-name" style="color:${meta.color}; font-weight:700;">${meta.label} <small style="font-weight:400; color:var(--text-secondary); font-size:0.7rem;">(${meta.name})</small></span>
+            <span class="stat-alloc-val"><b style="color:#f8fafc; font-size:0.9rem;">${baseVal}</b> ${bonusText}</span>
           </div>
+          <div class="stat-alloc-btns">
+            <button class="btn-stat-up" ${canUp1 ? '' : 'disabled'} title="Cộng 1 điểm" onclick="triggerAction('${acc.line_uid}', 'stat_up', '${st}', { amount: 1 })">+1</button>
+            <button class="btn-stat-up" ${canUp5 ? '' : 'disabled'} title="Cộng 5 điểm" onclick="triggerAction('${acc.line_uid}', 'stat_up', '${st}', { amount: 5 })">+5</button>
+            <button class="btn-stat-up btn-stat-all" ${canUp1 ? '' : 'disabled'} title="Cộng tất cả ${pts} điểm vào ${meta.label}" onclick="triggerAction('${acc.line_uid}', 'stat_up', '${st}', { amount: ${pts} })">ALL</button>
+          </div>
+        </div>
+      `;
+    });
+    el.innerHTML = html;
+  }
+
+  function renderCombatSummary(acc) {
+    const el = document.getElementById(`combat-summary-${acc.line_uid}`);
+    if (!el) return;
+    const p = acc.player;
+
+    const items = [
+      { label: '❤️ HP Tối Đa', val: `${p.hp_max_eff || p.hp_max || 100}`, color: '#22c55e' },
+      { label: '🔷 MP Tối Đa', val: `${p.mp_max_calc || 75}`, color: '#6366f1' },
+      { label: '🛡️ Giáp Tối Đa', val: `${p.armor_max_calc || 100}`, color: '#64748b' },
+      { label: '🔰 DEF (Giáp)', val: `${p.def_calc || 10}`, color: '#0ea5e9' },
+      { label: '💥 CRIT (Chí mạng)', val: `${p.crit_pct || 0}%`, color: '#f59e0b' },
+      { label: '🗡️ Pistol ATK', val: `${p.atk_pistol || 20}`, color: '#f43f5e' },
+      { label: '🏹 Sniper ATK', val: `${p.atk_sniper || 120}`, color: '#ec4899' },
+      { label: '⚔️ Knife ATK', val: `${p.atk_knife || 10}`, color: '#10b981' },
+      { label: '🗼 Turret ATK', val: `${p.atk_turret || 20}`, color: '#8b5cf6' }
+    ];
+
+    let html = '';
+    items.forEach(it => {
+      html += `
+        <div class="combat-summary-card">
+          <span class="combat-summary-label">${it.label}</span>
+          <span class="combat-summary-value" style="color:${it.color};">${it.val}</span>
         </div>
       `;
     });
@@ -1505,6 +1582,19 @@ document.addEventListener('DOMContentLoaded', () => {
     } else {
       fetchAccounts();
     }
+  };
+
+  // Switch Sub-Tab inside Character Pane
+  window.switchSubTab = function(uid, subTabId) {
+    const btnStats = document.getElementById(`subtab-btn-stats-${uid}`);
+    const btnSkills = document.getElementById(`subtab-btn-skills-${uid}`);
+    const paneStats = document.getElementById(`subpane-stats-${uid}`);
+    const paneSkills = document.getElementById(`subpane-skills-${uid}`);
+
+    if (btnStats) btnStats.classList.toggle('active', subTabId === 'stats');
+    if (btnSkills) btnSkills.classList.toggle('active', subTabId === 'skills');
+    if (paneStats) paneStats.style.display = subTabId === 'stats' ? 'block' : 'none';
+    if (paneSkills) paneSkills.style.display = subTabId === 'skills' ? 'block' : 'none';
   };
 
   // Fetch account terminal logs

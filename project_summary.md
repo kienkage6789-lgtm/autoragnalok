@@ -163,6 +163,21 @@ Chúng ta đã xây dựng thành công một hệ thống **Headless Bot Manage
     4. 🌐 **Phân Bổ Kết Nối**: Số Bot chạy Direct Connection vs qua Proxy Pool.
 *   **Tối ưu Responsive Layout Mobile**: Tự động co giãn 4 thẻ chỉ số thống kê và form tạo người dùng trên thiết bị di động (`< 640px`) giúp giao diện vuông vắn, không tràn lề.
 
+### Y. Đồng bộ & Sửa lỗi Thanh Hiển Thị Giáp (Armor Bar) trên Dashboard (2026-07-26)
+*   **Trích xuất Dữ liệu Điểm Giáp Thực tế**: Bổ sung `armor: p.armor` (điểm giáp hiện tại) vào đối tượng `player` của response API `GET /api/accounts`.
+*   **Tính toán Giáp Tối Đa (`armor_max_calc`)**: Đồng bộ công thức tính toán `armorMax` theo client game `xhrpg_canvas.js#L3813` (`floor((100 + floor((vit_eff-5)/5) + floor((str-5)/2) + armor_lv*10 + armor_up_skill*5) × rag_armor)`).
+*   **Cập nhật Giao diện Dashboard**: Sửa đổi `updateCard()` trong `public/app.js` để tính tỷ lệ thanh giáp theo chỉ số thực `armorPct = (armorCur / armorMax) * 100%` và định dạng văn bản hiển thị `armor-txt` thành `${armorCur} / ${armorMax} (${armorPct}%)` chuẩn mực tương tự thanh HP và MP.
+
+### Z. Nâng cấp Tab "👤 Nhân Vật": Cộng Điểm Tiềm Năng & Bảng Chỉ Số Nhân Vật Chuẩn UI Game (2026-07-26)
+*   **Đổi tên & Tái cấu trúc Tab**: Đổi tên tab **`Kỹ Năng`** thành **`👤 Nhân Vật`** với 3 phân vùng giao diện: 📊 Bảng cộng điểm Stat Points thủ công, ⚔️ Bảng chỉ số chiến đấu tổng quan (In-Game Combat Stats), và ⚡ Danh sách kỹ năng (Skills).
+*   **Bố cục Tiêu đề 1 Hàng & Lưới Cân Bằng**:
+    * Đưa tiêu đề nhóm `📊 Điểm Tiềm Năng` + badge `Stat Points: +N pt` lên 1 hàng ngang duy nhất.
+    * Đưa 6 ô điểm thuộc tính Stat Points về lưới 2 cột gọn gàng (3 x 2), vừa khít trong khung card điều khiển không tràn lề.
+    * Đưa 9 thẻ chỉ số chiến đấu về lưới 3 cột x 3 hàng vuông vắn (❤️ Max HP, 🔷 Max MP, 🛡️ Max Armor, 🔰 DEF, 💥 CRIT %, 🗡️ Pistol ATK, 🏹 Sniper ATK, ⚔️ Knife ATK, 🗼 Turret ATK).
+    * Đưa danh sách kỹ năng về lưới 2 cột full-width (`width: 100%`) căn giữa toàn bộ.
+    * Giảm độ đậm màu chữ 15% (`opacity: 0.85`) dịu mắt. Bỏ các công tắc tự động thừa khỏi tab Nhân Vật.
+*   **Backend & Server Status**: Expose toàn bộ 6 chỉ số thuộc tính gốc, chỉ số hiệu quả và chỉ số chiến đấu tổng quan trong API `GET /api/accounts`. Tiến trình `node.exe` đã được tắt sạch theo yêu cầu của người dùng để tự khởi động thủ công.
+
 ---
 
 ## 🚀 2. Các hạng mục CHƯA HOÀN THÀNH (Roadmap / Future Upgrades)

@@ -2,6 +2,55 @@
 
 > Changelog of actual changes implemented.
 
+## 2026-07-26 - Tối ưu hóa UI Tab Nhân Vật (Sub-Tabs, Sửa Lỗi Tràn Lề Capture.PNG & Thay Đổi Thứ Tự Tab)
+- File đã đổi: `public/app.js` (sửa), `public/app.css` (sửa).
+- Đã làm:
+  - **Tách Sub-Tabs nội bộ trong Tab Nhân Vật**:
+    * Thêm 2 sub-tabs nhỏ (`📊 Chỉ Số & Tiềm Năng` và `⚡ Kỹ Năng & Auto`) trong pane `👤 Nhân Vật` giúp phân tách thông tin, thu gọn chiều cao card bot, tránh vỡ bố cục Dashboard.
+  - **Sửa Lỗi Tràn Lề / Vỡ Layout (Capture.PNG Fix)**:
+    * Phát hiện nguyên nhân vỡ layout do dùng thẻ `.settings-group` (có CSS chia 2 cột `grid-template-columns: 1fr 1fr`) bọc tiêu đề và bảng chỉ số ➔ Ép tiêu đề sang bên trái và đẩy bảng chỉ số tràn ra khỏi viền phải của Card.
+    * Thay thế bằng lớp container chuyên dụng **`.char-section-block`** (`flex-direction: column; width: 100%`).
+    * **Đưa tiêu đề lên dòng riêng**: Dòng 1 chứa Tiêu đề `📊 Điểm Tiềm Năng (Stat Points)` và Badge `Stat Points: N pt` trải dài 100% chiều rộng trên cùng.
+    * **Dàn đều chỉ số ở dòng dưới**: 6 thuộc tính gốc (`STR`, `AGI`, `VIT` ở hàng 1 và `INT`, `DEX`, `LUK` ở hàng 2) dàn đều trong lưới 3 cột 100% bên dưới, vừa khít trong khung Card.
+  - **Thay Đổi Thứ Tự Tab**:
+    * Đưa Tab **`👤 Nhân Vật`** lên trước Tab **`Vật Phẩm`** trên thanh điều hướng Card tài khoản (Thứ tự mới: `Cơ Bản` ➔ `Săn Boss` ➔ `👤 Nhân Vật` ➔ `Vật Phẩm` ➔ `Nhật Ký`).
+- Đã test bằng: `npm test` -> PASS 100%.
+
+---
+
+## 2026-07-26 - Tính năng Tự Động & Thủ Công Cộng Điểm Stat Points + Bảng Chỉ Số Nhân Vật Chuẩn UI Game
+- File đã đổi: `server.js` (sửa), `public/app.js` (sửa), `public/app.css` (sửa).
+- Đã làm:
+  - **Đổi tên & Tái cấu trúc Tab**: Đổi thẻ tab **`Kỹ Năng`** thành **`👤 Nhân Vật`** với 3 phân vùng giao diện sắc nét:
+    1. 📊 **Bảng Cộng Điểm Tiềm Năng (Stat Points Allocation)**: Badge hiển thị `Stat Points: +N pt`, danh sách 6 thuộc tính gốc (`STR`, `AGI`, `VIT`, `INT`, `DEX`, `LUK`) hiển thị điểm gốc + điểm thưởng hiệu quả `(+eff)`, kèm các nút cộng điểm thủ công chuẩn UI Game **`[ +1 ]`**, **`[ +5 ]`**, **`[ ALL ]`** và công tắc bật/tắt **`⚡ Tự động cộng Stat Points`**.
+    2. ⚔️ **Bảng Chỉ Số Chiến Đấu Tổng Quan (In-Game Combat Stats)**: Lưới 9 thẻ hiển thị các chỉ số phái sinh chuẩn đồng bộ từ engine `xhrpg_canvas.js`: ❤️ Max HP, 🔷 Max MP, 🛡️ Max Armor, 🔰 DEF, 💥 CRIT %, 🗡️ Pistol ATK, 🏹 Sniper ATK, ⚔️ Knife ATK, 🗼 Turret ATK.
+    3. ⚡ **Danh Sách Kỹ Năng & Tự Động Kỹ Năng (Skills & Auto Skills)**: Bảo toàn 100% tính năng quản lý danh sách kỹ năng, tự động nâng skill và công tắc bật/tắt tự động từng kỹ năng.
+  - **Backend `server.js`**:
+    * Trong `GET /api/accounts`: Expose đủ 6 chỉ số thuộc tính cơ bản (`str`, `agi`, `vit`, `intel`, `dex`, `luk`), chỉ số hiệu quả (`str_eff`... `luk_eff`), và các chỉ số tính toán chiến đấu (`atk_pistol`, `atk_sniper`, `atk_knife`, `atk_turret`, `crit_pct`, `def_calc`).
+    * Trong `BotInstance.runAutomation()`: Đã bật cờ `enableUpgrades = true` cho phép chạy tự động cộng `stat_pts` theo danh sách ưu tiên `statsPriority` khi người dùng bật công tắc `autoStats`.
+  - **Sửa lỗi Cú pháp JS (SyntaxError Fix)**: Xóa khai báo trùng lặp `chkAutoStats` trong `public/app.js` gây ra lỗi `Uncaught SyntaxError: Identifier 'chkAutoStats' has already been declared` khiến trình duyệt ngắt chạy script đăng nhập.
+  - **Backend `server.js` — Vá lỗi 500 Route `GET /api/accounts`**: Khắc phục cấu trúc ngoặc closure của route `GET /api/accounts`, bọc toàn bộ bằng khối `try / catch` đảm bảo an toàn 100% không bị ngắt kết nối.
+  - **Tinh chỉnh UI Tab Nhân Vật — Tiêu đề 1 hàng & Bỏ Công tắc Tự Động**:
+    * Đưa tiêu đề nhóm `📊 Điểm Tiềm Năng` + badge `Stat Points: +N pt` lên 1 hàng ngang duy nhất.
+    * Đưa các ô chỉ số thuộc tính bên dưới về lưới 2 cột gọn gàng, nằm vừa khít trong khung card điều khiển mà không tràn lề.
+    * Loại bỏ công tắc `⚡ Tự động cộng Stat Points` và `⚡ Tự động nâng Skill Points` khỏi tab Nhân Vật theo yêu cầu thiết kế tối giản.
+- Đã test bằng: `node -c server.js`, `node -c public/app.js`, HTTP API Integration Test -> PASS 100%.
+
+---
+
+## 2026-07-26 - Sửa lỗi Hiển thị Thanh Giáp (Armor Bar) trên Dashboard
+- File đã đổi: `server.js` (sửa), `public/app.js` (sửa).
+- Đã làm:
+  - **Backend `server.js`**:
+    * Thêm `armor: p.armor` vào response `GET /api/accounts` (điểm giáp hiện tại từ server game).
+    * Thêm tính toán `armor_max_calc`: đồng bộ công thức `xhrpg_canvas.js#L3813` (`floor((100 + floor((vit_eff-5)/5) + floor((str-5)/2) + armor_lv*10 + armor_up_skill*5) × rag_armor)`).
+  - **Frontend `public/app.js`**:
+    * Cập nhật `updateCard()` tính tỷ lệ thanh giáp `armorPct = (armorCur / armorMax) * 100%`.
+    * Cập nhật text `armor-txt` hiển thị chuẩn định dạng điểm giáp thực tế `${armorCur} / ${armorMax} (${armorPct}%)` đồng bộ với thanh HP và MP.
+- Đã test bằng: `node -c server.js` -> PASS 100%.
+
+---
+
 ## 2026-07-26 - Nâng cấp Admin UI: Quản lý Quota Cảm Ứng cho Mobile & Bảng Thống Kê Tổng Quan Hệ Thống
 - File đã đổi: `server.js` (sửa), `public/index.html` (sửa), `public/app.css` (sửa), `public/app.js` (sửa).
 - Đã làm:
