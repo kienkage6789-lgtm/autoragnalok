@@ -385,5 +385,18 @@
   - [x] Test: `node -c public/app.js`, `npm test` -> PASS 100%.
 - Status: done
 
+### [x] T40 - Mobile Touch Quota Stepper & Admin Overview Statistics Panel
+- Description: Build touch-friendly bot quota stepper (+/- buttons) for mobile admins and system statistics overview cards panel.
+- Files related: `server.js`, `public/index.html`, `public/app.css`, `public/app.js`
+- Acceptance criteria:
+  - [x] Backend: Add `GET /api/admin/stats` returning total/active/expired users, total/online/offline bots, total quota, and direct vs proxy allocation.
+  - [x] Backend: Include `onlineBotCount` in `GET /api/admin/users`.
+  - [x] Frontend HTML: Add `#admin-stats-overview` cards container at top of Admin Users tab in `index.html`.
+  - [x] Frontend CSS: Style `.admin-stats-grid`, `.admin-stat-card`, `.btn-quota-step`, `.quota-input-field` with touch-friendly 30x30px controls and responsive mobile rules (`@media (max-width: 640px)`).
+  - [x] Frontend JS: Implement `fetchAdminStats()`, `renderAdminStats()`, `window.stepUserQuota(userId, delta)` with real-time sync.
+  - [x] Test: `node -c server.js`, `node -c public/app.js`, `npm test` -> PASS 100%.
+- Status: done
+
+
 
 

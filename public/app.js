@@ -290,8 +290,42 @@ document.addEventListener('DOMContentLoaded', () => {
     if (tab === 'proxies' || tab === 'backup') fetchAdminProxies();
   };
 
+  // Admin Fetch Stats Overview
+  async function fetchAdminStats() {
+    try {
+      const res = await fetch('/api/admin/stats');
+      if (!res.ok) return;
+      const stats = await res.json();
+      renderAdminStats(stats);
+    } catch (e) {
+      console.error('Error fetching admin stats:', e);
+    }
+  }
+
+  function renderAdminStats(stats) {
+    const elUsersVal = document.getElementById('stat-users-val');
+    const elUsersSub = document.getElementById('stat-users-sub');
+    const elBotsVal  = document.getElementById('stat-bots-val');
+    const elBotsSub  = document.getElementById('stat-bots-sub');
+    const elQuotaVal = document.getElementById('stat-quota-val');
+    const elQuotaSub = document.getElementById('stat-quota-sub');
+    const elProxyVal = document.getElementById('stat-proxy-val');
+
+    if (elUsersVal) elUsersVal.textContent = stats.totalUsers || 0;
+    if (elUsersSub) elUsersSub.textContent = `${stats.activeUsers || 0} Hoạt động / ${stats.expiredUsers || 0} Hết hạn`;
+    if (elBotsVal)  elBotsVal.textContent  = `${stats.onlineBots || 0} / ${stats.totalBots || 0}`;
+    if (elBotsSub)  elBotsSub.textContent  = `🟢 ${stats.onlineBots || 0} Online / 🔴 ${stats.offlineBots || 0} Off`;
+    
+    if (elQuotaVal) elQuotaVal.textContent = `${stats.totalBots || 0} / ${stats.totalQuota || 0}`;
+    const pct = stats.totalQuota > 0 ? Math.round((stats.totalBots / stats.totalQuota) * 100) : 0;
+    if (elQuotaSub) elQuotaSub.textContent = `${pct}% Đã sử dụng`;
+
+    if (elProxyVal) elProxyVal.textContent = `${stats.directBots || 0} Direct / ${stats.proxyBots || 0} Proxy`;
+  }
+
   // Admin Fetch Users
   async function fetchAdminUsers() {
+    fetchAdminStats();
     try {
       const response = await fetch('/api/admin/users');
       if (!response.ok) return;
@@ -329,21 +363,23 @@ document.addEventListener('DOMContentLoaded', () => {
           <td style="padding:8px;"><strong>${u.username}</strong></td>
           <td style="padding:8px;"><span class="badge ${isAdmin ? 'badge-info' : 'badge-idle'}">${isAdmin ? 'Admin' : 'User'}</span></td>
           <td style="padding:8px;">
-            ${isAdmin ? 'Vô hạn' : `
-              <div style="display:flex; align-items:center; gap:6px;">
-                <span>${u.botCount} /</span>
-                <input type="number" value="${u.maxAccounts || 1}" min="1" style="width:50px; padding:2px 4px; background:rgba(0,0,0,0.3); border:1px solid var(--border-color); border-radius:4px; color:#fff; font-size:0.8rem;" onchange="updateUserQuota('${u.id}', this.value)">
+            ${isAdmin ? '<span style="font-size:0.8rem; color:#a5b4fc;">Vô hạn</span>' : `
+              <div class="user-quota-stepper">
+                <span style="font-size:0.8rem; color:#cbd5e1; margin-right:2px;">${u.botCount} bot (${u.onlineBotCount || 0}🟢) /</span>
+                <button type="button" class="btn-quota-step" onclick="stepUserQuota('${u.id}', -1)" title="Giảm 1 bot">-</button>
+                <input type="number" class="quota-input-field" id="quota-inp-${u.id}" value="${u.maxAccounts || 1}" min="1" onchange="updateUserQuota('${u.id}', this.value)" onkeydown="if(event.key==='Enter') this.blur()">
+                <button type="button" class="btn-quota-step" onclick="stepUserQuota('${u.id}', 1)" title="Tăng 1 bot">+</button>
               </div>
             `}
           </td>
           <td style="padding:8px;">${expiryHtml}</td>
           <td style="padding:8px; text-align:right;">
             ${isAdmin ? '<span style="font-size:0.75rem; color:var(--text-secondary);">Gốc</span>' : `
-              <div style="display:flex; justify-content:flex-end; gap:4px;">
-                <button class="btn-mini" style="width:auto; padding:2px 6px; background:rgba(234,88,12,0.25); color:#fb923c; border-color:rgba(234,88,12,0.4);" onclick="setTestUserExpiry1Min('${u.id}')" title="Set đúng 1 Phút để TEST">1Phút⚡</button>
-                <button class="btn-mini" style="width:auto; padding:2px 6px; background:rgba(168,85,247,0.2); color:#c084fc; border-color:rgba(168,85,247,0.3);" onclick="extendUserExpiry('${u.id}', 1)" title="Gia hạn thêm 1 Ngày">+1Ngày</button>
-                <button class="btn-mini" style="width:auto; padding:2px 6px; background:rgba(59,130,246,0.2); color:#60a5fa; border-color:rgba(59,130,246,0.3);" onclick="extendUserExpiry('${u.id}', 30)" title="Gia hạn thêm 30 Ngày">+30Ngày</button>
-                <button class="btn-mini" style="width:auto; padding:2px 6px; background:rgba(239,68,68,0.2); color:#ef4444; border-color:rgba(239,68,68,0.4);" onclick="deleteAdminUser('${u.id}', '${u.username}')">Xóa</button>
+              <div style="display:flex; justify-content:flex-end; gap:4px; flex-wrap:wrap;">
+                <button class="btn-mini" style="width:auto; padding:3px 6px; background:rgba(234,88,12,0.25); color:#fb923c; border-color:rgba(234,88,12,0.4);" onclick="setTestUserExpiry1Min('${u.id}')" title="Set đúng 1 Phút để TEST">1Phút⚡</button>
+                <button class="btn-mini" style="width:auto; padding:3px 6px; background:rgba(168,85,247,0.2); color:#c084fc; border-color:rgba(168,85,247,0.3);" onclick="extendUserExpiry('${u.id}', 1)" title="Gia hạn thêm 1 Ngày">+1Ngày</button>
+                <button class="btn-mini" style="width:auto; padding:3px 6px; background:rgba(59,130,246,0.2); color:#60a5fa; border-color:rgba(59,130,246,0.3);" onclick="extendUserExpiry('${u.id}', 30)" title="Gia hạn thêm 30 Ngày">+30Ngày</button>
+                <button class="btn-mini" style="width:auto; padding:3px 6px; background:rgba(239,68,68,0.2); color:#ef4444; border-color:rgba(239,68,68,0.4);" onclick="deleteAdminUser('${u.id}', '${u.username}')">Xóa</button>
               </div>
             `}
           </td>
@@ -386,6 +422,14 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Window global methods for Admin User Table actions
+  window.stepUserQuota = async function(userId, delta) {
+    const inp = document.getElementById(`quota-inp-${userId}`);
+    let current = inp ? parseInt(inp.value) || 1 : 1;
+    let next = Math.max(1, current + delta);
+    if (inp) inp.value = next;
+    await window.updateUserQuota(userId, next);
+  };
+
   window.updateUserQuota = async function(userId, newQuota) {
     try {
       const response = await fetch(`/api/admin/users/${userId}`, {

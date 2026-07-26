@@ -107,10 +107,46 @@
 
       <!-- ═══ TAB: USERS ═══ -->
       <div id="admin-tab-users">
+        <!-- System Stats Overview Cards -->
+        <div id="admin-stats-overview" class="admin-stats-grid" style="margin-bottom: 16px;">
+          <div class="admin-stat-card">
+            <div class="stat-icon">👥</div>
+            <div class="stat-info">
+              <span class="stat-label">Người Dùng</span>
+              <span class="stat-value" id="stat-users-val">--</span>
+              <span class="stat-sub" id="stat-users-sub">-- Active / -- Expired</span>
+            </div>
+          </div>
+          <div class="admin-stat-card">
+            <div class="stat-icon">🤖</div>
+            <div class="stat-info">
+              <span class="stat-label">Bot Hệ Thống</span>
+              <span class="stat-value" id="stat-bots-val">--</span>
+              <span class="stat-sub" id="stat-bots-sub">🟢 -- Online / 🔴 -- Off</span>
+            </div>
+          </div>
+          <div class="admin-stat-card">
+            <div class="stat-icon">🎯</div>
+            <div class="stat-info">
+              <span class="stat-label">Dung Lượng Quota</span>
+              <span class="stat-value" id="stat-quota-val">-- / --</span>
+              <span class="stat-sub" id="stat-quota-sub">--% Đã dùng</span>
+            </div>
+          </div>
+          <div class="admin-stat-card">
+            <div class="stat-icon">🌐</div>
+            <div class="stat-info">
+              <span class="stat-label">Phân Bổ Kết Nối</span>
+              <span class="stat-value" id="stat-proxy-val">-- Direct / -- Proxy</span>
+              <span class="stat-sub" id="stat-proxy-sub">Bin-packing Pool</span>
+            </div>
+          </div>
+        </div>
+
         <!-- Create User Form (Admin) -->
         <form id="admin-create-user-form" style="background: rgba(0,0,0,0.2); padding: 15px; border-radius: 12px; border: 1px solid var(--border-color); margin-bottom: 20px;">
           <h4 style="font-size:0.9rem; color:#a78bfa; margin-bottom:10px;">＋ Tạo Người Dùng Mới</h4>
-          <div style="display:grid; grid-template-columns: 1fr 1fr 90px 120px; gap: 8px;">
+          <div class="admin-create-user-grid">
             <input type="text" id="new-user-name" placeholder="Username" required style="padding:8px; font-size:0.85rem; background:rgba(0,0,0,0.3); border:1px solid var(--border-color); border-radius:6px; color:#fff;">
             <input type="password" id="new-user-pass" placeholder="Mật khẩu" required style="padding:8px; font-size:0.85rem; background:rgba(0,0,0,0.3); border:1px solid var(--border-color); border-radius:6px; color:#fff;">
             <input type="number" id="new-user-quota" value="1" min="1" placeholder="Quota Bot" required style="padding:8px; font-size:0.85rem; background:rgba(0,0,0,0.3); border:1px solid var(--border-color); border-radius:6px; color:#fff;">
@@ -129,14 +165,14 @@
             <button type="submit" class="btn btn-primary" style="padding:6px 14px; font-size:0.8rem;">Tạo User</button>
           </div>
         </form>
-        <!-- Users List Table -->
-        <div style="max-height: 320px; overflow-y: auto;">
+        <!-- Users List Table Container -->
+        <div class="admin-users-table-wrapper" style="max-height: 340px; overflow-y: auto;">
           <table class="admin-users-table" style="width:100%; border-collapse:collapse; font-size:0.85rem; text-align:left;">
             <thead>
               <tr style="border-bottom:1px solid var(--border-color); color:var(--text-secondary);">
                 <th style="padding:8px;">Username</th>
                 <th style="padding:8px;">Vai Trò</th>
-                <th style="padding:8px;">Quota Bot</th>
+                <th style="padding:8px;">Quota Bot (chỉ chỉnh)</th>
                 <th style="padding:8px;">Hạn Sử Dụng</th>
                 <th style="padding:8px; text-align:right;">Thao Tác</th>
               </tr>

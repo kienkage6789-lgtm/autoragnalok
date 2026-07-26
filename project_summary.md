@@ -153,6 +153,16 @@ Chúng ta đã xây dựng thành công một hệ thống **Headless Bot Manage
     *   Bổ sung CSS `@media (max-width: 640px)` cho `.user-bot-grid { grid-template-columns: 1fr; padding: 8px; }` loại bỏ chiều rộng tối thiểu 360px cũ, giúp các thẻ bot co giãn vừa vặn màn hình điện thoại.
     *   Cấu hình `.user-group-header` và `.user-batch-proxy-box` phân hàng linh hoạt, thêm giới hạn `max-width: 100%` tránh tràn lề phải.
 
+### X. Nâng cấp Admin UI: Quản lý Quota Cảm ứng Mobile & Bảng Thống Kê Tổng Quan (2026-07-26)
+*   **Bộ nút chỉnh Quota Cảm ứng (`[ ➖ ]` `[ ➕ ]`)**: Tích hợp các nút bấm tăng/giảm dung lượng bot kích thước lớn (`30x30px`) dễ dàng điều chỉnh trên màn hình điện thoại mà không gặp tình trạng bị che bởi bàn phím ảo hay nhảy màn hình.
+*   **Tự động Đồng bộ & Hiển thị Số Bot Online**: Tự động gọi API `PUT /api/admin/users/:userId` và cập nhật tức thì, đồng thời hiển thị chi tiết số lượng bot thực tế đang chạy kèm số bot online trực tiếp trong ô Quota (VD: `2 bot (2🟢)`).
+*   **Bảng Thống Kê Tổng Quan Hệ Thống (`/api/admin/stats`)**: Tự động tổng hợp 4 khối chỉ số quan trọng tại đầu Tab Quản trị User:
+    1. 👥 **Người Dùng**: Tổng số User, số User đang hoạt động vs Đã hết hạn.
+    2. 🤖 **Bot Hệ Thống**: Tổng số Bot, số Bot 🟢 Online vs 🔴 Offline.
+    3. 🎯 **Dung Lượng Quota**: Tổng số Bot đang dùng / Tổng Quota đã cấp (% Sử dụng).
+    4. 🌐 **Phân Bổ Kết Nối**: Số Bot chạy Direct Connection vs qua Proxy Pool.
+*   **Tối ưu Responsive Layout Mobile**: Tự động co giãn 4 thẻ chỉ số thống kê và form tạo người dùng trên thiết bị di động (`< 640px`) giúp giao diện vuông vắn, không tràn lề.
+
 ---
 
 ## 🚀 2. Các hạng mục CHƯA HOÀN THÀNH (Roadmap / Future Upgrades)

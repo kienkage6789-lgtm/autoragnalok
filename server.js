@@ -1533,13 +1533,75 @@ app.get('/api/auth/me', requireAuth, (req, res) => {
 
 // ==================== ADMIN API ROUTES ====================
 
+// Get system statistics (Admin only)
+app.get('/api/admin/stats', requireAdmin, (req, res) => {
+  const users = loadUsers();
+  const accounts = loadAccounts();
+  const now = new Date();
+
+  let activeUsers = 0;
+  let expiredUsers = 0;
+  let totalQuota = 0;
+
+  users.forEach(u => {
+    if (u.role === 'admin') {
+      activeUsers++;
+    } else if (u.expiresAt && new Date(u.expiresAt) < now) {
+      expiredUsers++;
+    } else {
+      activeUsers++;
+    }
+    if (u.role !== 'admin') {
+      totalQuota += (u.maxAccounts || 1);
+    }
+  });
+
+  let onlineBots = 0;
+  let offlineBots = 0;
+  let directBots = 0;
+  let proxyBots = 0;
+
+  accounts.forEach(acc => {
+    const bot = botInstances[acc.line_uid];
+    if (bot && bot.isOnline) {
+      onlineBots++;
+    } else {
+      offlineBots++;
+    }
+
+    const pId = acc.proxyId || (bot ? bot.proxyId : 'auto');
+    if (pId === 'direct') {
+      directBots++;
+    } else {
+      proxyBots++;
+    }
+  });
+
+  res.json({
+    totalUsers: users.length,
+    activeUsers,
+    expiredUsers,
+    totalBots: accounts.length,
+    onlineBots,
+    offlineBots,
+    totalQuota,
+    directBots,
+    proxyBots
+  });
+});
+
 // Get all users (Admin only)
 app.get('/api/admin/users', requireAdmin, (req, res) => {
   const users = loadUsers();
   const accounts = loadAccounts();
 
   const list = users.map(u => {
-    const userBotCount = accounts.filter(acc => acc.userId === u.id).length;
+    const userBots = accounts.filter(acc => acc.userId === u.id);
+    let onlineCount = 0;
+    userBots.forEach(acc => {
+      const bot = botInstances[acc.line_uid];
+      if (bot && bot.isOnline) onlineCount++;
+    });
     return {
       id: u.id,
       username: u.username,
@@ -1547,7 +1609,8 @@ app.get('/api/admin/users', requireAdmin, (req, res) => {
       maxAccounts: u.maxAccounts || 1,
       expiresAt: u.expiresAt || null,
       createdAt: u.createdAt,
-      botCount: userBotCount
+      botCount: userBots.length,
+      onlineBotCount: onlineCount
     };
   });
   res.json(list);

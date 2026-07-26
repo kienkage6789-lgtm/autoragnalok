@@ -1293,3 +1293,135 @@ input:checked + .slider:before {
   }
 }
 
+/* Admin Stats Grid Overview */
+.admin-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+.admin-stat-card {
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(124, 58, 237, 0.25);
+  border-radius: 12px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  transition: transform 0.2s, border-color 0.2s;
+}
+.admin-stat-card:hover {
+  border-color: rgba(167, 139, 250, 0.5);
+  transform: translateY(-2px);
+}
+.stat-icon {
+  font-size: 1.5rem;
+  line-height: 1;
+}
+.stat-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.stat-label {
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.stat-value {
+  font-size: 1.1rem;
+  font-weight: 800;
+  color: #f8fafc;
+  line-height: 1.2;
+}
+.stat-sub {
+  font-size: 0.7rem;
+  color: #a78bfa;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Touch-Friendly Bot Quota Stepper */
+.user-quota-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(0, 0, 0, 0.25);
+  padding: 3px 6px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.btn-quota-step {
+  width: 30px;
+  height: 30px;
+  min-width: 30px;
+  border-radius: 6px;
+  border: 1px solid rgba(165, 180, 252, 0.35);
+  background: rgba(99, 102, 241, 0.25);
+  color: #e0e7ff;
+  font-weight: bold;
+  font-size: 1.1rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  touch-action: manipulation;
+  user-select: none;
+  transition: background-color 0.15s, transform 0.1s;
+}
+.btn-quota-step:active {
+  transform: scale(0.92);
+  background: rgba(99, 102, 241, 0.5);
+}
+.quota-input-field {
+  width: 52px;
+  height: 30px;
+  text-align: center;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: #fff;
+  font-size: 0.88rem;
+  font-weight: 700;
+  outline: none;
+}
+.quota-input-field:focus {
+  border-color: #a78bfa;
+}
+
+/* Create User Form Responsive Grid */
+.admin-create-user-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 90px 120px;
+  gap: 8px;
+}
+
+@media (max-width: 640px) {
+  .admin-stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+  }
+  .admin-stat-card {
+    padding: 8px 10px;
+    gap: 8px;
+  }
+  .stat-icon {
+    font-size: 1.25rem;
+  }
+  .stat-value {
+    font-size: 0.95rem;
+  }
+  .stat-sub {
+    font-size: 0.65rem;
+  }
+  .admin-create-user-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+  .admin-users-table-wrapper {
+    overflow-x: auto;
+  }
+}
+
+

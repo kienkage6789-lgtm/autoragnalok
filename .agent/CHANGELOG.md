@@ -2,6 +2,22 @@
 
 > Changelog of actual changes implemented.
 
+## 2026-07-26 - Nâng cấp Admin UI: Quản lý Quota Cảm Ứng cho Mobile & Bảng Thống Kê Tổng Quan Hệ Thống
+- File đã đổi: `server.js` (sửa), `public/index.html` (sửa), `public/app.css` (sửa), `public/app.js` (sửa).
+- Đã làm:
+  - **Quản lý Quota Bot Cảm ứng cho Mobile (Touch-Friendly Bot Quota Stepper)**:
+    * Bổ sung bộ nút bấm tăng/giảm `[ ➖ ]` `[ ➕ ]` kích thước lớn (`30x30px`) dễ chạm bằng ngón tay trên điện thoại mà không cần gõ bàn phím số thủ công.
+    * Tích hợp hàm `window.stepUserQuota(userId, delta)` gọi API `PUT /api/admin/users/:userId` để cập nhật quota tức thì, tránh trượt xô xệch màn hình hay bị che mất bàn phím ảo.
+    * Hiển thị chi tiết số lượng bot thực tế đang chạy kèm số bot online trực tiếp trong ô quota (VD: `2 bot (2🟢)`).
+  - **Bảng Thống Kê Tổng Quan Hệ Thống (System Stats Overview Panel)**:
+    * Backend `server.js`: Xây dựng endpoint `GET /api/admin/stats` tính toán tự động các chỉ số tổng quan hệ thống (Tổng User, User active/expired, Tổng Bot, Bot Online/Offline, Dung lượng Quota và phân bổ luồng Direct vs Proxy). Đồng thời bổ sung `onlineBotCount` trong `GET /api/admin/users`.
+    * Frontend `public/index.html` & `public/app.js`: Xây dựng khối `#admin-stats-overview` hiển thị 4 thẻ thông số chỉ số sắc nét ở đầu Tab Quản Trị User.
+  - **Tối ưu Layout Responsive Mobile**:
+    * Cập nhật `public/app.css` hỗ trợ media query `@media (max-width: 640px)` tự động sắp xếp lại lưới thẻ thống kê, form tạo người dùng và hỗ trợ cuộn ngang bảng an toàn trên mobile.
+- Đã test bằng: `node -c server.js`, `node -c public/app.js`, `npm test` -> PASS 100%.
+
+---
+
 ## 2026-07-26 - Tích hợp Công cụ Xác minh Outbound Public IP cho từng Bot & Proxy Pool
 - File đã đổi: `server.js` (sửa), `public/app.js` (sửa), `public/index.html` (sửa).
 - Đã làm:
