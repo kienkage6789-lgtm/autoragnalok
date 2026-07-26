@@ -159,3 +159,27 @@
 - Kết luận sau khi đọc `xhrpg_canvas.js` line 3810: `mpMax = floor((50 + intel_eff * 5) * rag_mult)` — đây là giá trị 100% được tính toán trong client, không bao giờ được trả về từ server game dưới dạng field.
 - Quyết định: Server Bot Manager tính `mp_max_calc` bằng công thức trên và expose trong API. Fallback mặc định `75` khi thiếu data (intel=5 → 50+5×5=75).
 
+## 2026-07-26 - Thiết kế lại giao diện Dashboard (Compact & Space Efficiency Redesign)
+
+- Bối cảnh: Giao diện Card cũ quá cồng kềnh (min 480px width, height > 750px), lãng phí diện tích chiều dọc và hiển thị ít bot trên màn hình PC.
+- Quyết định:
+  1. Đổi Responsive Grid thành `repeat(auto-fill, minmax(360px, 1fr))` để hiển thị 4-5 bot/hàng trên PC.
+  2. Gom Header Card thành 1 dòng duy nhất chứa Avatar/Status + Tên + Lv + Proxy Badge + Nút Play/Sửa/Xóa.
+  3. Gom Vitals thành lưới 2 cột x 2 hàng với thanh progress bar slim `7px`.
+  4. Hợp nhất Combat Rates & Resources thành 1 hàng Badge Pills mờ (`compact-stats-strip`).
+  5. Chuyển Tab nav sang Segmented Control Pills và giảm padding form controls từ `10px` xuống `5px`.
+  6. Ẩn khối `🚀 Chạy treo máy (Bot)` và khối `Chỉ số chính` (Stat Points) trên Thẻ Cơ Bản để Card gọn gàng tối đa.
+- Lý do: Tăng trải nghiệm người dùng, giúp quan sát nhiều tài khoản cùng lúc mà không phải cuộn màn hình liên tục.
+
+## 2026-07-26 - Sửa lỗi tính toán chỉ số tiêu diệt quái/phút (Kills Per Minute)
+
+- Bối cảnh: Chỉ số `killsPerMin` (số quái tiêu diệt/phút) báo cáo sai lệch nhiều hơn hẳn so với thực tế trong nhật ký.
+- Nguyên nhân gốc rễ:
+  1. Lỗi đếm sự kiện (`server.js` line 1034): Dùng `cleanMsg.includes('💀')` dẫn đến việc khi nhân vật hy sinh (`💀 Bạn đã hy sinh...`) hoặc thua PvP (`💀 K.O.`), cái chết của chính nhân vật cũng bị đếm nhầm thành 1 lần diệt quái.
+  2. Lỗi mẫu số cửa sổ trượt (`server.js` line 618): Công thức `startOfMeasurement = Math.max(this.startTime, oldestTime)` trả về `oldestTime` (thời điểm gần nhất có kill), làm `diffMs` chỉ là vài giây (clamped 0.1 min = 6s). Khi đó `killsPerMin = totalKills / 0.1` bị phóng đại gấp 10 - 60 lần thực tế.
+- Quyết định:
+  1. Chỉ đếm `e.type === 'kill'` (sự kiện kill chính thức do game server trả về).
+  2. Sửa `startOfMeasurement = Math.max(this.startTime || cutoff, cutoff)` để đo chuẩn xác thời gian thực tế đã trôi qua trong cửa sổ trượt 5 phút.
+
+
+

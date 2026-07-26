@@ -599,26 +599,23 @@ class BotInstance {
     const windowMs = 5 * 60 * 1000; // 5 minute window
     const cutoff = now - windowMs;
     
-    // Prune history older than 5 minutes
-    this.combatStatsHistory = this.combatStatsHistory.filter(h => h.time >= cutoff);
+    // Prune history entries older than 5 minutes
+    this.combatStatsHistory = (this.combatStatsHistory || []).filter(h => h.time >= cutoff);
     
     let totalKills = 0;
     let totalGold = 0;
     let totalExp = 0;
     
     this.combatStatsHistory.forEach(h => {
-      totalKills += h.kills;
-      totalGold += h.gold;
-      totalExp += h.exp;
+      totalKills += (h.kills || 0);
+      totalGold += (h.gold || 0);
+      totalExp += (h.exp || 0);
     });
     
-    let elapsedMin = 5;
-    if (this.combatStatsHistory.length > 0) {
-      const oldestTime = this.combatStatsHistory[0].time;
-      const startOfMeasurement = this.startTime ? Math.max(this.startTime, oldestTime) : oldestTime;
-      const diffMs = now - startOfMeasurement;
-      elapsedMin = Math.max(0.1, diffMs / 60000); // min 6 seconds
-    }
+    // Window start time is either when bot started running or 5 mins ago (cutoff)
+    const startOfMeasurement = this.startTime ? Math.max(this.startTime, cutoff) : cutoff;
+    const diffMs = now - startOfMeasurement;
+    const elapsedMin = Math.max(0.1, diffMs / 60000); // min 6 seconds
     
     return {
       killsPerMin: Math.round((totalKills / elapsedMin) * 10) / 10,
@@ -1033,8 +1030,8 @@ class BotInstance {
         if (!e.msg) return;
         const cleanMsg = e.msg.replace(/<[^>]*>/g, '');
         
-        // Count kills
-        if (e.type === 'kill' || cleanMsg.includes('💀')) {
+        // Count kills - strictly match kill events from game server
+        if (e.type === 'kill') {
           pollKills++;
         }
         

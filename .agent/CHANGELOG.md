@@ -148,6 +148,35 @@
 
 ---
 
+## 2026-07-26 - Sửa lỗi tính toán chỉ số tiêu diệt quái/phút (Kills Per Minute)
+- File đã đổi: `server.js` (sửa), `test.js` (sửa), `.agent/TASKS.md` (sửa), `.agent/DECISIONS.md` (sửa).
+- Đã làm:
+  - **Khắc phục lỗi lọc sự kiện (Event Parsing)**:
+    * Thay thế điều kiện cũ `if (e.type === 'kill' || cleanMsg.includes('💀'))` bằng `if (e.type === 'kill')`.
+    * Nguyên nhân: Trước đây các thông báo như nhân vật hy sinh `💀 Bạn đã hy sinh...` hoặc thua cuộc PvP `💀 K.O.` đều chứa biểu tượng `💀`, dẫn đến việc đếm nhầm cái chết của chính nhân vật thành số quái hạ gục.
+  - **Khắc phục lỗi thuật toán cửa sổ trượt (Sliding Window Algorithm)**:
+    * Trong `getCombatRates()`, sửa công thức tính thời điểm bắt đầu đo `startOfMeasurement`:
+      * Cũ: `Math.max(this.startTime, oldestTime)` ➔ Lấy `oldestTime` (thời điểm gần nhất vừa đòn kill), khiến khoảng cách thời gian `diffMs` bị rút ngắn chỉ còn vài giây (chỉ 0.1 phút), làm mẫu số chia quá nhỏ ➔ Tỉ lệ `killsPerMin` bị nhân phồng lên gấp hàng chục lần thực tế.
+      * Mới: `Math.max(this.startTime, cutoff)` ➔ Chọn mốc thời gian lớn hơn giữa lúc bot bắt đầu chạy và 5 phút trước (cutoff).
+    * Giúp tính toán chính xác tuyệt đối tổng số phút thực tế trôi qua trong 5 phút chạy bot.
+  - **Đơn vị thử nghiệm (Unit Test)**: Bổ sung test case kiểm thử `getCombatRates()` trong `test.js` -> `npm test` PASS 100%.
+  - **Sửa lỗi công tắc Sao Lưu Tự Động Telegram**: Khắc phục lỗi nút gạt `#backup-auto-enabled` không thể bật/tắt do thiếu `<label class="switch">` và bị thẻ `<span>` đè lên sự kiện click. Đồng thời bổ sung `onchange="saveBackupSettings()"` để tự động lưu ngay khi gạt công tắc.
+
+---
+
+## 2026-07-26 - Thiết kế lại Giao diện Dashboard (Compact & Balanced Layout)
+- File đã đổi: `public/app.css` (sửa), `public/app.js` (sửa), `ui_redesign_plan.md` (tạo mới), `.agent/TASKS.md` (sửa).
+- Đã làm:
+  - **Tối ưu hóa diện tích chiều cao (Giảm 45%)**: Thu nhỏ chiều cao của mỗi Card bot từ ~750px+ xuống còn ~400px, cho phép quan sát 4-5 bot cùng lúc trên màn hình PC.
+  - **Header Card 1 dòng duy nhất**: Gom gọn Tên bot, Badge Trạng thái, Proxy badge, Cấp độ và bộ nút 🎮 Play, ✏️ Sửa, 🗑️ Xóa trên cùng 1 hàng Flexbox.
+  - **Vitals 2 Cột x 2 Hàng (Slim Bars 7px)**: Gom 4 thanh HP, MP, Armor, EXP thành lưới 2x2 với thanh progress bar 7px thanh thoát và chữ số tỉ lệ sắc nét.
+  - **Hợp nhất Stats & Resource Strip**: Tích hợp các chỉ số farm (⚔️/m, 💰/m, ⭐/m) và tài nguyên (Gold, Wood, Stone, Iron, Copper, Herb) thành 1 hàng Badge Pills mờ duy nhất.
+  - **Segmented Control Tabs**: Nút chuyển Tab dạng viên thuốc nhỏ gọn (`padding: 4px 6px`), giảm padding form controls từ `10px` xuống `5px`, switch nhỏ gọn `34x18px`, và Terminal Log height `150px`.
+  - **Ẩn các phần tử thừa theo yêu cầu**: Đã ẩn khối công tắc `🚀 Chạy treo máy (Bot)` và khối nâng `Chỉ số chính` (Stat Points) trên giao diện Thẻ Cơ Bản để Card gọn gàng tối đa.
+- Đã test bằng: `npm test` và `node -c public/app.js` -> Cả hai đều PASS thành công!
+
+---
+
 ## 2026-07-25 - Sửa lỗi không cập nhật mục 'Bản đồ di chuyển' khi dịch chuyển bản đồ
 - File đã đổi: `server.js` (sửa), `public/app.js` (sửa).
 - Đã làm:

@@ -155,10 +155,10 @@
           <h4 style="font-size:0.9rem; color:#a78bfa; margin-bottom:12px;">⚙️ Cấu Hình Chung</h4>
           <div style="display:flex; gap:20px; flex-wrap:wrap; align-items:center;">
             <label style="display:flex; align-items:center; gap:8px; font-size:0.85rem; cursor:pointer;">
-              <span class="switch" style="display:inline-block; position:relative; width:36px; height:20px;">
-                <input type="checkbox" id="proxy-use-direct" onchange="updateProxySettings()" style="opacity:0; width:0; height:0; position:absolute;">
-                <span class="slider" style="position:absolute; inset:0; border-radius:20px; cursor:pointer; background:#334155; transition:.3s;"></span>
-              </span>
+              <label class="switch">
+                <input type="checkbox" id="proxy-use-direct" onchange="updateProxySettings()">
+                <span class="slider"></span>
+              </label>
               🖥️ Dùng kết nối trực tiếp máy (miễn phí, ưu tiên đầu tiên)
             </label>
             <label style="display:flex; align-items:center; gap:8px; font-size:0.85rem;">
@@ -220,13 +220,13 @@
               <label for="backup-interval" style="font-size:0.8rem; color:var(--text-secondary); display:block; margin-bottom:4px;">Tần suất sao lưu (Giờ)</label>
               <input type="number" id="backup-interval" value="12" min="1" style="width:100%; padding:8px; font-size:0.85rem; background:rgba(0,0,0,0.3); border:1px solid var(--border-color); border-radius:6px; color:#fff; outline:none;">
             </div>
-            <div style="display:flex; align-items:center; gap:8px; font-size:0.85rem; margin-top:20px;">
-              <span class="switch" style="display:inline-block; position:relative; width:36px; height:20px;">
-                <input type="checkbox" id="backup-auto-enabled" style="opacity:0; width:0; height:0; position:absolute;">
-                <span class="slider" style="position:absolute; inset:0; border-radius:20px; cursor:pointer; background:#334155; transition:.3s;"></span>
-              </span>
+            <label style="display:flex; align-items:center; gap:8px; font-size:0.85rem; margin-top:20px; cursor:pointer;">
+              <label class="switch">
+                <input type="checkbox" id="backup-auto-enabled" onchange="saveBackupSettings()">
+                <span class="slider"></span>
+              </label>
               Tự động gửi bản sao lưu định kỳ
-            </div>
+            </label>
             <div style="grid-column: span 2; display:flex; justify-content:space-between; align-items:center; margin-top:6px; border-top:1px dashed rgba(255,255,255,0.05); padding-top:10px;">
               <span style="font-size:0.75rem; color:var(--text-secondary);">
                 💡 Trạng thái: <span id="backup-status-text" style="font-weight:700; color:#ef4444;">Chưa hoạt động</span>

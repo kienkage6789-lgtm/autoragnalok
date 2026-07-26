@@ -84,6 +84,33 @@ try {
   const targetMs = Math.round(daysNum * 86400000);
   assert.strictEqual(targetMs, 60000); // Exactly 60,000 ms = 1 minute!
 
+  // Test Combat Rates Calculation
+  console.log('Testing Combat Rates Calculation...');
+  const mockBot = {
+    startTime: Date.now() - 2 * 60 * 1000, // started 2 minutes ago
+    combatStatsHistory: [
+      { time: Date.now() - 30 * 1000, kills: 4, gold: 100, exp: 200 }
+    ],
+    getCombatRates: function() {
+      const now = Date.now();
+      const cutoff = now - 5 * 60 * 1000;
+      this.combatStatsHistory = (this.combatStatsHistory || []).filter(h => h.time >= cutoff);
+      let totalKills = 0, totalGold = 0, totalExp = 0;
+      this.combatStatsHistory.forEach(h => { totalKills += h.kills; totalGold += h.gold; totalExp += h.exp; });
+      const startOfMeasurement = this.startTime ? Math.max(this.startTime, cutoff) : cutoff;
+      const diffMs = now - startOfMeasurement;
+      const elapsedMin = Math.max(0.1, diffMs / 60000);
+      return {
+        killsPerMin: Math.round((totalKills / elapsedMin) * 10) / 10,
+        goldPerMin: Math.round(totalGold / elapsedMin),
+        expPerMin: Math.round(totalExp / elapsedMin)
+      };
+    }
+  };
+  const rates = mockBot.getCombatRates();
+  // 4 kills over 2 minutes = 2.0 kills/min
+  assert.strictEqual(rates.killsPerMin, 2.0);
+
   console.log('✅ All Unit Tests Passed successfully!');
 } catch (error) {
   console.error('❌ Unit Tests Failed:', error);

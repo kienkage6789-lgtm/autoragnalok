@@ -641,97 +641,71 @@ document.addEventListener('DOMContentLoaded', () => {
   function buildCardSkeleton(cardEl, acc) {
     cardEl.innerHTML = `
       <div class="card-header">
-        <div class="acc-info">
-          <div class="acc-name-wrapper">
-            <span class="acc-name" id="name-${acc.line_uid}">${acc.name}</span>
-            <span class="badge badge-${acc.status}" id="status-badge-${acc.line_uid}">${acc.status}</span>
-            <span id="proxy-badge-${acc.line_uid}" style="font-size:0.7rem; padding:2px 6px; border-radius:6px; background:rgba(99,102,241,0.15); color:#818cf8; border:1px solid rgba(99,102,241,0.3); white-space:nowrap; display: none;">🌐 —</span>
-          </div>
-          <span class="acc-lv" id="lv-txt-${acc.line_uid}">Lv. --</span>
+        <div class="acc-info-compact">
+          <span class="acc-name" id="name-${acc.line_uid}">${acc.name}</span>
+          <span class="acc-lv" id="lv-txt-${acc.line_uid}">Lv.--</span>
+          <span class="badge badge-${acc.status}" id="status-badge-${acc.line_uid}">${acc.status}</span>
+          <span id="proxy-badge-${acc.line_uid}" style="font-size:0.7rem; padding:1px 5px; border-radius:4px; background:rgba(99,102,241,0.15); color:#818cf8; border:1px solid rgba(99,102,241,0.3); white-space:nowrap; display: none;">🌐 —</span>
         </div>
-        <div style="display: flex; gap: 6px;">
-          <button class="btn btn-secondary" style="padding:6px 12px; font-size:0.85rem;" onclick="openEditTokenModal('${acc.line_uid}')">Sửa</button>
-          <button class="btn btn-danger" style="padding:6px 12px; font-size:0.85rem;" onclick="deleteAccount('${acc.line_uid}')">Xóa</button>
+        <div class="header-actions-compact">
+          <button class="btn-mini-action btn-play" onclick="openGameLink('${acc.line_uid}', '${acc.session_token}')" title="Mở trực tiếp Client Game">🎮 Play</button>
+          <button class="btn-mini-action" onclick="openEditTokenModal('${acc.line_uid}')" title="Sửa Token">✏️</button>
+          <button class="btn-mini-action btn-del" onclick="deleteAccount('${acc.line_uid}')" title="Xóa Tài Khoản">🗑️</button>
         </div>
       </div>
 
-      <div class="card-vitals">
-        <div class="vital-row">
-          <span class="vital-label">❤️ HP</span>
-          <div class="bar-container">
+      <div class="card-vitals-grid">
+        <div class="vital-row-compact">
+          <div class="vital-label-wrap">
+            <span class="vital-title">❤️ HP</span>
+            <span class="vital-num" id="hp-txt-${acc.line_uid}">--/--</span>
+          </div>
+          <div class="bar-container-slim">
             <div class="bar-fill bar-hp" id="hp-bar-${acc.line_uid}" style="width: 0%"></div>
-            <div class="bar-text" id="hp-txt-${acc.line_uid}">-- / --</div>
           </div>
         </div>
-        <div class="vital-row">
-          <span class="vital-label">💧 MP</span>
-          <div class="bar-container">
+        <div class="vital-row-compact">
+          <div class="vital-label-wrap">
+            <span class="vital-title">💧 MP</span>
+            <span class="vital-num" id="mp-txt-${acc.line_uid}">--/--</span>
+          </div>
+          <div class="bar-container-slim">
             <div class="bar-fill bar-mp" id="mp-bar-${acc.line_uid}" style="width: 0%"></div>
-            <div class="bar-text" id="mp-txt-${acc.line_uid}">-- / --</div>
           </div>
         </div>
-        <div class="vital-row">
-          <span class="vital-label">🛡️ Giáp</span>
-          <div class="bar-container">
+        <div class="vital-row-compact">
+          <div class="vital-label-wrap">
+            <span class="vital-title">🛡️ Giáp</span>
+            <span class="vital-num" id="armor-txt-${acc.line_uid}">--/--</span>
+          </div>
+          <div class="bar-container-slim">
             <div class="bar-fill bar-armor" id="armor-bar-${acc.line_uid}" style="width: 0%"></div>
-            <div class="bar-text" id="armor-txt-${acc.line_uid}">-- / --</div>
           </div>
         </div>
-        <div class="vital-row">
-          <span class="vital-label">⭐ EXP</span>
-          <div class="bar-container">
+        <div class="vital-row-compact">
+          <div class="vital-label-wrap">
+            <span class="vital-title">⭐ EXP</span>
+            <span class="vital-num" id="exp-txt-${acc.line_uid}">0%</span>
+          </div>
+          <div class="bar-container-slim">
             <div class="bar-fill bar-exp" id="exp-bar-${acc.line_uid}" style="width: 0%"></div>
-            <div class="bar-text" id="exp-txt-${acc.line_uid}">0 %</div>
           </div>
         </div>
       </div>
 
-      <div class="card-rates">
-        <div class="rate-item" title="Số quái hạ gục mỗi phút">
-          <span>⚔️</span>
-          <span class="rate-val" id="rate-kills-${acc.line_uid}">0 /m</span>
-        </div>
-        <div class="rate-item" title="Vàng nhận được mỗi phút">
-          <span>💰</span>
-          <span class="rate-val" id="rate-gold-${acc.line_uid}">+0 /m</span>
-        </div>
-        <div class="rate-item" title="EXP nhận được mỗi phút">
-          <span>⭐</span>
-          <span class="rate-val" id="rate-exp-${acc.line_uid}">+0 /m</span>
-        </div>
+      <div class="combat-rates-strip">
+        <span class="stat-pill" title="Số quái hạ gục mỗi phút">⚔️ <strong id="rate-kills-${acc.line_uid}">0/m</strong></span>
+        <span class="stat-pill" title="Vàng nhận được mỗi phút">💰 <strong id="rate-gold-${acc.line_uid}">+0/m</strong></span>
+        <span class="stat-pill" title="EXP nhận được mỗi phút">⭐ <strong id="rate-exp-${acc.line_uid}">+0/m</strong></span>
       </div>
 
-      <div class="card-resources">
-        <div class="resource-item" title="Vàng (Gold)">
-          <span class="res-icon">💰</span>
-          <span class="res-val" id="res-gold-${acc.line_uid}">--</span>
-        </div>
-        <div class="resource-item" title="Gỗ (Wood)">
-          <span class="res-icon">🪵</span>
-          <span class="res-val" id="res-wood-${acc.line_uid}">--</span>
-        </div>
-        <div class="resource-item" title="Đá (Stone)">
-          <span class="res-icon">🪨</span>
-          <span class="res-val" id="res-stone-${acc.line_uid}">--</span>
-        </div>
-        <div class="resource-item" title="Sắt (Iron)">
-          <span class="res-icon">⚙️</span>
-          <span class="res-val" id="res-iron-${acc.line_uid}">--</span>
-        </div>
-        <div class="resource-item" title="Đồng (Copper)">
-          <span class="res-icon">🟫</span>
-          <span class="res-val" id="res-copper-${acc.line_uid}">--</span>
-        </div>
-        <div class="resource-item" title="Thảo dược (Herb)">
-          <span class="res-icon">🌿</span>
-          <span class="res-val" id="res-herb-${acc.line_uid}">--</span>
-        </div>
-      </div>
-
-      <div class="card-actions-strip">
-        <button class="btn btn-open-game" onclick="openGameLink('${acc.line_uid}', '${acc.session_token}')">
-          🎮 Mở Trực Tiếp Client Game
-        </button>
+      <div class="resources-strip">
+        <span class="stat-pill" title="Vàng (Gold)">💰 <strong id="res-gold-${acc.line_uid}">--</strong></span>
+        <span class="stat-pill" title="Gỗ (Wood)">🪵 <strong id="res-wood-${acc.line_uid}">--</strong></span>
+        <span class="stat-pill" title="Đá (Stone)">🪨 <strong id="res-stone-${acc.line_uid}">--</strong></span>
+        <span class="stat-pill" title="Sắt (Iron)">⚙️ <strong id="res-iron-${acc.line_uid}">--</strong></span>
+        <span class="stat-pill" title="Đồng (Copper)">🟫 <strong id="res-copper-${acc.line_uid}">--</strong></span>
+        <span class="stat-pill" title="Thảo dược (Herb)">🌿 <strong id="res-herb-${acc.line_uid}">--</strong></span>
       </div>
 
       <div class="card-tabs-nav">
@@ -744,7 +718,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       <div class="card-tab-content">
         <div class="tab-pane active" id="pane-core-${acc.line_uid}">
-          <div class="settings-group" style="border: 1px solid rgba(165,180,252,0.15); background: rgba(165,180,252,0.02); border-radius: 12px; padding: 10px 12px; margin-bottom: 10px;">
+          <div class="settings-group" style="display: none; border: 1px solid rgba(165,180,252,0.15); background: rgba(165,180,252,0.02); border-radius: 12px; padding: 10px 12px; margin-bottom: 10px;">
             <div class="toggle-control">
               <span class="toggle-label" style="font-weight: 700; color: #a5b4fc;">🚀 Chạy treo máy (Bot)</span>
               <label class="switch">
@@ -830,8 +804,8 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
           </div>
 
-          <div style="font-size:0.85rem; font-weight:700; color:var(--text-secondary); margin-top:5px;">Chỉ số chính (Stat Points còn lại: <span id="pts-val-${acc.line_uid}">0</span>)</div>
-          <div class="stats-list" id="stats-list-${acc.line_uid}">
+          <div style="font-size:0.85rem; font-weight:700; color:var(--text-secondary); margin-top:5px; display: none;">Chỉ số chính (Stat Points còn lại: <span id="pts-val-${acc.line_uid}">0</span>)</div>
+          <div class="stats-list" id="stats-list-${acc.line_uid}" style="display: none;">
             <!-- Stat rows rendered dynamically -->
           </div>
         </div>

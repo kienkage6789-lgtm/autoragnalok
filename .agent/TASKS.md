@@ -302,3 +302,24 @@
   - [x] EXP bar cập nhật real-time mỗi 1 giây theo vòng poll frontend.
 - Status: done
 
+### [x] T32 - Redesign Dashboard UI (Compact & Balanced Layout)
+- Description: Thiết kế lại giao diện Dashboard nhằm giảm 40-50% diện tích chiều cao của mỗi Card bot, gom gọn Header 1 dòng, Vitals 2 cột slim bar, Stats Strip hợp nhất và Tabs Pill Segmented Control.
+- Files related: `public/app.css`, `public/app.js`
+- Acceptance criteria:
+  - [x] CSS: Grid đổi thành `repeat(auto-fill, minmax(360px, 1fr))` để hiển thị được 4-5 bot/hàng trên PC.
+  - [x] CSS & JS: Header Card gom gọn Tên bot, Badge Trạng thái, Proxy badge, Lv và nút 🎮 Play, ✏️ Edit, 🗑️ Delete trên 1 hàng ngang.
+  - [x] CSS & JS: Vitals HP, MP, Armor, EXP thiết kế dạng 2 cột x 2 hàng với thanh progress bar slim 7px.
+  - [x] CSS & JS: Hợp nhất Combat Rates và Resources thành 1 hàng Stats Strip duy nhất dạng Badge Pill.
+  - [x] CSS & JS: Segmented Pill Tab Bar và giảm padding form controls từ 10px xuống 5px, giảm height Terminal Log từ 250px xuống 150px.
+- Status: done
+
+### [x] T33 - Fix Combat Rates & Kills Per Minute Calculation
+- Description: Điều tra và khắc phục triệt để lỗi tính toán sai lệch chỉ số quái tiêu diệt/phút (killsPerMin) do lọc nhầm tin nhắn không phải quái và lỗi thuật toán chọn timestamp bắt đầu trong cửa sổ trượt 5 phút.
+- Files related: `server.js`, `test.js`
+- Acceptance criteria:
+  - [x] Sửa lọc sự kiện: Chỉ đếm `e.type === 'kill'` (monster kills chính thức từ game server), loại bỏ việc đếm nhầm tin nhắn có emoji `💀` (như nhân vật hy sinh hoặc thua PvP).
+  - [x] Sửa thuật toán `getCombatRates()`: Thay đổi `startOfMeasurement` thành `Math.max(this.startTime || cutoff, cutoff)`, tính chính xác tổng số phút thực tế đã trôi qua trong cửa sổ trượt 5 phút thay vì bị ép mẫu số về 0.1 min.
+  - [x] Bổ sung unit test kiểm thử `getCombatRates()` trong `test.js` -> PASS.
+- Status: done
+
+
