@@ -181,5 +181,16 @@
   1. Chỉ đếm `e.type === 'kill'` (sự kiện kill chính thức do game server trả về).
   2. Sửa `startOfMeasurement = Math.max(this.startTime || cutoff, cutoff)` để đo chuẩn xác thời gian thực tế đã trôi qua trong cửa sổ trượt 5 phút.
 
+## 2026-07-26 - Sửa lỗi công tắc Sao Lưu Tự Động Telegram & Tách biệt UI Stats
+
+- Bối cảnh:
+  1. Người dùng phản hồi không thể bật/tắt nút "Tự động gửi bản sao lưu định kỳ" trong tab Backup Admin.
+  2. Yêu cầu tách riêng hàng đếm chỉ số diệt quái/vàng/exp với hàng tổng tài nguyên trong kho.
+- Quyết định:
+  1. Thay thế wrapper `<div>` và inline `<span>` của ô checkbox `#backup-auto-enabled` bằng cấu trúc `<label class="switch">` chuẩn HTML. Bổ sung `onchange="saveBackupSettings()"` để tự động lưu tức thì khi bật/tắt công tắc.
+  2. Tách `.compact-stats-strip` thành 2 khối riêng biệt: `.combat-rates-strip` (nền tím mờ `rgba(99, 102, 241, 0.08)`) chứa chỉ số tốc độ farm (kills/m, gold/m, exp/m) và `.resources-strip` chứa tổng 6 tài nguyên hiện có.
+- Lý do: Khắc phục lỗi tương tác UI và tăng tính mạch lạc, dễ quan sát dữ liệu trên Dashboard.
+
+
 
 

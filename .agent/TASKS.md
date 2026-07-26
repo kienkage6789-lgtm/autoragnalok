@@ -322,4 +322,13 @@
   - [x] Bổ sung unit test kiểm thử `getCombatRates()` trong `test.js` -> PASS.
 - Status: done
 
+### [x] T34 - Fix Telegram Backup Switch & Separate Stats Strips UI
+- Description: Sửa lỗi không thể gạt bật/tắt nút công tắc sao lưu định kỳ qua Telegram `#backup-auto-enabled` và tách biệt hàng đếm tỉ lệ diệt quái/vàng/exp với hàng tổng tài nguyên trong kho.
+- Files related: `public/index.html`, `public/app.css`, `public/app.js`
+- Acceptance criteria:
+  - [x] HTML: Chuẩn hóa wrapper công tắc `#backup-auto-enabled` thành `<label class="switch">` để phản hồi nhấp chuột mượt mà 100%. Bổ sung `onchange="saveBackupSettings()"`.
+  - [x] HTML & CSS: Tách rời `.compact-stats-strip` thành 2 khối riêng biệt `.combat-rates-strip` (nền tím mờ) và `.resources-strip` (nền đen mờ), giữ nguyên đầy đủ tất cả ID cập nhật động.
+  - [x] Test: `npm test` và `node -c public/app.js` -> PASS.
+- Status: done
+
 
