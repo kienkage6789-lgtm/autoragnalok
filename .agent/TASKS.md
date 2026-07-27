@@ -463,4 +463,16 @@
   - [x] Test: `node -c server.js`, `node test.js` -> PASS 100%.
 - Status: done
 
+### [ ] T46 - Server-Side Idle Guard & Event-Driven Act-Flag Jitter Engine
+- Description: Thiết lập cơ chế mô phỏng `act` flag tự nhiên kết hợp với Event-driven trigger từ các thao tác tự động của bot (di chuyển, học skill, dùng potion, đổi zone, nâng đồ) và tự động phục hồi khi nhận tín hiệu `d.idle = true` từ game server.
+- Files related: `server.js`, `public/app.js`
+- Acceptance criteria:
+  - [x] **Event-Driven Act Trigger (`setActFlag()`)**: Mỗi khi bot thực thi 1 hành vi tương tác tự động (nâng stats, dùng skill, bơm potion, đổi zone, warp), tự động kích hoạt `act = 1` ở poll kế tiếp.
+  - [x] **Dynamic Gaussian/Jitter Heartbeat**: Khi không có hành vi tự động, kích hoạt `act = 1` ngẫu nhiên trong khoảng 120s–300s (khoảng thời gian mô phỏng người dùng thỉnh thoảng tương tác UI), tránh gửi định kỳ quá đều.
+  - [x] **Idle Signal Auto-Recovery (`d.idle = true`)**: Khi game server trả về `d.idle = true`, đánh dấu khôi phục ngay ở poll kế tiếp (`act = 1`, reset jitter counter) và phát một gói tin heartbeat/keepalive mà không bị ngắt bot.
+  - [x] **Dashboard Monitoring Indicator**: Hiển thị trạng thái `Act Pulse` hoặc cảnh báo `Idle Recovery` trên terminal log của từng bot instance.
+  - [x] Test: `node -c server.js`, `npm test` -> PASS 100%.
+- Status: done
+
+
 

@@ -51,6 +51,7 @@ npm test
 1. Multi-account headless dashboard interface mimicking 100% of game panels (Core stats, Skills, Airship, Followers).
 2. Automation rules (Auto-Stats, Auto-Gear, Auto-Skills with priorities, Auto-Refills, Auto-Titan recharging).
 3. Live terminal activities log per bot instance.
+4. Server-Side Idle Guard Bypass & Natural Act-Flag Jitter Engine (Anti-AFK & Anti-Bot Protection).
 
 ## Hosting & Deployment Architecture
 - **Dynamic Domain Support**: The backend Express app uses `app.set('trust proxy', 1)` to automatically detect the client's real IP and HTTPS protocol behind reverse proxies (Nginx, Render, Heroku, Cloudflare). All client API calls use relative paths, and Bookmarklets fetch domain info dynamically using `window.location.origin` at the time of creation.

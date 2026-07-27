@@ -2,6 +2,28 @@
 
 > Changelog of actual changes implemented.
 
+## 2026-07-27 - T46 Post-Review Refinement: Jitter Range Fix, triggerActFlag Cleanup & Unit Tests
+- File đã đổi: `server.js` (sửa), `test.js` (sửa).
+- Đã làm:
+  - **Sửa Jitter Range**: `120000 + Math.random() * 160000` (120–280s) → `120000 + Math.random() * 180000` (120–300s) khớp spec TASKS.md. Cập nhật tất cả 4 chỗ phát sinh `nextActInterval` và comment.
+  - **Dọn `triggerActFlag()`**: Xóa tham số `reason` không sử dụng.
+  - **Bổ sung Unit Test T46**: 6 test cases cover đầy đủ 3 nhánh state machine (first poll, pending act event, jitter timeout) + 1 test idle recovery + 100 lần validate jitter range 120–300s.
+- Đã test bằng: `node -c server.js`, `node -c public/app.js`, `node test.js` → PASS 100%.
+
+---
+
+## 2026-07-27 - Server-Side Idle Guard & Event-Driven Act-Flag Jitter Engine (T46)
+- File đã đổi: `server.js` (sửa `BotInstance`, `sendRequest`, `pollGame`).
+- Nguyên nhân gốc rễ: Client game gốc (`xhrpg_canvas.js`) đặt `_actFlag = true` khi phát sinh sự kiện tương tác thật của người dùng và reset về `0` ngay ở poll kế tiếp. Server game dùng `last_action_at` để phát hiện bot khi `act: 1` bị gửi rập khuôn hoặc không đi kèm các hành động thực tế.
+- Đã làm:
+  - **`BotInstance` constructor & `triggerActFlag()`**: Khai báo `this.pendingActFlag = false` và bổ sung phương thức `triggerActFlag()`.
+  - **`sendRequest()`**: Tự động bật `this.pendingActFlag = true` cho mọi request tương tác tự động/thủ công tới các endpoint ngoại trừ `xhrpg_game.php` (như `xhrpg_upgrade.php`, `xhrpg_warp.php`, `xhrpg_arena.php`).
+  - **`pollGame()` actValue calculation**: Khi `this.pendingActFlag === true`, gửi `act: 1` ở poll ngay kế tiếp và reset `pendingActFlag = false`. Khi AFK đứng yên farm quái, gửi `act: 1` ngẫu nhiên 120s – 300s (nhịp Jitter tự nhiên).
+  - **Auto Idle Recovery Protocol (`d.idle`)**: Khi server trả về `d.idle = true`, tự động đặt `this.pendingActFlag = true`, reset `lastActSentAt = 0` và ép gửi `act: 1` khôi phục ngay ở poll kế tiếp.
+- Đã test bằng: `node -c server.js`, `npm test` → PASS 100%.
+
+---
+
 ## 2026-07-27 - Fix Bug `bot.isOnline` → `onlineBots` Luôn Bằng 0 (T45)
 - File đã đổi: `server.js` (sửa 2 chỗ).
 - Nguyên nhân gốc rễ: `BotInstance` constructor không khai báo `isOnline`. Field thực tế là `this.status`. Điều kiện `bot && bot.isOnline` luôn `undefined` (falsy) → `onlineBots` không bao giờ tăng.

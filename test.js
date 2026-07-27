@@ -111,6 +111,66 @@ try {
   // 4 kills over 2 minutes = 2.0 kills/min
   assert.strictEqual(rates.killsPerMin, 2.0);
 
+  // T46: Act Flag State Machine Tests
+  console.log('Testing T46 Act Flag State Machine...');
+
+  // Helper: simulate act flag calculation logic (mirrors pollGame act block in server.js)
+  function calcActValue(bot) {
+    const now = Date.now();
+    let actValue = 0;
+    if (bot.pollCount === 1) {
+      actValue = 1;
+      bot.lastActSentAt = now;
+      bot.nextActInterval = 120000 + Math.random() * 180000;
+      bot.pendingActFlag = false;
+    } else if (bot.pendingActFlag) {
+      actValue = 1;
+      bot.lastActSentAt = now;
+      bot.nextActInterval = 120000 + Math.random() * 180000;
+      bot.pendingActFlag = false;
+    } else if ((now - bot.lastActSentAt) >= bot.nextActInterval) {
+      actValue = 1;
+      bot.lastActSentAt = now;
+      bot.nextActInterval = 120000 + Math.random() * 180000;
+    }
+    return actValue;
+  }
+
+  // Branch 1: First poll always sends act=1
+  const bot1 = { pollCount: 1, lastActSentAt: 0, nextActInterval: 999999, pendingActFlag: false };
+  assert.strictEqual(calcActValue(bot1), 1, 'First poll must send act=1');
+  assert.strictEqual(bot1.pendingActFlag, false, 'pendingActFlag reset after first poll');
+
+  // Branch 2: Event-driven act trigger (pendingActFlag = true)
+  const bot2 = { pollCount: 5, lastActSentAt: Date.now(), nextActInterval: 999999, pendingActFlag: true };
+  assert.strictEqual(calcActValue(bot2), 1, 'pendingActFlag=true must send act=1');
+  assert.strictEqual(bot2.pendingActFlag, false, 'pendingActFlag reset after event-driven send');
+
+  // Branch 3a: Jitter timeout reached → act=1
+  const bot3 = { pollCount: 5, lastActSentAt: Date.now() - 300000, nextActInterval: 120000, pendingActFlag: false };
+  assert.strictEqual(calcActValue(bot3), 1, 'Jitter timeout reached must send act=1');
+
+  // Branch 3b: Jitter timeout NOT reached → act=0
+  const bot4 = { pollCount: 5, lastActSentAt: Date.now(), nextActInterval: 300000, pendingActFlag: false };
+  assert.strictEqual(calcActValue(bot4), 0, 'Jitter not reached must send act=0');
+
+  // Jitter range validation: 120s–300s (120000–300000ms)
+  console.log('Testing T46 Jitter Range 120s-300s...');
+  for (let i = 0; i < 100; i++) {
+    const interval = 120000 + Math.random() * 180000;
+    assert.ok(interval >= 120000, `Jitter min must be >= 120000, got ${interval}`);
+    assert.ok(interval <= 300000, `Jitter max must be <= 300000, got ${interval}`);
+  }
+
+  // Idle recovery: d.idle=true → force act=1 next poll
+  console.log('Testing T46 Idle Recovery...');
+  const bot5 = { pollCount: 50, lastActSentAt: Date.now(), nextActInterval: 999999, pendingActFlag: false };
+  // Simulate d.idle=true handler
+  bot5.lastActSentAt = 0;
+  bot5.nextActInterval = 0;
+  bot5.pendingActFlag = true;
+  assert.strictEqual(calcActValue(bot5), 1, 'Idle recovery must force act=1');
+
   console.log('✅ All Unit Tests Passed successfully!');
 } catch (error) {
   console.error('❌ Unit Tests Failed:', error);

@@ -2,6 +2,19 @@
 
 > Captured architectural decisions and trade-offs.
 
+## 2026-07-27 - Cơ chế Event-Driven Act-Flag Simulation & Server Idle Guard Bypass
+
+- Bối cảnh:
+  1. Client game gốc (`xhrpg_canvas.js`) sử dụng biến `_actFlag` chỉ kích hoạt `= 1` khi phát sinh sự kiện tương tác thật của người dùng (`pointerdown`, `keydown`, `touchstart`, `wheel`) và reset về `0` ngay ở poll kế tiếp.
+  2. Game Server kiểm tra `last_action_at` ở backend. Nếu client chỉ gửi `act: 1` cố định/liên tục không trùng khớp với các gói tin tương tác (`xhrpg_upgrade.php`, warp, skill, potion...), server sẽ gửi `d.idle = true` khiến bot dừng poll hoặc bị mất tỉ lệ farm online.
+- Quyết định:
+  1. **Event-Driven Act Trigger (`this.pendingActFlag`)**: Mọi request tương tác tự động/thủ công (nâng stats, nâng gear, dùng skill, bơm potion, đổi map, warp, thách đấu arena) đều tự động bật cờ `pendingActFlag = true`. Gói poll `xhrpg_game.php` tiếp theo sẽ gửi `act: 1` và reset cờ về `0`, khớp 100% logic client game gốc.
+  2. **Dynamic Jitter Pulse**: Khi bot đứng yên AFK farm quái không phát sinh action tự động, nhịp tim `act: 1` chỉ phát ngẫu nhiên trong khoảng **120s – 300s** (mô phỏng nhịp người dùng thỉnh thoảng tương tác UI), thay vì phát định kỳ rập khuôn.
+  3. **Auto Idle Signal Recovery**: Khi server gửi `d.idle = true`, bot không dừng mà tự động ép `act: 1` ngay ở poll kế tiếp, reset jitter timer và ghi log khôi phục tương tác khẩn cấp.
+- Lý do: Loại bỏ hoàn toàn dấu vết pattern bot, đảm bảo 100% khớp với cơ chế idle guard của game server.
+
+---
+
 ## 2026-07-26 - Single-Pass DOM Initialization cho Accordion & Công cụ Outbound IP Proxy Verification
 
 - Bối cảnh:

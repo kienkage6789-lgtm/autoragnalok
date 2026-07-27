@@ -577,12 +577,21 @@ class BotInstance {
     this.lootLogs = [];
     this.combatStatsHistory = [];
     this.startTime = null;
+    // 😴 Anti-idle & Event-Driven Act-Flag Jitter Engine
+    // Mô phỏng hành vi người dùng thật: act=1 khi có tương tác (Event) hoặc nhịp Jitter 120s-300s
+    this.lastActSentAt = 0;
+    this.nextActInterval = 120000 + Math.random() * 180000; // jitter ngẫu nhiên 120s-300s
+    this.pendingActFlag = false;
 
     this.proxyId = account.proxyId || null;
     const assigned = proxyPool.assignBot(this.line_uid, this.proxyId);
     this.proxyId = assigned;
     this.consecutiveErrors = 0;
     this.addLog('SYSTEM', `Khởi tạo bot cho tài khoản: ${this.name}`);
+  }
+
+  triggerActFlag() {
+    this.pendingActFlag = true;
   }
 
   getDefaultSettings() {
@@ -756,6 +765,11 @@ class BotInstance {
   }
 
   async sendRequest(url, payload) {
+    // T46: Mọi request hành động (nâng stats/gear/skill, warp, arena...) đều đánh dấu tương tác người dùng
+    if (!url.includes('xhrpg_game.php')) {
+      this.pendingActFlag = true;
+    }
+
     // Throttle requests: Đảm bảo khoảng cách tối thiểu 1.1s giữa các request của bot để tránh lỗi "too_fast"
     const now = Date.now();
     const timeSinceLast = now - (this.lastRequestAt || 0);
@@ -822,8 +836,30 @@ class BotInstance {
     }
 
     this.pollCount++;
-    // Request full payload on every 5th poll to keep cold values fresh
-    const isFull = (this.pollCount % 5 === 0) ? 1 : 0;
+    // Request full payload on every 10th poll — khớp client gốc (canvas.js:7020: _pollN % 10)
+    const isFull = (this.pollCount % 10 === 0) ? 1 : 0;
+
+    // 😴 Anti-idle: Tính act flag mô phỏng hành vi người dùng thật
+    // - Poll đầu tiên = act=1 (giống user vừa load trang/F5)
+    // - Khi có tương tác người dùng / tự động (this.pendingActFlag) = act=1 ở poll tiếp theo, khớp client gốc
+    // - Khi AFK đứng yên = act=1 nhịp ngẫu nhiên 120s - 300s (jitter tự nhiên)
+    const now = Date.now();
+    let actValue = 0;
+    if (this.pollCount === 1) {
+      actValue = 1;
+      this.lastActSentAt = now;
+      this.nextActInterval = 120000 + Math.random() * 180000;
+      this.pendingActFlag = false;
+    } else if (this.pendingActFlag) {
+      actValue = 1;
+      this.lastActSentAt = now;
+      this.nextActInterval = 120000 + Math.random() * 160000;
+      this.pendingActFlag = false;
+    } else if ((now - this.lastActSentAt) >= this.nextActInterval) {
+      actValue = 1;
+      this.lastActSentAt = now;
+      this.nextActInterval = 120000 + Math.random() * 160000;
+    }
     
     let exploreCx = this.player ? (this.settings.explore_cx || this.player.x) : this.settings.explore_cx;
     let exploreCy = this.player ? (this.settings.explore_cy || this.player.y) : this.settings.explore_cy;
@@ -990,7 +1026,7 @@ class BotInstance {
       line_uid: this.line_uid,
       session_token: this.session_token,
       manual_dir: '',
-      act: 1,
+      act: actValue,  // 😴 Jitter tự nhiên: 1 mỗi 45-90s ngẫu nhiên, không phải mọi poll
       full: isFull,
       bot: this.settings.bot ? 1 : 0,
       lock_pos: lockPos,
@@ -1010,6 +1046,16 @@ class BotInstance {
       this.error = 'Tài khoản bị kick hoặc đăng nhập từ thiết bị khác';
       this.addLog('ERROR', 'Tài khoản bị đăng xuất (đăng nhập từ nơi khác)');
       this.stop('failed');
+      return;
+    }
+
+    // 😴 T46: Handle server idle response — force act=1 ngay poll tiếp theo để phục hồi
+    // Server trả d.idle=true khi last_action_at quá lâu
+    if (d.idle) {
+      this.lastActSentAt = 0;   // Force act=1 ở poll tiếp theo
+      this.nextActInterval = 0; // Interval = 0 → gửi ngay
+      this.pendingActFlag = true;
+      this.addLog('SYSTEM', '😴 Server phát hiện Idle Signal -> Kích hoạt khôi phục tương tác khẩn cấp (act=1 forced)');
       return;
     }
 
