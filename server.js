@@ -272,6 +272,55 @@ class ProxyPool {
 
 const proxyPool = new ProxyPool();
 
+// ==================== MONSTER MASTERS CACHE & TRANSLATION ====================
+const MON_MASTERS_CACHE_FILE = path.join(__dirname, 'mon_masters_cache.json');
+let viDict = {};
+try {
+  const langPath = path.join(__dirname, 'xhrpg_lang_vi.js');
+  if (fs.existsSync(langPath)) {
+    const fakeWindow = { XHRPG_I18N: {} };
+    const code = fs.readFileSync(langPath, 'utf8');
+    const fn = new Function('window', code);
+    fn(fakeWindow);
+    viDict = fakeWindow.XHRPG_I18N.vi || {};
+  }
+} catch(e) {
+  console.error('Failed to load xhrpg_lang_vi.js dictionary:', e.message);
+}
+
+let monMastersCache = {};
+if (fs.existsSync(MON_MASTERS_CACHE_FILE)) {
+  try {
+    monMastersCache = JSON.parse(fs.readFileSync(MON_MASTERS_CACHE_FILE, 'utf8')) || {};
+  } catch(e) {}
+}
+
+function processMonMasters(rawMasters) {
+  if (!rawMasters || typeof rawMasters !== 'object') return;
+  let updated = false;
+  for (const mid in rawMasters) {
+    const mm = rawMasters[mid];
+    if (!mm) continue;
+    const origName = mm.n || mm.name || '';
+    const translatedName = viDict[origName] || origName;
+    const cleanEntry = {
+      n: translatedName,
+      orig_n: origName,
+      e: mm.e || '👾',
+      lv: parseInt(mm.lv) || 1,
+      cs: (mm.cs || 'str').toLowerCase(),
+      c: mm.c || '#ef4444'
+    };
+    monMastersCache[mid] = cleanEntry;
+    updated = true;
+  }
+  if (updated) {
+    try {
+      fs.writeFileSync(MON_MASTERS_CACHE_FILE, JSON.stringify(monMastersCache, null, 2), 'utf8');
+    } catch(e) {}
+  }
+}
+
 // Enable Gzip/Brotli compression for static and API responses (excluding image files)
 app.use(compression({
   level: 6,
@@ -950,7 +999,7 @@ class BotInstance {
       explore_cy: exploreCy,
       traveling: traveling,
       auto_potion_threshold: this.settings.auto_potion_threshold,
-      have_static: this.spots ? 1 : 0,
+      have_static: (this.spots && this.mon_masters) ? 1 : 0,
       lang: 'vi'
     };
 
@@ -978,6 +1027,12 @@ class BotInstance {
     // Save bosses list
     if (d.bosses) {
       this.bosses = d.bosses;
+    }
+
+    // Save mon_masters list (crawled live from game server)
+    if (d.mon_masters) {
+      processMonMasters(d.mon_masters);
+      this.mon_masters = d.mon_masters;
     }
 
     // Update player
@@ -2345,37 +2400,121 @@ app.get('/api/accounts', requireAuth, (req, res) => {
           spots: bot.spots || null,
           player: bot.player ? (() => {
             const p = bot.player;
-            const vitEff = p.vit_eff ?? p.vit ?? 5;
-            const vitBase = p.vit ?? 5;
-            const vitHpBonus = Math.max(0, Math.max(0, vitEff - 5) * 2 - Math.max(0, vitBase - 5));
-            const ragHp = 1 + 0.001 * Math.max(0, parseInt(p.rag_hp) || 0);
-            const hp_max_eff = Math.floor(((p.hp_max || 100) + vitHpBonus) * ragHp);
 
-            const intelEff = p.intel_eff ?? p.intel ?? 5;
-            const ragMp = 1 + 0.001 * Math.max(0, parseInt(p.rag_mp) || 0);
-            const mp_max_calc = Math.floor((50 + intelEff * 5) * ragMp);
+            // 1. Sổ tay Thẻ bài / Trứng (_collCB)
+            const _collCBof = (o) => {
+              const obj = (o && typeof o === 'object' && !Array.isArray(o)) ? o : (() => { try { return JSON.parse(o || '{}') || {}; } catch(e) { return {}; } })();
+              let b = 0;
+              for (const k in obj) {
+                const v = obj[k];
+                if (v && ((v.n | 0) > 0)) b += 1;
+                if (v && ((v.m | 0) > 0)) b += 3;
+              }
+              return b;
+            };
+            const collCB = _collCBof(p.cards) + _collCBof(p.eggs);
 
-            const vitEffArm = p.vit_eff ?? p.vit ?? 5;
-            const strEffArm = p.str ?? 5;
-            const armorUpSkillLv = (() => {
+            // 2. Thẻ MVP socket cắm trong module (_cardCB)
+            const cardCB = { atk: collCB, range: 0, armor: 0, hp: collCB, mp: collCB };
+            ['pistol_modules', 'sniper_modules', 'knife_modules', 'axe_modules', 'robot_modules', 'robot_gun_modules', 'railgun_modules', 'armor_modules', 'house_modules', 'turret_modules'].forEach(f => {
+              if (f === 'railgun_modules' && (+(p.robot_railgun_expires || 0)) <= Math.floor(Date.now() / 1000)) return;
+              let mods = p[f];
+              if (typeof mods === 'string') { try { mods = JSON.parse(mods || '{}'); } catch(e) { mods = {}; } }
+              if (!mods || typeof mods !== 'object') return;
+              Object.keys(mods).forEach(k => {
+                const m = mods[k];
+                if (!m || !Array.isArray(m.cards)) return;
+                m.cards.forEach(c => {
+                  if (!c || !c.mvp || !c.mb) return;
+                  const t = c.mb.t, a = c.mb.a | 0;
+                  if (a > 0 && cardCB[t] !== undefined) cardCB[t] += a;
+                });
+              });
+            });
+
+            // 3. Tổng ATK từ Module các loại vũ khí (_modTotalAtk)
+            const _pmodsObj = (w) => {
+              const f = w + '_modules';
+              let m = p[f];
+              if (typeof m === 'string') { try { m = JSON.parse(m || '{}'); } catch(e) { m = {}; } }
+              return (m && typeof m === 'object') ? m : {};
+            };
+            const _modEnhAtk = (to) => (to > 0 ? (to <= 5 ? to * 3 : (to <= 11 ? 15 + (to - 5) * 5 : 45 + (to - 11) * 8)) : 0);
+            const _modBarrelAtk = (m) => (m ? (Math.max(1, m.rarity || 1) - 1) * 3 + _modEnhAtk(parseInt(m.plus) || 0) : 0);
+            const _modGunAtk = (mods) => _modBarrelAtk(mods && mods.barrel) + _modBarrelAtk(mods && mods.mag);
+            const _modSightAtk = (mods) => _modBarrelAtk(mods && mods.sight);
+
+            const railOn = (parseInt(p.robot_railgun_expires) || 0) > Math.floor(Date.now() / 1000);
+            let modTotalAtk = 0;
+            ['pistol', 'sniper', 'knife', 'axe', 'robot_gun', 'railgun'].forEach(w => {
+              if (w === 'railgun' && !railOn) return;
+              const m = _pmodsObj(w);
+              modTotalAtk += _modGunAtk(m) + _modSightAtk(m);
+            });
+            const tm = _pmodsObj('turret');
+            modTotalAtk += _modBarrelAtk(tm.t_atk) + _modBarrelAtk(tm.t_range) + _modBarrelAtk(tm.t_dur);
+
+            // 4. Module Giáp (Armor Module MAX & DEF)
+            const _armorModDefOne = (to) => (to > 0 ? (to <= 5 ? to : (to <= 11 ? 5 + (to - 5) * 2 : 17 + (to - 11) * 3)) : 0);
+            const _armorEffVal = (slot, m) => {
+              const r = parseInt(m.rarity) || 1, plus = parseInt(m.plus) || 0;
+              if (slot === 'a_max') return r * 3 + plus * 2;
+              if (slot === 'a_regen') return _armorModDefOne(plus) + Math.floor((r - 1) / 2);
+              if (slot === 'a_return') return Math.min(50, r * 2 + plus);
+              return 0;
+            };
+            const armorMods = _pmodsObj('armor');
+            let armorModMax = 0, armorModDef = 0;
+            Object.keys(armorMods).forEach(k => {
+              const m = armorMods[k];
+              if (!m) return;
+              if (k === 'a_max') armorModMax += _armorEffVal('a_max', m);
+              if (k === 'a_regen') armorModDef += _armorEffVal('a_regen', m);
+            });
+
+            // 5. Trích xuất Cấp độ Kỹ năng
+            const skillsObj = (() => {
               try {
-                const sk = typeof p.skills === 'object' ? p.skills : JSON.parse(p.skills || '{}');
-                return parseInt(sk.armor_up) || 0;
+                return typeof p.skills === 'object' ? p.skills : JSON.parse(p.skills || '{}');
               } catch (e) {
-                return 0;
+                return {};
               }
             })();
-            const ragArmor = 1 + 0.001 * Math.max(0, parseInt(p.rag_armor) || 0);
-            const armor_max_calc = Math.floor((100 + Math.floor(Math.max(0, vitEffArm - 5) / 5) + Math.floor(Math.max(0, strEffArm - 5) / 2) + (p.armor_lv || 0) * 10 + armorUpSkillLv * 5) * ragArmor);
+            const armorUpSkillLv = parseInt(skillsObj.armor_up) || 0;
+            const critShotSkillLv = parseInt(skillsObj.crit_shot) || 0;
+            const deployTurretSkillLv = parseInt(skillsObj.deploy_turret) || 0;
 
+            // 6. Hệ số nhân Ragnalok Points
+            const ragHp = 1 + 0.001 * Math.max(0, parseInt(p.rag_hp) || 0);
+            const ragMp = 1 + 0.001 * Math.max(0, parseInt(p.rag_mp) || 0);
+            const ragArmor = 1 + 0.001 * Math.max(0, parseInt(p.rag_armor) || 0);
+            const ragAtk = 1 + 0.001 * Math.max(0, parseInt(p.rag_atk) || 0);
+            const ragDef = 1 + 0.001 * Math.max(0, parseInt(p.rag_def) || 0);
+            const ragCritBonus = Number(((parseInt(p.rag_crit) || 0) * 0.1).toFixed(1));
+
+            // 7. Các chỉ số tố chất hiệu quả
+            const strEff = p.str_eff ?? p.str ?? 5;
+            const agiEff = p.agi_eff ?? p.agi ?? 5;
+            const vitEff = p.vit_eff ?? p.vit ?? 5;
+            const intelEff = p.intel_eff ?? p.intel ?? 5;
             const dexEff = p.dex_eff ?? p.dex ?? 5;
             const lukEff = p.luk_eff ?? p.luk ?? 5;
-            const atk_pistol = Math.round(20 + Math.max(0, dexEff - 5) * 2 + ((p.gun_pistol_lv || 1) - 1) * 2);
-            const atk_sniper = Math.round(120 + Math.max(0, dexEff - 5) * 2.5 + ((p.gun_sniper_lv || 1) - 1) * 5);
-            const atk_knife = Math.round(Math.max(0, strEffArm - 5) * 3 + 10 + ((p.knife_lv || 1) - 1) * 8);
-            const atk_turret = Math.round(20 + intelEff * 3 + ((p.turret_lv || 1) - 1) * 2);
-            const crit_pct = Math.min(50, Math.floor((lukEff + strEffArm) / 10));
-            const def_calc = 10 + Math.max(0, vitEffArm - 5) + Math.max(0, parseInt(p.armor_lv) || 0);
+            const vitBase = p.vit ?? 5;
+
+            // 8. Tính toán các chỉ số chiến đấu phái sinh chuẩn 100%
+            const vitHpBonus = Math.max(0, Math.max(0, vitEff - 5) * 2 - Math.max(0, vitBase - 5));
+            const hp_max_eff = Math.floor(((p.hp_max || 100) + cardCB.hp + vitHpBonus) * ragHp);
+            const mp_max_calc = Math.floor((50 + intelEff * 5 + cardCB.mp) * ragMp);
+
+            const armor_max_calc = Math.floor((100 + Math.floor(Math.max(0, vitEff - 5) / 5) + Math.floor(Math.max(0, strEff - 5) / 2) + (p.armor_lv || 0) * 10 + armorModMax + armorUpSkillLv * 5 + cardCB.armor) * ragArmor);
+            const def_calc = Math.floor((10 + Math.max(0, vitEff - 5) + Math.max(0, parseInt(p.armor_lv) || 0) + armorModDef + collCB) * ragDef);
+            const crit_pct = Math.min(50, Math.floor((lukEff + strEff) / 10)) + ragCritBonus;
+
+            const atk_pistol = Math.floor((20 + Math.max(0, dexEff - 5) * 2 + critShotSkillLv * 5 + ((p.gun_pistol_lv || 1) - 1) * 2 + modTotalAtk + cardCB.atk) * ragAtk);
+            const atk_sniper = Math.floor((Math.round(120 + Math.max(0, dexEff - 5) * 2.5) + critShotSkillLv * 5 + ((p.gun_sniper_lv || 1) - 1) * 5 + modTotalAtk + cardCB.atk) * ragAtk);
+            const atk_knife = Math.floor((10 + Math.max(0, strEff - 5) * 3 + ((p.knife_lv || 1) - 1) * 8 + modTotalAtk + cardCB.atk) * ragAtk);
+            const atk_turret = Math.floor((20 + intelEff * 3 + deployTurretSkillLv * 5 + ((p.turret_lv || 1) - 1) * 2 + modTotalAtk + cardCB.atk) * ragAtk);
+            const dodge_pct = Math.min(75, Math.floor(agiEff / 3));
 
             return {
               lv: p.lv,
@@ -2404,6 +2543,7 @@ app.get('/api/accounts', requireAuth, (req, res) => {
               atk_turret,
               crit_pct,
               def_calc,
+              dodge_pct,
               exp: p.exp,
               gold: p.gold,
               wood: p.wood,
@@ -2419,11 +2559,31 @@ app.get('/api/accounts', requireAuth, (req, res) => {
               skill_pts: p.skill_pts,
               mine_lv: p.mine_lv,
               house_lv: p.house_lv,
-              house_energy: p.house_energy,
               skills: p.skills || '{}',
               skill_auto: p.skill_auto || '{}',
+              cards: p.cards || '{}',
+              eggs: p.eggs || '{}',
             };
-          })() : null
+          })() : null,
+          mon_masters: (() => {
+            const rawMM = (bot && bot.mon_masters && Object.keys(bot.mon_masters).length > 0)
+              ? bot.mon_masters
+              : monMastersCache;
+            const formatted = {};
+            for (const mid in rawMM) {
+              const item = rawMM[mid];
+              if (!item) continue;
+              const orig = item.n || item.name || item.orig_n || '';
+              formatted[mid] = {
+                n: viDict[orig] || item.n || orig || `Quái #${mid}`,
+                e: item.e || '👾',
+                lv: parseInt(item.lv) || 1,
+                cs: (item.cs || 'str').toLowerCase(),
+                c: item.c || '#ef4444'
+              };
+            }
+            return formatted;
+          })()
         };
       });
     res.json(list);

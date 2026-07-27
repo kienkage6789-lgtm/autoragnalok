@@ -1127,9 +1127,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
         <!-- Character & Skills Tab Pane -->
         <div class="tab-pane" id="pane-skills-${acc.line_uid}">
-          <div class="subtabs-nav" style="display:flex; gap:6px; margin-bottom:10px; border-bottom:1px solid rgba(255,255,255,0.08); padding-bottom:6px;">
-            <button class="subtab-btn active" id="subtab-btn-stats-${acc.line_uid}" onclick="switchSubTab('${acc.line_uid}', 'stats')">📊 Chỉ Số & Tiềm Năng</button>
-            <button class="subtab-btn" id="subtab-btn-skills-${acc.line_uid}" onclick="switchSubTab('${acc.line_uid}', 'skills')">⚡ Kỹ Năng & Auto</button>
+          <div class="subtabs-nav" style="display:flex; gap:6px; margin-bottom:10px; border-bottom:1px solid rgba(255,255,255,0.08); padding-bottom:6px; overflow-x:auto;">
+            <button class="subtab-btn active" id="subtab-btn-stats-${acc.line_uid}" onclick="switchSubTab('${acc.line_uid}', 'stats')">📊 Tiềm Năng</button>
+            <button class="subtab-btn" id="subtab-btn-skills-${acc.line_uid}" onclick="switchSubTab('${acc.line_uid}', 'skills')">⚡ Kỹ Năng</button>
+            <button class="subtab-btn" id="subtab-btn-cards-${acc.line_uid}" onclick="switchSubTab('${acc.line_uid}', 'cards')">🎴 Thẻ Bài</button>
+            <button class="subtab-btn" id="subtab-btn-eggs-${acc.line_uid}" onclick="switchSubTab('${acc.line_uid}', 'eggs')">🥚 Trứng</button>
           </div>
 
           <!-- Sub-pane 1: Stats & Stat Points -->
@@ -1170,6 +1172,36 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div style="grid-column: 1 / -1; font-size: 0.8rem; color: var(--text-secondary); opacity: 0.85; text-align: center; padding: 12px 0;">
                   Chưa có dữ liệu kỹ năng.
                 </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Sub-pane 3: Cards Inventory & MVP Exchange -->
+          <div class="subtab-pane" id="subpane-cards-${acc.line_uid}" style="display:none;">
+            <div class="char-section-block">
+              <div class="section-header-wrap">
+                <span class="section-title" style="color:#fb7185; font-weight:700;">🎴 Bộ Sưu Tập Thẻ Bài</span>
+                <span style="font-size:0.75rem; background:rgba(225, 29, 72, 0.15); color:#fda4af; padding:2px 8px; border-radius:10px; font-weight:700; border:1px solid rgba(244, 63, 94, 0.25);" id="cards-count-badge-${acc.line_uid}">
+                  Loài thẻ: <b id="cards-cnt-val-${acc.line_uid}">0</b> loài
+                </span>
+              </div>
+              <div class="cards-book-grid" id="cards-book-${acc.line_uid}">
+                <!-- Populated dynamically by renderCardBook(acc) -->
+              </div>
+            </div>
+          </div>
+
+          <!-- Sub-pane 4: Pet Eggs Inventory & MVP Exchange -->
+          <div class="subtab-pane" id="subpane-eggs-${acc.line_uid}" style="display:none;">
+            <div class="char-section-block">
+              <div class="section-header-wrap">
+                <span class="section-title" style="color:#38bdf8; font-weight:700;">🥚 Bộ Sưu Tập Trứng Thú Cưng</span>
+                <span style="font-size:0.75rem; background:rgba(14, 165, 233, 0.15); color:#7dd3fc; padding:2px 8px; border-radius:10px; font-weight:700; border:1px solid rgba(56, 189, 248, 0.25);" id="eggs-count-badge-${acc.line_uid}">
+                  Loài trứng: <b id="eggs-cnt-val-${acc.line_uid}">0</b> loài
+                </span>
+              </div>
+              <div class="eggs-book-grid" id="eggs-book-${acc.line_uid}">
+                <!-- Populated dynamically by renderEggBook(acc) -->
               </div>
             </div>
           </div>
@@ -1441,6 +1473,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     renderStatsList(acc);
     renderCombatSummary(acc);
+    renderCardBook(acc);
+    renderEggBook(acc);
 
     // Render tab contents based on active state
     const currentTab = activeTabs[acc.line_uid];
@@ -1538,11 +1572,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const p = acc.player;
 
     const items = [
-      { label: '❤️ HP Tối Đa', val: `${p.hp_max_eff || p.hp_max || 100}`, color: '#22c55e' },
-      { label: '🔷 MP Tối Đa', val: `${p.mp_max_calc || 75}`, color: '#6366f1' },
-      { label: '🛡️ Giáp Tối Đa', val: `${p.armor_max_calc || 100}`, color: '#64748b' },
-      { label: '🔰 DEF (Giáp)', val: `${p.def_calc || 10}`, color: '#0ea5e9' },
-      { label: '💥 CRIT (Chí mạng)', val: `${p.crit_pct || 0}%`, color: '#f59e0b' },
+      { label: '❤️ Max HP', val: `${p.hp_max_eff || p.hp_max || 100}`, color: '#22c55e' },
+      { label: '🔷 Max MP', val: `${p.mp_max_calc || 75}`, color: '#6366f1' },
+      { label: '🛡️ Max Giáp', val: `${p.armor_max_calc || 100}`, color: '#64748b' },
+      { label: '🔰 DEF', val: `${p.def_calc || 10}`, color: '#0ea5e9' },
+      { label: '💥 CRIT %', val: `${p.crit_pct || 0}%`, color: '#f59e0b' },
+      { label: '💨 Dodge %', val: `${p.dodge_pct || 0}%`, color: '#14b8a6' },
       { label: '🗡️ Pistol ATK', val: `${p.atk_pistol || 20}`, color: '#f43f5e' },
       { label: '🏹 Sniper ATK', val: `${p.atk_sniper || 120}`, color: '#ec4899' },
       { label: '⚔️ Knife ATK', val: `${p.atk_knife || 10}`, color: '#10b981' },
@@ -1588,13 +1623,318 @@ document.addEventListener('DOMContentLoaded', () => {
   window.switchSubTab = function(uid, subTabId) {
     const btnStats = document.getElementById(`subtab-btn-stats-${uid}`);
     const btnSkills = document.getElementById(`subtab-btn-skills-${uid}`);
+    const btnCards = document.getElementById(`subtab-btn-cards-${uid}`);
+    const btnEggs = document.getElementById(`subtab-btn-eggs-${uid}`);
+
     const paneStats = document.getElementById(`subpane-stats-${uid}`);
     const paneSkills = document.getElementById(`subpane-skills-${uid}`);
+    const paneCards = document.getElementById(`subpane-cards-${uid}`);
+    const paneEggs = document.getElementById(`subpane-eggs-${uid}`);
 
     if (btnStats) btnStats.classList.toggle('active', subTabId === 'stats');
     if (btnSkills) btnSkills.classList.toggle('active', subTabId === 'skills');
+    if (btnCards) btnCards.classList.toggle('active', subTabId === 'cards');
+    if (btnEggs) btnEggs.classList.toggle('active', subTabId === 'eggs');
+
     if (paneStats) paneStats.style.display = subTabId === 'stats' ? 'block' : 'none';
     if (paneSkills) paneSkills.style.display = subTabId === 'skills' ? 'block' : 'none';
+    if (paneCards) paneCards.style.display = subTabId === 'cards' ? 'block' : 'none';
+    if (paneEggs) paneEggs.style.display = subTabId === 'eggs' ? 'block' : 'none';
+  };
+
+  const MONSTER_DICT = {
+    1:  { n: 'Sứa Đỏ',             e: '🔴', lv: 1,  cs: 'str' },
+    2:  { n: 'Sâu Lá',              e: '🐛', lv: 2,  cs: 'agi' },
+    3:  { n: 'Thỏ Trắng',          e: '🐰', lv: 3,  cs: 'vit' },
+    4:  { n: 'Chim Khai Phá',       e: '🐥', lv: 5,  cs: 'dex' },
+    5:  { n: 'Chuồn Chuồn',          e: '🦟', lv: 7,  cs: 'intel' },
+    6:  { n: 'Mộc Yêu',             e: '🪵', lv: 9,  cs: 'luk' },
+    7:  { n: 'Nấm Độc',             e: '🍄', lv: 12, cs: 'vit' },
+    8:  { n: 'Sói Xám',             e: '🐺', lv: 15, cs: 'dex' },
+    9:  { n: 'Cốt Binh',             e: '💀', lv: 18, cs: 'str' },
+    10: { n: 'Thây Ma',             e: '🧟', lv: 22, cs: 'vit' },
+    11: { n: 'Xác Ướp',             e: '🩹', lv: 26, cs: 'vit' },
+    12: { n: 'Rắn Độc',             e: '🐍', lv: 30, cs: 'agi' },
+    13: { n: 'Người Đá',            e: '🗿', lv: 35, cs: 'str' },
+    14: { n: 'Băng Khổng Lồ',        e: '🧊', lv: 40, cs: 'vit' },
+    15: { n: 'Quỷ Tuyết',            e: '❄️', lv: 45, cs: 'str' },
+    16: { n: 'Bò Thần',              e: '🐂', lv: 50, cs: 'str' },
+    17: { n: 'Pháp Sư',             e: '📿', lv: 55, cs: 'intel' },
+    18: { n: 'Thuyền Trưởng',       e: '🏴‍☠️', lv: 60, cs: 'dex' },
+    19: { n: 'Quỷ Lửa',             e: '🔥', lv: 65, cs: 'str' },
+    20: { n: 'Chúa Lửa',             e: '🌋', lv: 70, cs: 'str' },
+    21: { n: 'Bọ Hoàng Kim',        e: '🐞', lv: 75, cs: 'vit' },
+    22: { n: 'Nữ Hoàng Maya',        e: '👑', lv: 80, cs: 'intel' },
+    23: { n: 'Vua Bọ',              e: '☥',  lv: 85, cs: 'intel' },
+    24: { n: 'Chúa Tể Baphomet',    e: '🐐', lv: 90, cs: 'str' },
+    25: { n: 'Chúa Tể Bóng Tối',    e: '🧙‍♂️', lv: 95, cs: 'intel' },
+    26: { n: 'Nữ Thần Valkyrie',    e: '⚔️', lv: 100, cs: 'str' }
+  };
+
+  // Render Cards Inventory & Exchange Panel (Compact 50% Height Layout)
+  function renderCardBook(acc) {
+    const el = document.getElementById(`cards-book-${acc.line_uid}`);
+    const cntBadge = document.getElementById(`cards-cnt-val-${acc.line_uid}`);
+    if (!el) return;
+
+    const p = acc.player;
+    const cardsData = (() => {
+      if (!p || !p.cards) return {};
+      if (typeof p.cards === 'object' && !Array.isArray(p.cards)) return p.cards;
+      try { return JSON.parse(p.cards || '{}') || {}; } catch(e) { return {}; }
+    })();
+
+    const monMasters = acc.mon_masters || {};
+    const STAT_COLORS = { str: '#ef4444', agi: '#22c55e', vit: '#f59e0b', dex: '#06b6d4', intel: '#a855f7', luk: '#eab308' };
+    const STAT_LABELS = { str: 'STR', agi: 'AGI', vit: 'VIT', dex: 'DEX', intel: 'INT', luk: 'LUK' };
+    const STAT_KEYS = ['str', 'agi', 'vit', 'dex', 'intel', 'luk'];
+
+    const cardIds = Object.keys(cardsData);
+    if (cntBadge) cntBadge.textContent = cardIds.length;
+
+    if (cardIds.length === 0) {
+      el.innerHTML = `
+        <div style="grid-column: 1 / -1; text-align: center; color: var(--text-secondary); opacity: 0.85; font-size: 0.8rem; padding: 16px 0;">
+          🎴 Chưa sở hữu thẻ bài nào trong kho. Hãy tiếp tục treo máy farm quái!
+        </div>
+      `;
+      return;
+    }
+
+    let html = '';
+    cardIds.forEach(mid => {
+      const entry = cardsData[mid] || {};
+      const countNormal = parseInt(entry.n) || 0;
+      const countMvp = parseInt(entry.m) || 0;
+
+      const defMon = MONSTER_DICT[mid] || {};
+      const mm = monMasters[mid] || {};
+      const monName = mm.n || mm.name || defMon.n || `Quái #${mid}`;
+      const monLv = parseInt(mm.lv) || defMon.lv || Math.max(1, parseInt(mid) * 2);
+      const monEmoji = mm.e || defMon.e || '👾';
+
+      const statType = (mm.cs || defMon.cs || STAT_KEYS[(parseInt(mid) - 1) % 6]).toLowerCase();
+      const statLabel = STAT_LABELS[statType] || statType.toUpperCase();
+      const statColor = STAT_COLORS[statType] || '#a855f7';
+
+      // Stat values (Math.ceil(Lv / 10) * 1 for normal, * 3 for MVP)
+      const valNormal = Math.ceil(monLv / 10) * 1;
+      const valMvp = Math.ceil(monLv / 10) * 3;
+
+      // MVP Combat Bonus calculation (2nd attribute when socketed in Module)
+      const cbTypes = ['str','agi','vit','dex','intel','luk','atk','armor','hp','mp','hp_regen','mp_regen'];
+      const cbType = cbTypes[Math.abs(parseInt(mid)) % 12];
+      let cbVal = 0;
+      if (cbType === 'hp' || cbType === 'mp') cbVal = Math.round(monLv * 30 / 4);
+      else if (cbType === 'armor') cbVal = Math.ceil(monLv / 10) * 30;
+      else if (cbType === 'hp_regen' || cbType === 'mp_regen') cbVal = Math.max(1, Math.floor(monLv / 10)) * 3;
+      else cbVal = Math.ceil(monLv / 10) * 3;
+      const cbLabel = cbType.toUpperCase();
+
+      const N = 100;
+      const isReady = countNormal >= N;
+      const pct = Math.min(100, Math.round((countNormal / N) * 100));
+
+      html += `
+        <div class="card-item-box compact">
+          <div class="card-item-header">
+            <div class="card-title-wrap">
+              <span class="card-mon-emoji">${monEmoji}</span>
+              <span class="card-mon-name">${monName}</span>
+              <span class="card-mon-lv">Lv.${monLv}</span>
+            </div>
+            <div class="card-progress-badge ${isReady ? 'ready' : ''}">
+              <b>${countNormal}</b> / ${N} ${isReady ? '✓' : ''}
+            </div>
+          </div>
+
+          <div class="card-exchange-progress">
+            <div class="card-exchange-fill" style="width: ${pct}%; background: ${isReady ? '#22c55e' : '#f59e0b'};"></div>
+          </div>
+
+          <div class="card-types-container">
+            <div class="card-type-subbox normal">
+              <span class="card-type-lbl" style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">🎴 <b style="color: ${statColor};">+${valNormal} ${statLabel}</b></span>
+              <span class="card-type-count">(<b>${countNormal}</b>)</span>
+            </div>
+
+            <div class="card-type-subbox mvp" title="Thuộc tính khảm Module: +${cbVal} ${cbLabel}">
+              <span class="card-type-lbl" style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">⭐ <b style="color: #f43f5e;">+${valMvp}${statLabel}</b> <span style="color:#a78bfa; font-size:0.42rem;">(+${cbVal}${cbLabel})</span></span>
+              <span class="card-type-count">(<b>${countMvp}</b>)</span>
+            </div>
+          </div>
+
+          <button class="btn-exchange-mvp ${isReady ? 'ready' : 'disabled'}" 
+            onclick="exchangeMvpCard('${acc.line_uid}', '${mid}', ${countNormal})"
+            ${isReady ? '' : 'disabled'}>
+            🔄 Đổi 1 Thẻ MVP (100 ➔ 1 ⭐)
+          </button>
+        </div>
+      `;
+    });
+
+    el.innerHTML = html;
+  }
+
+  // Handle Exchange MVP Card Action
+  window.exchangeMvpCard = async function(uid, mid, countNormal) {
+    if (countNormal < 100) {
+      alert('Bạn chưa đủ 100 Thẻ Thường để đổi 1 Thẻ MVP!');
+      return;
+    }
+    if (!confirm('Bạn có chắc chắn muốn dùng 100 Thẻ Thường để đổi lấy 1 Thẻ ⭐ MVP không?')) {
+      return;
+    }
+    try {
+      const res = await fetch(`/api/accounts/${uid}/action`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'card_mvp_exchange', extra: { mid } })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        alert(data.msg || 'Đổi Thẻ MVP thành công!');
+        if (window.fetchAccounts) window.fetchAccounts();
+      } else {
+        alert(data.error || 'Đổi Thẻ MVP thất bại!');
+      }
+    } catch(e) {
+      alert('Lỗi kết nối: ' + e.message);
+    }
+  };
+
+  // Render Pet Eggs Inventory & Exchange Panel
+  function renderEggBook(acc) {
+    const el = document.getElementById(`eggs-book-${acc.line_uid}`);
+    const cntBadge = document.getElementById(`eggs-cnt-val-${acc.line_uid}`);
+    if (!el) return;
+
+    const p = acc.player;
+    const eggsData = (() => {
+      if (!p || !p.eggs) return {};
+      if (typeof p.eggs === 'object' && !Array.isArray(p.eggs)) return p.eggs;
+      try { return JSON.parse(p.eggs || '{}') || {}; } catch(e) { return {}; }
+    })();
+
+    const monMasters = acc.mon_masters || {};
+    const eggIds = Object.keys(eggsData);
+    if (cntBadge) cntBadge.textContent = eggIds.length;
+
+    if (eggIds.length === 0) {
+      el.innerHTML = `
+        <div style="grid-column: 1 / -1; text-align: center; color: var(--text-secondary); opacity: 0.85; font-size: 0.8rem; padding: 16px 0;">
+          🥚 Chưa sở hữu trứng thú cưng nào trong kho. Hãy tiếp tục đánh quái để nhặt trứng!
+        </div>
+      `;
+      return;
+    }
+
+    let html = '';
+    eggIds.forEach(mid => {
+      const entry = eggsData[mid] || {};
+      const countNormal = parseInt(entry.n) || 0;
+      const countMvp = parseInt(entry.m) || 0;
+
+      const mm = monMasters[mid] || {};
+      const monName = mm.n || mm.name || `Quái #${mid}`;
+      const monLv = parseInt(mm.lv) || 1;
+      const monEmoji = mm.e || '👾';
+
+      const hatchCostNorm = monLv * 100;
+
+      const N = 100;
+      const isReady = countNormal >= N;
+      const pct = Math.min(100, Math.round((countNormal / N) * 100));
+
+      html += `
+        <div class="card-item-box compact">
+          <div class="card-item-header">
+            <div class="card-title-wrap">
+              <span class="card-mon-emoji">🥚 ${monEmoji}</span>
+              <span class="card-mon-name">${monName}</span>
+              <span class="card-mon-lv">Lv.${monLv}</span>
+            </div>
+            <div class="card-progress-badge ${isReady ? 'ready' : ''}">
+              <b>${countNormal}</b> / ${N} ${isReady ? '✓' : ''}
+            </div>
+          </div>
+
+          <div class="card-exchange-progress">
+            <div class="card-exchange-fill" style="width: ${pct}%; background: ${isReady ? '#22c55e' : '#f59e0b'};"></div>
+          </div>
+
+          <div class="card-types-container">
+            <div class="card-type-subbox normal">
+              <span class="card-type-lbl">🥚 Thường</span>
+              <b style="color:${countNormal > 0 ? '#38bdf8' : '#94a3b8'}; font-size:0.52rem;">${countNormal}</b>
+            </div>
+
+            <div class="card-type-subbox mvp">
+              <span class="card-type-lbl">⭐🥚 MVP</span>
+              <b style="color:${countMvp > 0 ? '#f43f5e' : '#94a3b8'}; font-size:0.52rem;">${countMvp}</b>
+            </div>
+          </div>
+
+          <button class="btn-exchange-mvp ${isReady ? 'ready' : 'disabled'}" 
+            onclick="exchangeMvpEgg('${acc.line_uid}', '${mid}', ${countNormal})"
+            ${isReady ? '' : 'disabled'}>
+            🔄 Đổi 1 Trứng MVP (100 ➔ 1 ⭐)
+          </button>
+        </div>
+      `;
+    });
+
+    el.innerHTML = html;
+  }
+
+  // Handle Exchange MVP Egg Action
+  window.exchangeMvpEgg = async function(uid, mid, countNormal) {
+    if (countNormal < 100) {
+      alert('Bạn chưa đủ 100 Trứng Thường để đổi 1 Trứng MVP!');
+      return;
+    }
+    if (!confirm('Bạn có chắc chắn muốn dùng 100 Trứng Thường để đổi lấy 1 Trứng ⭐ MVP không?')) {
+      return;
+    }
+    try {
+      const res = await fetch(`/api/accounts/${uid}/action`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'egg_mvp_exchange', extra: { mid } })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        alert(data.msg || 'Đổi Trứng MVP thành công!');
+        if (window.fetchAccounts) window.fetchAccounts();
+      } else {
+        alert(data.error || 'Đổi Trứng MVP thất bại!');
+      }
+    } catch(e) {
+      alert('Lỗi kết nối: ' + e.message);
+    }
+  };
+
+  // Handle Hatch Pet Egg Action
+  window.hatchPetEgg = async function(uid, mid, isMvp, cost) {
+    if (!confirm(`Bạn có chắc chắn muốn tiêu tốn ${cost.toLocaleString()} Gold để ấp trứng thú cưng này không?`)) {
+      return;
+    }
+    try {
+      const res = await fetch(`/api/accounts/${uid}/action`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'pet_hatch', extra: { mid, mvp: isMvp ? 1 : 0 } })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        alert(data.msg || 'Ấp trứng thú cưng thành công!');
+        if (window.fetchAccounts) window.fetchAccounts();
+      } else {
+        alert(data.error || 'Ấp trứng thất bại!');
+      }
+    } catch(e) {
+      alert('Lỗi kết nối: ' + e.message);
+    }
   };
 
   // Fetch account terminal logs

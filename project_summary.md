@@ -178,6 +178,39 @@ Chúng ta đã xây dựng thành công một hệ thống **Headless Bot Manage
     * Giảm độ đậm màu chữ 15% (`opacity: 0.85`) dịu mắt. Bỏ các công tắc tự động thừa khỏi tab Nhân Vật.
 *   **Backend & Server Status**: Expose toàn bộ 6 chỉ số thuộc tính gốc, chỉ số hiệu quả và chỉ số chiến đấu tổng quan trong API `GET /api/accounts`. Tiến trình `node.exe` đã được tắt sạch theo yêu cầu của người dùng để tự khởi động thủ công.
 
+### AA. Tính toán lại 100% chính xác Bảng Chỉ Số Chiến Đấu & Sửa Lỗi Tràn Lề (2026-07-27)
+*   **Đồng bộ 100% Engine Game (`xhrpg_canvas.js`)**:
+    *   Tính chính xác 10 chỉ số chiến đấu phái sinh (`Pistol ATK`, `Sniper ATK`, `Knife ATK`, `Turret ATK`, `DEF`, `CRIT %`, `Dodge %`, `HP Max`, `MP Max`, `Armor Max`).
+    *   Tích hợp đầy đủ điểm cộng Skill (`crit_shot`, `deploy_turret`, `armor_up`), bể sát thương Module (`modTotalAtk`, `armorModDef`), thẻ bài/trứng bộ sưu tập (`cardCB`, `collCB`) và điểm Ragnalok (`rag_atk`, `rag_def`, `rag_crit`).
+*   **Khắc phục Lỗi Tràn Lề (Ảnh `a.png`)**:
+    *   Rút gọn nhãn các chỉ số ngắn gọn, sắc nét (`❤️ Max HP`, `🔷 Max MP`, `🛡️ Max Giáp`, `🔰 DEF`, `💥 CRIT %`, `💨 Dodge %`...).
+    *   Chuyển đổi lưới `.combat-summary-grid` sang 2 cột 5 hàng vuông vắn (`grid-template-columns: repeat(2, 1fr)`), căn nhãn bên trái - chỉ số bên phải.
+    *   Thêm `width: 100%; box-sizing: border-box; overflow: hidden;` giúp giao diện phẳng, đẹp, cân đối 100% không bị tràn viền phải.
+
+### BB. Tích hợp Thẻ Bài, Trứng Thú Cưng & Live Crawl Data Game Server (2026-07-27)
+*   **Tối Ưu Tên Nhãn Sub-Tab Nhanh Gọn**:
+    *   Sub-tab 1: **`📊 Tiềm Năng`** (cũ: *Chỉ Số & Tiềm Năng*)
+    *   Sub-tab 2: **`⚡ Kỹ Năng`** (cũ: *Kỹ Năng & Auto*)
+    *   Sub-tab 3: **`🎴 Thẻ Bài`** (cũ: *Kho Thẻ Bài*)
+    *   Sub-tab 4: **`🥚 Trứng`** (cũ: *Kho Trứng*)
+*   **Bộ Sưu Tập Thẻ Bài (`🎴 Thẻ Bài`)**:
+    *   Phân loại Thẻ Thường (`🎴`) và Thẻ ⭐ MVP (`⭐`).
+    *   Hiển thị đủ **2 Thuộc Tính Thẻ MVP**: Thuộc tính nền (`+3X Stat`) và Thuộc tính Khảm Module (`+ATK`, `+ARMOR`, `+HP`, `+MP`...).
+    *   Cân bằng đối xứng **50% / 50%** tuyệt đối giữa 2 subbox, không bị xô lệch hay phình to khung.
+    *   Nút bấm **`🔄 Đổi 1 Thẻ MVP (100 ➔ 1 ⭐)`** tự động gửi lệnh `action: 'card_mvp_exchange'`.
+*   **Bộ Sưu Tập Trứng Thú Cưng (`🥚 Trứng`)**:
+    *   Phân loại Trứng Thường (`🥚`) và Trứng ⭐ MVP (`⭐🥚`).
+    *   Tạm ẩn thông tin chỉ số thưởng & loại bỏ nút bấm Ấp Trứng theo chỉ thị người dùng.
+    *   Hiển thị số lượng sở hữu trực tiếp, sạch gọn: `🥚 Thường  105` | `⭐🥚 MVP  1`.
+    *   Nút bấm **`🔄 Đổi 1 Trứng MVP (100 ➔ 1 ⭐)`** tự động gửi lệnh `action: 'egg_mvp_exchange'`.
+*   **Tối Ưu Kích Thước & Font Chữ (Compact Layout)**:
+    *   Giảm cỡ chữ toàn bộ hai bảng thêm **15%**.
+    *   Mở rộng độ rộng ô thẻ bài thêm **10%** (giảm gap xuống 3px, padding 3px), hiển thị cực kỳ phẳng, đẹp, vuông vắn 100%.
+*   **Live Crawl Dữ Liệu `mon_masters`**:
+    *   Backend `server.js` tự động cào `mon_masters` trực tiếp từ Server game (`/xhrpg_game.php`).
+    *   Nạp bộ từ điển `xhrpg_lang_vi.js` dịch 100% Tên quái vật sang Tiếng Việt chuẩn.
+    *   Đồng bộ Level (`Lv`), Emoji và Stat chính xác 100% nguyên bản của Game.
+
 ---
 
 ## 🚀 2. Các hạng mục CHƯA HOÀN THÀNH (Roadmap / Future Upgrades)

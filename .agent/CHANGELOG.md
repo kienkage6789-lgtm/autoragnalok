@@ -2,6 +2,223 @@
 
 > Changelog of actual changes implemented.
 
+## 2026-07-27 - Mở Rộng Độ Rộng Ô Thẻ Bài & Trứng Thêm 10%
+- File đã đổi: `public/app.css` (sửa).
+- Đã làm:
+  - **Mở Rộng Ô Thẻ Bài 10%**:
+    * Giảm khoảng cách gap giữa 2 cột từ `5px` ➔ `3px`.
+    * Tinh chỉnh padding hai bên từ `6px` ➔ `3px` giúp diện tích chứa chữ bên trong ô thẻ rộng thêm 10%, hiển thị trọn vẹn cả 2 thuộc tính Thẻ MVP.
+- Đã test bằng: `node -c server.js`, `node test.js` -> PASS 100%.
+
+---
+
+## 2026-07-27 - Hiển Thị Đủ 2 Thuộc Tính Thẻ MVP & Cố Định Chia Đều 50/50
+- File đã đổi: `public/app.js` (sửa), `public/app.css` (sửa).
+- Đã làm:
+  - **Hiển Thị Đủ 2 Thuộc Tính Thẻ MVP**:
+    * Hiển thị trực quan cả 2 thuộc tính: Thuộc tính nền (`⭐ +3 STR`) và Thuộc tính khảm Module (`(+3 ATK)`, `(+300 HP)`...).
+  - **Cố Định Kích Thước Khung 50% / 50%**:
+    * Bổ sung `min-width: 0` và `text-overflow: ellipsis` cho subbox.
+    * Đảm bảo hai ô Thẻ Thường và Thẻ MVP **luôn luôn chia đều 50% - 50% độ rộng**, không bị phình to hay đẩy lệch khung cho dù chuỗi chữ Thẻ MVP có dài hơn.
+- Đã test bằng: `node -c server.js`, `node test.js` -> PASS 100%.
+
+---
+
+## 2026-07-27 - Cân Bằng Đối Xứng 50/50 Hai Ô Thẻ Bài (Thường & MVP)
+- File đã đổi: `public/app.js` (sửa).
+- Đã làm:
+  - **Cân Bằng Kích Thước Subbox 50% / 50%**:
+    * Đơn giản hóa cấu trúc văn bản của ô Thẻ MVP bằng cách đưa thuộc tính thứ 2 (Khảm Module) vào tooltip `title="⚡ Khảm Module: +X ATK/HP..."`.
+    * Hai subbox Thẻ Thường (`🎴 +1 STR (10)`) và Thẻ MVP (`⭐ +3 STR (0)`) có độ dài ký tự và kích thước khung vuông vắn 100% đối xứng hoàn hảo.
+- Đã test bằng: `node -c server.js`, `node test.js` -> PASS 100%.
+
+---
+
+## 2026-07-27 - Cập Nhật Đổi Tên Các Sub-Tab Giao Diện Nhanh Gọn
+- File đã đổi: `public/app.js` (sửa).
+- Đã làm:
+  - **Đổi Tên Nhãn Nút Chuyển Sub-Tab**:
+    * `📊 Chỉ Số & Tiềm Năng` ➔ **`📊 Tiềm Năng`**
+    * `⚡ Kỹ Năng & Auto` ➔ **`⚡ Kỹ Năng`**
+    * `🎴 Kho Thẻ Bài` ➔ **`🎴 Thẻ Bài`**
+    * `🥚 Kho Trứng` ➔ **`🥚 Trứng`**
+- Đã test bằng: `node -c server.js`, `node test.js` -> PASS 100%.
+
+---
+
+## 2026-07-27 - Giảm 15% Cỡ Chữ Bảng Kho Thẻ Bài & Kho Trứng Thú Cưng
+- File đã đổi: `public/app.js` (sửa), `public/app.css` (sửa).
+- Đã làm:
+  - **Giảm Cỡ Chữ Thêm 15%**:
+    * Cỡ chữ Tên Quái: `0.58rem` ➔ `0.50rem`
+    * Cỡ chữ Level & Tiến Trình: `0.50rem` ➔ `0.44rem`
+    * Cỡ chữ Subbox & Nút Đổi: `0.50rem` - `0.52rem` ➔ `0.44rem` - `0.46rem`
+    * Cỡ chữ Số Lượng Trứng: `0.65rem` ➔ `0.52rem`
+  - Giúp giao diện Kho Thẻ và Kho Trứng siêu phẳng, nhỏ xinh, vuông vắn 100% trên mọi thiết bị màn hình.
+- Đã test bằng: `node -c server.js`, `node test.js` -> PASS 100%.
+
+---
+
+## 2026-07-27 - Bỏ Chữ 'Sở Hữu:' & Hiển Thị Trực Tiếp Số Lượng Trứng
+- File đã đổi: `public/app.js` (sửa).
+- Đã làm:
+  - **Loại Bỏ Chữ 'Sở Hữu:'**:
+    * Bỏ hoàn toàn chữ "Sở hữu:" rườm rà trong subbox Kho Trứng.
+    * Đưa số lượng hiển thị trực tiếp và nổi bật: `🥚 Thường  105` | `⭐🥚 MVP  1`.
+- Đã test bằng: `node -c server.js`, `node test.js` -> PASS 100%.
+
+---
+
+## 2026-07-27 - Tạm Ẩn Chỉ Số Thưởng Trứng & Loại Bỏ Nút Bấm Ấp Trứng
+- File đã đổi: `public/app.js` (sửa).
+- Đã làm:
+  - **Tạm Ẩn Thông Tin Thưởng Chỉ Số**:
+    * Ẩn các dòng chữ `+1 All Stats` / `+3 All Stats` trong subbox Trứng Thường (`🥚`) và Trứng MVP (`⭐🥚`).
+    * Chuyển sang hiển thị số lượng sở hữu sạch gọn: `Sở hữu: n`.
+  - **Loại Bỏ Chức Năng / Nút Bấm Ấp Trứng**:
+    * Loại bỏ nút bấm `🐣 Ấp Trứng`.
+    * Giữ duy nhất nút bấm full-width: **`🔄 Đổi 1 Trứng MVP (100 ➔ 1 ⭐)`**.
+- Đã test bằng: `node -c server.js`, `node test.js` -> PASS 100%.
+
+---
+
+## 2026-07-27 - Tích Hợp Kho Trứng Thú Cưng (Pet Eggs Inventory) & Đổi Trứng ⭐ MVP
+- File đã đổi: `server.js` (sửa), `public/app.js` (sửa), `public/app.css` (sửa).
+- Đã làm:
+  - **Backend `server.js`**:
+    * Trong `GET /api/accounts`: Truyền dữ liệu `eggs: p.eggs || '{}'` về cho Frontend.
+  - **Frontend `public/app.js` & `public/app.css`**:
+    * Thêm Sub-tab thứ 4 trong Tab `👤 Nhân Vật`: **`🥚 Kho Trứng`**.
+    * Hàm `renderEggBook(acc)`: Render danh sách Trứng thú cưng siêu gọn compact (~54px) phân loại **Trứng Thường (`🥚`)** và **Trứng ⭐ MVP (`⭐🥚`)**.
+    * **Thanh Tiến Trình & Nút Đổi Trứng MVP**: Tích hợp thanh tiến trình `n / 100` trứng và nút bấm **`🔄 Đổi MVP (100 ➔ 1 ⭐)`** tự động gửi lệnh `action: 'egg_mvp_exchange'` trực tiếp lên game server.
+    * **Tính Năng Ấp Trứng (`🐣 Ấp Trứng`)**: Tích hợp nút bấm ấp trứng với chi phí Gold chuẩn game (`Lv × 100 G`) tự động gửi lệnh `action: 'pet_hatch'`.
+    * **Đồng Bộ Dữ Liệu Live**: Đọc 100% Tên quái vật Tiếng Việt & Level chuẩn từ `mon_masters` live của Server game, chống tràn lề UI 100%.
+- Đã test bằng: `node -c server.js`, `node test.js` -> PASS 100%.
+
+---
+
+## 2026-07-27 - Tự Động Cào Dữ Liệu `mon_masters` Trực Tiếp Từ Server Game & Dịch Nguyên Bản 100%
+- File đã đổi: `server.js` (sửa), `public/app.js` (sửa).
+- Đã làm:
+  - **Live Crawl `mon_masters` Từ Game Server**:
+    * Trong `server.js`: Đánh dấu `have_static: 0` trên các lượt poll đầu để ép Game Server gửi về bộ từ điển `d.mon_masters` đầy đủ nhất.
+    * Tự động bắt lấy `d.mon_masters` từ Server và lưu cache vào `mon_masters_cache.json` để toàn bộ hệ thống luôn có dữ liệu thực tế.
+  - **Tự Động Dịch Tên Quái Nguyên Bản 100%**:
+    * Đọc trực tiếp bộ từ điển chuẩn `window.XHRPG_I18N.vi` từ `xhrpg_lang_vi.js` trong Node.js context để dịch chính xác tên gốc của từng quái vật sang Tiếng Việt chuẩn của Game.
+  - **Đồng Bộ Cấp Độ (Level) & Thuộc Tính Thật**:
+    * Loại bỏ hoàn toàn các công thức đoán Level cũ hay dữ liệu định nghĩa tạm.
+    * Frontend `app.js` hiển thị 100% Tên, Level (`Lv`), Emoji và Primary Stat chính xác tuyệt đối theo dữ liệu Live từ Server Game.
+- Đã test bằng: `node -c server.js`, `node test.js` -> PASS 100%.
+
+---
+
+## 2026-07-27 - Thay Nhãn Chữ Bằng Icon 🎴/⭐ & Kích Hoạt Thuộc Tính Thứ 2 Của Thẻ MVP
+- File đã đổi: `public/app.js` (sửa).
+- Đã làm:
+  - **Thay Nhãn Chữ Bằng Ký Hiệu Icon**:
+    * Đổi nhãn `Thường:` ➔ biểu tượng **`🎴`** nhỏ gọn.
+    * Đổi nhãn `⭐ MVP:` ➔ biểu tượng **`⭐`** tối ưu.
+  - **Hiển Thị Thuộc Tính Thứ 2 (Khảm Module) Của Thẻ MVP**:
+    * Thẻ MVP được trang bị đúng **2 Thuộc tính chuẩn game**:
+      1. **Thuộc tính nền**: `+3X Stat` (tự động cộng vào nhân vật).
+      2. **Thuộc tính khảm Module**: `(+X ATK / ARMOR / HP / MP...)` khi khảm thẻ vào Module trang bị.
+    * Mẫu hiển thị siêu gọn: `⭐ +3 STR (+3ATK)` (hover vào xem chi tiết: `Thuộc tính khảm Module: +3 ATK`).
+- Đã test bằng: `node -c server.js`, `node test.js` -> PASS 100%.
+
+---
+
+## 2026-07-27 - Thu Nhỏ Ô Thẻ Bài Thêm 10% & Tinh Chỉnh Hiển Thị Chữ Toàn Diện
+- File đã đổi: `public/app.css` (sửa).
+- Đã làm:
+  - **Giảm Cỡ Chữ & Padding Thêm 10%**:
+    * Cỡ chữ Tên Quái: `0.65rem` ➔ `0.58rem`
+    * Cỡ chữ Level & Tiến Trình: `0.56rem` ➔ `0.50rem`
+    * Cỡ chữ Subbox Thẻ & Nút Đổi: `0.56rem` ➔ `0.50rem` - `0.52rem`
+    * Tinh chỉnh padding `4px 6px`, gap `3px` và chiều cao thanh tiến trình `3px`.
+  - Giúp 100% nội dung chữ và nút bấm hiển thị vuông vắn, tròn trịa, không bị ngắt chữ hay nảy hàng trên mọi màn hình.
+- Đã test bằng: `node -c server.js`, `node test.js` -> PASS 100%.
+
+---
+
+## 2026-07-27 - Chuẩn Hóa Tên Quái Tiếng Việt Thuần, Giảm 15% Cỡ Chữ & Chống Tràn Lề 100%
+- File đã đổi: `public/app.js` (sửa), `public/app.css` (sửa).
+- Đã làm:
+  - **Bỏ Tên Tiếng Anh Trong Ngoặc**:
+    * Đưa toàn bộ danh mục quái vật sang tiếng Việt thuần chủng sắc nét: `🔴 Sứa Đỏ`, `🐛 Sâu Lá`, `🐰 Thỏ Trắng`, `🧊 Băng Khổng Lồ`, `🐺 Sói Xám`, `💀 Cốt Binh`...
+  - **Giảm 15% Cỡ Chữ Toàn Bộ Thành Phần**:
+    * Cỡ chữ tên quái: `0.76rem` ➔ `0.65rem`
+    * Cỡ chữ level & subbox: `0.66rem` ➔ `0.56rem`
+    * Cỡ chữ badge & nút bấm: `0.68rem` ➔ `0.58rem`
+  - **Chống Tràn Lề Giao Diện 100%**:
+    * Thiết lập `box-sizing: border-box; overflow: hidden; width: 100%;` cho tất cả container thẻ và subbox.
+    * Tinh chỉnh padding `5px 7px`, gap `4px` giúp toàn bộ ô thẻ bài nằm gọn gàng 100% trong khung UI điều khiển mà không tràn hay lẹm viền.
+- Đã test bằng: `node -c server.js`, `node test.js` -> PASS 100%.
+
+---
+
+## 2026-07-27 - Dịch Tên Quái Vật Sang Tiếng Việt & Sửa Lỗi Vỡ Layout Thẻ Bài (Ảnh a.png Fix)
+- File đã đổi: `public/app.js` (sửa), `public/app.css` (sửa).
+- Đã làm:
+  - **Dịch Tên Quái Vật Sang Tiếng Việt**:
+    * Nạp từ điển Tiếng Việt chuẩn `MONSTER_DICT` kèm tên tiếng Anh trong ngoặc: `🔴 Sứa Đỏ (Poring)`, `🐛 Sâu Lá (Fabre)`, `🐰 Thỏ Trắng (Lunatic)`, `🧊 Băng Khổng Lồ (Ice Titan)`, `🐺 Sói Xám (Wolf)`...
+  - **Khắc Phục Lỗi Vỡ Chữ / Lội Nhát (Ảnh a.png Fix)**:
+    * Phát hiện nguyên nhân do tiêu đề, các ô nhỏ và số tiến trình `10 / 100` bị ép vào các khối flex đứng làm chữ bị ngắt hàng xuống dòng nảy lung tung (`Ice` / `Titan`, `10 /` / `100`).
+    * Tái cấu trúc HTML & CSS với `white-space: nowrap`, tiêu đề 1 hàng chuẩn, subbox Thẻ Thường & MVP nằm ngang cân đối và thanh tiến trình trải dài full width.
+    * Nút bấm **`🔄 Đổi 1 Thẻ MVP (100 Thẻ thường ➔ 1 ⭐ MVP)`** nổi bật chuẩn 100% không bị co ép.
+- Đã test bằng: `node -c server.js`, `node test.js` -> PASS 100%.
+
+---
+
+## 2026-07-27 - Nâng cấp Ô Thẻ Bài Siêu Gọn (Giảm 50% Chiều Dài) & Bổ Sung Từ Điển Tên Quái Vật
+- File đã đổi: `server.js` (sửa), `public/app.js` (sửa), `public/app.css` (sửa).
+- Đã làm:
+  - **Từ điển Quái vật (`MONSTER_DICT`)**:
+    * Bổ sung từ điển tra cứu Quái vật chuẩn tiếng Việt + Icon + Level (`🔴 Poring (Lv.1)`, `🐛 Fabre (Lv.2)`, `🐰 Lunatic (Lv.3)`, `🐺 Wolf (Lv.15)`, `💀 Skeleton (Lv.18)`, `🧟 Mummy (Lv.26)`...).
+    * Khắc phục 100% tình trạng hiển thị nhãn thô `Quái vật #1`, `#2` khi game chưa nạp `mon_masters`.
+  - **Thu Nhỏ Ô Thẻ Bài (50% Chiều Dài)**:
+    * Giảm chiều cao từng ô thẻ từ ~160px xuống còn **~54px** (tiết kiệm 60% diện tích chiều dọc).
+    * Tái bố cục thành 2 dòng ngang compact:
+      - **Dòng 1**: `🔴 Poring (Lv.1)` | Thường: `+1 STR (×105)` | ⭐ MVP: `+3 STR (×1)`
+      - **Dòng 2**: Thanh tiến trình `105/100 ✓` màu xanh sáng đặt song song ngay bên cạnh nút bấm nhỏ **`[ 🔄 Đổi 1 MVP ]`**.
+- Đã test bằng: `node -c server.js`, `node test.js` -> PASS 100%.
+
+---
+
+## 2026-07-27 - Tích hợp Kho Thẻ Bài & Tính năng Đổi Thẻ ⭐ MVP (100 Thẻ Thường ➔ 1 Thẻ MVP)
+- File đã đổi: `server.js` (sửa), `public/app.js` (sửa), `public/app.css` (sửa).
+- Đã làm:
+  - **Backend `server.js`**:
+    * Trong `GET /api/accounts`: Truyền dữ liệu `cards: p.cards` về cho Frontend.
+  - **Frontend `public/app.js` & `public/app.css`**:
+    * Thêm Sub-tab thứ 3 trong Tab `👤 Nhân Vật`: **`🎴 Kho Thẻ Bài`**.
+    * Hàm `renderCardBook(acc)`: Render danh sách Thẻ bài phân loại **Thẻ Thường (`n`)** và **Thẻ ⭐ MVP (`m`)** cùng số lượng sở hữu.
+    * **Hiển thị Chỉ Số Cộng Thêm (+Stat Bonus)**: Tính toán chính xác lượng Stat cộng thêm cho Thẻ Thường (`+X Stat`) và Thẻ MVP (`+3X Stat`) kèm điểm Combat Bonus khi khảm vào Module (`+HP/MP`, `+Armor`, `+ATK`...).
+    * **Thanh tiến trình & Nút Đổi Thẻ MVP**: Hiển thị tiến trình `n / 100` thẻ. Tích hợp nút **`🔄 Đổi 1 Thẻ MVP (100 ➔ 1 ⭐)`** tự động gửi lệnh `action: 'card_mvp_exchange'` trực tiếp lên game server và reload dữ liệu lập tức khi thành công.
+- Đã test bằng: `node -c server.js`, `node test.js` -> PASS 100%.
+
+---
+
+## 2026-07-27 - Tính toán lại 100% chính xác Bảng Chỉ Số Chiến Đấu & Sửa Lỗi Tràn Lề (a.png Fix)
+- File đã đổi: `server.js` (sửa), `public/app.js` (sửa), `public/app.css` (sửa).
+- Đã làm:
+  - **Backend `server.js`**:
+    * Đồng bộ 100% công thức phái sinh từ game engine `xhrpg_canvas.js`:
+      - **Pistol ATK** & **Sniper ATK**: Tính thêm Skill `crit_shot` (+5 ATK/cấp), Module ATK pool (`modTotalAtk`), Card/Collection ATK bonus (`cardCB.atk`) và hệ số nhân Ragnalok `rag_atk`.
+      - **Knife ATK**: Tính thêm Module ATK pool, Card/Collection ATK bonus và hệ số `rag_atk`.
+      - **Turret ATK**: Tính thêm Skill `deploy_turret` (+5 ATK/cấp), Module ATK pool, Card/Collection ATK bonus và hệ số `rag_atk`.
+      - **DEF**: Tính thêm Module DEF (`armorModDef`), DEF từ Sổ tay Thẻ/Trứng (`collCB`) và hệ số Ragnalok `rag_def`.
+      - **CRIT %**: Tính thêm điểm cộng chí mạng từ Ragnalok `rag_crit` (+0.1%/điểm).
+      - **Dodge %**: Bổ sung chỉ số Né Tránh (`Math.min(75, Math.floor(agi_eff / 3))%`).
+  - **Frontend `public/app.js` & `public/app.css`**:
+    * Cập nhật `renderCombatSummary` hiển thị đủ 10 thẻ chỉ số chiến đấu bao gồm Né Tránh (Dodge).
+    * **Sửa Lỗi Tràn Lề (Ảnh a.png Fix)**:
+      - Rút gọn nhãn các chỉ số cho tinh tế, không bị dài: `❤️ Max HP`, `🔷 Max MP`, `🛡️ Max Giáp`, `🔰 DEF`, `💥 CRIT %`, `💨 Dodge %`, `🗡️ Pistol ATK`, `🏹 Sniper ATK`, `⚔️ Knife ATK`, `🗼 Turret ATK`.
+      - Chuyển bố cục lưới `.combat-summary-grid` sang **2 cột song song 5 hàng ngang** (`grid-template-columns: repeat(2, 1fr)`), căn chỉnh nhãn bên trái - chỉ số bên phải (`justify-content: space-between`).
+      - Cấu hình `width: 100%; box-sizing: border-box; overflow: hidden;` giúp 10 ô chỉ số vuông vắn, vừa khít trong Card mà không bị lẹm hay tràn viền phải.
+- Đã test bằng: `node -c server.js`, `node test.js` -> PASS 100%.
+
+---
+
 ## 2026-07-26 - Tối ưu hóa UI Tab Nhân Vật (Sub-Tabs, Sửa Lỗi Tràn Lề Capture.PNG & Thay Đổi Thứ Tự Tab)
 - File đã đổi: `public/app.js` (sửa), `public/app.css` (sửa).
 - Đã làm:
