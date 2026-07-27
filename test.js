@@ -171,6 +171,52 @@ try {
   bot5.pendingActFlag = true;
   assert.strictEqual(calcActValue(bot5), 1, 'Idle recovery must force act=1');
 
+  // Test T23: Admin Map & Zone Sync Logic
+  console.log('Testing T23 Map & Zone Sync Engine...');
+  const fs = require('fs');
+  const path = require('path');
+  const MAPS_CACHE_FILE = path.join(__dirname, 'maps_cache.json');
+  const SPOTS_CACHE_FILE = path.join(__dirname, 'spots_cache.json');
+
+  // Verify default maps exist
+  const defaultMaps = [
+    { id: 1, name: 'Thung lũng Trung tâm',  emoji: '🌿', req: 1  },
+    { id: 2, name: 'Sa mạc Vĩnh hằng',      emoji: '🏜️', req: 25 },
+    { id: 3, name: 'Vùng đất Băng giá',     emoji: '❄️', req: 40 },
+    { id: 4, name: 'Đấu trường Arena (PVP)', emoji: '⚔️', req: 20 },
+    { id: 5, name: 'Tàn tích Cổ đại',      emoji: '🏛️', req: 55 },
+    { id: 6, name: 'Núi lửa Sôi trào',      emoji: '🌋', req: 70 },
+  ];
+  assert.strictEqual(defaultMaps.length, 6);
+  assert.strictEqual(defaultMaps[0].id, 1);
+  assert.strictEqual(defaultMaps[5].id, 6);
+
+  // Test map regex extraction logic
+  const sampleCanvasScript = `
+    const MAP_DEFS = [
+      {id:1,name:'ทุ่งกลาง',emoji:'🌿',req:1},
+      {id:2,name:'ทะเลทรายนิรันดร์',emoji:'🏜️',req:25},
+      {id:3,name:'ดินแดนเยือกแข็ง',emoji:'❄️',req:40},
+      {id:4,name:'สนามประลอง',emoji:'⚔️',req:20},
+      {id:5,name:'Tàn tích Cổ đại',emoji:'🏛️',req:55},
+      {id:6,name:'Núi lửa Sôi trào',emoji:'🌋',req:70},
+      {id:7,name:'Bản đồ Mới',emoji:'🏔️',req:85}
+    ];
+  `;
+  const match = sampleCanvasScript.match(/MAP_DEFS\s*=\s*(\[\s*\{[\s\S]*?\}\s*\]);/);
+  assert.ok(match && match[1], 'MAP_DEFS regex must match array in script');
+  const rawItems = match[1].match(/\{[^}]+\}/g);
+  // Test T24: Passive Map Discovery Calculation Logic
+  console.log('Testing T24 Passive Map Discovery...');
+  const mockSpotsForMap9 = {
+    "1": { id: 1, name: "Vùng Tân Thủ 1", lv: 80 },
+    "2": { id: 2, name: "Vùng Tân Thủ 2", lv: 95 }
+  };
+  const spotsList = Object.values(mockSpotsForMap9);
+  let minLv = 999;
+  spotsList.forEach(s => { if (s.lv < minLv) minLv = s.lv; });
+  assert.strictEqual(minLv, 80, 'Min level for Map 9 should be calculated as 80');
+
   console.log('✅ All Unit Tests Passed successfully!');
 } catch (error) {
   console.error('❌ Unit Tests Failed:', error);

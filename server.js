@@ -321,6 +321,185 @@ function processMonMasters(rawMasters) {
   }
 }
 
+// ==================== MAPS & SPOTS CACHE & SYNC ENGINE ====================
+const MAPS_CACHE_FILE = path.join(__dirname, 'maps_cache.json');
+const SPOTS_CACHE_FILE = path.join(__dirname, 'spots_cache.json');
+
+const DEFAULT_MAP_DEFS = [
+  { id: 1, name: 'Thung lũng Trung tâm',  emoji: '🌿', req: 1  },
+  { id: 2, name: 'Sa mạc Vĩnh hằng',      emoji: '🏜️', req: 25 },
+  { id: 3, name: 'Vùng đất Băng giá',     emoji: '❄️', req: 40 },
+  { id: 4, name: 'Đấu trường Arena (PVP)', emoji: '⚔️', req: 20 },
+  { id: 5, name: 'Tàn tích Cổ đại',      emoji: '🏛️', req: 55 },
+  { id: 6, name: 'Núi lửa Sôi trào',      emoji: '🌋', req: 70 },
+];
+
+let mapsCache = [];
+let spotsCache = {}; // { [mapId]: { [spotId]: { id, name, lv, ... } } }
+let lastMapSyncAt = null;
+
+function loadMapsAndSpotsCache() {
+  if (fs.existsSync(MAPS_CACHE_FILE)) {
+    try {
+      const data = JSON.parse(fs.readFileSync(MAPS_CACHE_FILE, 'utf8'));
+      if (data && Array.isArray(data.maps) && data.maps.length > 0) {
+        mapsCache = data.maps;
+        lastMapSyncAt = data.lastSyncedAt || null;
+      }
+    } catch(e) {}
+  }
+  if (!mapsCache.length) {
+    mapsCache = [...DEFAULT_MAP_DEFS];
+  }
+
+  if (fs.existsSync(SPOTS_CACHE_FILE)) {
+    try {
+      spotsCache = JSON.parse(fs.readFileSync(SPOTS_CACHE_FILE, 'utf8')) || {};
+    } catch(e) {}
+  }
+}
+loadMapsAndSpotsCache();
+
+function saveMapsCache() {
+  try {
+    fs.writeFileSync(MAPS_CACHE_FILE, JSON.stringify({
+      maps: mapsCache,
+      lastSyncedAt: lastMapSyncAt
+    }, null, 2), 'utf8');
+  } catch(e) {}
+}
+
+function saveSpotsCache() {
+  try {
+    fs.writeFileSync(SPOTS_CACHE_FILE, JSON.stringify(spotsCache, null, 2), 'utf8');
+  } catch(e) {}
+}
+
+function getMapDefs() {
+  return (mapsCache && mapsCache.length > 0) ? mapsCache : DEFAULT_MAP_DEFS;
+}
+
+function syncMapsAndZonesFromGame() {
+  let updatedMapsCount = 0;
+  let updatedSpotsCount = 0;
+
+  // 1. Parse maps from xhrpg_canvas.js if present
+  try {
+    const canvasPath = path.join(__dirname, 'xhrpg_canvas.js');
+    if (fs.existsSync(canvasPath)) {
+      const code = fs.readFileSync(canvasPath, 'utf8');
+      const match = code.match(/MAP_DEFS\s*=\s*(\[\s*\{[\s\S]*?\}\s*\]);/);
+      if (match && match[1]) {
+        const rawItems = match[1].match(/\{[^}]+\}/g);
+        if (rawItems && rawItems.length > 0) {
+          const mapEmojiMap = { 1: '🌿', 2: '🏜️', 3: '❄️', 4: '⚔️', 5: '🏛️', 6: '🌋', 7: '🏔️', 8: '🏰' };
+          rawItems.forEach(itemStr => {
+            try {
+              const idMatch = itemStr.match(/id\s*:\s*(\d+)/);
+              const nameMatch = itemStr.match(/name\s*:\s*['"]([^'"]+)['"]/);
+              const emojiMatch = itemStr.match(/emoji\s*:\s*['"]([^'"]+)['"]/);
+              const reqMatch = itemStr.match(/req\s*:\s*(\d+)/);
+              if (idMatch) {
+                const id = parseInt(idMatch[1]);
+                const rawName = nameMatch ? nameMatch[1] : `Bản đồ #${id}`;
+                const translatedName = viDict[rawName] || viDict[`${emojiMatch ? emojiMatch[1] : ''} ${rawName}`] || rawName;
+                const emoji = emojiMatch ? emojiMatch[1] : (mapEmojiMap[id] || '🗺️');
+                const req = reqMatch ? parseInt(reqMatch[1]) : 1;
+
+                const existing = mapsCache.find(m => m.id === id);
+                if (!existing) {
+                  mapsCache.push({ id, name: translatedName, emoji, req });
+                  updatedMapsCount++;
+                } else {
+                  existing.name = translatedName;
+                  existing.emoji = emoji;
+                  existing.req = req;
+                }
+              }
+            } catch(err) {}
+          });
+        }
+      }
+    }
+  } catch(e) {
+    console.error('Error parsing MAP_DEFS from game script:', e.message);
+  }
+
+  mapsCache.sort((a, b) => a.id - b.id);
+  lastMapSyncAt = new Date().toISOString();
+  saveMapsCache();
+
+  // 2. Save current active spots from memory to spotsCache & reset static flag for all active bots
+  for (const uid in botInstances) {
+    const bot = botInstances[uid];
+    if (bot) {
+      if (bot.spots && bot.player && bot.player.map) {
+        spotsCache[bot.player.map] = bot.spots;
+        updatedSpotsCount += Object.keys(bot.spots).length;
+      }
+      // Force next poll tick to fetch fresh static spots & mon_masters from game server
+      bot.spots = null;
+      bot.mon_masters = null;
+    }
+  }
+  saveSpotsCache();
+
+  return {
+    success: true,
+    maps: mapsCache,
+    spotsCache: spotsCache,
+    lastSyncedAt: lastMapSyncAt,
+    updatedMapsCount,
+    updatedSpotsCount
+  };
+}
+
+function processPassiveMapDiscovery(mapId, spotsObj) {
+  if (!mapId || !spotsObj || typeof spotsObj !== 'object') return;
+  const spotsList = Object.values(spotsObj);
+  if (spotsList.length === 0) return;
+
+  const targetMapId = parseInt(mapId);
+  if (isNaN(targetMapId) || targetMapId <= 0) return;
+
+  let minLv = 999;
+  spotsList.forEach(s => {
+    if (!s) return;
+    const l = parseInt(s.lv || s.req_lv || s.level || s.req);
+    if (!isNaN(l) && l > 0 && l < minLv) minLv = l;
+  });
+  if (minLv === 999) minLv = 1;
+
+  let existing = mapsCache.find(m => m.id === targetMapId);
+  let updated = false;
+
+  if (!existing) {
+    const mapEmojiMap = { 1: '🌿', 2: '🏜️', 3: '❄️', 4: '⚔️', 5: '🏛️', 6: '🌋', 7: '🏔️', 8: '🏰', 9: '🌌', 10: '💎' };
+    const newMapEntry = {
+      id: targetMapId,
+      name: `Bản đồ #${targetMapId}`,
+      emoji: mapEmojiMap[targetMapId] || '🗺️',
+      req: minLv,
+      discoveredAt: new Date().toISOString(),
+      source: 'passive_live_discovery'
+    };
+    mapsCache.push(newMapEntry);
+    mapsCache.sort((a, b) => a.id - b.id);
+    updated = true;
+    console.log(`✨ [Passive Map Discovery] Đã tự động ghi nhận Bản đồ mới #${targetMapId} (Yêu cầu Lv.${minLv}+) từ Game Server!`);
+  } else {
+    if (existing.source === 'passive_live_discovery' && existing.req !== minLv) {
+      existing.req = minLv;
+      updated = true;
+    }
+  }
+
+  if (updated) {
+    lastMapSyncAt = new Date().toISOString();
+    saveMapsCache();
+  }
+}
+
 // Enable Gzip/Brotli compression for static and API responses (excluding image files)
 app.use(compression({
   level: 6,
@@ -544,15 +723,8 @@ function isSkillUnlocked(skillId, playerLv, skills) {
   return true;
 }
 
-// Map definitions (mirror of MAP_DEFS in xhrpg_canvas.js)
-const MAP_DEFS = [
-  { id: 1, name: 'Thung lũng Trung tâm',  emoji: '🌿', req: 1  },
-  { id: 2, name: 'Sa mạc Vĩnh hằng',      emoji: '🏜️', req: 25 },
-  { id: 3, name: 'Vùng đất Băng giá',     emoji: '❄️', req: 40 },
-  { id: 4, name: 'Đấu trường Arena (PVP)', emoji: '⚔️', req: 20 },
-  { id: 5, name: 'Tàn tích Cổ đại',      emoji: '🏛️', req: 55 },
-  { id: 6, name: 'Núi lửa Sôi trào',      emoji: '🌋', req: 70 },
-];
+// Map definitions (dynamically loaded & cached)
+const MAP_DEFS = getMapDefs();
 
 // Background poller manager
 class BotInstance {
@@ -1065,9 +1237,15 @@ class BotInstance {
       return;
     }
 
-    // Save spots list for map
+    // Save spots list for map & process passive map discovery
     if (d.spots) {
       this.spots = d.spots;
+      const currentMapId = (d.map != null) ? Number(d.map) : (d.player ? Number(d.player.map) : null);
+      if (currentMapId) {
+        spotsCache[currentMapId] = d.spots;
+        saveSpotsCache();
+        processPassiveMapDiscovery(currentMapId, d.spots);
+      }
     }
 
     // Save bosses list
@@ -1422,7 +1600,7 @@ class BotInstance {
     // 6. Auto Map Warp
     if (this.settings.autoMap && Number(this.player.map) !== Number(this.settings.targetMap)) {
       const targetMapId = parseInt(this.settings.targetMap) || 1;
-      const mapDef = MAP_DEFS.find(m => m.id === targetMapId);
+      const mapDef = getMapDefs().find(m => m.id === targetMapId);
       if (mapDef && (this.player.lv || 1) >= mapDef.req) {
         this.addLog('SYSTEM', `🗺️ [Tự động] Di chuyển sang bản đồ: ${mapDef.name}`);
         try {
@@ -2444,6 +2622,10 @@ app.get('/api/accounts', requireAuth, (req, res) => {
           proxyInfo: req.user.role === 'admin' ? proxyPool.getBotProxyInfo(bot.line_uid) : null,
           combatRates: bot.getCombatRates ? bot.getCombatRates() : { killsPerMin: 0, goldPerMin: 0, expPerMin: 0 },
           spots: bot.spots || null,
+          // Truyền danh sách bản đồ động từ cache xuống frontend (luôn dùng mới nhất)
+          mapsList: getMapDefs(),
+          // Spots cache của map hiện tại (để zone dropdown luôn có dữ liệu ngay cả khi bot chưa có spots mới)
+          cachedSpots: (bot.player && bot.player.map && spotsCache[bot.player.map]) ? spotsCache[bot.player.map] : null,
           player: bot.player ? (() => {
             const p = bot.player;
 
@@ -2758,7 +2940,7 @@ app.put('/api/accounts/:line_uid', requireAuth, async (req, res) => {
     if (Object.keys(settings).length > 0) {
       if (settings.targetMap !== undefined) {
         const targetMapNum = Number(settings.targetMap);
-        const mapDef = MAP_DEFS.find(m => m.id === targetMapNum);
+        const mapDef = getMapDefs().find(m => m.id === targetMapNum);
         if (mapDef && bot.player && (bot.player.lv || 1) < mapDef.req) {
           return res.status(400).json({ error: `Cấp độ không đủ! Bản đồ ${mapDef.name} yêu cầu Lv.${mapDef.req}+.` });
         }
@@ -2992,7 +3174,40 @@ app.get('/api/admin/proxies/verify-all', requireAuth, async (req, res) => {
     }
   }
 
-  res.json({ ok: true, timestamp: new Date().toISOString(), results });
+  res.json({ success: true, timestamp: new Date().toISOString(), results });
+});
+
+// Admin Map & Zone Sync Endpoints
+app.get('/api/admin/maps-zones', requireAuth, (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Chỉ Admin mới có quyền truy cập' });
+  res.json({
+    success: true,
+    maps: getMapDefs(),
+    spotsCache: spotsCache,
+    lastSyncedAt: lastMapSyncAt
+  });
+});
+
+app.post('/api/admin/sync-maps-zones', requireAuth, (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Chỉ Admin mới có quyền thực hiện đồng bộ' });
+  const result = syncMapsAndZonesFromGame();
+  res.json(result);
+});
+
+app.put('/api/admin/maps/:id', requireAuth, (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Chỉ Admin mới có quyền thực hiện' });
+  const mapId = parseInt(req.params.id);
+  const { name, emoji, req: minReq } = req.body;
+  const targetMap = mapsCache.find(m => m.id === mapId);
+  if (!targetMap) return res.status(404).json({ error: 'Không tìm thấy bản đồ chỉ định.' });
+
+  if (name !== undefined && String(name).trim() !== '') targetMap.name = String(name).trim();
+  if (emoji !== undefined && String(emoji).trim() !== '') targetMap.emoji = String(emoji).trim();
+  if (minReq !== undefined) targetMap.req = Math.max(1, parseInt(minReq) || 1);
+
+  lastMapSyncAt = new Date().toISOString();
+  saveMapsCache();
+  res.json({ success: true, map: targetMap, maps: mapsCache });
 });
 
 // Trigger manual action
@@ -3026,7 +3241,7 @@ app.post('/api/accounts/:line_uid/action', requireAuth, async (req, res) => {
 
       if (payload.target_map !== undefined) {
         const targetMapNum = Number(payload.target_map);
-        const mapDef = MAP_DEFS.find(m => m.id === targetMapNum);
+        const mapDef = getMapDefs().find(m => m.id === targetMapNum);
         if (mapDef && bot.player && (bot.player.lv || 1) < mapDef.req) {
           return res.status(400).json({ error: `Cấp độ không đủ! Bản đồ ${mapDef.name} yêu cầu Lv.${mapDef.req}+.` });
         }

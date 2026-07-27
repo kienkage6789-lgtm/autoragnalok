@@ -2,6 +2,31 @@
 
 > Changelog of actual changes implemented.
 
+## 2026-07-27 - Cơ Chế Hấp Thu Bản Đồ Động An Toàn cho Người Chơi Cũ & Mới (T24)
+- File đã đổi: [server.js](file:///C:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/server.js), [public/index.html](file:///C:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/public/index.html), [public/app.js](file:///C:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/public/app.js), [test.js](file:///C:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/test.js).
+- Đã làm:
+  - **Passive Map Discovery Engine (`processPassiveMapDiscovery`)**: Tự động bắt lấy `d.spots` và `d.map` khi các tài khoản bot (cũ và mới) hoạt động tự nhiên. Nếu phát hiện Map ID mới chưa từng xuất hiện, tự động khởi tạo entry Map mới và lưu vĩnh viễn vào `maps_cache.json` với 0% rủi ro bị ban tài khoản (không phát sinh request dò ID bừa bãi).
+  - **Tự động tính toán Level tối thiểu (`req`)**: Phân tích level của tất cả các khu vực trong `d.spots` để xác định level tối thiểu cần thiết để vào Map đó.
+  - **API `PUT /api/admin/maps/:id` & Giao diện Chỉnh sửa**: Bổ sung nút **"✏️ Sửa"** trên bảng Admin UI cho phép Admin đổi tên hiển thị, icon emoji và điều chỉnh cấp độ yêu cầu cho từng bản đồ.
+  - **Nhãn phân loại Nguồn dữ liệu (`sourceBadge`)**: Hiển thị nhãn `✨ Tự động hấp thu (Live)` trên bảng Admin đối với các bản đồ được ghi nhận tự động từ tài khoản người chơi.
+  - **Unit Testing**: Bổ sung unit test kiểm tra logic tính toán level tối thiểu của Passive Map Discovery.
+- Đã test bằng: `npm test` → PASS 100% (15 unit tests pass).
+
+---
+
+## 2026-07-27 - Chức Năng Đồng Bộ Bản Đồ & Zone Thủ Công Từ Admin UI (T23)
+- File đã đổi: [server.js](file:///C:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/server.js), [public/index.html](file:///C:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/public/index.html), [public/app.js](file:///C:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/public/app.js), [test.js](file:///C:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/test.js).
+- File tạo mới: `maps_cache.json`, `spots_cache.json`.
+- Đã làm:
+  - **Admin UI Tab "🗺️ Bản Đồ & Zone"**: Bổ sung tab mới trong Admin Panel với nút **"🔄 Quét & Đồng Bộ Bản Đồ / Zone Ngay"**, bảng hiển thị thông tin danh sách bản đồ (ID, Emoji, Tên Map, Lv yêu cầu, số lượng Zone đã cache) và thời điểm đồng bộ gần nhất.
+  - **Manual Trigger Endpoint `POST /api/admin/sync-maps-zones`**: Chỉ thực hiện quét khi Admin bấm nút. Backend bóc tách `MAP_DEFS` trực tiếp từ `xhrpg_canvas.js`, hợp nhất từ điển tiếng Việt `xhrpg_lang_vi.js`, lưu cache vĩnh viễn vào `maps_cache.json`.
+  - **Zone (Spots) Caching Engine**: Lưu vết dữ liệu khu vực (`d.spots`) của từng bản đồ vào `spots_cache.json`. Khi Admin bấm sync, server tự động ép `bot.spots = null` trên các bot active để tải static data mới nhất ở nhịp poll kế tiếp.
+  - **Dynamic Map Select Rendering**: Đổi hằng số `MAP_DEFS` hardcode thành `getMapDefs()`. Hàm `populateMapSelect(acc)` ở frontend tự động render dropdown bản đồ `#sel-map` động từ API.
+  - **Unit Testing**: Thêm unit test trong `test.js` xác minh regex bóc tách `MAP_DEFS` và cấu trúc cache bản đồ.
+- Đã test bằng: `npm test` → PASS 100% (14 unit tests pass).
+
+---
+
 ## 2026-07-27 - T46 Post-Review Refinement: Jitter Range Fix, triggerActFlag Cleanup & Unit Tests
 - File đã đổi: `server.js` (sửa), `test.js` (sửa).
 - Đã làm:

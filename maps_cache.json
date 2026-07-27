@@ -1,0 +1,49 @@
+{
+  "maps": [
+    {
+      "id": 1,
+      "name": "Cánh đồng trung tâm",
+      "emoji": "🌿",
+      "req": 1
+    },
+    {
+      "id": 2,
+      "name": "Sa mạc vĩnh hằng",
+      "emoji": "🏜️",
+      "req": 25
+    },
+    {
+      "id": 3,
+      "name": "Vùng đất băng giá",
+      "emoji": "❄️",
+      "req": 40
+    },
+    {
+      "id": 4,
+      "name": "Đấu trường",
+      "emoji": "🏛️",
+      "req": 20
+    },
+    {
+      "id": 5,
+      "name": "Tàn tích Cổ đại",
+      "emoji": "🏛️",
+      "req": 55
+    },
+    {
+      "id": 6,
+      "name": "Núi lửa Sôi trào",
+      "emoji": "🌋",
+      "req": 70
+    },
+    {
+      "id": 8,
+      "name": "sa mạc newbie",
+      "emoji": "🏰",
+      "req": 25,
+      "discoveredAt": "2026-07-27T14:28:36.618Z",
+      "source": "passive_live_discovery"
+    }
+  ],
+  "lastSyncedAt": "2026-07-27T14:38:18.999Z"
+}

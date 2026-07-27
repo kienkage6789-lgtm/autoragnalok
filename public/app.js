@@ -268,7 +268,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Admin Tab Switching
   window.switchAdminTab = function(tab) {
     // Fix #2: Dùng class .admin-tab-panel/.active thay vì inline display style
-    ['users', 'proxies', 'backup'].forEach(t => {
+    ['users', 'proxies', 'backup', 'maps'].forEach(t => {
       const panel = document.getElementById(`admin-tab-${t}`);
       const btn   = document.getElementById(`admin-tab-btn-${t}`);
       if (panel) {
@@ -286,6 +286,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     if (tab === 'proxies' || tab === 'backup') fetchAdminProxies();
+    if (tab === 'maps') fetchAdminMapsZones();
   };
 
   // Admin Fetch Stats Overview
@@ -299,6 +300,120 @@ document.addEventListener('DOMContentLoaded', () => {
       console.error('Error fetching admin stats:', e);
     }
   }
+
+  // Admin Fetch Maps & Zones
+  async function fetchAdminMapsZones() {
+    try {
+      const res = await fetch('/api/admin/maps-zones');
+      if (!res.ok) return;
+      const data = await res.json();
+      renderAdminMapsZones(data);
+    } catch (e) {
+      console.error('Error fetching admin maps & zones:', e);
+    }
+  }
+
+  function renderAdminMapsZones(data) {
+    if (!data) return;
+    const lastSyncEl = document.getElementById('admin-maps-last-sync');
+    const countEl = document.getElementById('admin-maps-count-val');
+    const tbody = document.getElementById('admin-maps-table-body');
+
+    if (lastSyncEl) {
+      lastSyncEl.textContent = data.lastSyncedAt ? new Date(data.lastSyncedAt).toLocaleString('vi-VN') : 'Chưa đồng bộ';
+    }
+    if (countEl) {
+      countEl.textContent = (data.maps || []).length;
+    }
+    if (tbody) {
+      const maps = data.maps || [];
+      const spotsCache = data.spotsCache || {};
+      if (maps.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" style="padding: 12px; text-align: center; color: var(--text-muted);">Không tìm thấy dữ liệu bản đồ.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = maps.map(m => {
+        const spotsForMap = spotsCache[m.id] ? Object.keys(spotsCache[m.id]).length : 0;
+        const isPassive = m.source === 'passive_live_discovery';
+        const sourceBadge = isPassive 
+          ? `<span style="background:rgba(59,130,246,0.15); color:#60a5fa; padding:2px 6px; border-radius:4px; font-size:0.72rem; margin-left:6px;">✨ Tự động hấp thu (Live)</span>`
+          : `<span style="background:rgba(156,163,175,0.15); color:#9ca3af; padding:2px 6px; border-radius:4px; font-size:0.72rem; margin-left:6px;">📦 Mặc định / Parsed</span>`;
+        return `
+          <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+            <td style="padding: 10px; font-weight: 700; color: #60a5fa;">#${m.id}</td>
+            <td style="padding: 10px; font-weight: 600; color: #fff;">
+              ${m.emoji || '🗺️'} ${m.name} ${sourceBadge}
+            </td>
+            <td style="padding: 10px; color: #fbbf24; font-weight: 600;">Lv.${m.req}+</td>
+            <td style="padding: 10px;">
+              <span style="background: ${spotsForMap > 0 ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)'}; color: ${spotsForMap > 0 ? '#34d399' : '#f87171'}; padding: 3px 8px; border-radius: 4px; font-weight: 600; font-size: 0.78rem;">
+                ${spotsForMap > 0 ? `${spotsForMap} khu vực` : 'Chưa thu thập'}
+              </span>
+            </td>
+            <td style="padding: 10px; text-align: right;">
+              <button onclick="editMapMeta(${m.id}, '${m.name.replace(/'/g, "\\'")}', '${m.emoji || '🗺️'}', ${m.req})" style="background: rgba(255,255,255,0.1); color: #fff; border: 1px solid var(--border-color); border-radius: 4px; padding: 3px 8px; font-size: 0.75rem; cursor: pointer;">
+                ✏️ Sửa
+              </button>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+  }
+
+  window.editMapMeta = async function(mapId, currentName, currentEmoji, currentReq) {
+    const newName = prompt('Nhập tên bản đồ mới:', currentName);
+    if (newName === null) return;
+    const newEmoji = prompt('Nhập emoji biểu tượng mới:', currentEmoji);
+    if (newEmoji === null) return;
+    const newReq = prompt('Nhập cấp độ yêu cầu tối thiểu (Lv):', currentReq);
+    if (newReq === null) return;
+
+    try {
+      const res = await fetch(`/api/admin/maps/${mapId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newName, emoji: newEmoji, req: parseInt(newReq) || 1 })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        alert('✅ Cập nhật thông tin bản đồ thành công!');
+        fetchAdminMapsZones();
+        if (typeof fetchAccounts === 'function') fetchAccounts();
+      } else {
+        alert(`❌ Lỗi: ${data.error || 'Cập nhật thất bại'}`);
+      }
+    } catch(e) {
+      alert(`❌ Lỗi kết nối: ${e.message}`);
+    }
+  };
+
+  window.triggerAdminMapSync = async function() {
+    const btn = document.getElementById('btn-sync-maps-admin');
+    const origText = btn ? btn.innerHTML : '';
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '⏳ Đang quét game code & đồng bộ...';
+    }
+    try {
+      const res = await fetch('/api/admin/sync-maps-zones', { method: 'POST' });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        alert(`✅ Đồng bộ thành công!\n- Số bản đồ: ${data.maps ? data.maps.length : 0}\n- Lần đồng bộ: ${new Date(data.lastSyncedAt).toLocaleString('vi-VN')}`);
+        renderAdminMapsZones(data);
+        if (typeof fetchAccounts === 'function') fetchAccounts();
+      } else {
+        alert(`❌ Đồng bộ thất bại: ${data.error || 'Lỗi không xác định'}`);
+      }
+    } catch(e) {
+      alert(`❌ Lỗi kết nối: ${e.message}`);
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = origText;
+      }
+    }
+  };
 
   function renderAdminStats(stats) {
     const elUsersVal = document.getElementById('stat-users-val');
@@ -1409,11 +1524,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const chkAutoMap = document.getElementById(`chk-automap-${acc.line_uid}`);
     if (chkAutoMap && document.activeElement !== chkAutoMap) chkAutoMap.checked = acc.settings.autoMap === true;
 
-    const selMap = document.getElementById(`sel-map-${acc.line_uid}`);
-    if (selMap && document.activeElement !== selMap) {
-      const currentTargetMap = acc.settings.targetMap !== undefined ? acc.settings.targetMap : (acc.player ? acc.player.map : 1);
-      selMap.value = String(currentTargetMap || 1);
-    }
+    populateMapSelect(acc);
 
     // Auto Zone toggle & zone select: populate from acc.spots then sync value
     const chkAutoZone = document.getElementById(`chk-autozone-${acc.line_uid}`);
@@ -1481,14 +1592,44 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  // Populate map dropdown from dynamic mapsList returned by server
+  function populateMapSelect(acc) {
+    const selMap = document.getElementById(`sel-map-${acc.line_uid}`);
+    if (!selMap) return;
+    const mapsList = acc.mapsList || window.cachedMapsList || [
+      { id: 1, name: 'Thung lũng Trung tâm',  emoji: '🌿', req: 1  },
+      { id: 2, name: 'Sa mạc Vĩnh hằng',      emoji: '🏜️', req: 25 },
+      { id: 3, name: 'Vùng đất Băng giá',     emoji: '❄️', req: 40 },
+      { id: 4, name: 'Đấu trường Arena (PVP)', emoji: '⚔️', req: 20 },
+      { id: 5, name: 'Tàn tích Cổ đại',      emoji: '🏛️', req: 55 },
+      { id: 6, name: 'Núi lửa Sôi trào',      emoji: '🌋', req: 70 },
+    ];
+    if (acc.mapsList) window.cachedMapsList = acc.mapsList;
+
+    const currentTargetMap = acc.settings && acc.settings.targetMap !== undefined ? String(acc.settings.targetMap) : String(acc.player ? acc.player.map : 1);
+    const hash = mapsList.map(m => `${m.id}:${m.name}:${m.req}`).join('|');
+
+    if (selMap.dataset.hash !== hash) {
+      selMap.innerHTML = mapsList.map(m =>
+        `<option value="${m.id}">${m.emoji || '🗺️'} ${m.name} (Lv.${m.req}+)</option>`
+      ).join('');
+      selMap.dataset.hash = hash;
+    }
+    if (document.activeElement !== selMap && selMap.value !== currentTargetMap) {
+      selMap.value = currentTargetMap;
+    }
+  }
+
   // Populate zone dropdown from spots data returned by server
   function populateZoneSelect(acc) {
     const sel = document.getElementById(`sel-zone-${acc.line_uid}`);
     if (!sel) return;
 
-    const spots = acc.spots; // object keyed by zone id, or null
+    // Priority: live spots from bot > cachedSpots for current map (from spotsCache) > empty
+    const currentMapId = acc.player && acc.player.map;
+    const spots = acc.spots || (currentMapId ? acc.cachedSpots : null);
+
     if (!spots || typeof spots !== 'object') {
-      // No spots data yet — keep placeholder, disable select
       sel.innerHTML = `<option value="">⏳ Chờ tải dữ liệu Zone...</option>`;
       return;
     }
@@ -1499,10 +1640,10 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    // Only re-render if spots list changed (avoid dropdown flicker)
+    // Only re-render if spots list changed or map changed (avoid dropdown flicker)
     const currentCount = sel.querySelectorAll('option[value]').length;
-    if (currentCount !== spotsList.length || sel.dataset.lastMap !== String(acc.player && acc.player.map)) {
-      sel.dataset.lastMap = String(acc.player && acc.player.map);
+    if (currentCount !== spotsList.length || sel.dataset.lastMap !== String(currentMapId)) {
+      sel.dataset.lastMap = String(currentMapId);
       sel.innerHTML = `<option value="">🗺️ Chọn khu vực (Zone)...</option>`;
       spotsList.forEach((spot, idx) => {
         const opt = document.createElement('option');
@@ -2124,26 +2265,20 @@ document.addEventListener('DOMContentLoaded', () => {
   // Save map and warp immediately
   window.changeTargetMap = async function(uid, mapId) {
     const val = parseInt(mapId) || 1;
-    
-    // Check level requirement client-side
-    const MAP_REQS = { 1: 1, 2: 25, 3: 40, 4: 20, 5: 55, 6: 70 };
-    const MAP_NAMES = {
-      1: 'Thung lũng Trung tâm',
-      2: 'Sa mạc Vĩnh hằng',
-      3: 'Vùng đất Băng giá',
-      4: 'Đấu trường Arena',
-      5: 'Tàn tích Cổ đại',
-      6: 'Núi lửa Sôi trào'
-    };
-    
-    const reqLv = MAP_REQS[val] || 1;
+
+    // Check level requirement client-side using dynamic maps cache
+    const maps = window.cachedMapsList || [];
+    const mapDef = maps.find(m => m.id === val);
+    const reqLv = mapDef ? (mapDef.req || 1) : 1;
+    const mapName = mapDef ? `${mapDef.emoji || '🗺️'} ${mapDef.name}` : `Bản đồ #${val}`;
+
     const lvEl = document.getElementById(`lv-txt-${uid}`);
     if (lvEl) {
       const match = lvEl.textContent.match(/Lv\.\s*(\d+)/i);
       if (match) {
         const currentLv = parseInt(match[1]) || 1;
         if (currentLv < reqLv) {
-          alert(`Cấp độ không đủ! Bản đồ ${MAP_NAMES[val]} yêu cầu Lv.${reqLv}+. Nhân vật của bạn hiện tại là Lv.${currentLv}.`);
+          alert(`Cấp độ không đủ! ${mapName} yêu cầu Lv.${reqLv}+. Nhân vật của bạn hiện tại là Lv.${currentLv}.`);
           fetchAccounts(); // Restore select box selection
           return;
         }

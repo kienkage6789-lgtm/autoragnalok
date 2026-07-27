@@ -3,6 +3,38 @@
 > Work Breakdown Structure. Update task states immediately upon changes.
 > Statuses: todo | doing | blocked | review | done
 
+### [x] T25 - Đồng Bộ Bản Đồ & Zone Xuống Bảng Điều Khiển Sau Passive Discovery
+- Description: Sau khi hệ thống Passive Map Discovery ghi nhận Map mới vào `maps_cache.json`, dropdown Bản đồ trên Dashboard không được cập nhật vì `GET /api/accounts` chưa trả về `mapsList`. Đồng thời Zone dropdown hiển thị trống do không có fallback vào `spotsCache`. Và `changeTargetMap()` vẫn dùng hardcode `MAP_REQS`/`MAP_NAMES` cố định 6 bản đồ.
+- Files related: `server.js`, `public/app.js`
+- Acceptance criteria:
+  - [x] Backend: Bổ sung trường `mapsList: getMapDefs()` vào response `GET /api/accounts` để frontend luôn nhận danh sách bản đồ mới nhất từ cache.
+  - [x] Backend: Bổ sung trường `cachedSpots: spotsCache[bot.player.map]` vào response để frontend có dữ liệu zone ngay cả khi `bot.spots` chưa kịp load lại.
+  - [x] Frontend `populateZoneSelect()`: Ưu tiên `acc.spots` (live từ bot) → fallback `acc.cachedSpots` (từ spotsCache persist) → hiện `⏳ Chờ tải...`.
+  - [x] Frontend `changeTargetMap()`: Xóa bỏ `MAP_REQS`/`MAP_NAMES` hardcode 6 map. Thay bằng lookup động từ `window.cachedMapsList` — bản đồ mới tự động được kiểm tra cấp độ và hiển thị tên đúng.
+  - [x] Test: `npm test` → PASS 100% (15 unit tests pass).
+- Status: done
+
+
+- Description: Xây dựng cơ chế Passive Map Discovery trong pollGame() để tự động ghi nhận các Map ID mới (dành cho người chơi cũ/mới) từ gói d.spots mà không phát sinh thêm bất kỳ request giả lập nào. Bổ sung API cho phép Admin chỉnh sửa tên, emoji và cấp độ yêu cầu của từng Map.
+- Files related: `server.js`, `public/index.html`, `public/app.js`, `maps_cache.json`, `test.js`
+- Acceptance criteria:
+  - [x] Hàm `processPassiveMapDiscovery(mapId, spotsObj)` tự động phân tích `d.spots` của bất kỳ bot nào (cũ/mới), phát hiện Map ID mới và lưu an toàn vào `maps_cache.json`.
+  - [x] Tự động tính toán cấp độ tối thiểu (`req`) của Map mới dựa trên level của các Zone trong map đó.
+  - [x] Bổ sung endpoint `PUT /api/admin/maps/:id` cho phép Admin tùy chỉnh tên hiển thị và emoji của từng bản đồ.
+  - [x] Đảm bảo 0% rủi ro bị game server quét anti-bot (không gửi request dò ID bừa bãi).
+- Status: done
+
+### [x] T23 - Đồng Bộ Bản Đồ & Zone Thủ Công Từ Admin UI
+- Description: Xây dựng tab "🗺️ Bản Đồ & Zone" trên Admin UI cho phép Admin chủ động bấm nút cập nhật/quét bản đồ và zone mới từ game server, lưu cache maps_cache.json và spots_cache.json, đồng bộ tức thì lên UI cho tất cả các tài khoản bot.
+- Files related: `server.js`, `public/index.html`, `public/app.js`, `public/app.css`, `maps_cache.json`, `spots_cache.json`, `test.js`
+- Acceptance criteria:
+  - [x] Nút "🔄 Quét & Đồng Bộ Bản Đồ / Zone Ngay" trong Admin Panel gửi request POST `/api/admin/sync-maps-zones`.
+  - [x] Backend tự động bóc tách `MAP_DEFS` từ client script (`xhrpg_canvas.js`), dịch tên tiếng Việt từ `xhrpg_lang_vi.js`, lưu vào `maps_cache.json`.
+  - [x] Hệ thống gom nhóm và lưu vết zone (`d.spots`) của từng map vào `spots_cache.json`.
+  - [x] Backend và Frontend dùng `getMapDefs()` để render động dropdown bản đồ (`#sel-map`), tự nhận biết map mới mà không cần hardcode.
+  - [x] Bảng Admin hiển thị thông tin chi tiết: ID, tên map, emoji, req level, số lượng zone (spots) đã cache và thời gian đồng bộ gần nhất.
+- Status: done
+
 ### [x] T01 - Core Backend & Account Storage
 - Description: Set up package.json, Node.js project, Express server, accounts.json storage, and account management API (Add, Delete, Update, List).
 - Files related: `server.js`, `package.json`, `accounts.json`

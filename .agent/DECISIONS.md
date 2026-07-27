@@ -2,6 +2,51 @@
 
 > Captured architectural decisions and trade-offs.
 
+## 2026-07-27 - Luồng Dữ Liệu Map & Zone: Server Cache → API Response → UI (T25)
+
+- Bối cảnh:
+  1. `processPassiveMapDiscovery()` cập nhật `maps_cache.json` và `spots_cache.json` theo thời gian thực khi bot nhận `d.spots`.
+  2. Tuy nhiên `GET /api/accounts` **không bao giờ trả về `mapsList`** → `populateMapSelect()` mãi dùng fallback hardcode 6 bản đồ cũ → bản đồ mới không bao giờ hiện ra trên Dashboard.
+  3. Zone dropdown (`populateZoneSelect`) chỉ đọc `acc.spots` (live từ bot). Sau khi `processPassiveMapDiscovery()` reset `bot.spots = null`, dropdown hiện trống dù `spotsCache` đã có đủ dữ liệu.
+  4. `changeTargetMap()` dùng `MAP_REQS`/`MAP_NAMES` hardcode 6 map → bản đồ mới không được validate cấp độ đúng.
+- Quyết định:
+  1. **Inject `mapsList` vào API response**: `GET /api/accounts` luôn trả về `mapsList: getMapDefs()` để frontend nhận danh sách bản đồ mới nhất từ cache sau mỗi lần poll (~5s).
+  2. **Inject `cachedSpots` vào API response**: `GET /api/accounts` trả về thêm `cachedSpots: spotsCache[bot.player.map]` — fallback zone data cho bot khi `bot.spots` chưa sẵn sàng.
+  3. **Zone Priority Chain**: `populateZoneSelect()` kiểm tra theo thứ tự: `acc.spots` (live) → `acc.cachedSpots` (persist) → hiện "⏳ Chờ tải...". Không bao giờ bị trống nếu cache có dữ liệu.
+  4. **Dynamic Level Validation**: `changeTargetMap()` tra cứu `window.cachedMapsList.find(m => m.id === val)` thay vì `MAP_REQS` hardcode → tự động hỗ trợ mọi bản đồ mới được hấp thu.
+- Lý do: Đảm bảo vòng lặp dữ liệu khép kín hoàn toàn: Passive Discovery → Cache JSON → API Response → UI Render. Không còn điểm nào bị vỡ khi game ra map mới.
+
+---
+
+## 2026-07-27 - Kiến Trúc Hấp Thu Bản Đồ Động An Toàn (Safe Passive Map Discovery)
+
+- Bối cảnh:
+  1. Game có sự phân chia các bản đồ khác nhau giữa Người chơi Cũ và Người chơi Mới.
+  2. Nếu sử dụng phương pháp "quét dò chủ động / brute-force ID", server sẽ phải gửi hàng loạt request lạ đến game server -> **Rất dễ bị phát hiện anti-bot và khóa tài khoản**.
+- Quyết định:
+  1. **Passive Interception Engine**: Không gửi bất kỳ request thăm dò nào. Khi bất kỳ tài khoản bot nào (cũ hoặc mới) hoạt động tự nhiên và nhận gói `d.spots` từ game server, backend sẽ tự động trích xuất Map ID và lưu vào `maps_cache.json`.
+  2. **Auto-Calculated Min Level**: Tự động tính toán cấp độ tối thiểu `req` cho bản đồ mới dựa trên level thấp nhất của các khu vực trong `d.spots`.
+  3. **Admin Customization API (`PUT /api/admin/maps/:id`)**: Cung cấp giao diện trên Admin UI cho phép Admin đổi tên hiển thị, emoji, và tùy chỉnh level tối thiểu cho từng bản đồ đã được ghi nhận.
+- Lý do: Đảm bảo 100% an toàn (0% rủi ro bị ban tài khoản), đồng thời thu thập chính xác 100% bản đồ của cả người chơi cũ và mới khi hệ thống vận hành.
+
+---
+
+## 2026-07-27 - Cơ chế Đồng Bộ Bản Đồ & Zone Thủ Công Qua Admin UI (Chống Quét Code Game Liên Tục)
+
+- Bối cảnh:
+  1. Nếu server liên tục quét/fetch code game (`xhrpg_canvas.js`, `xhrpg_lang_vi.js`) hoặc liên tục gửi request probe map ở mỗi nhịp poll sẽ tốn băng thông, CPU và dễ bị game server phát hiện/chặn IP.
+  2. Người dùng cần tính năng chủ động: Chỉ khi Admin bấm nút "Cập Nhật", server mới tiến hành bóc tách bản đồ và zone mới, đồng thời phải đồng bộ đầy đủ cả Bản Đồ và Zone (Spots).
+- Quyết định:
+  1. **Manual Admin Trigger**: Tạo endpoint `POST /api/admin/sync-maps-zones` kích hoạt duy nhất khi Admin nhấn nút trên tab `🗺️ Bản Đồ & Zone`.
+  2. **Persisted Caches (`maps_cache.json` & `spots_cache.json`)**:
+     - Parsed `MAP_DEFS` từ client script được hợp nhất với bộ từ điển tiếng Việt (`xhrpg_lang_vi.js`) và lưu vào `maps_cache.json`.
+     - Danh sách zone (`d.spots`) thu thập từ các bot được gom nhóm theo map và lưu vào `spots_cache.json`.
+  3. **Dynamic Frontend Rendering**: Backend gán danh sách `mapsList` vào response API `/api/accounts`, frontend `public/app.js` tự động render dropdown bản đồ `#sel-map` động mà không hardcode `<option>`.
+  4. **Force Static Refresh**: Khi Admin kích hoạt sync, server tự động reset `bot.spots = null` và `bot.mon_masters = null` trên các bot active để ép nhịp poll kế tiếp re-fetch static data mới nhất từ game server.
+- Lý do: Tối ưu hiệu năng tối đa, loại bỏ overhead quét ngầm không cần thiết, đảm bảo linh hoạt 100% khi game phát hành map và zone mới.
+
+---
+
 ## 2026-07-27 - Cơ chế Event-Driven Act-Flag Simulation & Server Idle Guard Bypass
 
 - Bối cảnh:

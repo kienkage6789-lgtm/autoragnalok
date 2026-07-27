@@ -100,6 +100,9 @@
         <button id="admin-tab-btn-backup" class="admin-tab-btn" onclick="switchAdminTab('backup')">
           💾 Sao Lưu
         </button>
+        <button id="admin-tab-btn-maps" class="admin-tab-btn" onclick="switchAdminTab('maps')">
+          🗺️ Bản Đồ & Zone
+        </button>
       </div>
 
       <!-- ═══ TAB: USERS ═══ (Fix #1: dùng class admin-tab-panel + .active) -->
@@ -292,6 +295,49 @@
               <button class="btn btn-danger" onclick="document.getElementById('restore-file-input').click()" style="padding:8px 16px; font-size:0.82rem; background:rgba(239,68,68,0.15); color:#ef4444; border-color:rgba(239,68,68,0.35);">📤 Chọn File & Khôi Phục Ngay</button>
               <span id="restore-file-name" class="admin-restore-filename">Chưa chọn file</span>
             </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ TAB: MAPS & ZONES ═══ -->
+      <div id="admin-tab-maps" class="admin-tab-panel">
+        <div class="admin-section-block" style="margin-bottom: 16px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 12px;">
+            <div>
+              <h3 style="margin: 0; font-size: 1.05rem; color: #60a5fa; display: flex; align-items: center; gap: 8px;">
+                🗺️ Cập Nhật Bản Đồ & Zone Thủ Công
+              </h3>
+              <p style="margin: 4px 0 0 0; font-size: 0.82rem; color: var(--text-muted);">
+                Chỉ thực hiện khi Admin yêu cầu. Tránh quét code game liên tục gây tốn tài nguyên.
+              </p>
+            </div>
+            <button id="btn-sync-maps-admin" onclick="triggerAdminMapSync()" style="background: linear-gradient(135deg, #3b82f6, #1d4ed8); color: #fff; border: none; padding: 8px 16px; border-radius: 6px; font-weight: 600; font-family: inherit; cursor: pointer; display: flex; align-items: center; gap: 6px; box-shadow: 0 2px 8px rgba(59,130,246,0.4);">
+              🔄 Quét & Đồng Bộ Bản Đồ / Zone Ngay
+            </button>
+          </div>
+          <div style="font-size: 0.8rem; color: #9ca3af; display: flex; gap: 16px; flex-wrap: wrap;">
+            <span>Lần đồng bộ gần nhất: <strong id="admin-maps-last-sync" style="color: #fbbf24;">Chưa đồng bộ</strong></span>
+            <span>Tổng số bản đồ: <strong id="admin-maps-count-val" style="color: #34d399;">0</strong></span>
+          </div>
+        </div>
+
+        <div class="admin-section-block">
+          <h4 style="margin: 0 0 10px 0; font-size: 0.95rem; color: #e5e7eb;">📋 Danh Sách Bản Đồ & Số Zone Đã Cache</h4>
+          <div style="overflow-x: auto;">
+            <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem; text-align: left;">
+              <thead>
+                <tr style="border-bottom: 1px solid var(--border-color); color: var(--text-muted);">
+                  <th style="padding: 8px;">ID</th>
+                  <th style="padding: 8px;">Emoji & Tên Bản Đồ</th>
+                  <th style="padding: 8px;">Lv Yêu Cầu</th>
+                  <th style="padding: 8px;">Số Zone (Spots) Cached</th>
+                  <th style="padding: 8px; text-align: right;">Thao Tác</th>
+                </tr>
+              </thead>
+              <tbody id="admin-maps-table-body">
+                <tr><td colspan="5" style="padding: 12px; text-align: center; color: var(--text-muted);">Đang tải dữ liệu...</td></tr>
+              </tbody>
+            </table>
           </div>
         </div>
       </div>
