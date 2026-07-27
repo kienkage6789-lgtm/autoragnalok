@@ -1617,7 +1617,7 @@ app.get('/api/admin/stats', requireAdmin, (req, res) => {
 
   accounts.forEach(acc => {
     const bot = botInstances[acc.line_uid];
-    if (bot && bot.isOnline) {
+    if (bot && bot.status === 'running') {
       onlineBots++;
     } else {
       offlineBots++;
@@ -1654,7 +1654,7 @@ app.get('/api/admin/users', requireAdmin, (req, res) => {
     let onlineCount = 0;
     userBots.forEach(acc => {
       const bot = botInstances[acc.line_uid];
-      if (bot && bot.isOnline) onlineCount++;
+      if (bot && bot.status === 'running') onlineCount++;
     });
     return {
       id: u.id,

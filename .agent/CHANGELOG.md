@@ -2,7 +2,27 @@
 
 > Changelog of actual changes implemented.
 
-## 2026-07-27 - Mở Rộng Độ Rộng Ô Thẻ Bài & Trứng Thêm 10%
+## 2026-07-27 - Fix Bug `bot.isOnline` → `onlineBots` Luôn Bằng 0 (T45)
+- File đã đổi: `server.js` (sửa 2 chỗ).
+- Nguyên nhân gốc rễ: `BotInstance` constructor không khai báo `isOnline`. Field thực tế là `this.status`. Điều kiện `bot && bot.isOnline` luôn `undefined` (falsy) → `onlineBots` không bao giờ tăng.
+- Đã làm:
+  - **`GET /api/admin/stats` (dòng 1620)**: `bot.isOnline` ➔ `bot.status === 'running'` → `onlineBots` và `offlineBots` đếm đúng thực tế.
+  - **`GET /api/admin/users` (dòng 1657)**: `bot.isOnline` ➔ `bot.status === 'running'` → `onlineBotCount` trên từng User Accordion đếm đúng.
+- Đã test bằng: `node -c server.js`, `node test.js` → PASS 100%.
+
+---
+
+## 2026-07-27 - Cải Tiến 3 Điểm Kiến Trúc UI Admin (T44)
+- File đã đổi: `public/index.html` (sửa), `public/app.css` (sửa), `public/app.js` (sửa).
+- Đã làm:
+  - **Fix #1 — CSS Inline → CSS Class**: Thêm ~270 dòng CSS class chuyên dụng vào `app.css` (`.admin-tab-panel`, `.admin-tab-btn`, `.admin-section-block`, `.admin-add-proxy-grid`, `.admin-backup-form-grid`, `.admin-restore-*`, v.v.). Toàn bộ `style="background:rgba(0,0,0,0.2)..."` hardcode trong admin modal của `index.html` đã được thay bằng class.
+  - **Fix #2 — `switchAdminTab()` dùng Class**: Refactor dùng `classList.toggle('active')` thay vì gán inline `style.display` và `style.background/color/borderColor`. CSS có `transition: 0.15s ease` → tab switching có animation mượt. HTML khởi tạo đúng với `class="admin-tab-btn active"` và `class="admin-tab-panel active"` ngay từ đầu.
+  - **Fix #3 — Batch Proxy Dropdown Tự Rebuild**: Thêm hàm `refreshAllBatchProxySelects()` được gọi tự động sau mỗi lần `fetchAdminProxies()` resolve. Hàm tìm tất cả `select[id^="user-batch-proxy-"]` trên DOM, rebuild options từ `adminProxiesList` mới nhất, giữ nguyên lựa chọn cũ (`sel.value = prev`).
+- Đã test bằng: `node -c server.js`, `node -c public/app.js`, `node test.js` → PASS 100%.
+
+---
+
+
 - File đã đổi: `public/app.css` (sửa).
 - Đã làm:
   - **Mở Rộng Ô Thẻ Bài 10%**:

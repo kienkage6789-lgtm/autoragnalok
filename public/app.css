@@ -1099,6 +1099,270 @@ input:checked + .slider:before {
   cursor: not-allowed;
 }
 
+/* ═══════════════════════════════════════════════
+   ADMIN MODAL — Tab Panel System (Fix #2)
+   Dùng class thay vì inline display:none
+   để dễ thêm transition/animation sau này
+═══════════════════════════════════════════════ */
+.admin-tab-panel {
+  display: none;
+}
+.admin-tab-panel.active {
+  display: block;
+}
+
+/* Admin Tab Nav Buttons */
+.admin-tab-btn {
+  padding: 6px 14px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  /* inactive state */
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+}
+.admin-tab-btn.active {
+  background: rgba(165, 180, 252, 0.2);
+  color: #a5b4fc;
+  border-color: rgba(165, 180, 252, 0.4);
+}
+
+/* ═══════════════════════════════════════════════
+   ADMIN MODAL — Section Blocks (Fix #1)
+   Thay thế các inline style="background:rgba..."
+   trong index.html
+═══════════════════════════════════════════════ */
+
+/* Container chung cho các section trong admin tab */
+.admin-section-block {
+  background: rgba(0, 0, 0, 0.2);
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border-color);
+  margin-bottom: 14px;
+}
+.admin-section-block h4 {
+  font-size: 0.9rem;
+  color: #a78bfa;
+  margin-bottom: 10px;
+}
+.admin-section-block-lg {
+  background: rgba(0, 0, 0, 0.2);
+  padding: 15px;
+  border-radius: 12px;
+  border: 1px solid var(--border-color);
+  margin-bottom: 20px;
+}
+.admin-section-block-lg h4 {
+  font-size: 0.9rem;
+  color: #a78bfa;
+  margin-bottom: 10px;
+}
+
+/* Header row trong proxy settings (title + test-all button) */
+.admin-section-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.admin-section-header-row h4 {
+  margin: 0;
+}
+.btn-test-all-ip {
+  background: rgba(99, 102, 241, 0.25);
+  border: 1px solid rgba(99, 102, 241, 0.5);
+  color: #a5b4fc;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  font-weight: 600;
+  transition: background 0.15s;
+}
+.btn-test-all-ip:hover {
+  background: rgba(99, 102, 241, 0.4);
+}
+
+/* Global proxy settings row */
+.proxy-global-settings-row {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.proxy-global-hint {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  margin-top: 8px;
+  margin-bottom: 0;
+}
+
+/* Add Proxy Form grid */
+.admin-add-proxy-grid {
+  display: grid;
+  grid-template-columns: 160px 1fr auto;
+  gap: 8px;
+  align-items: center;
+}
+
+/* Proxy / Users table wrapper */
+.admin-proxy-table-wrapper {
+  max-height: 300px;
+  overflow-y: auto;
+}
+.admin-proxy-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+  text-align: left;
+}
+.admin-proxy-table thead tr {
+  border-bottom: 1px solid var(--border-color);
+  color: var(--text-secondary);
+}
+.admin-proxy-table th {
+  padding: 7px;
+}
+.admin-proxy-table td {
+  padding: 7px;
+}
+
+/* Backup form grid (2 cols) */
+.admin-backup-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.admin-backup-form-grid .input-control label {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  display: block;
+  margin-bottom: 4px;
+}
+.admin-backup-form-grid .input-control input {
+  width: 100%;
+  padding: 8px;
+  font-size: 0.85rem;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: #fff;
+  outline: none;
+  box-sizing: border-box;
+}
+
+/* Backup status / footer row */
+.admin-backup-footer-row {
+  grid-column: span 2;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 6px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.05);
+  padding-top: 10px;
+}
+.admin-backup-status-label {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+/* Manual backup action buttons row */
+.admin-backup-actions-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+
+/* Restore section separator */
+.admin-restore-section {
+  border-top: 1px dashed rgba(255, 255, 255, 0.1);
+  padding-top: 14px;
+}
+.admin-restore-label {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #f59e0b;
+  display: block;
+  margin-bottom: 6px;
+}
+.admin-restore-hint {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  margin-bottom: 10px;
+  line-height: 1.4;
+}
+.admin-restore-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.admin-restore-filename {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  font-family: monospace;
+}
+
+/* Tab nav divider */
+.admin-tab-nav {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 10px;
+}
+
+/* Proxy input field (monospace) */
+.admin-input-mono {
+  padding: 8px;
+  font-size: 0.85rem;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: #fff;
+  font-family: monospace;
+}
+.admin-input-text {
+  padding: 8px;
+  font-size: 0.85rem;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: #fff;
+}
+
+/* Create-user form (large) */
+.admin-create-user-form-block {
+  background: rgba(0, 0, 0, 0.2);
+  padding: 15px;
+  border-radius: 12px;
+  border: 1px solid var(--border-color);
+  margin-bottom: 20px;
+}
+
+/* Responsive for mobile */
+@media (max-width: 640px) {
+  .admin-add-proxy-grid {
+    grid-template-columns: 1fr;
+  }
+  .admin-backup-form-grid {
+    grid-template-columns: 1fr;
+  }
+  .admin-backup-footer-row {
+    grid-column: span 1;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  .admin-tab-nav {
+    flex-wrap: wrap;
+  }
+}
+
 /* User-Grouped Accordion Dashboard (Admin View) */
 .user-grouped-container {
   display: flex;

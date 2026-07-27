@@ -442,8 +442,25 @@
   - [x] Test: `node -c server.js`, `node -c public/app.js` -> PASS 100%.
 - Status: done
 
+### [x] T44 - Cải Tiến 3 Điểm Kiến Trúc UI Admin (CSS Inline, Tab Switch, Batch Proxy)
+- Description: Kiểm tra toàn bộ kiến trúc UI Admin, phát hiện và khắc phục 3 điểm yếu: (1) quá nhiều inline style trong HTML, (2) switchAdminTab() gán style trực tiếp thay vì dùng class, (3) dropdown Đổi Proxy Hàng Loạt bị trống khi adminProxiesList chưa load kịp.
+- Files related: `public/index.html`, `public/app.css`, `public/app.js`
+- Acceptance criteria:
+  - [x] Thêm ~270 dòng CSS class chuyên dụng vào `app.css`: `.admin-tab-panel`, `.admin-tab-btn`, `.admin-section-block`, `.admin-add-proxy-grid`, `.admin-backup-form-grid`, `.admin-restore-*`, v.v.
+  - [x] `switchAdminTab()` refactor dùng `classList.toggle('active')` thay vì gán inline `style.display` và `style.background/color/borderColor` → dễ thêm transition sau.
+  - [x] `index.html` thay tất cả `style="background:rgba(0,0,0,0.2)..."` trong admin modal bằng CSS class tương ứng.
+  - [x] Thêm hàm `refreshAllBatchProxySelects()` vào `fetchAdminProxies()` — sau mỗi lần fetch xong, tự động rebuild tất cả dropdown `user-batch-proxy-*` trên DOM, giữ lại lựa chọn cũ.
+  - [x] Test: `node -c server.js`, `node -c public/app.js`, `node test.js` -> PASS 100%.
+- Status: done
 
-
-
+### [x] T45 - Fix Bug `bot.isOnline` Không Tồn Tại → onlineBots Luôn Bằng 0
+- Description: Admin Stats Panel luôn hiển thị 🟢 0 Online dù bot đang chạy. Điều tra phát hiện `bot.isOnline` không phải property của `BotInstance` (class chỉ có `this.status`). Kết quả là điều kiện `bot && bot.isOnline` luôn falsy → counter không bao giờ tăng.
+- Files related: `server.js`
+- Root cause: `BotInstance` constructor không khai báo `isOnline`. Field thực tế phản ánh trạng thái chạy là `this.status = 'running'`.
+- Acceptance criteria:
+  - [x] Sửa `GET /api/admin/stats` (dòng 1620): `bot.isOnline` → `bot.status === 'running'` → `onlineBots` đếm đúng.
+  - [x] Sửa `GET /api/admin/users` (dòng 1657): `bot.isOnline` → `bot.status === 'running'` → `onlineBotCount` trên từng User row đếm đúng.
+  - [x] Test: `node -c server.js`, `node test.js` -> PASS 100%.
+- Status: done
 
 

@@ -89,24 +89,21 @@
         <button class="modal-close" id="admin-modal-close-btn">&times;</button>
       </div>
 
-      <!-- Admin Tab Nav -->
-      <div style="display:flex; gap:6px; margin-bottom:16px; border-bottom:1px solid var(--border-color); padding-bottom:10px;">
-        <button id="admin-tab-btn-users" onclick="switchAdminTab('users')"
-          style="padding:6px 14px; font-size:0.85rem; font-weight:700; border-radius:8px; border:1px solid rgba(165,180,252,0.4); background:rgba(165,180,252,0.2); color:#a5b4fc; cursor:pointer;">
+      <!-- Admin Tab Nav (Fix #2: dùng class admin-tab-btn / .active) -->
+      <div class="admin-tab-nav">
+        <button id="admin-tab-btn-users" class="admin-tab-btn active" onclick="switchAdminTab('users')">
           👥 Người Dùng
         </button>
-        <button id="admin-tab-btn-proxies" onclick="switchAdminTab('proxies')"
-          style="padding:6px 14px; font-size:0.85rem; font-weight:700; border-radius:8px; border:1px solid var(--border-color); background:transparent; color:var(--text-secondary); cursor:pointer;">
+        <button id="admin-tab-btn-proxies" class="admin-tab-btn" onclick="switchAdminTab('proxies')">
           🌐 Proxy Pool
         </button>
-        <button id="admin-tab-btn-backup" onclick="switchAdminTab('backup')"
-          style="padding:6px 14px; font-size:0.85rem; font-weight:700; border-radius:8px; border:1px solid var(--border-color); background:transparent; color:var(--text-secondary); cursor:pointer;">
+        <button id="admin-tab-btn-backup" class="admin-tab-btn" onclick="switchAdminTab('backup')">
           💾 Sao Lưu
         </button>
       </div>
 
-      <!-- ═══ TAB: USERS ═══ -->
-      <div id="admin-tab-users">
+      <!-- ═══ TAB: USERS ═══ (Fix #1: dùng class admin-tab-panel + .active) -->
+      <div id="admin-tab-users" class="admin-tab-panel active">
         <!-- System Stats Overview Cards -->
         <div id="admin-stats-overview" class="admin-stats-grid" style="margin-bottom: 16px;">
           <div class="admin-stat-card">
@@ -144,8 +141,8 @@
         </div>
 
         <!-- Create User Form (Admin) -->
-        <form id="admin-create-user-form" style="background: rgba(0,0,0,0.2); padding: 15px; border-radius: 12px; border: 1px solid var(--border-color); margin-bottom: 20px;">
-          <h4 style="font-size:0.9rem; color:#a78bfa; margin-bottom:10px;">＋ Tạo Người Dùng Mới</h4>
+        <form id="admin-create-user-form" class="admin-create-user-form-block">
+          <h4>＋ Tạo Người Dùng Mới</h4>
           <div class="admin-create-user-grid">
             <input type="text" id="new-user-name" placeholder="Username" required style="padding:8px; font-size:0.85rem; background:rgba(0,0,0,0.3); border:1px solid var(--border-color); border-radius:6px; color:#fff;">
             <input type="password" id="new-user-pass" placeholder="Mật khẩu" required style="padding:8px; font-size:0.85rem; background:rgba(0,0,0,0.3); border:1px solid var(--border-color); border-radius:6px; color:#fff;">
@@ -185,16 +182,16 @@
       </div>
 
       <!-- ═══ TAB: PROXY POOL ═══ -->
-      <div id="admin-tab-proxies" style="display:none;">
+      <div id="admin-tab-proxies" class="admin-tab-panel">
         <!-- Global Settings -->
-        <div style="background:rgba(0,0,0,0.2); padding:14px; border-radius:12px; border:1px solid var(--border-color); margin-bottom:14px;">
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-            <h4 style="font-size:0.9rem; color:#a78bfa; margin:0;">⚙️ Cấu Hình Chung & Kiểm Tra Outbound IP</h4>
-            <button type="button" onclick="verifyAllProxiesIp()" style="background:rgba(99,102,241,0.25); border:1px solid rgba(99,102,241,0.5); color:#a5b4fc; border-radius:6px; padding:4px 10px; font-size:0.8rem; cursor:pointer; font-weight:600;">
+        <div class="admin-section-block">
+          <div class="admin-section-header-row">
+            <h4>⚙️ Cấu Hình Chung & Kiểm Tra Outbound IP</h4>
+            <button type="button" class="btn-test-all-ip" onclick="verifyAllProxiesIp()">
               🔍 Test IP Public Tất Cả Luồng
             </button>
           </div>
-          <div style="display:flex; gap:20px; flex-wrap:wrap; align-items:center;">
+          <div class="proxy-global-settings-row">
             <label style="display:flex; align-items:center; gap:8px; font-size:0.85rem; cursor:pointer;">
               <label class="switch">
                 <input type="checkbox" id="proxy-use-direct" onchange="updateProxySettings()">
@@ -208,32 +205,32 @@
                 style="width:60px; padding:3px 6px; background:rgba(0,0,0,0.3); border:1px solid var(--border-color); border-radius:6px; color:#fff; font-size:0.85rem;">
             </label>
           </div>
-          <p style="font-size:0.75rem; color:var(--text-secondary); margin-top:8px; margin-bottom:0;">
+          <p class="proxy-global-hint">
             💡 Thuật toán <strong>Bin-Packing</strong>: lấp đầy Direct → lấp đầy từng proxy trước khi mở proxy mới. Tiết kiệm chi phí tối đa.
           </p>
         </div>
 
         <!-- Add Proxy Form -->
-        <form id="admin-add-proxy-form" style="background:rgba(0,0,0,0.2); padding:14px; border-radius:12px; border:1px solid var(--border-color); margin-bottom:14px;">
-          <h4 style="font-size:0.9rem; color:#a78bfa; margin-bottom:10px;">＋ Thêm Proxy Mới</h4>
-          <div style="display:grid; grid-template-columns: 160px 1fr auto; gap:8px; align-items:center;">
-            <input type="text" id="proxy-new-label" placeholder="Tên gợi nhớ (VD: VN Proxy 1)" style="padding:8px; font-size:0.85rem; background:rgba(0,0,0,0.3); border:1px solid var(--border-color); border-radius:6px; color:#fff;">
-            <input type="text" id="proxy-new-url" placeholder="http://user:pass@ip:port  hoặc  IP:PORT:USER:PASS  hoặc  IP:PORT" required style="padding:8px; font-size:0.85rem; background:rgba(0,0,0,0.3); border:1px solid var(--border-color); border-radius:6px; color:#fff; font-family:monospace;">
+        <form id="admin-add-proxy-form" class="admin-section-block">
+          <h4>＋ Thêm Proxy Mới</h4>
+          <div class="admin-add-proxy-grid">
+            <input type="text" id="proxy-new-label" placeholder="Tên gợi nhớ (VD: VN Proxy 1)" class="admin-input-text">
+            <input type="text" id="proxy-new-url" placeholder="http://user:pass@ip:port  hoặc  IP:PORT:USER:PASS  hoặc  IP:PORT" required class="admin-input-mono">
             <button type="submit" class="btn btn-primary" style="padding:7px 14px; font-size:0.8rem; white-space:nowrap;">Thêm Proxy</button>
           </div>
           <div class="error-msg" id="proxy-add-error" style="margin-top:6px; font-size:0.8rem;"></div>
         </form>
 
         <!-- Proxy List -->
-        <div style="max-height:300px; overflow-y:auto;">
-          <table style="width:100%; border-collapse:collapse; font-size:0.82rem; text-align:left;">
+        <div class="admin-proxy-table-wrapper">
+          <table class="admin-proxy-table">
             <thead>
-              <tr style="border-bottom:1px solid var(--border-color); color:var(--text-secondary);">
-                <th style="padding:7px;">Tên</th>
-                <th style="padding:7px;">URL</th>
-                <th style="padding:7px; text-align:center;">Tải (Bot)</th>
-                <th style="padding:7px; text-align:center;">Trạng Thái</th>
-                <th style="padding:7px; text-align:right;">Thao Tác</th>
+              <tr>
+                <th>Tên</th>
+                <th>URL</th>
+                <th style="text-align:center;">Tải (Bot)</th>
+                <th style="text-align:center;">Trạng Thái</th>
+                <th style="text-align:right;">Thao Tác</th>
               </tr>
             </thead>
             <tbody id="proxy-table-body">
@@ -244,22 +241,22 @@
       </div>
 
       <!-- ═══ TAB: BACKUP & RESTORE ═══ -->
-      <div id="admin-tab-backup" style="display:none;">
+      <div id="admin-tab-backup" class="admin-tab-panel">
         <!-- Telegram Config -->
-        <div style="background:rgba(0,0,0,0.2); padding:14px; border-radius:12px; border:1px solid var(--border-color); margin-bottom:14px;">
-          <h4 style="font-size:0.9rem; color:#a78bfa; margin-bottom:12px;">📢 Cấu HÌnh Sao Lưu Tự Động Qua Telegram</h4>
-          <form id="admin-backup-settings-form" onsubmit="saveBackupSettings(event)" style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
+        <div class="admin-section-block">
+          <h4>📢 Cấu Hình Sao Lưu Tự Động Qua Telegram</h4>
+          <form id="admin-backup-settings-form" onsubmit="saveBackupSettings(event)" class="admin-backup-form-grid">
             <div class="input-control">
-              <label for="backup-tele-token" style="font-size:0.8rem; color:var(--text-secondary); display:block; margin-bottom:4px;">Telegram Bot Token</label>
-              <input type="password" id="backup-tele-token" placeholder="Nhập Bot Token từ @BotFather" style="width:100%; padding:8px; font-size:0.85rem; background:rgba(0,0,0,0.3); border:1px solid var(--border-color); border-radius:6px; color:#fff; outline:none;">
+              <label for="backup-tele-token">Telegram Bot Token</label>
+              <input type="password" id="backup-tele-token" placeholder="Nhập Bot Token từ @BotFather">
             </div>
             <div class="input-control">
-              <label for="backup-tele-chatid" style="font-size:0.8rem; color:var(--text-secondary); display:block; margin-bottom:4px;">Telegram Chat ID</label>
-              <input type="text" id="backup-tele-chatid" placeholder="Nhập Chat ID từ @userinfobot" style="width:100%; padding:8px; font-size:0.85rem; background:rgba(0,0,0,0.3); border:1px solid var(--border-color); border-radius:6px; color:#fff; outline:none;">
+              <label for="backup-tele-chatid">Telegram Chat ID</label>
+              <input type="text" id="backup-tele-chatid" placeholder="Nhập Chat ID từ @userinfobot">
             </div>
             <div class="input-control">
-              <label for="backup-interval" style="font-size:0.8rem; color:var(--text-secondary); display:block; margin-bottom:4px;">Tần suất sao lưu (Giờ)</label>
-              <input type="number" id="backup-interval" value="12" min="1" style="width:100%; padding:8px; font-size:0.85rem; background:rgba(0,0,0,0.3); border:1px solid var(--border-color); border-radius:6px; color:#fff; outline:none;">
+              <label for="backup-interval">Tần suất sao lưu (Giờ)</label>
+              <input type="number" id="backup-interval" value="12" min="1">
             </div>
             <label style="display:flex; align-items:center; gap:8px; font-size:0.85rem; margin-top:20px; cursor:pointer;">
               <label class="switch">
@@ -268,8 +265,8 @@
               </label>
               Tự động gửi bản sao lưu định kỳ
             </label>
-            <div style="grid-column: span 2; display:flex; justify-content:space-between; align-items:center; margin-top:6px; border-top:1px dashed rgba(255,255,255,0.05); padding-top:10px;">
-              <span style="font-size:0.75rem; color:var(--text-secondary);">
+            <div class="admin-backup-footer-row">
+              <span class="admin-backup-status-label">
                 💡 Trạng thái: <span id="backup-status-text" style="font-weight:700; color:#ef4444;">Chưa hoạt động</span>
               </span>
               <button type="submit" class="btn btn-primary" style="padding:6px 16px; font-size:0.8rem;">Lưu Cấu Hình</button>
@@ -278,22 +275,22 @@
         </div>
 
         <!-- Manual Backup / Restore -->
-        <div style="background:rgba(0,0,0,0.2); padding:14px; border-radius:12px; border:1px solid var(--border-color); margin-bottom:14px;">
-          <h4 style="font-size:0.9rem; color:#a78bfa; margin-bottom:12px;">⚡ Thao Tác Sao Lưu & Phục Hồi</h4>
-          <div style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:18px;">
+        <div class="admin-section-block">
+          <h4>⚡ Thao Tác Sao Lưu & Phục Hồi</h4>
+          <div class="admin-backup-actions-row">
             <button class="btn btn-primary" onclick="triggerTelegramBackupNow(this)" style="padding:8px 16px; font-size:0.82rem; background:#6366f1; border-color:#4f46e5;">⚡ Gửi Backup Lên Telegram</button>
             <button class="btn btn-secondary" onclick="downloadBackupNow()" style="padding:8px 16px; font-size:0.82rem;">📥 Tải Backup Về Máy (.zip)</button>
           </div>
-          
-          <div style="border-top:1px dashed rgba(255,255,255,0.1); padding-top:14px;">
-            <label style="font-size:0.85rem; font-weight:700; color:#f59e0b; display:block; margin-bottom:6px;">⚠️ Khôi Phục Dữ Liệu Từ File Backup (.zip)</label>
-            <p style="font-size:0.78rem; color:var(--text-secondary); margin-bottom:10px; line-height:1.4;">
+
+          <div class="admin-restore-section">
+            <label class="admin-restore-label">⚠️ Khôi Phục Dữ Liệu Từ File Backup (.zip)</label>
+            <p class="admin-restore-hint">
               Chọn tệp sao lưu dạng tệp nén `.zip` đã tải về trước đó. Hệ thống sẽ tự động giải nén ghi đè cấu hình, nạp lại trạng thái người dùng, proxy và khởi chạy lại các bot.
             </p>
-            <div style="display:flex; align-items:center; gap:12px;">
+            <div class="admin-restore-row">
               <input type="file" id="restore-file-input" accept=".zip" style="display:none;" onchange="handleRestoreUpload(this)">
               <button class="btn btn-danger" onclick="document.getElementById('restore-file-input').click()" style="padding:8px 16px; font-size:0.82rem; background:rgba(239,68,68,0.15); color:#ef4444; border-color:rgba(239,68,68,0.35);">📤 Chọn File & Khôi Phục Ngay</button>
-              <span id="restore-file-name" style="font-size:0.8rem; color:var(--text-secondary); font-family:monospace;">Chưa chọn file</span>
+              <span id="restore-file-name" class="admin-restore-filename">Chưa chọn file</span>
             </div>
           </div>
         </div>

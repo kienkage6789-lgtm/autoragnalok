@@ -267,26 +267,24 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Admin Tab Switching
   window.switchAdminTab = function(tab) {
-    document.getElementById('admin-tab-users').style.display    = tab === 'users'   ? '' : 'none';
-    document.getElementById('admin-tab-proxies').style.display  = tab === 'proxies' ? '' : 'none';
-    document.getElementById('admin-tab-backup').style.display   = tab === 'backup'  ? '' : 'none';
-    
-    const btnUsers   = document.getElementById('admin-tab-btn-users');
-    const btnProxies = document.getElementById('admin-tab-btn-proxies');
-    const btnBackup  = document.getElementById('admin-tab-btn-backup');
-    
-    const tabs = ['users', 'proxies', 'backup'];
-    const buttons = { users: btnUsers, proxies: btnProxies, backup: btnBackup };
-    
-    tabs.forEach(t => {
-      const btn = buttons[t];
+    // Fix #2: Dùng class .admin-tab-panel/.active thay vì inline display style
+    ['users', 'proxies', 'backup'].forEach(t => {
+      const panel = document.getElementById(`admin-tab-${t}`);
+      const btn   = document.getElementById(`admin-tab-btn-${t}`);
+      if (panel) {
+        panel.classList.toggle('active', t === tab);
+        // Xóa inline style cũ (nếu còn sót từ lần trước)
+        panel.style.display = '';
+      }
       if (btn) {
-        btn.style.background = tab === t ? 'rgba(165,180,252,0.2)' : 'transparent';
-        btn.style.color      = tab === t ? '#a5b4fc' : 'var(--text-secondary)';
-        btn.style.borderColor= tab === t ? 'rgba(165,180,252,0.4)' : 'var(--border-color)';
+        btn.classList.toggle('active', t === tab);
+        // Xóa inline styles cũ
+        btn.style.background  = '';
+        btn.style.color       = '';
+        btn.style.borderColor = '';
       }
     });
-    
+
     if (tab === 'proxies' || tab === 'backup') fetchAdminProxies();
   };
 
@@ -2343,9 +2341,28 @@ document.addEventListener('DOMContentLoaded', () => {
       renderProxySettings(data.settings);
       renderProxyTable(data.list);
       renderBackupSettings(data.settings);
+      // Fix #3: Sau khi có danh sách proxy, rebuild tất cả batch-proxy dropdowns
+      // trong accordion cards (tránh dropdown trống khi proxy chưa load kịp)
+      refreshAllBatchProxySelects();
     } catch (e) {
       console.error('Error fetching proxies:', e);
     }
+  }
+
+  // Fix #3: Rebuild tất cả dropdown "Đổi Proxy Hàng Loạt" trên accordion cards
+  function refreshAllBatchProxySelects() {
+    const selects = document.querySelectorAll('[id^="user-batch-proxy-"]');
+    if (!selects.length) return;
+    const optionsHtml = `
+      <option value="direct">🌐 Direct Connection</option>
+      <option value="auto">🔄 Auto Rotation Pool</option>
+      ${adminProxiesList.map(p => `<option value="${p.id}">${p.label}${!p.active ? ' (Off)' : ''}</option>`).join('')}
+    `;
+    selects.forEach(sel => {
+      const prev = sel.value; // giữ lại lựa chọn cũ
+      sel.innerHTML = optionsHtml;
+      if (prev) sel.value = prev; // khôi phục lựa chọn cũ nếu còn trong list
+    });
   }
 
   window.testAdminProxy = async function(id, btn) {
