@@ -8,6 +8,7 @@ proxies.json
 
 # Cache and scratch files
 spots_cache.json
+maps_cache.json
 scratch/
 .env
 
