@@ -288,6 +288,52 @@ try {
   console.error('Failed to load xhrpg_lang_vi.js dictionary:', e.message);
 }
 
+function translateThaiText(text) {
+  if (!text || typeof text !== 'string') return text;
+  
+  // 1. Exact match lookup
+  if (viDict[text]) return viDict[text];
+  
+  let translated = text;
+  
+  // 2. Perform word/phrase translation using keys of viDict
+  if (!global.sortedViKeys) {
+    global.sortedViKeys = Object.keys(viDict)
+      .filter(k => k.trim().length > 1 && /[\u0e00-\u0e7f]/.test(k)) // Thai characters only
+      .sort((a, b) => b.length - a.length); // Longest first to avoid partial replacements
+  }
+  
+  for (const key of global.sortedViKeys) {
+    if (translated.includes(key)) {
+      translated = translated.split(key).join(viDict[key]);
+    }
+  }
+  
+  // 3. Additional common replacements for combat logs if still containing Thai
+  const commonReplacements = [
+    { raw: 'ได้รับ', val: 'Nhận được' },
+    { raw: 'ซ้ำ', val: 'trùng' },
+    { raw: 'ดื่มยา', val: 'Bơm thuốc' },
+    { raw: 'ฟื้นฟู', val: 'Hồi phục' },
+    { raw: 'หลบหลีก', val: 'Né' },
+    { raw: 'หลบ', val: 'Né' },
+    { raw: 'เป้าหมาย', val: 'Mục tiêu' },
+    { raw: 'สำเร็จ', val: 'thành công' },
+    { raw: 'ล้มเหลว', val: 'thất bại' },
+    { raw: 'ยานบินผลิต', val: 'Phi thuyền sản xuất' },
+    { raw: 'เลเวลเพิ่มเป็น', val: 'Lv tăng thành' },
+    { raw: 'เพิ่มเป็น', val: 'tăng thành' }
+  ];
+  
+  for (const rep of commonReplacements) {
+    if (translated.includes(rep.raw)) {
+      translated = translated.split(rep.raw).join(rep.val);
+    }
+  }
+  
+  return translated;
+}
+
 let monMastersCache = {};
 if (fs.existsSync(MON_MASTERS_CACHE_FILE)) {
   try {
@@ -379,9 +425,33 @@ function getMapDefs() {
   return (mapsCache && mapsCache.length > 0) ? mapsCache : DEFAULT_MAP_DEFS;
 }
 
-function syncMapsAndZonesFromGame() {
+async function syncMapsAndZonesFromGame() {
   let updatedMapsCount = 0;
   let updatedSpotsCount = 0;
+
+  // Try to auto-download the latest xhrpg_canvas.js from the game server
+  try {
+    console.log('🔄 Downloader: Fetching latest xhrpg_canvas.js from game server...');
+    const now = Date.now();
+    const targetUrl = `https://ragnalok.online/human/js/xhrpg_canvas.js?_cb=${now}`;
+    const response = await fetch(targetUrl, {
+      dispatcher: proxyPool.getDefaultDispatcher(),
+      headers: {
+        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'referer': 'https://ragnalok.online/human/'
+      }
+    });
+    if (response.ok) {
+      const code = await response.text();
+      if (code && !code.trim().startsWith('<')) {
+        const canvasPath = path.join(__dirname, 'xhrpg_canvas.js');
+        fs.writeFileSync(canvasPath, code, 'utf8');
+        console.log('✅ Downloader: Updated local xhrpg_canvas.js on disk.');
+      }
+    }
+  } catch(e) {
+    console.error('❌ Downloader: Failed to auto-download latest game script:', e.message);
+  }
 
   // 1. Parse maps from xhrpg_canvas.js if present
   try {
@@ -806,7 +876,7 @@ class BotInstance {
     this.logs.push({
       time: timestamp,
       type: type.toLowerCase(),
-      msg: msg
+      msg: translateThaiText(msg)
     });
     if (this.logs.length > 200) {
       this.logs.shift();
@@ -817,7 +887,7 @@ class BotInstance {
     const timestamp = new Date().toLocaleTimeString('vi-VN');
     this.lootLogs.push({
       time: timestamp,
-      msg: msg
+      msg: translateThaiText(msg)
     });
     if (this.lootLogs.length > 200) {
       this.lootLogs.shift();
@@ -3188,9 +3258,9 @@ app.get('/api/admin/maps-zones', requireAuth, (req, res) => {
   });
 });
 
-app.post('/api/admin/sync-maps-zones', requireAuth, (req, res) => {
+app.post('/api/admin/sync-maps-zones', requireAuth, async (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'Chỉ Admin mới có quyền thực hiện đồng bộ' });
-  const result = syncMapsAndZonesFromGame();
+  const result = await syncMapsAndZonesFromGame();
   res.json(result);
 });
 
@@ -3557,10 +3627,66 @@ app.get('/play', requireAuth, async (req, res) => {
     const html = await fetchGameHtml(req);
     res.send(html);
   } catch (e) {
-    console.error('Fetch HTML error:', e.message);
-    // Tạm fallback về file tĩnh nếu server gốc lỗi
+    console.error('Fetch HTML error, serving patched play.html fallback:', e.message);
     let fallback = fs.readFileSync(path.join(__dirname, 'play.html'), 'utf8');
-    fallback = fallback.replace(/\?v=\d+/g, `?v=${Date.now()}`);
+    const now = Date.now();
+    
+    // Vá lỗi DOM và áp dụng tất cả các thay thế giống fetchGameHtml
+    fallback = fallback.replace('id="log-list"', 'id="event-log"');
+    fallback = fallback.replace('</body>', '<div id="login-overlay" style="display:none"></div>\n</body>');
+    fallback = fallback.replace(/src="js\/xhrpg_canvas\.js[^"]*"/, `src="/js/xhrpg_canvas.js?v=${now}"`);
+    fallback = fallback.replace(
+      /(<script src="\/js\/xhrpg_canvas\.js\?v=\d+"><\/script>)/,
+      `$1\n<script src="/js/xhrpg_lang_vi.js?v=${now}"></script>`
+    );
+    
+    const customScript = `
+<script>
+const BASE_URL = "/";
+const CF_REGION = "VN";
+const _L = true;
+document.getElementById('loading-msg').textContent = 'Đang kết nối qua proxy chống ngắt kết nối...';
+
+function startGame(player, token, offlineReward) {
+  document.getElementById('loading-screen').style.display = 'none';
+  document.getElementById('game-screen').style.display    = 'flex';
+  xhrpg.init(player, BASE_URL, token);
+  if (offlineReward && offlineReward.kills > 0) {
+    setTimeout(() => xhrpg.showOfflineReward(offlineReward), 800);
+  }
+}
+
+const urlParams = new URLSearchParams(window.location.search);
+const uid = urlParams.get('line_uid');
+const token = urlParams.get('session_token');
+
+if (uid && token) {
+  $.post('/xhrpg_game.php', {
+    line_uid: uid,
+    session_token: token,
+    act: 1,
+    full: 1,
+    bot: 1,
+    lang: 'vi',
+    have_static: 0
+  })
+  .done(res => {
+    const data = typeof res === 'string' ? JSON.parse(res) : res;
+    if (data.ok) {
+      startGame(data.player, token, data.offline_reward);
+    } else {
+      document.getElementById('loading-msg').textContent = 'Đăng nhập thất bại: ' + (data.error || 'Lỗi không xác định');
+    }
+  })
+  .fail(() => {
+    document.getElementById('loading-msg').textContent = 'Không thể kết nối tới máy chủ Proxy';
+  });
+} else {
+  document.getElementById('loading-msg').textContent = 'Lỗi: Thiếu tham số line_uid hoặc session_token trên link';
+}
+</script>`;
+
+    fallback = fallback.replace(/<script>[\s\S]*?LIFF_ID[\s\S]*?<\/script>/, customScript);
     res.send(fallback);
   }
 });
@@ -3592,7 +3718,7 @@ async function fetchGameAsset(urlPath) {
     throw new Error(`Fetched asset ${urlPath} is HTML, not JavaScript (likely blocked by Cloudflare or redirected)`);
   }
   
-  // Inject bypass into main game engine file
+  // Inject bypass into main game engine file and auto-save fallback copy to disk
   if (urlPath === '/js/xhrpg_canvas.js') {
     const patchTarget = `if (_pollStopped || _inflight) return;`;
     const bypassCode = `if (_pollStopped || _inflight) return;\n    _lastInputAt = Date.now(); // Bypass idle timeout\n    _tabHiddenAt = 0; // Bypass hidden tab timeout`;
@@ -3600,13 +3726,31 @@ async function fetchGameAsset(urlPath) {
     if (text.includes(patchTarget)) {
       text = text.replace(patchTarget, bypassCode);
     }
+    try {
+      const canvasPath = path.join(__dirname, 'xhrpg_canvas.js');
+      fs.writeFileSync(canvasPath, text, 'utf8');
+      console.log('💾 Auto-saved latest patched xhrpg_canvas.js to disk');
+    } catch(err) {
+      console.error('Failed to auto-save canvas to disk:', err.message);
+    }
+  }
+  
+  // Auto-save sdk.js to local disk fallback
+  if (urlPath === '/js/sdk.js') {
+    try {
+      const sdkPath = path.join(__dirname, 'sdk.js');
+      fs.writeFileSync(sdkPath, text, 'utf8');
+      console.log('💾 Auto-saved latest sdk.js to disk');
+    } catch(err) {
+      console.error('Failed to auto-save sdk to disk:', err.message);
+    }
   }
   
   assetCache[urlPath] = { time: now, data: text };
   return text;
 }
 
-app.get('/js/xhrpg_canvas.js', async (req, res) => {
+app.get(['/js/xhrpg_canvas.js', '/human/js/xhrpg_canvas.js'], async (req, res) => {
   try {
     const data = await fetchGameAsset('/js/xhrpg_canvas.js');
     res.set({
@@ -3620,7 +3764,7 @@ app.get('/js/xhrpg_canvas.js', async (req, res) => {
   }
 });
 
-app.get('/js/xhrpg_lang_vi.js', (req, res) => {
+app.get(['/js/xhrpg_lang_vi.js', '/human/js/xhrpg_lang_vi.js'], (req, res) => {
   res.set({
     'Cache-Control': 'public, max-age=1800',
     'Content-Type': 'application/javascript; charset=utf-8'
@@ -3628,7 +3772,7 @@ app.get('/js/xhrpg_lang_vi.js', (req, res) => {
   res.sendFile(path.join(__dirname, 'xhrpg_lang_vi.js'));
 });
 
-app.get('/js/jquery-3.6.0.min.js', (req, res) => {
+app.get(['/js/jquery-3.6.0.min.js', '/human/js/jquery-3.6.0.min.js'], (req, res) => {
   res.set({
     'Cache-Control': 'public, max-age=31536000',
     'ETag': 'jquery-3.6.0-v1'
@@ -3636,7 +3780,7 @@ app.get('/js/jquery-3.6.0.min.js', (req, res) => {
   res.sendFile(path.join(__dirname, 'jquery-3.6.0.min.js'));
 });
 
-app.get('/js/sdk.js', async (req, res) => {
+app.get(['/js/sdk.js', '/human/js/sdk.js'], async (req, res) => {
   try {
     const data = await fetchGameAsset('/js/sdk.js');
     res.set({
@@ -3651,8 +3795,12 @@ app.get('/js/sdk.js', async (req, res) => {
 });
 
 // Proxy PHP endpoints
-app.all('/xhrpg_*.php', async (req, res) => {
-  const targetUrl = `https://ragnalok.online/human${req.originalUrl}`;
+app.all(['/xhrpg_*.php', '/human/xhrpg_*.php'], async (req, res) => {
+  let cleanPath = req.originalUrl;
+  if (cleanPath.startsWith('/human/')) {
+    cleanPath = cleanPath.slice(6);
+  }
+  const targetUrl = `https://ragnalok.online/human${cleanPath}`;
   
   // Track client activity to pause bot loop
   const uid = req.body.line_uid || req.query.line_uid;
@@ -3669,6 +3817,22 @@ app.all('/xhrpg_*.php', async (req, res) => {
     console.log(`[Proxy Req Error] ${req.method} ${req.originalUrl} | Error: ${err.message} | Time: ${Date.now() - startTime}ms`);
     if (!res.headersSent) {
       res.status(500).json({ error: 'Lỗi máy chủ trung gian (Proxy failed)', details: err.message });
+    }
+  }
+});
+
+// Proxy Cloudflare Turnstile & Challenge platform endpoints
+app.all('/cdn-cgi/*', async (req, res) => {
+  const targetUrl = `https://ragnalok.online${req.originalUrl}`;
+  const startTime = Date.now();
+  console.log(`[Proxy Cloudflare Start] ${req.method} ${req.originalUrl}`);
+  try {
+    await proxyRequest(req, res, targetUrl);
+    console.log(`[Proxy Cloudflare Success] ${req.method} ${req.originalUrl} | Time: ${Date.now() - startTime}ms`);
+  } catch (err) {
+    console.log(`[Proxy Cloudflare Error] ${req.method} ${req.originalUrl} | Error: ${err.message}`);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Proxy cdn-cgi failed', details: err.message });
     }
   }
 });
@@ -3702,6 +3866,11 @@ if (require.main === module) {
     console.log(`🚀 Ragnalok Headless Dashboard running at:`);
     console.log(`👉 http://localhost:${PORT}`);
     console.log(`===============================================`);
+    
+    // Auto-sync game assets at startup in background
+    syncMapsAndZonesFromGame().catch(err => {
+      console.error('❌ Startup Map/Zone synchronization failed:', err.message);
+    });
   });
 
   // Setup periodic Telegram backup (Check every 5 minutes if it's time to backup)

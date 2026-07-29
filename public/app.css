@@ -476,7 +476,11 @@ body {
 }
 
 .card-tab-content {
+  display: none;
   min-height: 180px;
+}
+.card-tab-content.active {
+  display: block;
 }
 .tab-pane {
   display: none;
@@ -2161,6 +2165,11 @@ input:checked + .slider:before {
   background: rgba(255, 255, 255, 0.05);
   color: rgba(255, 255, 255, 0.3);
   cursor: not-allowed;
+}
+
+/* Loot Terminal font reduction (20% smaller than 0.75rem is 0.6rem) */
+.loot-terminal {
+  font-size: 0.6rem !important;
 }
 
 

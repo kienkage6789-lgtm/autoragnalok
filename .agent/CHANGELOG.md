@@ -2,6 +2,31 @@
 
 > Changelog of actual changes implemented.
 
+## 2026-07-29 - Tự động tải game script, Dịch log tiếng Việt, Sửa lỗi Cloudflare cdn-cgi & Tự cập nhật fallback
+- File đã đổi: [server.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/autoragnalok/server.js).
+- Đã làm:
+  - **Tự động tải game script (`xhrpg_canvas.js`)**: Tích hợp bộ Downloader tự động fetch file `xhrpg_canvas.js` mới nhất từ game server để ghi đè lên đĩa local mỗi khi khởi động server hoặc khi thực hiện yêu cầu đồng bộ từ admin, giúp tool luôn nhận các map/zone/skill mới nhất.
+  - **Dịch log combat và nhặt đồ sang tiếng Việt**: Triển khai thuật toán dịch thuật động `translateThaiText()` sử dụng từ điển `viDict` để chuyển ngữ toàn bộ tên quái vật, địa danh, vật phẩm và các hành động (uống thuốc, nhặt đồ, lên cấp, ...) từ tiếng Thái sang tiếng Việt trước khi ghi log.
+  - **Vá lỗi fallback play.html**: Bổ sung logic vá lỗi DOM và thay thế script khởi chạy LIFF bằng proxy script trong catch block của `/play` (khi fetch `index.php` lỗi hoặc bị Cloudflare chặn).
+  - **Bổ sung định tuyến hỗ trợ tiền tố `/human`**: Cấu hình các route JS (`/js/xhrpg_canvas.js`, `/js/xhrpg_lang_vi.js`, `/js/jquery-3.6.0.min.js`, `/js/sdk.js`) và proxy PHP (`/xhrpg_*.php`) hỗ trợ đồng thời cả các request có tiền tố `/human/` để tránh lỗi trả về HTML `index.html` gây crash client.
+  - **Proxy hóa các yêu cầu `/cdn-cgi/*`**: Chuyển tiếp toàn bộ các yêu cầu Turnstile Challenge của Cloudflare về game server gốc để vượt qua bảo vệ của Cloudflare, tránh trả về HTML `index.html` gây ra lỗi cú pháp `Unexpected token '<' (at main.js)`.
+  - **Tự động cập nhật tệp dự phòng trên đĩa (Self-healing)**: Lưu tự động tệp `xhrpg_canvas.js` và `sdk.js` xuống đĩa local mỗi khi tải động thành công từ game server qua proxy, giải quyết hoàn toàn lỗi lệch phiên bản trong tương lai.
+- Đã test bằng: `npm test` → PASS 100%.
+
+---
+
+## 2026-07-29 - Tái cấu trúc Bảng điều khiển: Gộp tab Log (chia sub-tab Hoạt động & Vật phẩm), thu gọn mặc định, giảm font size, hiển thị stats /h và /d
+- File đã đổi: [public/app.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/autoragnalok/public/app.js), [public/app.css](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/autoragnalok/public/app.css).
+- Đã làm:
+  - **Thu gọn tab mặc định (Collapsible Tabs)**: Khởi tạo active tab là `null`, click vào tab đang mở sẽ đóng lại, giúp giao diện gọn gàng hơn.
+  - **Triệt tiêu khoảng trống thừa khi đóng tab**: Mặc định đặt `.card-tab-content` thành `display: none` và chỉ chuyển sang `display: block` (thêm class `active`) khi có một tab bất kỳ đang được mở. Điều này loại bỏ hoàn toàn khoảng trống thừa ở cuối thẻ khi các tab ở trạng thái thu gọn.
+  - **Gộp tab Vật Phẩm & Nhật Ký thành tab Log (với Sub-tabs)**: Tạo tab Log chứa 2 sub-tab "Hoạt Động" và "Vật Phẩm" sử dụng lớp `.subtab-btn`. Mặc định khi click mở tab Log sẽ hiển thị sub-tab Hoạt Động (nhật ký hoạt động chung) để tối ưu không gian hiển thị và hiệu năng.
+  - **Giảm 20% cỡ chữ log vật phẩm**: Cập nhật cỡ chữ cho phần log rơi đồ từ `0.75rem` xuống còn `0.6rem` (và các text hiển thị tương ứng) để tối ưu không gian.
+  - **Bổ sung thống kê hiệu suất theo giờ (/h) và ngày (/d)**: Người dùng có thể click vào thanh thống kê tốc độ để chuyển đổi hiển thị giữa `/m`, `/h`, `/d` hoặc di chuột xem tooltip chi tiết của 3 đơn vị cùng lúc.
+- Đã test bằng: `npm test` → PASS 100%.
+
+---
+
 ## 2026-07-27 - Cơ Chế Hấp Thu Bản Đồ Động An Toàn cho Người Chơi Cũ & Mới (T24)
 - File đã đổi: [server.js](file:///C:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/server.js), [public/index.html](file:///C:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/public/index.html), [public/app.js](file:///C:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/public/app.js), [test.js](file:///C:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/test.js).
 - Đã làm:

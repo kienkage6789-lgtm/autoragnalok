@@ -6,10 +6,13 @@ const xhrpg = (() => {
   const ZONE_R  = [900, 1350, 1800, 2250];
   const TILE    = 16;
   const GUN_RANGE_BONUS_PX = 18; // +6m ระยะปืนทุกชนิด (sync กับ PHP XHRPG_GUN_RANGE_BONUS_PX)
+  const AXE_AOE_N = 6;           // 🪓 ขวานไททันโดนพร้อมกันกี่ตัว (sync PHP XHRPG_AOE_MAX)
+  const AXE_AOE_M = 15;          // 🪓 รัศมี AOE ขวาน (m) — คงที่ทุกเลเวล (sync PHP XHRPG_AXE_AOE_M)
   const AMMO_YIELD = 3;         // ผลิต 1 หน่วย → ได้ 3 นัด (sync กับ PHP XHRPG_AMMO_YIELD)
   const AMMO_YIELD_PISTOL = 5;  // ปืนสั้น 5 นัด/หน่วย (sync กับ PHP XHRPG_AMMO_YIELD_BY_GUN)
+  const AMMO_YIELD_T1 = 10;     // T1 ทุกปืน 10 นัด/หน่วย (sync กับ PHP XHRPG_AMMO_YIELD_T1)
   const POTION_YIELD = 3;       // ผลิต 1 หน่วย → ได้ 3 ขวด (sync กับ PHP XHRPG_POTION_YIELD)
-  const POLL_MS = 1000;   // เว้นระยะ tick 1.0s
+  const POLL_MS = 1250;   // เว้นระยะ tick 1.0s → 1.25s (เจ้าของสั่งลอง 2026-07-20 ลด CPU ~20% ยอมเกมช้า 20% — ถอย = 1000 · จุดถอย git 709fff7)
 
   let player = null, monsters = [], others = [], targetMonsterId = null;
   let bosses = []; // MVP ทุกตัวในแผนที่ (ส่งมาจาก server) → ปุ่ม icon ข้าง dropdown + เดินไปหา
@@ -23,6 +26,7 @@ const xhrpg = (() => {
   let explosions = [];    // {x,y,r,color,born} — วงระเบิดจาง (สกิลกระสุนระเบิด)
   const pullAnim = {};    // mid -> {x0,y0,born,life} — tween มอนไหลเข้าหา (สกิลดึงมอน, front-only)
   const shockFx = {};     // mid -> {born,life} — effect ⚡ ARM Gun ช็อต (โชว์ตามวินาทีสตันจริงจาก e.stun)
+  const robotFx = {};     // mid -> {born,life,kind} — ป้ายบอกว่าสถานะนี้มาจากไททัน (kind: 'axe'=🪓 สตันขวาน · 'arm'=🏹 ธนูไททัน) · server ส่ง e.src
   const _hitFlash = {};   // mid -> เวลาสิ้นสุด (Date.now ms) — มอนโดนตีแว่บขาวสั้นๆ
   const _friendDS = {};   // okey -> seq (o.ds) ล่าสุดที่โชว์แล้ว — กันโชว์เลขดาเมจเพื่อนเบิ้ลเมื่อ poll ไม่ตรงจังหวะ
   const _friendMvp = {};  // okey -> seq (o.mvps) ล่าสุด — กันเด้ง "MVP" เหนือหัวเพื่อนซ้ำ (presence ค้าง ~1s)
@@ -34,7 +38,6 @@ const xhrpg = (() => {
   let lootPops = [];      // {x,y,spr,born} — ไอคอนของดรอปลอยขึ้น (Money/HP)
   let groundLoot = [];    // {x,y,icon,born} — ของดรอปวางที่จุดมอนตาย จางใน ~2 tick
   let baseUrl = '/human/';
-  let assetsBaseUrl = '/';
   // ไอคอนมีด (inline-SVG · Bold outline) — ใช้ทุกจุดที่โชว์ไอคอนมีด (HUD/log/tab/การ์ด/ตลาด/ยานบิน/help ฯลฯ)
   //   มีดสั้น = ใบสั้นด้ามใหญ่ · มีดยาว = ใบเรียวยาว ด้ามสั้น · นิยามไว้บนสุดให้ทุก const/ฟังก์ชันอ้างได้ · แก้ที่นี่ที่เดียว = เปลี่ยนทั้งเกม
   const _LOG_KNIFE_S = `<svg viewBox="0 0 32 32" width="15" height="15" style="vertical-align:-3px;filter:drop-shadow(0 0 0.7px rgba(255,255,255,0.55))"><g stroke="#1e293b" stroke-width="1.6" stroke-linejoin="round"><path d="M16 4 L19 18 L13 18 Z" fill="#dbe2ea"/><rect x="9" y="17" width="14" height="3" rx="1.4" fill="#f5b53c"/><rect x="13.2" y="20" width="5.6" height="8.4" rx="1.8" fill="#8a5636"/></g></svg>`;
@@ -104,7 +107,7 @@ const xhrpg = (() => {
   function sfxThrowBig(){ const n = Date.now(); if (n - _sfxShootAt   < 45) return; _sfxShootAt  = n; _tone(260, 0.09, 'square', 0.09, 60); _tone(110, 0.08, 'triangle', 0.05, 45); _noise(0.05, 0.04, 900); } // มีดยาว (ขว้างหนัก "ธุ่ก")
   // ปลุก AudioContext ครั้งแรกที่ผู้ใช้แตะ/คลิก (นโยบาย autoplay ของเบราว์เซอร์)
   ['pointerdown','touchstart','keydown'].forEach(ev => window.addEventListener(ev, () => _audioCtx(), { once: true, passive: true }));
-  let _pShotAng = 0, _pShotUntil = 0; // ฮีโร่: ทิศ+เวลาของนัดล่าสุด → หันหน้าให้ตรงกับวิถีมีดสั้นที่ยิงจริง
+  let _pShotAng = 0, _pShotUntil = 0, _pShotMid = null; // ฮีโร่: ทิศ+เวลาของนัดล่าสุด → หันหน้าให้ตรงกับวิถีมีดสั้นที่ยิงจริง
   let _heroElixirUntil = 0, _heroRollUntil = 0, _heroDeadAt = 0; // นักธนู: ดื่มยาถึงเวลานี้ / กลิ้งหลบถึงเวลานี้ / เวลาเริ่มท่าตาย (เล่นครั้งเดียวค้างเฟรมสุดท้าย)
   let _idleRepick = 0, _idleLookAng = 0; // ฮีโร่ยืนเฉย: เหลือบมองรอบตัวเป็นพักๆ (แค่หันหน้า — เลิกก้าวย่ำแล้ว ท่า idle ขยับเองอยู่)
   let _dogX = null, _dogY = null, _dogFace = 1; // หมาวิ่งตาม (client-side · เพื่อนๆ ไม่สู้)
@@ -115,14 +118,14 @@ const xhrpg = (() => {
   const SPR_GREEN = Array.from({length:10},(_,i)=>'greenery_'+(i+1));
   const SPR_DECOR = Array.from({length:16},(_,i)=>'decor_'+(i+1));
   // มอน animate — map ตามเลเวล · สัตว์ฟาร์ม Lv.1-9 (ชีท 6×8) · สไลม์ Lv.12-17 (craftpix 8เฟรม×4ทิศ 64px) · พืชนักล่า Lv.18-20 (craftpix 6เฟรม×4ทิศ 64px)
-  const MON_ANIM = {1:'a_chick',2:'a_piglet',3:'a_lamb',4:'a_rooster',5:'a_turkey',6:'a_calf',7:'a_sheep',8:'a_bull',9:'a_bull',12:'slime1',13:'slime2',14:'slime3',15:'slime4',16:'slime5',17:'slime6',18:'plant1',19:'plant2',20:'plant3',21:'golem1',22:'golem2',23:'golem3',24:'mushroom1',25:'mushroom2',26:'mushroom3',27:'rat1',28:'rat2',29:'rat3',30:'lizard1',31:'lizard2',32:'lizard3',33:'gnoll1',34:'gnoll2',35:'gnoll3',36:'slimeboss1',37:'slimeboss2',38:'slimeboss3',40:'vampire1',41:'vampire2',42:'vampire3',45:'skeleton1',46:'skeleton2',47:'skeleton3',50:'demon1',51:'demon2',52:'demon3'};
+  const MON_ANIM = {1:'a_chick',2:'a_piglet',3:'a_lamb',4:'a_rooster',5:'a_turkey',6:'a_calf',7:'a_sheep',8:'a_bull',9:'a_bull',12:'slime1',13:'slime2',14:'slime3',15:'slime4',16:'slime5',17:'slime6',18:'plant1',19:'plant2',20:'plant3',21:'golem1',22:'golem2',23:'golem3',24:'mushroom1',25:'mushroom2',26:'mushroom3',27:'rat1',28:'rat2',29:'rat3',30:'lizard1',31:'lizard2',32:'lizard3',33:'gnoll1',34:'gnoll2',35:'gnoll3',36:'slimeboss1',37:'slimeboss2',38:'slimeboss3',40:'vampire1',41:'vampire2',42:'vampire3',45:'skeleton1',46:'skeleton2',47:'skeleton3',50:'demon1',51:'demon2',52:'demon3',53:'zombie1',54:'zombie2',55:'zombie3',56:'sb_jelly1',57:'sb_jelly2',58:'sb_jelly3',59:'sb_crab1',60:'sb_crab2',61:'sb_urchin_m',62:'sb_fish1',63:'sb_fish2',64:'sb_fish3',67:'sb_shark1',68:'sb_shark2',69:'sb_fish4',70:'drg1',71:'drg2',72:'drg3'}; // 🐉 Lv70-72 มังกรป่ามังกรโบราณ (MONSTER15)
   // grid ต่อชีท (คอลัมน์=เฟรมเดิน · แถว=ทิศ) — สัตว์ฟาร์ม 6×8 (ใช้แถว 0-2) · สไลม์ 8×4 (walk 8 เฟรม × 4 ทิศ)
-  const MON_GRID = { slime1:{cols:8,rows:4}, slime2:{cols:8,rows:4}, slime3:{cols:8,rows:4}, slime4:{cols:8,rows:4}, slime5:{cols:8,rows:4}, slime6:{cols:8,rows:4}, plant1:{cols:6,rows:4}, plant2:{cols:6,rows:4}, plant3:{cols:6,rows:4}, golem1:{cols:8,rows:4}, golem2:{cols:8,rows:4}, golem3:{cols:8,rows:4}, mushroom1:{cols:6,rows:4}, mushroom2:{cols:6,rows:4}, mushroom3:{cols:6,rows:4}, rat1:{cols:6,rows:4}, rat2:{cols:6,rows:4}, rat3:{cols:6,rows:4}, lizard1:{cols:6,rows:4}, lizard2:{cols:6,rows:4}, lizard3:{cols:6,rows:4}, gnoll1:{cols:6,rows:4}, gnoll2:{cols:6,rows:4}, gnoll3:{cols:6,rows:4}, slimeboss1:{cols:8,rows:4}, slimeboss2:{cols:8,rows:4}, slimeboss3:{cols:8,rows:4}, vampire1:{cols:6,rows:4}, vampire2:{cols:6,rows:4}, vampire3:{cols:6,rows:4}, skeleton1:{cols:6,rows:4}, skeleton2:{cols:6,rows:4}, skeleton3:{cols:6,rows:4}, demon1:{cols:6,rows:4}, demon2:{cols:6,rows:4}, demon3:{cols:6,rows:4} };
+  const MON_GRID = { slime1:{cols:8,rows:4}, slime2:{cols:8,rows:4}, slime3:{cols:8,rows:4}, slime4:{cols:8,rows:4}, slime5:{cols:8,rows:4}, slime6:{cols:8,rows:4}, plant1:{cols:6,rows:4}, plant2:{cols:6,rows:4}, plant3:{cols:6,rows:4}, golem1:{cols:8,rows:4}, golem2:{cols:8,rows:4}, golem3:{cols:8,rows:4}, mushroom1:{cols:6,rows:4}, mushroom2:{cols:6,rows:4}, mushroom3:{cols:6,rows:4}, rat1:{cols:6,rows:4}, rat2:{cols:6,rows:4}, rat3:{cols:6,rows:4}, lizard1:{cols:6,rows:4}, lizard2:{cols:6,rows:4}, lizard3:{cols:6,rows:4}, gnoll1:{cols:6,rows:4}, gnoll2:{cols:6,rows:4}, gnoll3:{cols:6,rows:4}, slimeboss1:{cols:8,rows:4}, slimeboss2:{cols:8,rows:4}, slimeboss3:{cols:8,rows:4}, vampire1:{cols:6,rows:4}, vampire2:{cols:6,rows:4}, vampire3:{cols:6,rows:4}, skeleton1:{cols:6,rows:4}, skeleton2:{cols:6,rows:4}, skeleton3:{cols:6,rows:4}, demon1:{cols:6,rows:4}, demon2:{cols:6,rows:4}, demon3:{cols:6,rows:4}, zombie1:{cols:6,rows:4}, zombie2:{cols:6,rows:4}, zombie3:{cols:6,rows:4}, sb_jelly1:{cols:10,rows:4}, sb_jelly2:{cols:10,rows:4}, sb_jelly3:{cols:10,rows:4}, sb_crab1:{cols:10,rows:4}, sb_crab2:{cols:10,rows:4}, sb_urchin_m:{cols:10,rows:4}, sb_fish1:{cols:10,rows:4}, sb_fish2:{cols:10,rows:4}, sb_fish3:{cols:10,rows:4}, sb_shark1:{cols:10,rows:4}, sb_shark2:{cols:10,rows:4}, sb_fish4:{cols:10,rows:4}, drg1:{cols:10,rows:4}, drg2:{cols:10,rows:4}, drg3:{cols:10,rows:4} };
   const _MON_GRID_DEF = { cols:6, rows:8 };
   // ขนาดต่อชนิด (คูณกับขนาดฐาน) — สไลม์เหนือ Lv.12-14 (ใหญ่พิเศษ) · สไลม์ตะวันตก Lv.15-17 (ปรับได้)
   // zone 1 (Lv.4-6) ×1.30 · zone อื่นทั้งหมด ×1.20 (ปรับใหญ่ขึ้นทั้งกระดาน 2026-07-05)
   const MAP_MON_SIZE_MUL = {}; // ตัวคูณขนาดมอนตามแผนที่ — ปิดไว้ (ทุกแผนที่ ×1) · ใส่ {2:1.3} = ทะเลทรายใหญ่ 30% ฯลฯ
-  const MON_SIZE = new Proxy({1:1, 2:1, 3:1, 4:1, 5:1, 6:1, 7:1, 8:1, 9:1, 21:5, 22:5, 23:5, 27:4, 28:4, 29:4}, { get: (t, k) => (k in t ? t[k] : 3) }); // default ×3 · ทุ่งกลาง Lv1-9 = ×1 · Lv21-23 = ×5 · Lv27-29 = ×4 · ใส่ MON_SIZE[lv]=n ปรับเพิ่ม
+  const MON_SIZE = new Proxy({1:1, 2:1, 3:1, 4:1, 5:1, 6:1, 7:1, 8:1, 9:1, 21:5, 22:5, 23:5, 27:4, 28:4, 29:4, 56:2.6, 57:2.6, 58:2.8, 61:2.7, 67:4.2, 68:4.2, 69:4.8, 70:3.4, 71:3.6, 72:3.8}, { get: (t, k) => (k in t ? t[k] : 3) }); // 🐉 Lv70-72 มังกร (ชีทท่าบิน Flight ตัวเต็มเฟรม — size ลดชดเชย · เดิม 5.0-5.4 คู่ชีท Walk ตัวเล็ก) // default ×3 · ทุ่งกลาง Lv1-9 = ×1 · Lv21-23 = ×5 · Lv27-29 = ×4 · ใต้ทะเล: แมงกะพรุน/เม่น เล็กลง · ฉลาม/เจ้าสมุทร ใหญ่ขึ้น · ใส่ MON_SIZE[lv]=n ปรับเพิ่ม
   //   ค่าเดิม (เผื่อปรับกลับรายเลเวล): {1:0.96,2:1.08,3:1.08,4:1.3,5:1.5,6:1.63,7:1.38,8:1.68,9:1.74, 12:3.52,13:3.86,14:4.92, 15:3.0,16:3.36,17:4.2,18:3.24,19:3.6,20:4.2,21:4.6,22:5.1,23:5.6, 24:4.9,25:5.2,26:5.5,27:5.0,28:5.3,29:5.6,30:5.0,31:5.3,32:5.6,33:5.2,34:5.5,35:5.8, 36:10.0,37:10.6,38:11.2}
   function _sprForEmoji(e) {
     if ('🌲🌳🌴🎋🌵'.indexOf(e) >= 0) return { arr: SPR_TREES, hf: 3.2 };
@@ -131,37 +134,99 @@ const xhrpg = (() => {
     return { arr: SPR_DECOR, hf: 2.2 }; // ซาก/ตกแต่ง
   }
   // ── สกินไททัน (ร้าน Premium) — key/ชื่อ/ราคา sync กับ xhrpg_premium.php ──
-  const SKIN_DEFS = [ // ชื่อ/ราคา sync กับ PHP SKIN_DEFS · ทุกตัวสุ่ม stat +1~10 ตอนซื้อ (default = Bob ฟรี)
+  const SKIN_DEFS = [ // ชื่อ/ราคา sync กับ PHP SKIN_DEFS · ผู้เล่นเลือก STAT เองได้ค่าเต็มเพดาน ไม่ได้สุ่ม (default = Bob ฟรี)
     { key:'char2',     name:'Rex',    price:249 }, // ไททันหน้ากาก ปืนใหญ่บนบ่า
     { key:'char3',     name:'Tank',   price:279 }, // ไททันบอลกลมยักษ์
     { key:'marty',     name:'มาตี้',    price:299 }, // ROBOT01 char01 — ม่วงถือประแจ
     { key:'jasmatha',  name:'จัสมาท่า', price:329 }, // ROBOT01 char03 — ส้มแขนใบเลื่อย
     { key:'ameoai',    name:'อามเมออาย', price:349 }, // ROBOT01 char04 — ส้มแขนคีบ
     { key:'montana',   name:'มอนทาน่า',  price:399 }, // ROBOT01 char05 — ม่วงคลุมฮู้ดส้ม
-    { key:'destroyer', name:'Zero',   price:189, disabled:1 }, // android เพชฌฆาตเทา — ปิดขาย (เจ้าของเดิมยังใช้/รีโรลได้)
-    { key:'infantry',  name:'Sarge',  price:189, disabled:1 }, // android ทหารหัวเหลือง — ปิดขาย
-    { key:'mecha1',    name:'Titan',  price:199, disabled:1 }, // เมคาน้ำเงินปืนกล — ปิดขาย
-    { key:'mecha2',    name:'Fang',   price:199, disabled:1 }, // เมคาแดงหนามแหลม — ปิดขาย
-    { key:'mecha3',    name:'Hunter', price:199, disabled:1 }, // เมคาเขียวพราน — ปิดขาย
-    { key:'swordsman', name:'Blade',  price:209, disabled:1 }, // นักดาบพลังฟ้า (แรร์) — ปิดขาย
+    { key:'destroyer', name:'Zero',   price:189 }, // android เพชฌฆาตเทา — ปิดขาย (เจ้าของเดิมยังใช้/รีโรลได้)
+    { key:'infantry',  name:'Sarge',  price:189 }, // android ทหารหัวเหลือง — ปิดขาย
+    { key:'mecha1',    name:'Titan',  price:199 }, // เมคาน้ำเงินปืนกล — ปิดขาย
+    { key:'mecha2',    name:'Fang',   price:199 }, // เมคาแดงหนามแหลม — ปิดขาย
+    { key:'mecha3',    name:'Hunter', price:199 }, // เมคาเขียวพราน — ปิดขาย
+    { key:'swordsman', name:'Blade',  price:209 }, // นักดาบพลังฟ้า (แรร์) — ปิดขาย
     { key:'kowel',     name:'โคเวล',    price:499 }, // ROBOT01 char02 — หมวกเห็ดชูหมัด
     { key:'eyeflyer',  name:'eyeflyer', price:599 },  // ROBOT02 char4 — ลูกตาบินได้
     { key:'turrus',    name:'Turrus',   price:999 },  // ROBOT02 char2 — เต่าถือค้อน
     { key:'dinosung',  name:'dinosung', price:1999 }, // ROBOT02 char3 — ไดโนหมวกร่ม
     { key:'tarex',     name:'Tarex',    price:3499 }, // ROBOT02 char1 — ไดโนถือปืน (แพงสุด)
   ];
+  // 🗂️ ร้านสกิน 2 ชั้น: หน้าแรกโชว์ "กลุ่ม" → กดเข้าไปถึงเห็นทุกตัว (docs/hero-skin-group-ui.md · เจ้าของสั่ง 2026-07-28)
+  //    ชื่อกลุ่ม **ไม่แปล** — เป็นชื่อซีรีส์ (แนวเดียวกับ Premium Orion Gun) ทุกภาษาเห็นเหมือนกัน
+  //    เพิ่มกลุ่มใหม่ = ต่อท้าย array นี้ + ใส่ field `g` ให้สกินใหม่ · ของเดิมไม่มี `g` ตกเป็นกลุ่มแรกอัตโนมัติ
+  const SKIN_GROUP_DEFS = {
+    robot: [{ key: 'titan', name: 'TITAN' }],
+    hero:  [{ key: 'sword', name: 'SWORD MAN' }, { key: 'shinobi', name: 'SHINOBI' }],
+    // ⚠️ คีย์ 'buddy' คงเดิม เปลี่ยนแค่ชื่อที่โชว์ (BUDDY → ANIMAL) — คู่หูเดิม 14 ตัวไม่มี field g
+    //    ระบบโยนลงกลุ่มแรกอัตโนมัติ ดังนั้น 'buddy' ต้องอยู่ตัวแรกเสมอ ห้ามแทรก MONSTER ไว้หน้า
+    pet:   [{ key: 'buddy', name: 'ANIMAL' }, { key: 'monster', name: 'MONSTER' }],
+  };
+  let _skinGrp = { robot: null, hero: null, pet: null };   // null = อยู่หน้ารายการกลุ่ม
+  function skinGrpOpen(kind, g) { if (kind in _skinGrp) { _skinGrp[kind] = g;    renderPremium(); } }
+  function skinGrpBack(kind)    { if (kind in _skinGrp) { _skinGrp[kind] = null; renderPremium(); } }
+  const _skinGrpReset = () => { _skinGrp = { robot: null, hero: null, pet: null }; }; // เรียกตอนปิดแผง — ไม่งั้นเปิดมาครั้งหน้าค้างในกลุ่มเดิม ผู้เล่นนึกว่าสกินหาย
   const SKIN_STAT_LABEL = { str:'STR', agi:'AGI', vit:'VIT', dex:'DEX', intel:'INT', luk:'LUK' };
   const SKIN_REROLL_PRICE = 19; // sync กับ PHP SKIN_REROLL_PRICE
   const _skinMaxStat = (price) => 10 + Math.floor((price || 0) / 1000) * 5; // STAT MAX ตามราคา (เริ่ม 10 · +5 ทุก 1000P) sync PHP xhrpg_skin_max_stat
-  // roll ของสกิน (จาก player.robot_skin_stats) → {label:'DEX', v:7, b:9} หรือ null · รองรับ format เก่า (string = +5)
-  function _skinRollOf(key) {
-    let m = player?.robot_skin_stats; if (typeof m === 'string') { try { m = JSON.parse(m); } catch(e) { m = null; } }
-    const e = m && m[key];
-    if (!e) return null;
-    if (typeof e === 'string') return { label: SKIN_STAT_LABEL[e] || e, v: 5, b: 5 };
-    if (e.s && e.v) return { label: SKIN_STAT_LABEL[e.s] || e.s, v: +e.v, b: +(e.b || e.v) };
-    return null;
+  // ══ 🎯 STAT สกิน = ค่ากลางต่อผู้เล่น ไม่ผูกกับตัวสกิน (docs/skin-stat-decouple.md · เจ้าของเคาะ 2026-07-28) ══
+  //    ⚠️ มิเรอร์ xhrpg_skin_stat_pick() ฝั่ง server เป๊ะๆ — แก้ต้องแก้ 2 ที่
+  //    อ่านคีย์สงวน `_g` · ผู้เล่นเดิมที่ยังไม่มี → หยิบ roll ที่ v สูงสุดจากคีย์รายสกินเดิม (ไม่มีใครเสียของ)
+  function _rollGlobal(raw) {
+    let m = raw; if (typeof m === 'string') { try { m = JSON.parse(m); } catch (e) { m = null; } }
+    if (!m || typeof m !== 'object') return null;
+    let e = m._g;
+    if (!e || !e.s || !e.v) {
+      e = null;
+      for (const k in m) {
+        if (k === '_g') continue;
+        let v = m[k];
+        if (typeof v === 'string') v = { s: v, v: 5 };   // legacy: stat เดี่ยว = +5
+        if (!v || !v.s || !v.v) continue;
+        if (!e || +v.v > +e.v) e = v;
+      }
+    }
+    //  s = คีย์ stat ดิบ (str/agi/…) — แผง STAT ต้องใช้ตัวนี้บวกเลข ห้ามใช้ label ที่แปลแล้ว
+    return (e && e.s && e.v) ? { s: String(e.s), label: SKIN_STAT_LABEL[e.s] || e.s, v: +e.v, b: +(e.b || e.v) } : null;
   }
+  // ══ 🎯 SKIN LV — เพดาน STAT มาจาก "ยอดสะสม P ของสกินทุกใบในหมวดนั้น" (docs/skin-lv-design.md) ══
+  //    ⚠️ มิเรอร์ XHRPG_SKIN_LV_TABLE ฝั่ง server เป๊ะ — แก้ที่นี่ต้องแก้ xhrpg_config.php ด้วย
+  //    [เลเวล, EXP ที่ต้องถึง (P สะสม), STAT ที่ได้]
+  const SKIN_LV_TABLE = [
+    [1, 0, 0], [2, 100, 10], [3, 1000, 15], [4, 2000, 20], [5, 3000, 25],
+    [6, 5000, 30], [7, 10000, 35], [8, 20000, 40], [9, 40000, 45], [10, 80000, 50],
+  ];
+  const _skinLv        = (xp) => { let l = 1; SKIN_LV_TABLE.forEach(r => { if (xp >= r[1]) l = r[0]; }); return l; };
+  const _skinStatForXp = (xp) => { let s = 0; SKIN_LV_TABLE.forEach(r => { if (xp >= r[1]) s = r[2]; }); return s; };
+  const _skinNextRow   = (xp) => SKIN_LV_TABLE.find(r => xp < r[1]) || null;   // null = เต็มเพดาน
+  // 🧮 EXP ของหมวด = max(xp ที่ server เก็บไว้, ผลรวมราคาสกินที่ถืออยู่) — มิเรอร์ xhrpg_skin_xp()
+  function _skinXp(ownedRaw, defs, statsRaw) {
+    let own = ownedRaw;
+    if (typeof own === 'string') { try { own = JSON.parse(own); } catch (e) { own = []; } }
+    if (!Array.isArray(own)) own = [];
+    let sum = 0;
+    own.forEach(k => { const d = defs.find(x => x.key === k); if (d) sum += d.price | 0; });
+    let m = statsRaw; if (typeof m === 'string') { try { m = JSON.parse(m); } catch (e) { m = null; } }
+    const g = (m && typeof m === 'object') ? m._g : null;
+    return Math.max(sum, g ? (+(g.xp || 0)) : 0);
+  }
+  // 🔒 เพดานที่ใช้จริง = max(STAT ตามเลเวล, ค่าสูงสุดที่เคยเลือก `b`) — ค่าห้ามต่ำกว่าที่เคยมี
+  //    ⚠️ มิเรอร์ xhrpg_skin_cap_of() ฝั่ง server เป๊ะ
+  function _skinCap(ownedRaw, defs, statsRaw) {
+    let m = statsRaw; if (typeof m === 'string') { try { m = JSON.parse(m); } catch (e) { m = null; } }
+    const g = (m && typeof m === 'object') ? m._g : null;
+    const best = g ? Math.max(+(g.b || 0), +(g.v || 0)) : 0;
+    return Math.max(_skinStatForXp(_skinXp(ownedRaw, defs, statsRaw)), best);
+  }
+  // key รับไว้เพื่อความเข้ากันได้กับจุดเรียกเดิม แต่ไม่ใช้แล้ว (ค่าเป็นของกลาง)
+  // 🆓 ราคาเลือก STAT — ครั้งแรกในหมวดนั้น (ยังไม่มีคีย์ `_g`) ฟรี ⚠️ มิเรอร์ xhrpg_skin_pick_price() ฝั่ง server
+  const _pickPriceOf = (raw) => {
+    let m = raw; if (typeof m === 'string') { try { m = JSON.parse(m); } catch (e) { m = null; } }
+    const g = (m && typeof m === 'object') ? m._g : null;
+    return (g && g.s && g.v) ? SKIN_REROLL_PRICE : 0;
+  };
+  function _skinRollOf(key) { return _rollGlobal(player?.robot_skin_stats); }
   // ── สัตว์เลี้ยง (สกินหมาที่วิ่งตาม) — key/ชื่อ/ราคา sync กับ XHRPG_PET_SKINS (default ส้มจี๊ด ฟรี) ──
   const PET_SKIN_DEFS = [
     { key:'dog_black',   name:'ดำ',     price:149 },
@@ -178,8 +243,35 @@ const xhrpg = (() => {
     { key:'wolf_black',    name:'แบล็ค',  price:699 },
     { key:'hamster_cream', name:'นุ่น',   price:999 },
     { key:'linhui',        name:'หลินฮุ่ย', price:3499 }, // PET03 แพนด้า Premium
+    // ── 👾 กลุ่ม MONSTER (zcraftpix PET04-07) — ดู docs/pet-skin-pack2-survey.md ──
+    //    ⚠️ ราคาต้องตรงกับ XHRPG_PET_SKINS ฝั่ง PHP เป๊ะ · เพดาน STAT = 10 + floor(ราคา/1000)×5
+    //    ⚠️ ตัวบิน (bee/bluebird/fmon*) ชีท walk = ชีท idle (แพ็คไม่มีท่าเดิน — Idle คือกระพือปีก)
+    { key:'bee',      g:'monster', name:'บัมเบิ้ล',   price:199  }, // PET07 ผึ้งใส่แว่น
+    { key:'hedgehog', g:'monster', name:'หนามเตย',   price:299  }, // PET05 เม่น
+    { key:'snail',    g:'monster', name:'สลัก',      price:399  }, // PET05 หอยทาก
+    { key:'crab',     g:'monster', name:'ก้ามปู',    price:499  }, // PET07 ปูแดง
+    { key:'bluebird', g:'monster', name:'ฟ้าคราม',   price:699  }, // PET07 นกฟ้า
+    { key:'turtle',   g:'monster', name:'กระดองเขียว', price:899 }, // PET05 เต่า
+    { key:'fmon2',    g:'monster', name:'ขนเขียว',   price:1199 }, // PET04 ก้อนขนเขียว
+    { key:'fmon4',    g:'monster', name:'ขนส้ม',     price:1499 }, // PET04 ก้อนขนส้ม
+    { key:'fmon1',    g:'monster', name:'ปีกม่วง',   price:1899 }, // PET04 ค้างคาวม่วง
+    { key:'fmon3',    g:'monster', name:'ปีกน้ำตาล', price:2299 }, // PET04 ค้างคาวน้ำตาล
+    { key:'mon3',     g:'monster', name:'เขาทอง',    price:2499 }, // PET06 มอนเทาเขาทอง
+    { key:'mon2',     g:'monster', name:'ขนแดง',     price:2999 }, // PET06 มอนขนแดง
+    { key:'mon1',     g:'monster', name:'ฟันเขียว',  price:3499 }, // PET06 มอนฟันเขียว (แพงสุดกลุ่ม)
   ];
-  const _PET_SIZE_MUL = {}; // ตัวคูณขนาดคู่หูพิเศษ — ปิดไว้ (ทุกสกินขนาดปกติ 31.5×scale · เดิม linhui ×2)
+  // 🐾 ตัวคูณขนาดคู่หูรายสกิน (ไม่ใส่ = ×1 · กล่องวาดเท่ากันหมด 31.5×scale)
+  //   ⚠️ ปัญหา: กล่องเฟรมเท่ากัน (48px) แต่ "ตัวสัตว์เต็มเฟรมไม่เท่ากัน" → บางตัวดูใหญ่กว่าเพื่อนมาก
+  //      วัดจริงจากชีท walk เฟรม 0 (ความสูง bbox / 48px): 🐕 dog 56% · 🐈 cat 46% = กลุ่ม ANIMAL เป็นเกณฑ์
+  //      กลุ่ม MONSTER หลายตัวเต็มเฟรม 85-88% → ดูใหญ่กว่าหมาเกือบ 2 เท่า (เจ้าของแจ้ง 2026-07-28 "ใหญ่เกินไปมาก")
+  //   วิธีตั้งค่า: mul ≈ 55 ÷ (% ที่วัดได้) → ทุกตัวสูงใกล้เคียงกลุ่ม ANIMAL · ตัวที่วัดได้ ≤60% ไม่ต้องใส่ (ปกติอยู่แล้ว)
+  //   ถ้าเพิ่มสกินใหม่: วัดชีทก่อน แล้วค่อยเติมบรรทัด — อย่าเดา
+  const _PET_SIZE_MUL = {
+    bee: 0.65, hedgehog: 0.73, bluebird: 0.82,          // 85% · 75% · 67%
+    fmon2: 0.65, fmon4: 0.65,                            // 85% ทั้งคู่ (fmon1 54% · fmon3 56% = ปกติ ไม่ต้องย่อ)
+    mon1: 0.65, mon2: 0.65, mon3: 0.63,                  // 85% · 85% · 88%
+    // ไม่ต้องย่อ: snail 60% · crab 50% · turtle 54% · fmon1 54% · fmon3 56% (พอๆ กับหมา/แมวอยู่แล้ว)
+  };
   // ── สกินฮีโร่ (Swordsman lvl2-9) — key/ชื่อ/ราคา sync กับ HERO_SKIN_DEFS ฝั่ง PHP (default '' = นักรบฝึกหัด ฟรี) · ดู docs/hero-skin-spec.md ──
   const HERO_SKIN_DEFS = [
     { key:'sw2', name:'นักรบพเนจร',     price:149  }, // หนัง+เหล็กบางส่วน
@@ -190,25 +282,36 @@ const xhrpg = (() => {
     { key:'sw7', name:'ผู้กล้า',          price:1499 }, // น้ำเงิน+ทอง trim
     { key:'sw8', name:'ผู้กล้าระดับสูง',  price:2499 }, // เข้มแดงเลือด+ทอง
     { key:'sw9', name:'ผู้กล้าในตำนาน',  price:3499 }, // ดำ-ม่วง+ทอง
+    // ── 🥋 กลุ่ม SHINOBI (zcraftpix HERO04-08) — ดู docs/hero-skin-pack2-catalog.md §9 ──
+    //    ⚠️ ชีทต้นฉบับมี "มุมข้างทิศเดียว" → แถวหน้า/หลังใช้มุมข้างซ้ำ (เจ้าของรับข้อจำกัดนี้แล้ว 2026-07-28)
+    //    ⚠️ ราคาต้องตรงกับ HERO_SKIN_DEFS ฝั่ง PHP เป๊ะ · เพดาน STAT = 10 + floor(ราคา/1000)×5 (ห้ามเกิน 3,499)
+    { key:'hs01', g:'shinobi', name:'นักสู้เพลิง',       price:449  }, // ผมส้มสไปก์ ชุดฝึกฟ้า-ขาว มือเปล่า
+    { key:'hs09', g:'shinobi', name:'นักดวลซากุระ',      price:649  }, // ชมพู-ขาว อาวุธเรียวยาว
+    { key:'hs11', g:'shinobi', name:'โรนินเหล็ก',        price:849  }, // ผมเทาน้ำเงิน กิโมโนเข้ม คาตานะ
+    { key:'hs07', g:'shinobi', name:'ดาบเลือด',          price:949  }, // ผมน้ำตาลหางม้า หนังดำ คาตานะ
+    { key:'hs03', g:'shinobi', name:'นินจาเงา',          price:1199 }, // ชุดนินจาดำล้วน มีดคู่
+    { key:'hs08', g:'shinobi', name:'นักบวชน้ำแข็ง',     price:1399 }, // คลุมขาว-ฟ้าทรงมิโกะ ดาบยาว
+    { key:'hs06', g:'shinobi', name:'อัศวินเขี้ยว',       price:1599 }, // หูสัตว์+หางฟู เครื่องแบบดำ-แดง
+    { key:'hs02', g:'shinobi', name:'ซามูไรพเนจร',       price:1799 }, // ผมดำมัดหางม้า กิโมโนดำ คาตานะ
+    { key:'hs12', g:'shinobi', name:'นักรบดาบคู่',       price:1899 }, // บลอนด์สไปก์ เปลือยท่อนบน ดาบคู่
+    { key:'hs10', g:'shinobi', name:'นักฆ่าคลุมหัว',     price:3299 }, // ฮู้ดดำเต็มตัว มีท่าขว้างในตัว
+    { key:'hs05', g:'shinobi', name:'นักเวทแมวราตรี',    price:3399 }, // หูแมว+หางดำ มีท่าร่ายเวท
+    { key:'hs04', g:'shinobi', name:'จิ้งจอกคลั่ง',       price:3499 }, // หูจิ้งจอก+หางทองพลิ้วใหญ่
   ];
   const TH_STATES = ['idle','walk','run','attack','walk_atk','run_atk','hurt','death']; // 8 ท่าของชีท thrower (th_* และ hs_{skin}_*)
-  function _heroRollOf(key) {
-    let m = player?.hero_skin_stats; if (typeof m === 'string') { try { m = JSON.parse(m); } catch(e) { m = null; } }
-    const e = m && m[key];
-    if (e && e.s && e.v) return { label: SKIN_STAT_LABEL[e.s] || e.s, v: +e.v, b: +(e.b || e.v) };
-    return null;
-  }
-  function _petRollOf(key) {
-    let m = player?.pet_skin_stats; if (typeof m === 'string') { try { m = JSON.parse(m); } catch(e) { m = null; } }
-    const e = m && m[key];
-    if (e && e.s && e.v) return { label: SKIN_STAT_LABEL[e.s] || e.s, v: +e.v, b: +(e.b || e.v) };
-    return null;
-  }
+  function _heroRollOf(key) { return _rollGlobal(player?.hero_skin_stats); }
+  function _petRollOf(key) { return _rollGlobal(player?.pet_skin_stats); }
   // ระดับความหายากของค่า 1-10 → สี/ป้าย (1-3 เทา · 4-6 ฟ้า · 7-8 ม่วง · 9-10 ทอง)
+  //    ⚠️ ค่าที่เข้ามาตอนนี้เป็น "เพดานตามราคาสกิน" (10/15/20/25) ไม่ใช่ผลสุ่ม 1-10 แบบเดิมอีกแล้ว
+  //       เกณฑ์เดิม (>=9 = ทอง) จึงเข้าเงื่อนไขทุกครั้ง ทำให้ทุกคนเห็น "ทอง" หมด = ป้ายไม่มีความหมาย
+  //       → ไล่ตามขั้นเพดานจริง: 25 ทอง · 20 ม่วง · 15 ฟ้า · 10 เทา
+  // 🎨 สีป้าย STAT ตามค่า — ขยายรับถึง +50 แล้ว (SKIN LV 10) · เดิมตันที่ 25 ทำให้ 30-50 สีเดียวกันหมด
   function _skinTier(v) {
-    if (v >= 9) return { c:'#b45309', bg:'#fef3c7', glow: v >= 10 };
-    if (v >= 7) return { c:'#7c3aed', bg:'#f3e8ff', glow: false };
-    if (v >= 4) return { c:'#0284c7', bg:'#e0f2fe', glow: false };
+    if (v >= 40) return { c:'#be123c', bg:'#ffe4e6', glow: true };   // LV8+ แดงเข้ม
+    if (v >= 30) return { c:'#b45309', bg:'#fef3c7', glow: true };   // LV6-7 ทอง
+    if (v >= 25) return { c:'#c2410c', bg:'#ffedd5', glow: true };   // LV5 ส้ม
+    if (v >= 20) return { c:'#7c3aed', bg:'#f3e8ff', glow: false };
+    if (v >= 15) return { c:'#0284c7', bg:'#e0f2fe', glow: false };
     return { c:'#6b7280', bg:'#f1f5f9', glow: false };
   }
   // ── ICO: แผนที่ emoji → ไอคอน pixel-art 16px (assets/icons/gui/) — เปลี่ยนเฉพาะ "การแสดงผล" เท่านั้น ──
@@ -254,7 +357,7 @@ const xhrpg = (() => {
   function _icoImgFile(f) { const im = f && SUM['ico_' + f]; return (im && im.complete && im.naturalWidth) ? im : null; }
   function _icoImg(emoji) { return _icoImgFile(ICO[emoji]); } // สำหรับ canvas (ground loot)
   // <img> inline สำหรับ HTML string — pixelated + ขยับลง 2px ให้เรียงกับข้อความ (ไม่มี allocation ค้าง — เป็น string ล้วน)
-  function _icoTag(f, emoji, px) { return `<img src="${assetsBaseUrl}assets/icons/gui/${f}" alt="${emoji}" style="width:${px}px;height:${px}px;image-rendering:pixelated;vertical-align:-2px">`; }
+  function _icoTag(f, emoji, px) { return `<img src="${baseUrl}assets/icons/gui/${f}" alt="${emoji}" style="width:${px}px;height:${px}px;image-rendering:pixelated;vertical-align:-2px">`; }
   // ── ทรัพยากร: inline-SVG icon (รูปเดียวกับของตกพื้น) — เรนเดอร์ชัวร์ทุก WebView แทน emoji 🪵🪨⚙️🟫 ──
   const _RES_EMOJI = { '🪵':'wood', '🪨':'stone', '⚙️':'iron', '🟫':'copper' };
   function _resSvg(kind, px) {
@@ -273,7 +376,7 @@ const xhrpg = (() => {
     // แทนที่เฉพาะใน "text" (นอก tag) — SVG มี " และ <> ถ้าไปแทรกใน attribute เช่น title="...⚙️..." จะทำ HTML พัง
     return html.replace(/(<[^>]*>)|([^<]+)/g, (m, tag, text) => tag ? tag : text.replace(/🪵|🪨|⚙️|🟫/g, e => _resSvg(_RES_EMOJI[e])));
   }
-  function _icoHtml(emoji, px)   { if (_RES_EMOJI[emoji]) return _resSvg(_RES_EMOJI[emoji], px); const f = ICO[emoji]; return _icoImgFile(f) ? _icoTag(f, emoji, px || 14) : emoji; }
+  function _icoHtml(emoji, px)   { if (_RES_EMOJI[emoji]) return _resSvg(_RES_EMOJI[emoji], px); const f = ICO[emoji]; return _icoImgFile(f) ? _icoTag(f, emoji, px || 14) : _escHtml(emoji); } // 🔒 fallback = สตริงดิบเข้า innerHTML — item_icon ของตลาดเคยรับจาก client (แถวเก่าที่ค้างอยู่)
   function _icoPotionHtml(t, px) { const f = ICO_POTION_TIER[t-1]; return _icoImgFile(f) ? _icoTag(f, POTION_TIER_ICONS[t-1], px || 14) : POTION_TIER_ICONS[t-1]; }
   // เพชร inline-SVG (ฟ้า/แดง/เขียว) — วาดเป็นเจียระไน 4 เหลี่ยม · [dark, main, light, lightest]
   const _GEM_SHADE = {
@@ -290,33 +393,33 @@ const xhrpg = (() => {
     if (_sumLoading) return; _sumLoading = true;
     const list = [];
     ['bg','river', ...SPR_TREES, ...SPR_STONE, ...SPR_GREEN, ...SPR_DECOR]
-      .forEach(n => list.push([n, assetsBaseUrl + 'assets/tiles/summer/' + n + '.png']));
-    for (let lv = 1; lv <= 9; lv++) list.push(['mon' + lv, assetsBaseUrl + 'assets/monsters/mon' + lv + '.png']); // มอน pixel-art (fallback)
-    ['a_chick','a_piglet','a_lamb','a_rooster','a_turkey','a_calf','a_sheep','a_bull','slime1','slime2','slime3','slime4','slime5','slime6','plant1','plant2','plant3','golem1','golem2','golem3','mushroom1','mushroom2','mushroom3','rat1','rat2','rat3','lizard1','lizard2','lizard3','gnoll1','gnoll2','gnoll3','slimeboss1','slimeboss2','slimeboss3','vampire1','vampire2','vampire3','skeleton1','skeleton2','skeleton3','demon1','demon2','demon3']
-      .forEach(n => list.push([n, assetsBaseUrl + 'assets/monsters/' + n + '.png'])); // มอน animate (ฟาร์ม + สไลม์ + พืช + golem + เห็ด/หนู/กิ้งก่าทะเลทราย + แวมไพร์/โครงกระดูก/ปีศาจหิมะ)
-    ['hero_pistol','hero_rifle','hero_mg','muzzle_pistol','muzzle_rifle','robot_idle','robot_walk','robot_attack','turret','cat_walk','cat_idle','dog_walk','dog_idle','priest_idle','priest_walk','priest_special','archer_idle','archer_walk','archer_attack','archer_attack_front','archer_attack_back']
-      .forEach(n => list.push([n, assetsBaseUrl + 'assets/hero/' + n + '.png'])); // ฮีโร่ + ไททัน + ป้อม + แมว + หมา + ⛪นักบวช
+      .forEach(n => list.push([n, baseUrl + 'assets/tiles/summer/' + n + '.png']));
+    for (let lv = 1; lv <= 9; lv++) list.push(['mon' + lv, baseUrl + 'assets/monsters/mon' + lv + '.png']); // มอน pixel-art (fallback)
+    ['a_chick','a_piglet','a_lamb','a_rooster','a_turkey','a_calf','a_sheep','a_bull','slime1','slime2','slime3','slime4','slime5','slime6','plant1','plant2','plant3','golem1','golem2','golem3','mushroom1','mushroom2','mushroom3','rat1','rat2','rat3','lizard1','lizard2','lizard3','gnoll1','gnoll2','gnoll3','slimeboss1','slimeboss2','slimeboss3','vampire1','vampire2','vampire3','skeleton1','skeleton2','skeleton3','demon1','demon2','demon3','zombie1','zombie2','zombie3','sb_jelly1','sb_jelly2','sb_jelly3','sb_crab1','sb_crab2','sb_urchin_m','sb_fish1','sb_fish2','sb_fish3','sb_shark1','sb_shark2','sb_fish4','drg1','drg2','drg3'] // ⚠️ sb_urchin_m มี _m — กันชนกับ decor 'sb_urchin' ใน tiles/seabed (SUM key ทับกัน → มอนภาพแตก)
+      .forEach(n => list.push([n, baseUrl + 'assets/monsters/' + n + '.png'])); // มอน animate (ฟาร์ม + สไลม์ + พืช + golem + เห็ด/หนู/กิ้งก่าทะเลทราย + แวมไพร์/โครงกระดูก/ปีศาจหิมะ + ปลา/ปู/แมงกะพรุน/ฉลามใต้ทะเลลึก map6)
+    ['hero_pistol','hero_rifle','hero_mg','muzzle_pistol','muzzle_rifle','robot_idle','robot_walk','robot_attack','turret','cat_walk','cat_idle','dog_walk','dog_idle','priest_idle','priest_walk','priest_special','archer_idle','archer_walk','archer_attack','archer_attack_front','archer_attack_back','knight_idle','knight_walk','knight_attack','anubis_idle','anubis_walk','anubis_attack']
+      .forEach(n => list.push([n, baseUrl + 'assets/hero/' + n + '.png'])); // ฮีโร่ + ไททัน + ป้อม + แมว + หมา + ⛪นักบวช
     ['explode1','explode2','explode3','explode4','prop_money','prop_hp','prop_ammo','prop_armor']
-      .forEach(n => list.push([n, assetsBaseUrl + 'assets/fx/' + n + '.png'])); // effect ระเบิด + ของดรอป
+      .forEach(n => list.push([n, baseUrl + 'assets/fx/' + n + '.png'])); // effect ระเบิด + ของดรอป
     ['hero2_gun_idle','hero2_gun_walk','hero2_rifle_idle','hero2_rifle_walk','hero2_knife_idle','hero2_knife_walk','hero2_knife_atk']
-      .forEach(n => list.push([n, assetsBaseUrl + 'assets/hero/' + n + '.png'])); // ฮีโร่ TDS อนิเมชัน (ปืน/ไรเฟิล/มีด) — เก็บไว้เป็น fallback เงียบๆ ของชุดนักธนู
+      .forEach(n => list.push([n, baseUrl + 'assets/hero/' + n + '.png'])); // ฮีโร่ TDS อนิเมชัน (ปืน/ไรเฟิล/มีด) — เก็บไว้เป็น fallback เงียบๆ ของชุดนักธนู
     // นักธนู (archer side-view · หันขวา default · เฟรมจัตุรัส 128px — จำนวนเฟรม = กว้าง÷สูง) + มีดสั้น + เอฟเฟกต์ธนู
     [['arc_idle','a_idle'],['arc_walk','a_walk'],['arc_run','a_run'],['arc_shot1','a_shot1'],['arc_shot2','a_shot2'],
      ['arc_melee','a_melee'],['arc_hurt','a_hurt'],['arc_dead','a_dead'],['arc_roll','a_roll'],['arc_elixir','a_elixir'],
      ['arc_arrow','a_arrow'],['fx_arrow_fire','fx_arrow_fire'],['fx_arrow_magic','fx_arrow_magic'],['fx_arrow_poison','fx_arrow_poison']]
-      .forEach(([k, f]) => list.push([k, assetsBaseUrl + 'assets/hero/archer/' + f + '.png']));
+      .forEach(([k, f]) => list.push([k, baseUrl + 'assets/hero/archer/' + f + '.png']));
     // นักขว้างมีด (thrower 4 ทิศ · เฟรมจัตุรัส 64px · 4 แถว: 0=หน้า 1=ซ้าย 2=ขวา 3=หลัง) + มีด 2 ขนาด — ชุดหลักแทนนักธนู (arc_* ด้านบนคงไว้เป็น fallback) · โหลดพลาดไม่เป็นไร (draw site fallback นักธนูเอง)
     ['th_idle','th_walk','th_run','th_attack','th_walk_atk','th_run_atk','th_hurt','th_death','fx_knife_s','fx_knife_b']
-      .forEach(n => list.push([n, assetsBaseUrl + 'assets/hero/thrower/' + n + '.png']));
+      .forEach(n => list.push([n, baseUrl + 'assets/hero/thrower/' + n + '.png']));
     // สกินฮีโร่ (Swordsman lvl2-9 · layout เดียวกับ th_* ทุกประการ) — 8 ชีท/สกิน · โหลดพลาด → fallback th_* default (ดู docs/hero-skin-spec.md)
     HERO_SKIN_DEFS.forEach(hk => TH_STATES
-      .forEach(st => list.push(['hs_' + hk.key + '_' + st, assetsBaseUrl + 'assets/hero/thrower/skins/' + hk.key + '_' + st + '.png'])));
+      .forEach(st => list.push(['hs_' + hk.key + '_' + st, baseUrl + 'assets/hero/thrower/skins/' + hk.key + '_' + st + '.png'])));
     // สกินไททัน — 3 sheet (idle/walk/attack) + 1 prev ต่อสกิน · โหลดพลาดไม่เป็นไร (onerror นับถอยเหมือนกัน → render fallback ไททัน default)
     SKIN_DEFS.forEach(sk => ['idle','walk','attack','prev']
-      .forEach(kind => list.push(['skin_' + sk.key + '_' + kind, assetsBaseUrl + 'assets/hero/skins/robot_' + sk.key + '_' + kind + '.png'])));
+      .forEach(kind => list.push(['skin_' + sk.key + '_' + kind, baseUrl + 'assets/hero/skins/robot_' + sk.key + '_' + kind + '.png'])));
     // สัตว์เลี้ยง (สกินหมา) — walk/idle ต่อสกิน · โหลดพลาดไม่เป็นไร (drawDog fallback เป็นหมา default)
     PET_SKIN_DEFS.forEach(pk => ['walk','idle']
-      .forEach(kind => list.push(['pet_' + pk.key + '_' + kind, assetsBaseUrl + 'assets/hero/pets/pet_' + pk.key + '_' + kind + '.png'])));
+      .forEach(kind => list.push(['pet_' + pk.key + '_' + kind, baseUrl + 'assets/hero/pets/pet_' + pk.key + '_' + kind + '.png'])));
     // ── Grassland tileset (CraftPix) — sprite ต้นไม้/พุ่ม/ดอกไม้/หิน/ซาก + sheet พื้นถนนดิน (ใช้ bake ครั้งเดียว) ──
     // key = 'g_' + ชื่อไฟล์ · โหลดพลาดไม่เป็นไร (fallback วาดแบบเดิม)
     const _gl = ['ground_sheet', 'details_sheet'];
@@ -325,20 +428,20 @@ const xhrpg = (() => {
     for (let i = 1; i <= 19; i++) _gl.push('bush' + i);
     for (let i = 1; i <= 11; i++) _gl.push('flower' + i);
     for (let i = 1; i <= 3;  i++) _gl.push('gel' + i);
-    _gl.forEach(n => list.push(['g_' + n, assetsBaseUrl + 'assets/tiles/grassland/' + n + '.png']));
+    _gl.forEach(n => list.push(['g_' + n, baseUrl + 'assets/tiles/grassland/' + n + '.png']));
     // ── ชุด road/bridge (โฟลเดอร์ย่อยของ grassland) — หญ้า fringe ตลิ่งขรุขระ + กอง cobble เกาะแก่ง + สะพานสำเร็จรูป ──
     // โหลดใน loader เดียวกัน (นับ left ร่วมกัน) → buildGround ไม่มีทาง bake ก่อนภาพชุดนี้พร้อม · โหลดพลาดไม่เป็นไร (fallback วาดแบบเดิม)
     [['g_road_grass', 'road/Ground_grass.png'], ['g_road5', 'road/Road5.png'], ['g_bridge_h', 'bridge/bridge_h.png']]
-      .forEach(([k, f]) => list.push([k, assetsBaseUrl + 'assets/tiles/grassland/' + f]));
+      .forEach(([k, f]) => list.push([k, baseUrl + 'assets/tiles/grassland/' + f]));
     // ── ปราสาทกลางเกาะ (bake ลง ground) + ธงยานบิน (วาดต่อเฟรมใน drawHouse) — แสดงผลเท่านั้น ──
     // โหลดใน loader เดียวกัน (นับ left ร่วมกัน) · โหลดพลาดไม่เป็นไร (ปราสาท: ข้ามการวาด / ธง: fallback 🚩)
     [['g_castle', 'castle/castle.png'], ['g_house_flag', 'castle/house_flag.png']]
-      .forEach(([k, f]) => list.push([k, assetsBaseUrl + 'assets/tiles/grassland/' + f]));
+      .forEach(([k, f]) => list.push([k, baseUrl + 'assets/tiles/grassland/' + f]));
     // ── decor ทะเลทราย (bake ลง ground map 2 · โหลดใน loader เดียวกัน → พร้อมก่อน bake · โหลดพลาดข้ามการวาด) ──
     ['ds_palm','ds_palm2','ds_cactus1','ds_cactus2','ds_tree1','ds_tree2','ds_pyramid','ds_bones','ds_scull','ds_rock1','ds_rock2','ds_rock3','ds_dirt1','ds_dirt2','ds_dirt3','ds_pile1','ds_pile2','ds_grass1','ds_grass2','ds_flower1','oasis_tree',
      'ds_palm3','ds_palm4','ds_palm5','ds_palm_s','ds_palm_m','ds_tree_m','ds_bigtree','ds_bigtree2','ds_bush1','ds_yucca','ds_agave','ds_cactus3','ds_cactus4',
      'ds_oa_coast','ds_oa_rip3','ds_oa_lily1','ds_oa_lily2','ds_oa_lily3','ds_reed1','ds_reed2','ds_reed3']
-      .forEach(n => list.push([n, assetsBaseUrl + 'assets/tiles/desert/' + n + '.png']));
+      .forEach(n => list.push([n, baseUrl + 'assets/tiles/desert/' + n + '.png']));
     // ── decor ดินแดนเยือกแข็ง (bake ลง ground map 3 · โหลดใน loader เดียวกัน → พร้อมก่อน bake · โหลดพลาดข้ามการวาด) ──
     ['wt_bigtree','wt_icetree1','wt_icetree2','wt_icetree3',
      'wt_tree2','wt_tree3','wt_tree6', // เหลือแค่ต้นกิ่งเปล่ามีหิมะ (tree2/3) + คริสต์มาส (tree6) — ตัดสนเขียว tree1/4/5/7/8 ออก (ธีมน้ำแข็ง)
@@ -347,9 +450,26 @@ const xhrpg = (() => {
      'wt_snowman1','wt_snowman2','wt_snowman3','wt_snowman4','wt_snowman5','wt_stone1','wt_stone2',
      'wt_iceflower1','wt_iceflower2','wt_iceflower3','wt_cube1','wt_cube2','wt_cube3','wt_cube4',
      'wt_ice','wt_ripple'] // texture บ่อ: Ice.png (น้ำแข็งฟ้าซีด+ดาว fracture) · ripple decal (โปรยบนบ่อน้ำฟ้าสด)
-      .forEach(n => list.push([n, assetsBaseUrl + 'assets/tiles/winter/' + n + '.png']));
+      .forEach(n => list.push([n, baseUrl + 'assets/tiles/winter/' + n + '.png']));
+    ['dv_anubis','dv_horus','dv_medusa'] // 🏺 ไอคอนสัตว์เทพ (แท็บสัตว์เทพ · ตัวล็อกใส่ filter grayscale ฝั่ง CSS)
+      .forEach(n => list.push([n, baseUrl + 'assets/pets/' + n + '.png']));
+    ['sb_whale','sb_octopus','sb_tentacle','sb_vent','sb_rock','sb_coral_purple','sb_coral_blue','sb_coral_red','sb_seagrass','sb_urchin','sb_gravel','sb_algae',
+     'sb_bones','sb_bone_fish','sb_anemone_red','sb_anemone_pink','sb_crystal','sb_coral_tree','sb_coral_white','sb_lily','sb_berries'] // 🌊 map 6 ใต้ทะเลลึก (ชุด 2 จาก M04 Objects — แต่งแมพหนาขึ้น 2026-07-22 · ⚠️ ห้ามตั้งชื่อชนกับชีทมอน sb_*)
+      .forEach(n => list.push([n, baseUrl + 'assets/tiles/seabed/' + n + '.png']));
+    ['dg_ground','dg_dragon','dg_tree1','dg_tree2','dg_tree3','dg_tree_sm','dg_ruins1','dg_ruins2','dg_ruins3','dg_ruins4',
+     'dg_rock1','dg_rock2','dg_rock3','dg_mush1','dg_mush2','dg_mush_blue','dg_liana1','dg_liana2','dg_stone'] // 🐉 map 10 ป่ามังกรโบราณ (M05 rocky — เจ้าของสั่ง 2026-07-25 ใช้ object แพ็คนี้เท่านั้น)
+      .forEach(n => list.push([n, baseUrl + 'assets/tiles/dragon/' + n + '.png']));
+    ['ct_ground','ct_wall','ct_wall_tall','ct_tower_s','ct_tower_m','ct_keep_s','ct_keep_l',
+     'ct_gate_1','ct_gate_2','ct_gate_3','ct_flag','ct_deco'] // 🏯 map 11 ปราสาทกิล (MAPG03 castle tileset · docs/guild-castle-design.md)
+      .forEach(n => list.push([n, baseUrl + 'assets/castle/' + n + '.png']));
+    // ── 🏡 บ้านของฉัน (map 5 · bake+วาดต่อเฟรม · โหลดพลาดข้ามการวาด — docs/home-design.md) ──
+    ['house','pillar','tree_apple','tree_green','path','dirt','flowers','scarecrow','crates','smoke','plot']
+      .forEach(n => list.push(['hm_' + n, baseUrl + 'assets/home/' + n + '.png']));
+    { const _hp = ['sprout1','sprout2','sprout3']; // 🌱 พืช: ต้นอ่อน generic 3 + ต้นโต 12 สายพันธุ์ ×2 เกรด (ทอง = crop{n}g)
+      for (let i = 1; i <= 12; i++) _hp.push('crop' + i, 'crop' + i + 'g');
+      _hp.forEach(n => list.push(['hm_' + n, baseUrl + 'assets/home/' + n + '.png'])); }
     // ── ไอคอน pixel-art แทน emoji (แสดงผลเท่านั้น) — preload ครั้งเดียวใน loader เดียวกัน · key = 'ico_' + ชื่อไฟล์ · โหลดพลาดไม่เป็นไร (fallback emoji) ──
-    _icoAllFiles().forEach(f => list.push(['ico_' + f, assetsBaseUrl + 'assets/icons/gui/' + f]));
+    _icoAllFiles().forEach(f => list.push(['ico_' + f, baseUrl + 'assets/icons/gui/' + f]));
     let left = list.length;
     const done = () => { if (--left <= 0) buildGround(); };
     list.forEach(([k, u]) => {
@@ -462,7 +582,18 @@ const xhrpg = (() => {
       items.push({ y: th * 0.28, draw: () => { // ฐาน (ราก) อยู่ต่ำกว่า center = y ฐานโลก ~ +th*0.28
         const s = toScreen(SPAWN_X, SPAWN_Y);
         const fi = Math.floor(Date.now() / 170) % frames;
-        ctx.drawImage(img, fi * fw, 0, fw, fh, s.x - tw * scale / 2, s.y - th * scale * 0.72, tw * scale, th * scale);
+        // 🧟 อีเวนต์บุก: โดนตี ≤350ms ที่แล้ว → เขย่าต้นไม้ + วงแดงวาบ (map 2 เท่านั้น — สนามประลองใช้ draw นี้ร่วมแต่ไม่มีอีเวนต์)
+        const _ivHit = currentMap === 2 && (Date.now() - _invTreeHitAt) < 350;
+        const _jx = _ivHit ? (Math.random() * 6 - 3) * scale : 0, _jy = _ivHit ? (Math.random() * 4 - 2) * scale : 0;
+        ctx.drawImage(img, fi * fw, 0, fw, fh, s.x - tw * scale / 2 + _jx, s.y - th * scale * 0.72 + _jy, tw * scale, th * scale);
+        if (_ivHit) {
+          ctx.save();
+          ctx.globalAlpha = 0.22 * (1 - (Date.now() - _invTreeHitAt) / 350);
+          ctx.fillStyle = '#ef4444';
+          ctx.beginPath(); ctx.arc(s.x, s.y - th * scale * 0.3, tw * scale * 0.55, 0, Math.PI * 2); ctx.fill();
+          ctx.restore();
+          startAnim();
+        }
       } });
     }
     items.sort((a, b) => a.y - b.y).forEach(it => it.draw());
@@ -767,11 +898,533 @@ const xhrpg = (() => {
     items.sort((a, b) => a.y - b.y).forEach(it => it.draw());
     ctx.imageSmoothingEnabled = _sm;
   }
+  // ── 🌊 ดินแดนใต้ทะเลลึก (map 6): พื้นน้ำลึก gradient + กรวด/ปะการัง/สาหร่าย scatter (bake) · ซากปลาวาฬ+หมึกยักษ์กลาง (drawSeabedCenter ต่อเฟรม · trim-aware) ──
+  let _seabedGrove = null;
+  function buildGroundSeabed() {
+    groundCanvas = document.createElement('canvas');
+    groundCanvas.width = MAP_W; groundCanvas.height = MAP_H;
+    const g = groundCanvas.getContext('2d'); g.imageSmoothingEnabled = false;
+    const grd = g.createRadialGradient(MAP_W / 2, MAP_H / 2, 150, MAP_W / 2, MAP_H / 2, MAP_W * 0.72); // น้ำลึก: กลางสว่างนิด ขอบมืด
+    grd.addColorStop(0, '#356584'); grd.addColorStop(0.6, '#1d4463'); grd.addColorStop(1, '#0e2c47');
+    g.fillStyle = grd; g.fillRect(0, 0, MAP_W, MAP_H);
+    let s = 91; const rnd = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; }; // seeded (พื้นคงที่ทุกโหลด)
+    for (let i = 0; i < 3000; i++) { g.globalAlpha = 0.04 + rnd() * 0.10; g.fillStyle = rnd() < 0.5 ? '#4b7d9c' : '#0a2238'; g.beginPath(); g.arc(rnd() * MAP_W, rnd() * MAP_H, 1 + rnd() * 2.4, 0, 7); g.fill(); } // ทราย/กรวดจุด
+    g.globalAlpha = 1;
+    const pool = [['sb_gravel', 96, 110], ['sb_algae', 72, 76], ['sb_seagrass', 54, 62], ['sb_coral_purple', 48, 34], ['sb_coral_blue', 48, 34], ['sb_coral_red', 46, 32], ['sb_rock', 80, 40], ['sb_urchin', 40, 28], ['sb_vent', 58, 16],
+      ['sb_lily', 46, 40], ['sb_berries', 44, 26], ['sb_anemone_pink', 62, 20], ['sb_anemone_red', 52, 18], ['sb_coral_tree', 68, 18], ['sb_coral_white', 54, 18], ['sb_crystal', 58, 14], ['sb_bone_fish', 66, 10]]; // ชุด 2 (M04 Objects) — เพิ่มความหนา 2026-07-22 เจ้าของบอกโล่ง
+    pool.forEach(([k, sz, n]) => { for (let i = 0; i < n; i++) { const x = 90 + rnd() * (MAP_W - 180), y = 90 + rnd() * (MAP_H - 180); if (Math.hypot(x - MAP_W / 2, y - MAP_H / 2) < 200) continue; _wtDraw(g, k, x, y, sz * (0.7 + rnd() * 0.6)); } }); // เว้นกลาง 200px (ที่ landmark)
+    // ── landmark ประจำโซน (bake ตายตัว seeded — ธีมตาม lore โซน · พิกัดตรง XHRPG_SPOTS_SEABED ฝั่ง PHP) ──
+    const _zoneDeco = [
+      // 🪨 หินใต้น้ำ (NE 1750,500): สุสานกระดูก + กองหิน
+      [1750, 500, [['sb_bones', 88, 0, -60], ['sb_bones', 66, -120, 40], ['sb_bone_fish', 76, 90, 70], ['sb_bone_fish', 60, -70, -110], ['sb_rock', 110, 130, -60], ['sb_rock', 90, -150, -40], ['sb_urchin', 44, 60, 130], ['sb_crystal', 60, 170, 60]]],
+      // 🪸 ปะการังลึกลับ (SW 500,1750): สวนปะการัง + คริสตัล + ดอกไม้ทะเล
+      [500, 1750, [['sb_coral_tree', 92, 0, -70], ['sb_coral_tree', 72, -130, 30], ['sb_coral_white', 66, 110, -40], ['sb_crystal', 74, 60, 90], ['sb_crystal', 56, -90, -110], ['sb_anemone_pink', 78, 150, 60], ['sb_anemone_red', 60, -60, 130], ['sb_berries', 50, 130, 140]]],
+      // 🌊 ลานกว้าง (SE 1750,1750): หนวดหมึกโผล่ + ปล่องน้ำร้อน (ลานโล่งกลาง — ที่ฉลามล่า)
+      [1750, 1750, [['sb_tentacle', 84, -140, -80], ['sb_tentacle', 68, 150, 50], ['sb_vent', 72, 60, -120], ['sb_vent', 60, -80, 120], ['sb_rock', 96, 160, -50], ['sb_anemone_red', 56, -160, 60]]],
+    ];
+    _zoneDeco.forEach(([zx, zy, items]) => items.forEach(([k, sz, dx, dy]) => _wtDraw(g, k, zx + dx + (rnd() - 0.5) * 24, zy + dy + (rnd() - 0.5) * 24, sz)));
+    _seabedGrove = [{ dx: -210, dy: -70, key: 'sb_octopus', sz: 150 }, { dx: 230, dy: 60, key: 'sb_tentacle', sz: 70 }, { dx: -40, dy: 150, key: 'sb_coral_blue', sz: 60 }, { dx: 180, dy: -120, key: 'sb_bone_fish', sz: 70 }, { dx: -160, dy: 120, key: 'sb_anemone_pink', sz: 64 }];
+    groundReady = true; _groundMap = 6;
+  }
+  function drawSeabedCenter() { // ซากปลาวาฬยักษ์กลางแมพ + decor รอบ — วาดหลังพื้น ก่อน entity (mirror drawWinterTree)
+    if (currentMap !== 6) return;
+    const { scale } = getCameraTransform();
+    const t0 = toScreen(SPAWN_X - 300, SPAWN_Y - 260), t1 = toScreen(SPAWN_X + 300, SPAWN_Y + 200);
+    if (t1.x < -120 || t0.x > canvas.width + 120 || t1.y < -120 || t0.y > canvas.height + 120) return;
+    const _sm = ctx.imageSmoothingEnabled; ctx.imageSmoothingEnabled = false;
+    const items = [];
+    (_seabedGrove || []).forEach(p => { const img = SUM[p.key]; if (!img || !img.complete || !img.naturalWidth) return;
+      items.push({ y: p.dy, draw: () => { const sc = toScreen(SPAWN_X + p.dx, SPAWN_Y + p.dy); const b = _trimBox(img), w = p.sz * scale, h = w * (b.sh / b.sw); ctx.drawImage(img, b.sx, b.sy, b.sw, b.sh, sc.x - w / 2, sc.y - h, w, h); } }); });
+    const img = SUM['sb_whale']; if (img && img.complete && img.naturalWidth) { const b = _trimBox(img), tw = 340, th = tw * (b.sh / b.sw);
+      items.push({ y: 30, draw: () => { const sc = toScreen(SPAWN_X, SPAWN_Y + 30); ctx.drawImage(img, b.sx, b.sy, b.sw, b.sh, sc.x - tw * scale / 2, sc.y - th * scale, tw * scale, th * scale); } }); }
+    items.sort((a, b) => a.y - b.y).forEach(it => it.draw());
+    ctx.imageSmoothingEnabled = _sm;
+  }
+  // ── 🐉 ป่ามังกรโบราณ (map 10 · M05 rocky — เจ้าของสั่ง 2026-07-25 ใช้ object จากแพ็คนี้เท่านั้น · Phase A ยังไม่มีมอน) ──
+  let _dragonGrove = null;
+  function buildGroundDragon() {
+    groundCanvas = document.createElement('canvas');
+    groundCanvas.width = MAP_W; groundCanvas.height = MAP_H;
+    const g = groundCanvas.getContext('2d'); g.imageSmoothingEnabled = false;
+    g.fillStyle = (SUM['dg_ground'] && SUM['dg_ground'].naturalWidth) ? g.createPattern(SUM['dg_ground'], 'repeat') : '#C5B997'; // พรมหินมอส bake จาก tile TMX จริง (dg_ground 512²)
+    g.fillRect(0, 0, MAP_W, MAP_H);
+    let s = 105; const rnd = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; }; // seeded (พื้นคงที่ทุกโหลด)
+    const pool = [['dg_rock1', 34, 90], ['dg_rock2', 34, 80], ['dg_rock3', 36, 70], ['dg_stone', 30, 60],
+      ['dg_mush1', 40, 46], ['dg_mush2', 48, 40], ['dg_mush_blue', 56, 30], ['dg_liana1', 52, 34], ['dg_liana2', 52, 30],
+      ['dg_tree1', 120, 40], ['dg_tree2', 124, 36], ['dg_tree3', 128, 34], ['dg_tree_sm', 66, 44],
+      ['dg_ruins2', 58, 14], ['dg_ruins3', 56, 12], ['dg_ruins4', 54, 12]];
+    pool.forEach(([k, sz, n]) => { for (let i = 0; i < n; i++) { const x = 90 + rnd() * (MAP_W - 180), y = 90 + rnd() * (MAP_H - 180); if (Math.hypot(x - MAP_W / 2, y - MAP_H / 2) < 220) continue; _wtDraw(g, k, x, y, sz * (0.7 + rnd() * 0.6)); } }); // เว้นกลาง 220px (ที่รูปปั้นมังกร)
+    // มุมตกแต่ง bake ตายตัว: ซากวิหาร NE · ดงเห็ดยักษ์ SW · ดงสนโบราณ SE (Phase B ค่อยผูกโซนมอนพิกัดเดียวกัน)
+    const _deco = [
+      [1750, 500,  [['dg_ruins1', 130, 0, -60], ['dg_ruins2', 70, -130, 40], ['dg_ruins4', 62, 110, 60], ['dg_rock3', 44, -80, -110], ['dg_liana1', 56, 150, -50]]],
+      [500, 1750,  [['dg_mush_blue', 90, 0, -50], ['dg_mush2', 64, -120, 50], ['dg_mush1', 50, 110, -60], ['dg_mush_blue', 60, 130, 70], ['dg_stone', 36, -70, 120]]],
+      [1750, 1750, [['dg_tree3', 140, 0, -70], ['dg_tree1', 110, -140, 40], ['dg_tree_sm', 70, 120, 60], ['dg_rock1', 40, -60, 130]]],
+    ];
+    _deco.forEach(([zx, zy, items]) => items.forEach(([k, sz, dx, dy]) => _wtDraw(g, k, zx + dx + (rnd() - 0.5) * 24, zy + dy + (rnd() - 0.5) * 24, sz)));
+    _dragonGrove = [{ dx: -220, dy: -60, key: 'dg_tree2', sz: 130 }, { dx: 230, dy: 70, key: 'dg_tree1', sz: 120 }, { dx: -50, dy: 160, key: 'dg_ruins2', sz: 70 }, { dx: 190, dy: -130, key: 'dg_ruins3', sz: 64 }, { dx: -170, dy: 110, key: 'dg_mush_blue', sz: 66 }];
+    groundReady = true; _groundMap = 10;
+  }
+  function drawDragonCenter() { // 🐉 รูปปั้นมังกรหินกลางแมพ + ดงสน/ซากวิหารรอบ — mirror drawSeabedCenter (วาดหลังพื้น ก่อน entity)
+    if (currentMap !== 10) return;
+    const { scale } = getCameraTransform();
+    const t0 = toScreen(SPAWN_X - 300, SPAWN_Y - 260), t1 = toScreen(SPAWN_X + 300, SPAWN_Y + 200);
+    if (t1.x < -120 || t0.x > canvas.width + 120 || t1.y < -120 || t0.y > canvas.height + 120) return;
+    const _sm = ctx.imageSmoothingEnabled; ctx.imageSmoothingEnabled = false;
+    const items = [];
+    (_dragonGrove || []).forEach(p => { const img = SUM[p.key]; if (!img || !img.complete || !img.naturalWidth) return;
+      items.push({ y: p.dy, draw: () => { const sc = toScreen(SPAWN_X + p.dx, SPAWN_Y + p.dy); const b = _trimBox(img), w = p.sz * scale, h = w * (b.sh / b.sw); ctx.drawImage(img, b.sx, b.sy, b.sw, b.sh, sc.x - w / 2, sc.y - h, w, h); } }); });
+    const img = SUM['dg_dragon']; if (img && img.complete && img.naturalWidth) { const b = _trimBox(img), tw = 300, th = tw * (b.sh / b.sw);
+      items.push({ y: 30, draw: () => { const sc = toScreen(SPAWN_X, SPAWN_Y + 30); ctx.drawImage(img, b.sx, b.sy, b.sw, b.sh, sc.x - tw * scale / 2, sc.y - th * scale, tw * scale, th * scale); } }); }
+    items.sort((a, b) => a.y - b.y).forEach(it => it.draw());
+    ctx.imageSmoothingEnabled = _sm;
+  }
+  // ── 🏡 บ้านของฉัน (map 5) — ผังตายตัวกลางแมพ ใช้ร่วม bake+overlay (docs/home-design.md) ──
+  //    บ้านซ้ายบน · แท่นสะสม 6 แถวขวาบ้าน · แปลง 4×4 หกผืน 2 แถว×3 ใต้ spawn
+  const HOME_HOUSE = { x: 860, y: 830, w: 260, h: 256 };
+  const HOME_PEDS  = Array.from({ length: 6 }, (_, i) => ({ x: 620 + i * 74, y: 1180 })); // แถวซ้ายใต้บ้าน (ย้ายหนีบ่อน้ำ 2026-07-18 — เดิมขวาบ้าน)
+  const HOME_PLOTS = Array.from({ length: 6 }, (_, i) => ({ x: 900 + (i % 3) * 190, y: 1300 + ((i / 3) | 0) * 190 }));
+  const HOME_PLOT_SZ = 150;
+  let _homePond = null; // 💧 บ่อน้ำขวาบ้าน (descriptor จาก _bakePondM01F — วาดคลื่น/ตลิ่ง animated ต่อเฟรมใน drawHomeOverlay)
+  // ── 🌱 เมล็ด mirror PHP (xhrpg_seed_* ใน config — ต้องตรงกันเสมอ): id 1-24 · id-1 = (tier-1)*4 + sp*2 + gold ──
+  const SEED_NAMES  = ['องุ่นป่า','ถั่วเลื้อย','พริกแดง','กะหล่ำปลี','ดอกมันเทศ','ใบหยก','ว่านหนาม','ข้าวสาลี','แอปเปิล','เลมอน','เชอร์รี่','มะพร้าว'];
+  const SEED_GROW_H = [1, 2, 4, 8, 16, 24];
+  const SEED_PRICE  = [80, 160, 400, 800, 1920, 3200]; // 💸 -20% ทุก tier (เจ้าของสั่ง 2026-07-19) — ⚠️ ต้องตรงกับ XHRPG_SEED_PRICE ฝั่ง PHP เสมอ
+  const seedTier   = id => (((id - 1) / 4) | 0) + 1;
+  const seedGold   = id => ((id - 1) & 1) === 1;
+  const seedSprite = id => ((((id - 1) / 4) | 0) * 2) + (((id - 1) >> 1) & 1) + 1; // 1-12
+  const seedPrice  = id => SEED_PRICE[seedTier(id) - 1] * (seedGold(id) ? 3 : 1);
+  const seedGrowS  = id => SEED_GROW_H[seedTier(id) - 1] * 3600;
+  const seedLabel  = id => (seedGold(id) ? '⭐' : '') + T(SEED_NAMES[seedSprite(id) - 1] || 'พืช') + (seedGold(id) ? ' (' + T('เกรดทอง') + ')' : '');
+  const _homeSeedsObj = () => { const s = player && player.home_seeds; return (s && typeof s === 'object' && !Array.isArray(s)) ? s : (typeof s === 'string' ? (JSON.parse(s || '{}') || {}) : {}); };
+  // 🏡👥 เยี่ยมบ้านเพื่อน — server ส่ง home_view (ข้อมูลบ้านเจ้าของ) มาตอนอยู่บ้านคนอื่น
+  //     ตัวอ่านบ้านทุกตัวสลับมาใช้ home_view อัตโนมัติ → ห้ามเขียนทับ player.home_* (เป็นข้อมูลของเราเอง จะโดน flush กลับ DB)
+  let _homeView = null; // {name, home_lv, home_crops, treasures} | null = อยู่บ้านตัวเอง
+  const _homeVisiting = () => !!_homeView;                       // อยู่บ้านเพื่อนอยู่ไหม (ซ่อนปุ่ม/ปิด action)
+  const _homeSrc      = () => _homeView || player || {};         // แหล่งข้อมูลบ้านที่กำลังวาด
+  const _homeCropsArr = () => { const c = _homeSrc().home_crops; return Array.isArray(c) ? c : (typeof c === 'string' ? (JSON.parse(c || '[]') || []) : []); };
+  // ═══ 🏯 ปราสาทกิล (map 11 · docs/guild-castle-design.md) ═══
+  //   instance ต่อกิล — ปราสาทประกอบจากชิ้นส่วนตามสูตร tier (ทุก 5 Lv = 20 ขั้น · sync xhrpg_castle_tier)
+  //   bake ลง groundCanvas ครั้งเดียวต่อ (tier+ตรา) — เฟรมปกติวาด 1 drawImage เท่าแมพอื่น
+  let _ctInfo = null, _ctFetchAt = 0, _ctBakeKey = '';
+  const _ctTier = (lv) => Math.max(1, Math.min(20, Math.floor((Math.max(1, lv | 0) - 1) / 5) + 1)); // sync PHP xhrpg_castle_tier
+  function _ctSpec(t) { // พารามิเตอร์ปราสาทต่อ tier — ขึ้นทุกขั้น + ปลดของใหญ่เป็นช่วง (ตาราง §3 ในดีไซน์)
+    //   องค์ประกอบ: หอปราสาทกลาง (ct_keep_l = ชิ้นที่สวยสุด) เป็นตัวเอกทุก tier · กำแพงขนาบ · หอมุมปลายแถว
+    //   ⚠️ เคยพลาด: เอา ct_wall (ชิ้นบนสุด 112×96 เป็นทางเดินไม้) มาวางเดี่ยว → ดูเป็นกล่องน้ำตาลลอย
+    //      กำแพงต้องใช้ ct_wall_tall (มีหน้าหินเต็ม) เท่านั้น
+    return {
+      keepScale: 1 + Math.min(t, 18) * 0.045,          // หอกลางโตเรื่อยๆ (T1 1.0 → T18+ 1.81)
+      //   ⚠️ กำแพงต้อง cap: ปล่อยโตเชิงเส้นถึง T20 = ยาว ~2900px ล้นจอทั้งสองข้าง (เห็นในภาพเรนเดอร์)
+      //      โตต่อหลัง T9 ด้วยหอ/แถวหลัง/ธง/หอกลางแทน — สูงขึ้นแทนที่จะกว้างขึ้น
+      walls:  Math.min(1 + Math.floor(t / 2.2), 4),    // กำแพงข้างละกี่ท่อน (T1 1 → T7+ 4 คงที่ ≈ 1400px พอดีหนึ่งจอ)
+      backRow: t >= 12,                                // แถวกำแพงหลัง (ความลึก แทนความกว้าง)
+      towers: t >= 3,                                  // หอปลายแถว
+      towerScale: 0.9 + Math.min(t, 16) * 0.03,
+      tower2: t >= 9,                                  // หอคู่ในซ้อนอีกชั้น
+      gate:   t >= 9 ? 3 : (t >= 5 ? 2 : 1),
+      flags:  Math.min(2 + Math.floor(t / 2), 10),
+      gold:   t >= 19,                                 // ธงทอง
+      deco:   5 + Math.floor(t * 0.8),
+      path:   t >= 5,
+      garden: t >= 14,
+      yard:   190 + t * 12,
+    };
+  }
+  // พิกัดหลักของฉาก — ⚠️ ทั้ง bake (buildGroundCastle) และ overlay (ตรา/ป้าย) ต้องใช้ชุดเดียวกัน
+  //    เดิมแยกกันคนละค่า → ตรากิลกับป้ายลอยหลุดออกไปคนละทิศกับตัวปราสาท
+  function _ctAnchors(tier) {
+    const sp = _ctSpec(tier), SC = 1.25;
+    const CX = MAP_W / 2, BASE = MAP_H / 2 + 40;
+    const wm = SUM['ct_wall_tall'], km = SUM['ct_keep_l'];
+    const wallW = (wm && wm.naturalWidth ? wm.naturalWidth : 112) * SC * 0.98;
+    const wallH = (wm && wm.naturalHeight ? wm.naturalHeight : 159) * SC * 0.98;
+    const keepW = (km && km.naturalWidth ? km.naturalWidth : 132) * SC * sp.keepScale;
+    const keepH = (km && km.naturalHeight ? km.naturalHeight : 255) * SC * sp.keepScale;
+    const armW = sp.walls * wallW;
+    return { sp, SC, CX, BASE, wallW, wallH, keepW, keepH, armW, edge: keepW / 2 + armW };
+  }
+  // ═══ 🕳️ ดันกิล (map 12 · docs/guild-dungeon-design.md) ═══
+  //     เฟส A ไม่มี asset ใหม่: ใช้พื้นหิน/ก้อนหินของป่ามังกรซ้ำทั้งชุด แล้วย้อมโทนมืดทับให้ได้อารมณ์ถ้ำ
+  //     (ห้ามแก้ buildGroundDragon เดิม — map 10 ต้องเหมือนเดิมทุกพิกเซล)
+  function buildGroundGdun() {
+    buildGroundDragon();
+    if (!groundCanvas) return;
+    const g = groundCanvas.getContext('2d');
+    g.globalAlpha = 0.35; g.fillStyle = '#0b0a14'; g.fillRect(0, 0, MAP_W, MAP_H); g.globalAlpha = 1; // ย้อมมืด ~35% ทั้งผืน
+    _groundMap = 12; // buildGroundDragon เซ็ตไว้ 10 — เขียนทับให้ตรงแมพจริง
+  }
+  function buildGroundCastle() {
+    groundCanvas = document.createElement('canvas');
+    groundCanvas.width = MAP_W; groundCanvas.height = MAP_H;
+    const g = groundCanvas.getContext('2d'); g.imageSmoothingEnabled = false;
+    const im = k => { const m = SUM[k]; return (m && m.complete && m.naturalWidth) ? m : null; };
+    g.fillStyle = im('ct_ground') ? g.createPattern(SUM['ct_ground'], 'repeat') : '#c9a06a';
+    g.fillRect(0, 0, MAP_W, MAP_H);
+    const info = _ctInfo, tier = info ? _ctTier(info.g.lv) : 1;
+    const sp = _ctSpec(tier);
+    const CX = MAP_W / 2, BASE = MAP_H / 2 + 40;    // ฐานปราสาท (ตีนกำแพง) — spawn ผู้เล่นอยู่ใต้ลงไป
+    const SC = 1.25;                                 // สเกลชิ้นส่วน (ชิ้นต้นฉบับ 112-255px)
+    let s = 99173; const rnd = () => { s = (s * 1664525 + 1013904223) & 0xffffffff; return (s >>> 0) / 0xffffffff; };
+    const drawB = (key, cx, bottomY, scale) => { // วาดชิ้นส่วน bottom-anchor กลางที่ cx · คืนความสูงที่วาด
+      const m = im(key); if (!m) return 0;
+      const w = m.naturalWidth * scale, h = m.naturalHeight * scale;
+      g.drawImage(m, Math.round(cx - w / 2), Math.round(bottomY - h), Math.round(w), Math.round(h));
+      return h;
+    };
+    const wallImg = im('ct_wall_tall');               // ⚠️ กำแพงใช้ชิ้นนี้เท่านั้น (ct_wall เป็นทางเดินไม้ วางเดี่ยวดูเป็นกล่องลอย)
+    const wallW = wallImg ? wallImg.naturalWidth * SC * 0.98 : 110;
+    const keepW = (im('ct_keep_l') ? SUM['ct_keep_l'].naturalWidth : 132) * SC * sp.keepScale;
+    const armW  = sp.walls * wallW;                   // ความยาวกำแพงข้างละ
+    const edge  = keepW / 2 + armW;                   // ขอบนอกสุด (จุดวางหอปลายแถว)
+    // ── ลานดินหน้าปราสาท (นุ่มๆ ไม่ให้เป็นวงคราบ — ⚠️ ห้ามใช้ ct_floor: เป็นลายอิฐ "กำแพง" ปูพื้นแล้วเป็นแถบขวาง) ──
+    {
+      const yard = Math.max(sp.yard, edge * 1.15);
+      const grd = g.createRadialGradient(CX, BASE + 120, yard * 0.25, CX, BASE + 120, yard);
+      grd.addColorStop(0, 'rgba(120,86,48,.30)'); grd.addColorStop(1, 'rgba(120,86,48,0)');
+      g.save(); g.fillStyle = grd;
+      g.beginPath();
+      if (g.ellipse) g.ellipse(CX, BASE + 120, yard, yard * 0.52, 0, 0, Math.PI * 2); else g.rect(CX - yard, BASE + 50, yard * 2, yard * 0.7);
+      g.fill(); g.restore();
+    }
+    // ── พรมทางเดินเข้า (T5+) ──
+    if (sp.path) {
+      g.save(); g.globalAlpha = 0.85; g.fillStyle = '#7f1d1d';
+      g.fillRect(CX - 30 * SC, BASE + 10, 60 * SC, 230);
+      g.fillStyle = '#a16207';
+      g.fillRect(CX - 30 * SC, BASE + 10, 60 * SC, 5); g.fillRect(CX - 30 * SC, BASE + 236, 60 * SC, 5);
+      g.restore();
+    }
+    // ── แถวกำแพงหลัง (T12+) — ให้ปราสาทดูลึกขึ้นโดยไม่กว้างขึ้น ──
+    if (sp.backRow) {
+      for (let i = 0; i < sp.walls; i++) {
+        const off = keepW / 2 + (i + 0.2) * wallW;
+        drawB('ct_wall_tall', CX - off, BASE - 42 * SC, SC * 0.84);
+        drawB('ct_wall_tall', CX + off, BASE - 42 * SC, SC * 0.84);
+      }
+    }
+    // ── กำแพงปีกซ้าย/ขวา (วาดก่อน = อยู่หลังหอ) ──
+    for (let i = 0; i < sp.walls; i++) {
+      const off = keepW / 2 + (i + 0.5) * wallW;
+      drawB('ct_wall_tall', CX - off, BASE, SC * 0.98);
+      drawB('ct_wall_tall', CX + off, BASE, SC * 0.98);
+    }
+    // ── หอปลายแถว ──
+    if (sp.towers) {
+      drawB('ct_tower_m', CX - edge, BASE + 10, SC * sp.towerScale);
+      drawB('ct_tower_m', CX + edge, BASE + 10, SC * sp.towerScale);
+    }
+    if (sp.tower2) { // หอคู่ในซ้อนอีกชั้น (ระหว่างหอกลางกับปลายแถว)
+      drawB('ct_tower_s', CX - (keepW / 2 + armW * 0.5), BASE + 4, SC * sp.towerScale * 0.95);
+      drawB('ct_tower_s', CX + (keepW / 2 + armW * 0.5), BASE + 4, SC * sp.towerScale * 0.95);
+    }
+    // ── 🏯 หอปราสาทกลาง = ตัวเอกของฉาก (วาดท้ายสุด = อยู่หน้าสุด · มีทุก tier ไม่ใช่แค่ T6+) ──
+    const keepH = drawB('ct_keep_l', CX, BASE + 16, SC * sp.keepScale);
+    // ── ประตูหน้าหอ ──
+    const gateKey = 'ct_gate_' + sp.gate;
+    if (im(gateKey)) {
+      const gsc = sp.gate === 3 ? SC * 0.62 : (sp.gate === 2 ? SC * 0.42 : SC * 0.7);
+      drawB(gateKey, CX, BASE + 22, gsc);
+    }
+    // ── ธง (ย้อมสีตรากิล · ทอง T19+) — ปักบนยอดกำแพง/หอ ไล่จากกลางออกข้าง ──
+    const fm = im('ct_flag');
+    if (fm && info) {
+      const col = sp.gold ? '#eab308' : (GD_COLORS[info.g.co] || GD_COLORS[0]);
+      const off = document.createElement('canvas');
+      off.width = fm.naturalWidth; off.height = fm.naturalHeight;
+      const og = off.getContext('2d');
+      og.drawImage(fm, 0, 0);
+      og.globalCompositeOperation = 'source-atop';
+      og.fillStyle = col; og.globalAlpha = 0.78;
+      og.fillRect(0, 0, off.width, off.height);
+      const fw = off.width * SC * 0.95, fh = off.height * SC * 0.95;
+      const wallTop = BASE - (wallImg ? wallImg.naturalHeight * SC * 0.98 : 160);
+      for (let i = 0; i < sp.flags; i++) {
+        const side = i % 2 ? 1 : -1, k = Math.floor(i / 2);
+        const fx = CX + side * (keepW / 2 + (k + 0.5) * wallW);
+        if (Math.abs(fx - CX) > edge) continue;
+        g.drawImage(off, Math.round(fx - fw / 2), Math.round(wallTop - fh + 6 * SC), Math.round(fw), Math.round(fh));
+      }
+    }
+    void keepH;
+    // ── ของประดับ (atlas 8 ช่อง × 32px) + สวน T15+ ──
+    const dm = im('ct_deco');
+    if (dm) {
+      const cell = 32, cells = Math.max(1, Math.round(dm.naturalWidth / cell));
+      for (let i = 0; i < sp.deco; i++) {
+        const ci = Math.floor(rnd() * cells);
+        const ang = rnd() * Math.PI * 2, rr = 150 + rnd() * (sp.yard * 0.8);
+        const dx = CX + Math.cos(ang) * rr, dy = BASE + 70 + Math.sin(ang) * rr * 0.42;
+        if (dy < BASE + 26 || Math.abs(dx - CX) < 46 * SC) continue; // ไม่วางทับตัวปราสาท/ทางเดินเข้า
+        const ds = (1.0 + rnd() * 0.6) * SC;                         // เล็กกว่าตัวละคร (ของประดับ ไม่ใช่อาคาร)
+        g.drawImage(dm, ci * cell, 0, cell, cell, Math.round(dx - cell * ds / 2), Math.round(dy - cell * ds), Math.round(cell * ds), Math.round(cell * ds));
+      }
+      if (sp.garden) { // แนวสวนสองข้างทางเดิน
+        for (let i = 0; i < 12; i++) {
+          const ci = Math.floor(rnd() * cells), side = i % 2 ? 1 : -1;
+          const dx = CX + side * (52 * SC + rnd() * 26), dy = BASE + 44 + (i / 12) * 180;
+          const ds = 0.8 * SC;
+          g.drawImage(dm, ci * cell, 0, cell, cell, Math.round(dx - cell * ds / 2), Math.round(dy - cell * ds), Math.round(cell * ds), Math.round(cell * ds));
+        }
+      }
+    }
+    _ctBakeKey = info ? (tier + ':' + info.g.sh + ':' + info.g.co + ':' + info.g.ic + ':' + info.g.name) : 'none';
+  }
+  // ── วาดต่อเฟรม: ตรากิลเหนือประตู + ป้ายรายชื่อสมาชิก + ประกายยอดปราสาท T20 ──
+  function drawCastleOverlay() {
+    const info = _ctInfo; if (!info) return;
+    const { scale } = getCameraTransform();
+    const tier = _ctTier(info.g.lv);
+    const A = _ctAnchors(tier);
+    // ตรากิล — แขวนบนหน้าหอปราสาท เหนือประตู (ยึดกับความสูงหอจริง ไม่ใช่ค่าคงที่)
+    const em = _gdEmblem(info.g.sh, info.g.co, info.g.ic, 128);
+    const es = toScreen(A.CX, A.BASE + 16 - A.keepH * 0.62);
+    const ew = Math.max(16, A.keepW * 0.34) * scale;
+    ctx.save(); ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(em, es.x - ew / 2, es.y - ew / 2, ew, ew);
+    // ชื่อกิลใต้ตรา
+    ctx.font = `800 ${Math.max(7, 9 * scale)}px system-ui, sans-serif`;
+    ctx.textAlign = 'center'; ctx.fillStyle = '#fde68a';
+    ctx.shadowColor = 'rgba(0,0,0,.9)'; ctx.shadowBlur = 4;
+    ctx.fillText(info.g.name.slice(0, 16), es.x, es.y + ew / 2 + 11 * scale);
+    ctx.restore();
+    // ✨ ประกายยอดปราสาท (T20)
+    if (tier >= 20) {
+      const ts = toScreen(A.CX, A.BASE + 16 - A.keepH - 10);
+      const k = 0.5 + 0.5 * Math.sin(Date.now() / 380);
+      ctx.save(); ctx.globalAlpha = 0.55 + 0.45 * k;
+      ctx.font = `${Math.round(15 * scale)}px serif`; ctx.textAlign = 'center';
+      ctx.fillText('✨', ts.x, ts.y); ctx.restore();
+      startAnim();
+    }
+    _drawCastleBoard(scale, A);
+  }
+  // ป้ายรายชื่อสมาชิกข้างประตู — วาดด้วย canvas ล้วน (fillText = ปลอดภัยจาก XSS โดยธรรมชาติ)
+  function _drawCastleBoard(scale, A) {
+    const info = _ctInfo; if (!info) return;
+    // ตั้งไว้บนพื้นข้างทางเข้า (ยึดขอบปราสาทจริง → ไม่ลอยหลุดไปไกลเวลา tier เล็ก)
+    const bs = toScreen(A.CX + A.keepW * 0.5 + 118, A.BASE + 232); // ต่ำกว่าตีนกำแพง = ไม่ทับตัวปราสาท
+    const W = 112 * scale, H = 132 * scale;
+    const x = bs.x - W / 2, y = bs.y - H;
+    ctx.save(); ctx.imageSmoothingEnabled = true;
+    ctx.fillStyle = '#5b3a1e'; ctx.strokeStyle = '#2f1d0d'; ctx.lineWidth = Math.max(1, 2 * scale);
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(x, y, W, H, 5 * scale); else ctx.rect(x, y, W, H);
+    ctx.fill(); ctx.stroke();
+    ctx.fillStyle = 'rgba(0,0,0,.22)'; ctx.fillRect(x + 3 * scale, y + 3 * scale, W - 6 * scale, 20 * scale);
+    // หัวป้าย
+    ctx.textAlign = 'center'; ctx.fillStyle = '#fde68a';
+    ctx.font = `800 ${Math.max(6, 7.5 * scale)}px system-ui, sans-serif`;
+    ctx.fillText(info.g.name.slice(0, 14), x + W / 2, y + 14 * scale);
+    ctx.fillStyle = '#e7c9a0'; ctx.font = `${Math.max(5, 6 * scale)}px system-ui, sans-serif`;
+    ctx.fillText('Lv.' + info.g.lv + ' · ' + info.g.n + '/' + info.g.cap, x + W / 2, y + 25 * scale);
+    // รายชื่อ 12 คนแรก
+    const ms = info.members || [], show = ms.slice(0, 12);
+    ctx.textAlign = 'left'; ctx.font = `${Math.max(5, 6 * scale)}px system-ui, sans-serif`;
+    show.forEach((m, i) => {
+      const ly = y + 38 * scale + i * 8.5 * scale;
+      ctx.fillStyle = m.role === 'leader' ? '#fbbf24' : (m.role === 'officer' ? '#a5d8ff' : '#e2e8f0');
+      const tag = m.role === 'leader' ? '👑' : (m.role === 'officer' ? '⭐' : '·');
+      ctx.fillText(tag + ' ' + String(m.nm || '?').slice(0, 12), x + 7 * scale, ly);
+    });
+    if (ms.length > show.length) {
+      ctx.fillStyle = '#c9a988'; ctx.textAlign = 'center';
+      ctx.fillText(T('และอีก {n} คน', { n: ms.length - show.length }), x + W / 2, y + H - 7 * scale);
+    }
+    ctx.restore();
+  }
+  function buildGroundHome() { // สนามหญ้าส่วนตัว — bake ของตายตัว (พื้น/บ้าน/ทางหิน/ต้นไม้/ตกแต่ง) · แปลง/แท่น/ควันขึ้นกับ state → วาดต่อเฟรมใน drawHomeOverlay
+    groundCanvas = document.createElement('canvas');
+    groundCanvas.width = MAP_W; groundCanvas.height = MAP_H;
+    const g = groundCanvas.getContext('2d'); g.imageSmoothingEnabled = false;
+    // 🌿 พื้นหญ้าแบบทุ่งกลาง (2026-07-18 เจ้าของขอ — texture pattern เดียวกับแมพแรก ไม่ใช่สีเรียบ+จุด)
+    g.fillStyle = (SUM['bg'] && SUM['bg'].naturalWidth) ? g.createPattern(SUM['bg'], 'repeat') : '#b5e08a';
+    g.fillRect(0, 0, MAP_W, MAP_H);
+    let hs = 5150; const hrnd = () => { hs = (hs * 1664525 + 1013904223) & 0xffffffff; return (hs >>> 0) / 0xffffffff; };
+    const _img = k => { const m = SUM[k]; return (m && m.complete && m.naturalWidth) ? m : null; };
+    const _inYard = (x, y) => x > 560 && x < 1620 && y > 740 && y < 1740; // เขตสนาม (บ้าน/บ่อ/แท่นแถวซ้าย/แปลง) — ของใหญ่ห้ามทับ
+    // ── decor ชุดทุ่งกลางล้วน (pool + ขนาดเดียวกับ treeSpr แมพแรก: สูง = size×2.2 bottom-anchor) ──
+    const _hPools = {
+      tree:  ['g_tree1','g_tree2','g_tree3','g_tree4','g_tree5'],
+      btree: ['g_btree1','g_btree2','g_btree3','g_btree4'],
+      bushB: ['g_bush1','g_bush2','g_bush3','g_bush4','g_bush5','g_bush6','g_bush14','g_bush17'],
+      bushS: ['g_bush7','g_bush8','g_bush10','g_bush11','g_bush12','g_bush13','g_bush15','g_bush18','g_bush9','g_bush16','g_bush19'],
+      flower: Array.from({ length: 11 }, (_, i) => 'g_flower' + (i + 1)),
+      rock:  ['g_rock1','g_rock2','g_rock3','g_rock4','g_rock5'],
+    };
+    const _hDraw = (pool, x, y, size) => { // วาดแบบ treeSpr แมพแรกเป๊ะ: h = size×2.2 · bottom-anchor · คมไม่เบลอ
+      const img = _img(pool[(hrnd() * pool.length) | 0]); if (!img) return;
+      const h = size * 2.2, w = h * (img.naturalWidth / img.naturalHeight);
+      g.drawImage(img, x - w / 2, y - h, w, h);
+    };
+    // ดอกไม้/พุ่มเล็ก (field ทุ่งกลาง size 11-19) — ทั่วแมพ ในสนามเบาบาง
+    for (let i = 0; i < 500; i++) {
+      const x = hrnd() * (MAP_W - 60) + 30, y = hrnd() * (MAP_H - 60) + 30;
+      if (_inYard(x, y) && hrnd() < 0.72) continue;
+      _hDraw(hrnd() < 0.6 ? _hPools.flower : _hPools.bushS, x, y, 11 + hrnd() * 8);
+    }
+    // หินก้อนเล็กประปราย (นอกสนาม)
+    for (let i = 0; i < 40; i++) {
+      const x = hrnd() * (MAP_W - 80) + 40, y = hrnd() * (MAP_H - 80) + 40;
+      if (_inYard(x, y)) continue;
+      _hDraw(_hPools.rock, x, y, 14 + hrnd() * 10);
+    }
+    // ทางหิน: จากหน้าประตูบ้าน (990,1092) → spawn (1125,1210) → ลานหน้าแปลง
+    const pt = _img('hm_path');
+    if (pt) {
+      const _pathAt = (x, y) => g.drawImage(pt, x - 22, y - 22, 44, 44);
+      for (let t = 0; t <= 8; t++) _pathAt(990 + (1125 - 990) * t / 8, 1092 + (1210 - 1092) * t / 8);
+      for (let t = 1; t <= 4; t++) _pathAt(1125, 1210 + 18 * t); // ลงไปทางแปลง
+      _pathAt(1168, 1210); _pathAt(1082, 1210); // ลานกว้างตรง spawn
+    }
+    // 💧 บ่อน้ำขวาบ้าน (เจ้าของขอ 2026-07-18) — โมดูล M01F เดียวกับบ่อทุ่งกลาง/Oasis (พรมดิน+ชั้นน้ำ bake · ตลิ่ง/คลื่น animated ต่อเฟรม)
+    _homePond = _bakePondM01F(g, 1390, 935, 0.8, hrnd);
+    // บ้าน (bake — ตายตัว) + ลังไม้ข้างบ้าน + หุ่นไล่กาข้างแปลง
+    const hh = _img('hm_house'); if (hh) g.drawImage(hh, HOME_HOUSE.x, HOME_HOUSE.y, HOME_HOUSE.w, HOME_HOUSE.h);
+    const cr = _img('hm_crates'); if (cr) g.drawImage(cr, 1140, 1010, 74, 76);
+    const sc = _img('hm_scarecrow'); if (sc) g.drawImage(sc, 1490, 1330, 72, 99);
+    // 🌳 ต้นไม้ชุดทุ่งกลาง (2026-07-18 เจ้าของขอสวยแบบแมพแรก): วงแหวนต้นใหญ่รอบสนาม + scatter ทั้งแมพ (ขนาดเดียวกับ treeSpr)
+    for (let a = 0; a < 40; a++) { // วงแหวนรั้วธรรมชาติ (เว้นประตูทางใต้)
+      const ang = (a / 40) * Math.PI * 2;
+      if (ang > 1.25 && ang < 1.85) continue;
+      const x = 1170 + Math.cos(ang) * (490 + hrnd() * 60), y = 1240 + Math.sin(ang) * (620 + hrnd() * 60);
+      if (_inYard(x, y) || x < 60 || x > MAP_W - 60 || y < 90 || y > MAP_H - 30) continue;
+      _hDraw(hrnd() < 0.2 ? _hPools.btree : _hPools.tree, x, y, 64 + hrnd() * 24); // สูง ~141-194 (เจ้าของขอใหญ่ขึ้นอีก 2026-07-19 — วงแหวนรอบบ้านเด่นสุด · ตอไม้ 20%)
+    }
+    for (let i = 0; i < 180; i++) { // scatter — mix 70% ต้นไม้ / 30% พุ่มใหญ่ (ขยายจาก 18-32 → 24-40 เจ้าของขอต้นใหญ่)
+      const x = hrnd() * (MAP_W - 120) + 60, y = hrnd() * (MAP_H - 140) + 80;
+      if (_inYard(x, y)) continue;
+      _hDraw(hrnd() < 0.7 ? _hPools.tree : _hPools.bushB, x, y, 32 + hrnd() * 20); // ขยาย 24-40 → 32-52 (เจ้าของขอใหญ่ขึ้นอีก 2026-07-19)
+    }
+    // 🌲 แนวป่า (2026-07-18 เจ้าของขอ "โล่งไป ขอแนวป่าๆ"): ป่าชายแมพหนารอบขอบ + หย่อมป่ากลางทุ่ง
+    //    เขตกันชนใหญ่กว่า _inYard (+60px รอบด้าน) — เรือนยอดต้นสูง ~90px ยื่นจากฐาน ไม่ให้ทับบ้าน/แปลง/บ่อ/แท่น · เว้นทางเดินออกใต้
+    const _nearYard   = (x, y) => x > 500 && x < 1680 && y > 680 && y < 1800;
+    const _inSouthGate = (x, y) => x > 1020 && x < 1280 && y > 1640; // ทางออกใต้ (ตรงช่องรั้ววงแหวน) — ไม่ปลูกขวาง
+    for (let i = 0; i < 420; i++) { // ป่าชายแมพ: กรอบหนา ~260px — เข้มริมขอบ จางเข้าใน (bias กำลังสอง)
+      const edge = (hrnd() * 4) | 0, d = hrnd() * hrnd() * 260, along = hrnd() * MAP_W;
+      const x = edge === 2 ? 30 + d : (edge === 3 ? MAP_W - 30 - d : along);
+      const y = edge === 0 ? 90 + d : (edge === 1 ? MAP_H - 20 - d : along);
+      if (x < 30 || x > MAP_W - 30 || y < 90 || y > MAP_H - 20) continue;
+      if (_nearYard(x, y) || _inSouthGate(x, y)) continue;
+      _hDraw(hrnd() < 0.2 ? _hPools.btree : _hPools.tree, x, y, 56 + hrnd() * 26); // ต้นใหญ่ สูง ~123-180 (เจ้าของขอใหญ่ขึ้นอีก 2026-07-19 · ตอไม้ 20%)
+    }
+    for (let c = 0; c < 10; c++) { // หย่อมป่ากลางทุ่ง 10 หย่อม (5-9 ต้น/หย่อม ±110px) — เติมความเป็นป่าโดยไม่ทึบทั้งแมพ
+      const cx = 160 + hrnd() * (MAP_W - 320), cy = 220 + hrnd() * (MAP_H - 420);
+      if (_nearYard(cx, cy)) continue; // ศูนย์หย่อมตกใกล้สนาม → ข้ามทั้งหย่อม
+      const n = 5 + ((hrnd() * 5) | 0);
+      for (let t = 0; t < n; t++) {
+        const x = cx + (hrnd() - 0.5) * 220, y = cy + (hrnd() - 0.5) * 220;
+        if (x < 40 || x > MAP_W - 40 || y < 100 || y > MAP_H - 30) continue;
+        if (_nearYard(x, y) || _inSouthGate(x, y)) continue;
+        _hDraw(hrnd() < 0.25 ? _hPools.btree : _hPools.tree, x, y, 50 + hrnd() * 20); // สูง ~110-154 (เจ้าของขอใหญ่ขึ้นอีก 2026-07-19 · ตอไม้ 25%)
+      }
+    }
+    // 🌳 ต้นไม้ "ในสนาม" รอบบ้าน + รอบบ่อน้ำ (เจ้าของขอ 2026-07-19 — เดิมสนามโล่งเพราะ _inYard กันทั้งผืน)
+    //    เว้นเฉพาะ: ตัวบ้าน±40 · บ่อ (r150) · โซนแปลงปลูก 6+ลานหน้าแปลง+หุ่นไล่กา · ทางหิน+จุดเกิด
+    //    ต้นฐานอยู่ใต้บ้าน = วาดทับบ้าน (ถูก perspective — ของอยู่หน้าล่างบังของหลัง) · ขนาดย่อมกว่าวงแหวนนอกให้มีชั้นความลึก
+    const _inHouseZ = (x, y) => x > HOME_HOUSE.x - 40 && x < HOME_HOUSE.x + HOME_HOUSE.w + 40 && y > HOME_HOUSE.y - 30 && y < HOME_HOUSE.y + HOME_HOUSE.h + 26;
+    const _inPondZ  = (x, y) => Math.hypot(x - 1390, y - 935) < 150;
+    const _inPlotsZ = (x, y) => x > 830 && x < 1500 && y > 1240 && y < 1700; // แปลง+ลาน+หุ่นไล่กา — ห้ามมีต้นไม้ (มติเจ้าของ)
+    const _inPathZ  = (x, y) => x > 940 && x < 1220 && y > 1050 && y < 1310; // ทางหินหน้าบ้าน→spawn
+    const _okYardTree = (x, y) => x > 60 && x < MAP_W - 60 && y > 100 && y < MAP_H - 30
+      && !_inHouseZ(x, y) && !_inPondZ(x, y) && !_inPlotsZ(x, y) && !_inPathZ(x, y);
+    for (let i = 0; i < 26; i++) { // วงรอบบ้าน
+      const ang = hrnd() * Math.PI * 2, r = 150 + hrnd() * 130;
+      const x = HOME_HOUSE.x + HOME_HOUSE.w / 2 + Math.cos(ang) * (r + 60), y = HOME_HOUSE.y + HOME_HOUSE.h / 2 + Math.sin(ang) * r;
+      if (!_okYardTree(x, y)) continue;
+      _hDraw(hrnd() < 0.25 ? _hPools.btree : _hPools.tree, x, y, 44 + hrnd() * 20); // สูง ~97-141
+    }
+    for (let i = 0; i < 18; i++) { // วงรอบบ่อน้ำ
+      const ang = hrnd() * Math.PI * 2, r = 165 + hrnd() * 90;
+      const x = 1390 + Math.cos(ang) * (r + 30), y = 935 + Math.sin(ang) * r;
+      if (!_okYardTree(x, y)) continue;
+      _hDraw(hrnd() < 0.2 ? _hPools.btree : _hPools.tree, x, y, 38 + hrnd() * 18); // สูง ~84-123
+    }
+    groundReady = true; _groundMap = 5; // ⚠️ ห้ามลืม (บั๊กจริง 2026-07-18): ไม่ set = ล็อกอินค้างในบ้านแล้ว drawTiles ใช้ fallback สีเขียวเปล่า — บ้าน/ต้นไม้ที่ bake ไว้หายทั้งแมพ
+  }
+  function drawHomeOverlay() { // 🏡 วาดต่อเฟรม (หลังพื้น ก่อน entity — mirror drawWinterTree): ควันไฟ + แท่นสะสม 6 + แปลง 6 ตามระดับบ้าน
+    const { scale } = getCameraTransform(); // ⚠️ วัตถุยึดพิกัดโลก → ใช้ scale ล้วน ห้าม /displayScale
+    const t0 = toScreen(560, 700), t1 = toScreen(1620, 1780);
+    if (t1.x < -120 || t0.x > canvas.width + 120 || t1.y < -120 || t0.y > canvas.height + 120) return; // นอกจอ — ข้าม (ครอบแท่นแถวซ้าย+บ่อขวา)
+    const _sm = ctx.imageSmoothingEnabled; ctx.imageSmoothingEnabled = false;
+    const _img = k => { const m = SUM[k]; return (m && m.complete && m.naturalWidth) ? m : null; };
+    // ── 💧 บ่อน้ำขวาบ้าน — ตลิ่งหิน/คลื่น/ใบบัว animated (โมดูลเดียวกับบ่อทุ่งกลาง · มี cull ในตัว) ──
+    _drawPondM01F(_homePond);
+    // ── ควันปล่องไฟ (6 เฟรม 48px · 150ms) — ลอยเหนือปล่องซ้ายบนของบ้าน ──
+    const sm = _img('hm_smoke');
+    if (sm) {
+      const f = ((performance.now() / 150) | 0) % 6;
+      const s = toScreen(922, 858), w = 64 * scale;
+      ctx.globalAlpha = 0.9;
+      ctx.drawImage(sm, f * 48, 0, 48, 48, s.x - w / 2, s.y - w, w, w);
+      ctx.globalAlpha = 1;
+    }
+    // ── แท่นโชว์ของสะสม 6 แท่น — ⛔ ปิดชั่วคราว (เจ้าของ 2026-07-19 "ดูตลก") · เปิดกลับ: เอา if(false) ออก ──
+    //    popup เยี่ยมบ้านเพื่อน (homeVisit) ยังโชว์รายการของสะสมตามเดิม — ปิดเฉพาะรูปแท่นบนแมพ
+    if (false) {
+    const pil = _img('hm_pillar');
+    const _tOwned = (() => { const t = player && player.treasures; return Array.isArray(t) ? t : (typeof t === 'string' ? (JSON.parse(t || '[]') || []) : []); })();
+    HOME_PEDS.forEach((p, i) => {
+      const s = toScreen(p.x, p.y);
+      if (pil) { const w = 62 * scale, h = w * (64 / 56); ctx.drawImage(pil, s.x - w / 2, s.y - h, w, h); }
+      const tm = TREASURE_MASTER.find(t => t.id === i + 1); if (!tm) return;
+      const owned = _tOwned.includes(i + 1);
+      ctx.save();
+      ctx.font = `${Math.max(8, Math.round(20 * scale))}px sans-serif`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.globalAlpha = owned ? 1 : 0.35;
+      ctx.fillText(owned ? tm.icon : '❔', s.x, s.y - 52 * scale);
+      ctx.restore();
+    });
+    }
+    // ── แปลงปลูก 6 (4×4) — Phase A: แปลง 1 เปิด · 2-6 ปลดที่ home_lv 20/40/60/80/100 (จางล็อก+ป้าย Lv) ──
+    const pl = _img('hm_plot');
+    const _hlv = (_homeSrc().home_lv | 0) || 1; // 🏡👥 เยี่ยมบ้านเพื่อน = ใช้ระดับบ้านเจ้าของ (แปลงที่ปลดตรงกับของเขา)
+    const _unl = 1 + [20, 40, 60, 80, 100].filter(q => _hlv >= q).length;
+    HOME_PLOTS.forEach((p, i) => {
+      const s = toScreen(p.x, p.y), w = HOME_PLOT_SZ * scale;
+      const open = i < _unl;
+      if (pl) { ctx.globalAlpha = open ? 1 : 0.4; ctx.drawImage(pl, s.x, s.y, w, w); ctx.globalAlpha = 1; }
+      if (!open) {
+        ctx.save();
+        ctx.font = `${Math.max(8, Math.round(17 * scale))}px sans-serif`;
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText('🔒', s.x + w / 2, s.y + w / 2 - 9 * scale);
+        ctx.font = `700 ${Math.max(7, Math.round(11 * scale))}px sans-serif`;
+        ctx.fillStyle = '#fef3c7';
+        ctx.fillText('Lv.' + [20, 40, 60, 80, 100][i - 1], s.x + w / 2, s.y + w / 2 + 11 * scale);
+        ctx.restore();
+      }
+    });
+    // ── 🌱 พืชในหลุม — stage ตามเวลาจริง: <1/3 หน่อ · <2/3 ต้นเตี้ย · <1 พุ่ม · สุก = ต้นโตสายพันธุ์จริง (+เด้งเบาๆ + ✨ทอง) ──
+    const _nowS = Date.now() / 1000;
+    const _cw = HOME_PLOT_SZ / 4; // ช่องหลุม world px (37.5)
+    _homeCropsArr().forEach(c => {
+      const base = HOME_PLOTS[c.p]; if (!base || c.p >= _unl) return;
+      const frac = Math.min(1, (_nowS - c.t) / seedGrowS(c.s));
+      const ripe = frac >= 1;
+      const key = ripe ? ('hm_crop' + seedSprite(c.s) + (seedGold(c.s) ? 'g' : '')) : ('hm_sprout' + (frac < 0.34 ? 1 : (frac < 0.67 ? 2 : 3)));
+      const img = _img(key); if (!img) return;
+      const cx = base.x + ((c.i % 4) + 0.5) * _cw, cy = base.y + (((c.i / 4) | 0) + 0.85) * _cw;
+      const bob = ripe ? Math.sin(performance.now() / 300 + c.i) * 1.5 : 0; // สุกแล้วเด้งเบาๆ เรียกเก็บ
+      const ww = (ripe ? 34 : 24) * scale, hh = ww * (img.naturalHeight / img.naturalWidth);
+      const sc = toScreen(cx, cy + bob);
+      ctx.drawImage(img, sc.x - ww / 2, sc.y - hh, ww, hh); // bottom-anchor กลางหลุม
+      if (ripe && seedGold(c.s)) {
+        ctx.save(); ctx.font = `${Math.max(7, Math.round(11 * scale))}px sans-serif`; ctx.textAlign = 'center';
+        ctx.fillText('✨', sc.x + 10 * scale, sc.y - hh - 2 * scale); ctx.restore();
+      }
+    });
+    ctx.imageSmoothingEnabled = _sm;
+  }
   function buildGround() {
+    if (currentMap === 5) { buildGroundHome(); return; }    // 🏡 บ้านของฉัน — สนามหญ้าส่วนตัว (docs/home-design.md)
     if (currentMap === 4) { buildGroundDesert(); return; } // 🏛️ สนามประลอง — ใช้พื้นทรายชุดเดียวกับทะเลทราย (สเปคเจ้าของ ไม่ทำ asset ใหม่)
-    if (currentMap === 3) { buildGroundWinter(); return; } // ดินแดนเยือกแข็ง (ไม่ใช้ waterBlobs/เกาะ)
-    if (currentMap === 2) { buildGroundDesert(); return; } // ทะเลทราย (ไม่ใช้ waterBlobs/เกาะ)
-    if (!waterBlobs) return;
+    if (currentMap === 3 || currentMap === 9) { buildGroundWinter(); return; } // ดินแดนเยือกแข็ง (ไม่ใช้ waterBlobs/เกาะ)
+    if (currentMap === 6) { buildGroundSeabed(); return; } // 🌊 ดินแดนใต้ทะเลลึก
+    if (currentMap === 10) { buildGroundDragon(); return; } // 🐉 ป่ามังกรโบราณ (M05 rocky)
+    if (currentMap === 11) { buildGroundCastle(); return; } // 🏯 ปราสาทกิล — โตตาม Lv กิล (docs/guild-castle-design.md)
+    if (currentMap === 12) { buildGroundGdun(); return; }   // 🕳️ ดันกิล — พื้นหินย้อมมืด (docs/guild-dungeon-design.md)
+    if (currentMap === 2 || currentMap === 8) { buildGroundDesert(); return; } // ทะเลทราย (+ 🌱 map8 ผู้เล่นใหม่ = พื้นทรายชุดเดียวกัน)
+    if (!waterBlobs) return; // 🌱 map7 ผู้เล่นใหม่ = ตกมา = พื้นหญ้าแบบ map1 อัตโนมัติ
     groundCanvas = document.createElement('canvas');
     groundCanvas.width = MAP_W; groundCanvas.height = MAP_H;
     const g = groundCanvas.getContext('2d');
@@ -1070,14 +1723,33 @@ const xhrpg = (() => {
   // กดค้างเกิน 1.5s = ไม่ใช่การแตะปุ่ม (ลากจอ/ค้าง) → ไม่บล็อกการรีเฟรชยาว
   function _uiTouchBusy() { return (_uiPtrDownAt && Date.now() - _uiPtrDownAt < 1500) || (Date.now() - _uiPtrUpAt < 350); }
   let _tabHiddenAt = 0;     // เวลาเริ่มซ่อนแท็บ (0 = แสดงอยู่) — ซ่อนครบ 10 นาที schedulePoll หยุด → gap สะสมเข้า offline catch-up
-  let _lastInputAt = Date.now(); // 😴 เวลา input จริงล่าสุด (กด/แตะ/คีย์/ล้อเมาส์) — จอเปิดแต่ไม่กดเกิน 10 นาที = พักจอเข้าโหมด offline
+  let _lastInputAt = Date.now(); // 😴 เวลา input จริงล่าสุด (กด/แตะ/คีย์/ล้อเมาส์) — จอเปิดแต่ไม่กดเกินเพดาน = พักจอเข้าโหมด offline
+  // 👑😴 สิทธิ์ VIP "เปิดหน้าจอได้นานขึ้น" (docs/vip-idle-extend-design.md · เจ้าของเคาะ 2026-07-28)
+  //    ⚠️ มิเรอร์ xhrpg_config.php (XHRPG_VIP_IDLE_*) — ปรับเรตต้องแก้ 2 ที่ · **ด่านจริงอยู่ server** ตรงนี้แค่ทำให้ UI ตรงกัน
+  //    ตัวเลขในหน้า VIP/คู่มือสร้างจากค่าชุดนี้ ไม่ฝังในคำแปล → ปรับเรตแล้วทุกภาษาเปลี่ยนตามเอง
+  // 👑 ระดับ VIP สูงสุด — ⚠️ มิเรอร์ XHRPG_VIP_MAX ฝั่ง server · ทุกจุดที่ clamp ระดับต้องใช้ตัวนี้ ห้าม hardcode เลข
+  //    (ตอนขยาย 10 → 15 ต้องไล่แก้ min(10,…) ถึง 15 จุดฝั่ง server — const นี้กันไม่ให้เกิดซ้ำ · docs/vip-11-15-design.md)
+  const VIP_MAX = 15;
+  // 😴 เพดานพักจอเป็น "นาที" ต่อระดับ VIP — ดัชนี = ระดับ (0..VIP_MAX) · มิเรอร์ XHRPG_VIP_IDLE_MIN ฝั่ง server
+  //    เจ้าของปรับรอบ 5 (2026-07-28): เส้นไม่เป็นสูตรเดียว (VIP1-5 ทีละ +5 · VIP6-9 ทีละ +10 · VIP10 กระโดด 90 · VIP11+ ทีละ +30) → เก็บเป็นตาราง
+  const VIP_IDLE_MIN = [10, 15, 20, 25, 30, 35, 45, 55, 65, 75, 90, 120, 150, 180, 210, 240];
+  // 🪓 เอฟเฟกต์วง AOE ขวานไททัน — ปิดชั่วคราว (เจ้าของสั่ง 2026-07-28 "ขวานหมุนๆ บนแผนที่ มันแปลกๆ")
+  //    ปิดแค่ภาพเท่านั้น ดาเมจ AOE ยังทำงานครบ (คิดฝั่ง server) · เปิดคืน = เปลี่ยนเป็น true
+  const AXE_AOE_FX = false;
+  function _idleCutMin(vipLv) {
+    const v = Math.max(0, Math.min(VIP_MAX, vipLv | 0));
+    return VIP_IDLE_MIN[v] !== undefined ? VIP_IDLE_MIN[v] : VIP_IDLE_MIN[0];
+  }
+  const _idleCutMs  = () => _idleCutMin(player ? player.vip_lv : 0) * 60000;
   let _actFlag = true;           // เริ่ม true = poll แรกหลังโหลดหน้า/F5 ส่ง act=1 เสมอ (โหลดหน้า = มีตัวตนสด) → กัน last_action_at เก่าใน blob เด้ง overlay พักจอทันที · หลังจากนั้น true เมื่อมี input จริง (กด/แตะ/คีย์/ล้อ)
   let _pollStopped = false; // true เมื่อถูก kick/logout — กัน visibilitychange resume กลับมา
   let _inflight = false;    // มี poll request ค้างอยู่ — กัน visibilitychange ยิงซ้อนเป็นสองลูป
   let _pollFails = 0;       // จำนวน poll พังติดกัน (เน็ตล่ม/โดน rate limit 1015/429) → ชะลอรอบถัดไปแบบทวีคูณ กันยิงรัวต่ออายุแบน Cloudflare
   // ── B2: player hot/cold split — poll ปกติ (ไม่เปิด panel) server ส่ง hot only · cold (คลัง/การ์ด/ไข่/ของสะสม) carry-forward ──
   let _pollN = 0; // นับ poll → ขอ full ทุก 10 รอบ (refresh cold ที่ tick-drop อาจเปลี่ยนตอนไม่เปิด panel)
-  const _COLD_FIELDS = ['module_inventory','sniper_module_inventory','knife_module_inventory','axe_module_inventory','robot_module_inventory','robot_gun_module_inventory','railgun_module_inventory','armor_module_inventory','house_module_inventory','turret_module_inventory','cards','eggs','treasures','treasures_qty','hardware','hardware_qty','weapon_parts','weapon_parts_qty','house_parts','house_parts_qty','stat_parts','stat_parts_qty']; // sync ต้องตรงกับ xhrpg_game.php B2
+  const _COLD_FIELDS = ['module_inventory','sniper_module_inventory','knife_module_inventory','axe_module_inventory','robot_module_inventory','robot_gun_module_inventory','railgun_module_inventory','armor_module_inventory','house_module_inventory','turret_module_inventory','cards','eggs','treasures','treasures_qty','hardware','hardware_qty','weapon_parts','weapon_parts_qty','house_parts','house_parts_qty','stat_parts','stat_parts_qty','eq2_inv',
+    'pistol_modules','sniper_modules','knife_modules','axe_modules','robot_modules','robot_gun_modules','railgun_modules','armor_modules','house_modules','turret_modules', // Q2b: โมดูลที่สวม 10 ชุด — endpoint เปลี่ยนของตอบ player เต็ม + แผงใน _COLD_PANELS ขอ full เอง
+    'home_crops']; // Q2b: แปลงผัก — server ส่งเฉพาะ map 5 · นอกบ้าน carry-forward (โตตาม timestamp ฝั่ง client อยู่แล้ว) · sync ต้องตรงกับ xhrpg_game.php B2
   const _COLD_PANELS = { gun:1, item:1, stat:1, robot:1, house:1, card:1, market:1, pet:1 }; // panel ที่อ่าน cold → เปิดอยู่ = ขอ full ให้สดเสมอ
   let sessionToken = null;
   let logLines  = [];
@@ -1294,7 +1966,7 @@ const xhrpg = (() => {
   // ── Zoom ─────────────────────────────────────────────────────────────────────
   const DEFAULT_ZOOM = 2.0;
   const DEFAULT_ZOOM_IDX = ZOOM_STEPS.indexOf(DEFAULT_ZOOM); // index 5 (2.0) — ถอยออก 2 step
-  const MIN_ZOOM_IDX = DEFAULT_ZOOM_IDX - 1; // zoom out ได้อีกแค่ 1 step จากระยะตั้งต้น
+  const MIN_ZOOM_IDX = DEFAULT_ZOOM_IDX - 2; // zoom out ได้ 2 step จากระยะตั้งต้น (2026-07-18 เจ้าของขอเพิ่มอีก step — เดิม 1)
 
   function zoom(dir) {
     const idx = ZOOM_STEPS.indexOf(zoomLevel);
@@ -1366,7 +2038,7 @@ const xhrpg = (() => {
     //    ⚠️ เฉพาะ map 1 เท่านั้น — treeSpr คือต้นไม้/พุ่ม grassland ของทุ่งกลาง (gen ใน buildTiles)
     //    เดิมวาดทุกแมพ → ต้นเขียวโผล่บนทะเลทราย/ดินแดนเยือกแข็ง (แมพ 2/3 มี decor bake ของตัวเองแล้ว)
     ctx.textAlign = 'center';
-    if (currentMap === 1) for (const t of treeSpr) {
+    if (currentMap === 1 || currentMap === 7) for (const t of treeSpr) { // 🌱 map7 ผู้เล่นใหม่ = ต้นไม้/หินตกแต่งเหมือน map1
       const sx = t.wx * scale + ox, sy = t.wy * scale + oy;
       if (sx < -160 || sx > canvas.width + 160 || sy < -320 || sy > canvas.height + 60) continue; // margin กว้างขึ้น — หิน/ต้นไม้ใหญ่ไม่วูบหายขอบจอ
       // sprite grassland (pixel-art) — ฐาน sprite อยู่ที่จุด (bottom-anchored) วาดคมไม่เบลอ · ยังไม่โหลด → fallback ชุดเดิม
@@ -1660,6 +2332,11 @@ const xhrpg = (() => {
   }
 
   // ── 🐾 สัตว์เลี้ยงมอนสเตอร์ (ฟักจากไข่ · เดินตามเจ้าของ · เพื่อนเห็นด้วยผ่าน others[].pet_mid) — docs/pet-system-design.md ──
+  //   🔧 2 ตัวเลขคุมขนาดสัตว์เลี้ยงทั้งหมด (ปรับที่นี่ที่เดียว มีผลทั้งของเราและของเพื่อน)
+  //      เทียบเคียง: คู่หู (สกิน) วาดที่ 31.5×scale · สัตว์เลี้ยงที่ cap 1.6 = 34×scale → ใหญ่กว่าคู่หูนิดเดียว
+  //      ก่อนแก้: ปลาพิษ Lv62-64 = 63×scale · ฉลาม Lv69 = 101×scale · MVP ฉลาม = 212×scale (บังจอ)
+  const PET_MON_SIZE_CAP = 1.6;  // เพดาน MON_SIZE ตอนวาดเป็นสัตว์เลี้ยง (มอนบนแมพยังใหญ่เท่าเดิม ไม่กระทบ)
+  const PET_MON_MVP_MUL  = 3;    // ⭐ สัตว์เลี้ยง MVP ใหญ่กว่าตัวปกติ **3 เท่า** (เจ้าของเคาะ 2026-07-28 · ไล่มา 2.1 → 1.6 → 1.5 → 2 → 3)
   let _mpX = null, _mpY = null, _mpFace = 1; // state ตัวเรา (lerp-trail แบบเดียวกับหมา)
   let _oMonPetS = {};                        // state ต่อเพื่อน {key:{x,y,face}}
   function _drawMonPetSprite(mid, mvp, wx, wy, face, moving, ownerName, mine, alpha) {
@@ -1667,8 +2344,14 @@ const xhrpg = (() => {
     const { scale } = getCameraTransform();
     const s = toScreen(wx, wy);
     if (s.x < -90 || s.x > canvas.width + 90 || s.y < -90 || s.y > canvas.height + 90) return;
-    const sizeMult = mvp ? 2.1 : 1;                   // MVP: ×3 −30% = ×2.1 (บอกว่า MVP ด้วยดาวเหนือหัวแทน — เดิม ×3 ใหญ่เกิน)
-    const fs = Math.round(15.4 * scale * sizeMult);   // ขนาดเท่ามอนในแผนที่ (drawMonsters)
+    // 🐾 ขนาดสัตว์เลี้ยง — **ไม่ใช่ขนาดเท่ามอนบนแมพอีกแล้ว** (เจ้าของแจ้ง 2026-07-28 "บางตัวใหญ่ผิดปกติ")
+    //   เดิม asz = fs × 1.368 × MON_SIZE[lv] = ขนาดมอนจริงเป๊ะ → ฟักไข่มอนตัวใหญ่ (ฉลาม MON_SIZE 4.8 · ปลาพิษ 3)
+    //   ได้สัตว์เลี้ยงเท่าตัวมอนกลางจอ · MVP ยิ่งคูณอีก 2.1 = บังทั้งหน้าจอ
+    //   แก้: จำกัดเพดาน MON_SIZE เฉพาะตอนวาดเป็น "สัตว์เลี้ยง" → ทุกสายพันธุ์ลงมาอยู่ในย่านเดียวกัน
+    //   ตัวเล็กอยู่แล้ว (Lv1-9 MON_SIZE=1) ไม่โดนกระทบ — เล็กก็เล็กตามเดิม
+    const petSize  = Math.min(MON_SIZE[mm.lv || 1] || 1, PET_MON_SIZE_CAP);
+    const sizeMult = mvp ? PET_MON_MVP_MUL : 1;       // ⭐ MVP ใหญ่กว่าปกติ แต่ไม่เท่ามอน MVP จริง (มีดาวเหนือหัวบอกอยู่แล้ว)
+    const fs = Math.round(15.4 * scale * sizeMult);
     const lv = mm.lv || 1;
     const sheetKey = MON_ANIM[lv], anim = sheetKey ? SUM[sheetKey] : null;
     const grid = MON_GRID[sheetKey] || _MON_GRID_DEF;
@@ -1677,8 +2360,8 @@ const xhrpg = (() => {
     if (anim && anim.complete && anim.naturalWidth) {
       const cols = grid.cols, rows = grid.rows;
       const fw = anim.naturalWidth / cols, fh = anim.naturalHeight / rows;
-      const col = moving ? (Math.floor(Date.now() / 130) % cols) : 0; // เฟรมเดิน 130ms เท่ามอนจริง
-      const asz = fs * 1.368 * (MON_SIZE[lv] || 1);
+      const col = moving ? (Math.floor((Date.now() + 600) / 130) % cols) : 0; // เฟรมเดิน 130ms เท่ามอนจริง · +600ms เฟส (🎲 desync)
+      const asz = fs * 1.368 * petSize;   // 🐾 ใช้ petSize (มีเพดาน) ไม่ใช่ MON_SIZE ดิบ
       ctx.translate(s.x, s.y);
       if (face > 0) ctx.scale(-1, 1); // แถวเดินข้าง: default หันซ้าย → พลิกเมื่อไปขวา (convention เดียวกับ drawMonsters)
       ctx.drawImage(anim, col * fw, 2 * fh, fw, fh, -asz / 2, -asz / 2, asz, asz); // row 2 = เดินข้าง
@@ -1852,13 +2535,111 @@ const xhrpg = (() => {
     if (_moving || _casting) startAnim();
   }
 
+  // ── ⚔️ Premium Skeleton Knight (149P/10วัน) — สายบุก: ตำแหน่งจริงมาจาก server (knight_x/y — วิ่งหามอนเอง) ──
+  function drawKnight() {
+    if (!player || (parseInt(player.knight_expires) || 0) <= Math.floor(Date.now() / 1000)) return;
+    const { scale } = getCameraTransform();
+    const _kx = player.knight_x != null ? parseFloat(player.knight_x) : player.x + 16;
+    const _ky = player.knight_y != null ? parseFloat(player.knight_y) : player.y + 12;
+    const _tp = smoothed('knight', _kx, _ky);
+    const s = toScreen(_tp.x, _tp.y);
+    // 💠 Frost Aura — วงกลมฟ้าอ่อนติดตัวตลอด (รัศมีจริง 10m + 0.1m/Lv · sync server $_knAoe) · pulse เบาๆ (วาดใต้ตัว)
+    const _knAoePx = (10 + 0.1 * ((parseInt(player.knight_lv) || 1) - 1)) * 3; // เดิม 90px คงที่
+    ctx.save();
+    ctx.globalAlpha = 0.14 + 0.08 * Math.abs(Math.sin(Date.now() / 450));
+    ctx.fillStyle = '#7dd3fc';
+    ctx.beginPath(); ctx.arc(s.x, s.y, _knAoePx * scale, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 0.5;
+    ctx.strokeStyle = '#38bdf8'; ctx.lineWidth = Math.max(1, 1.6 * scale); ctx.setLineDash([6 * scale, 4 * scale]);
+    ctx.beginPath(); ctx.arc(s.x, s.y, _knAoePx * scale, 0, Math.PI * 2); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+    startAnim(); // pulse ต่อเนื่อง
+    const _moving = Math.abs(_tp.tx - _tp.sx) + Math.abs(_tp.ty - _tp.sy) > 0.25; // เกณฑ์เดิน 0.8→0.25 (อัศวินไถลช้า = โชว์ idle นิ่ง "ลอยๆ" · ลดให้ท่าเดินติดง่าย เจ้าของแจ้ง 2026-07-23)
+    let _fight = false; // ประชิดมอน (≤12m) = เล่นท่าฟัน
+    if (!_moving) { for (const m of monsters) { if (m && !m.is_dead && (m.x - _tp.x) ** 2 + (m.y - _tp.y) ** 2 < 36 * 36) { _fight = true; break; } } }
+    const sheet = SUM[_fight ? 'knight_attack' : (_moving ? 'knight_walk' : 'knight_idle')];
+    if (sheet && sheet.complete && sheet.naturalWidth) {
+      const fh = sheet.naturalHeight, frames = Math.max(1, Math.round(sheet.naturalWidth / fh)); // เฟรมจัตุรัส 128px แถวเดียว (bake แบบนักบวช)
+      const fi = Math.floor((Date.now() + 400) / (_moving ? 90 : 120)) % frames, sz = 60 * scale; // +400ms เฟส · เดิน 90ms (เร็วขึ้น = ขาสับชัด) · idle 120ms
+      ctx.save(); ctx.imageSmoothingEnabled = false; ctx.translate(s.x, s.y);
+      if (_tp.tx < _tp.sx) ctx.scale(-1, 1); // หันตามทิศเดิน
+      ctx.drawImage(sheet, fi * fh, 0, fh, fh, -sz / 2, -sz * 0.72, sz, sz);
+      ctx.restore();
+    } else {
+      ctx.save(); ctx.font = `${Math.round(15 * scale)}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('⚔️', s.x, s.y); ctx.restore();
+    }
+    if (_moving || _fight) startAnim();
+  }
+
+  // ── 🏺 สัตว์เทพ Anubis (docs/divine-pet-design.md) — ตำแหน่งจาก server (dv_x/dv_y) · ท่าฟันตอนประชิด · HP bar + 💫 สลบ ──
+  let _dvChainFx = null; // {segs:[{x1,y1,x2,y2}], born} — สายฟ้าลูกโซ่จาก event dv_chain (จางใน ~550ms)
+  let _dvAtkUntil = 0;   // เล่นท่า attack ชั่วครู่หลังตี/ยิงสายฟ้า
+  function drawDivine() {
+    if (!player || (parseInt(player.dv_pet) || 0) < 1 || (parseInt(player.dv_on ?? 1) || 0) !== 1) return;
+    const { scale } = getCameraTransform();
+    const _dx = player.dv_x != null ? parseFloat(player.dv_x) : player.x + 22;
+    const _dy = player.dv_y != null ? parseFloat(player.dv_y) : player.y - 10;
+    const _tp = smoothed('divine', _dx, _dy);
+    const s = toScreen(_tp.x, _tp.y);
+    const _down = !!(+player.dv_down || 0);
+    const _moving = Math.abs(_tp.tx - _tp.sx) + Math.abs(_tp.ty - _tp.sy) > 0.8;
+    let _fight = Date.now() < _dvAtkUntil;
+    if (!_fight && !_moving && !_down) { for (const m of monsters) { if (m && !m.is_dead && (m.x - _tp.x) ** 2 + (m.y - _tp.y) ** 2 < 36 * 36) { _fight = true; break; } } }
+    const sheet = SUM[_down ? 'anubis_idle' : (_fight ? 'anubis_attack' : (_moving ? 'anubis_walk' : 'anubis_idle'))];
+    if (sheet && sheet.complete && sheet.naturalWidth) {
+      const fh = sheet.naturalHeight, frames = Math.max(1, Math.round(sheet.naturalWidth / fh));
+      const fi = Math.floor((Date.now() + 800) / 120) % frames, sz = 93 * scale; // +800ms เฟส Anubis (🎲 desync) · ×1.5 จาก 62 (เจ้าของสั่ง 2026-07-23)
+      ctx.save(); ctx.imageSmoothingEnabled = false; ctx.translate(s.x, s.y);
+      if (_down) ctx.globalAlpha = 0.55;
+      if (_tp.tx > _tp.sx) ctx.scale(-1, 1); // ชีทหันซ้าย default → พลิกเมื่อไปขวา
+      ctx.drawImage(sheet, fi * fh, 0, fh, fh, -sz / 2, -sz * 0.72, sz, sz);
+      ctx.restore();
+    } else {
+      ctx.save(); ctx.font = `${Math.round(15 * scale)}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('🏺', s.x, s.y); ctx.restore();
+    }
+    // HP bar (มิเรอร์สัตว์เลี้ยง) + 💫 ตอนสลบ
+    const _hpM = _dvStatsC().hp_max, _hpC = Math.max(0, Math.min(_hpM, parseInt(player.dv_hp) || 0));
+    if (_hpM > 0 && (_hpC < _hpM || _down)) {
+      const bw = 34 * scale;
+      ctx.save();
+      ctx.fillStyle = 'rgba(15,23,42,.55)'; ctx.fillRect(s.x - bw / 2, s.y - 30 * scale, bw, 4 * scale);
+      ctx.fillStyle = _down ? '#f59e0b' : '#22c55e'; ctx.fillRect(s.x - bw / 2, s.y - 30 * scale, bw * (_hpC / _hpM), 4 * scale);
+      if (_down) { ctx.font = `${Math.round(12 * scale)}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText('💫', s.x, s.y - 36 * scale); }
+      ctx.restore();
+    }
+    if (_moving || _fight) startAnim();
+    // ⚡ สายฟ้าลูกโซ่ — ม่วงเทพ (เจ้าของเลือก 2026-07-22) · จาง 1.5s
+    if (_dvChainFx) {
+      const age = Date.now() - _dvChainFx.born;
+      if (age > 1500) { _dvChainFx = null; }
+      else {
+        ctx.save();
+        ctx.globalAlpha = 1 - age / 1500;
+        ctx.strokeStyle = '#a855f7'; ctx.lineWidth = Math.max(1.5, 2.2 * scale);
+        ctx.shadowColor = '#d8b4fe'; ctx.shadowBlur = 8 * scale;
+        _dvChainFx.segs.forEach(sg => {
+          const a = toScreen(sg.x1, sg.y1), b = toScreen(sg.x2, sg.y2);
+          ctx.beginPath(); ctx.moveTo(a.x, a.y);
+          const mx = (a.x + b.x) / 2 + (Math.random() - 0.5) * 14 * scale;
+          const my = (a.y + b.y) / 2 + (Math.random() - 0.5) * 14 * scale;
+          ctx.lineTo(mx, my); ctx.lineTo(b.x, b.y); ctx.stroke();
+        });
+        ctx.restore();
+        startAnim();
+      }
+    }
+  }
+
   // ── 🏹 Elf Archer (Premium 149P/10วัน) — เดินตามผู้เล่นเยื้องหลังขวา · เล่นท่ายิง (Attack) ตอนยิงธนู ──
   let _archerShootUntil = 0, _archerAimX = null, _archerAimY = null; // ท่า Attack + ทิศเล็งหลัง event arrow
   // 🏹 ตำแหน่งยืนนักธนู: ห่างผู้เล่น ~16m สุ่มสลับ ขวาบน ⟷ เหนือ ทุก ~8s (smoothed('archer') ทำให้เดินย้ายจุดลื่นๆ เอง)
   let _archerOfs = { dx: 48, dy: -40 }, _archerOfsAt = 0;
   let _archerDrawX = null, _archerDrawY = null; // ตำแหน่ง world ที่สไปรต์ถูก "วาดจริง" เฟรมล่าสุด (smoothed แล้ว) — จุดออกธนูใช้ตัวนี้ กันเส้นออกจากอากาศตอนนักธนูกำลังเดินย้ายจุด
   // ⛪🧱 บัฟ MAX เกราะจากนักบวช (passive ตลอดที่ active): 100 + 5/Lv หลัง Lv.1 — มิเรอร์ xhrpg_priest_armor_max_bonus (PHP)
-  const _priestAmB = () => (parseInt(player?.priest_expires) || 0) > Math.floor(Date.now() / 1000) ? 100 + (Math.max(1, parseInt(player.priest_lv) || 1) - 1) * 5 : 0;
+  const _priestAmB = () => (parseInt(player?.priest_expires) || 0) > Math.floor(Date.now() / 1000) ? Math.round((100 + (Math.max(1, parseInt(player.priest_lv) || 1) - 1) * 5) * 3.0) : 0; // ×3.0 (sync xhrpg_priest_armor_max_bonus · เจ้าของสั่ง 2026-07-22 เดิม ×1.5)
   function _archerOffset() {
     const _n = Date.now();
     if (_n - _archerOfsAt > 8000) { _archerOfsAt = _n; _archerOfs = Math.random() < 0.5 ? { dx: 48, dy: -40 } : { dx: 0, dy: -54 }; }
@@ -1881,7 +2662,7 @@ const xhrpg = (() => {
     const sheet = SUM[_shKey] && SUM[_shKey].complete && SUM[_shKey].naturalWidth ? SUM[_shKey] : SUM['archer_attack']; // front/back ยังไม่โหลด → ด้านข้าง
     if (sheet && sheet.complete && sheet.naturalWidth) {
       const fh = sheet.naturalHeight, frames = Math.max(1, Math.round(sheet.naturalWidth / fh));
-      const fi = Math.floor(Date.now() / 120) % frames, sz = 30 * scale;
+      const fi = Math.floor((Date.now() + 240) / 120) % frames, sz = 30 * scale; // +240ms เฟสนักธนู (🎲 desync)
       ctx.save(); ctx.imageSmoothingEnabled = false; ctx.translate(s.x, s.y);
       // หัน: ยิง→ทิศเป้าเสมอ (ชนะทิศเดิน — เดิม _moving ทับ ทำยิงซ้ายแต่หันขวา เพราะไหลตามผู้เล่นตลอด delta แนวนอน≈0) · เดิน→ทิศเดินเฉพาะ delta แนวนอนมีนัย · sheet หันขวา default · หน้า/หลัง ไม่ flip
       const _fl = _vert ? false
@@ -1928,10 +2709,54 @@ const xhrpg = (() => {
     });
   }
 
+  // ── ⚔️ อัศวินของเพื่อน (others[].kn = 1) — วาด offset ขวาหลังเจ้าของ (knight_x จริงไม่ broadcast · pattern เดียวกับนักบวชเพื่อน) ──
+  function drawOtherKnights() {
+    if (!others || !others.length) return;
+    others.forEach(o => {
+      if (!o || !o.kn || o.is_ghost || o.x == null) return;
+      const op = smoothed('o_kn_' + (o.name || ''), parseFloat(o.x) + 20, parseFloat(o.y) + 14);
+      const { scale } = getCameraTransform();
+      const s = toScreen(op.x, op.y);
+      if (s.x < -80 || s.x > canvas.width + 80 || s.y < -80 || s.y > canvas.height + 80) return;
+      const _mv = Math.abs(op.tx - op.sx) + Math.abs(op.ty - op.sy) > 0.8;
+      const sh = SUM[_mv ? 'knight_walk' : 'knight_idle'];
+      if (sh && sh.complete && sh.naturalWidth) {
+        const fh = sh.naturalHeight, fr = Math.max(1, Math.round(sh.naturalWidth / fh));
+        const fi = Math.floor((Date.now() + 400) / 120) % fr, sz = 60 * scale; // ขนาด+เฟสเดียวกับของเรา
+        ctx.save(); ctx.imageSmoothingEnabled = false; ctx.translate(s.x, s.y);
+        if (op.tx < op.sx) ctx.scale(-1, 1); // ชีทหันขวา default
+        ctx.drawImage(sh, fi * fh, 0, fh, fh, -sz / 2, -sz * 0.72, sz, sz); ctx.restore();
+      }
+      if (_mv) startAnim();
+    });
+  }
+
+  // ── 🏺 Anubis ของเพื่อน (others[].dv = 1) — วาด offset ขวาหน้าเจ้าของ (dv_x จริงไม่ broadcast) · ขนาด ×1.5 เท่าของเรา ──
+  function drawOtherDivines() {
+    if (!others || !others.length) return;
+    others.forEach(o => {
+      if (!o || !o.dv || o.is_ghost || o.x == null) return;
+      const op = smoothed('o_dv_' + (o.name || ''), parseFloat(o.x) + 22, parseFloat(o.y) - 10);
+      const { scale } = getCameraTransform();
+      const s = toScreen(op.x, op.y);
+      if (s.x < -90 || s.x > canvas.width + 90 || s.y < -90 || s.y > canvas.height + 90) return;
+      const _mv = Math.abs(op.tx - op.sx) + Math.abs(op.ty - op.sy) > 0.8;
+      const sh = SUM[_mv ? 'anubis_walk' : 'anubis_idle'];
+      if (sh && sh.complete && sh.naturalWidth) {
+        const fh = sh.naturalHeight, fr = Math.max(1, Math.round(sh.naturalWidth / fh));
+        const fi = Math.floor((Date.now() + 800) / 120) % fr, sz = 93 * scale; // ×1.5 sync drawDivine
+        ctx.save(); ctx.imageSmoothingEnabled = false; ctx.translate(s.x, s.y);
+        if (op.tx > op.sx) ctx.scale(-1, 1); // ชีทหันซ้าย default → พลิกเมื่อไปขวา
+        ctx.drawImage(sh, fi * fh, 0, fh, fh, -sz / 2, -sz * 0.72, sz, sz); ctx.restore();
+      }
+      if (_mv) startAnim();
+    });
+  }
+
   function drawCat() {
     if (!player) return;
     const catLv = parseInt(player.cat_lv) || 0;
-    if (!(player.cat_enabled ?? 1)) return; // Lv.0 ก็วิ่งส่งของ (ฟรีติดตัวทุกคน)
+    // 🐱 เนโกะเปิดตลอด ฟรีติดตัวทุกคน (เจ้าของสั่ง 2026-07-23 ถอดปุ่มปิด — คนชอบปิดแล้วงง)
     const state = player.cat_state || 'idle';
     if (state !== 'running') {
       // ── ghost ช่วงส่งถึง: server สลับพ้น running แล้ว แต่วาดแมวไหลเข้าหาผู้เล่นต่อสั้นๆ (กันวูบหายกลางทาง ตอนส่งถึงใน tick เดียว) ──
@@ -2184,6 +3009,66 @@ const xhrpg = (() => {
     // (เอาแถบชาร์จ Premium Titan Beam เหนือหุ่นออกตามคำขอ — ไม่แสดงแล้ว)
   }
 
+  // ══ 🏰🔫 ป้อมกิลบนแมพ (docs/guild-turret-design.md) ═══════════════════════════════════════════
+  //   ข้อมูลมาจาก poll (`gturrets` · server cache 60 วิ/แมพ) — ป้อมของ "ทุกกิล" ที่ตั้งบนแมพนี้
+  //   ⚠️ คอสเมติกล้วน: การยิงเป็นแค่ภาพ (ดาเมจจริง settle ชั่วโมงละรอบฝั่ง server) — client ไม่คิด DMG ใดๆ
+  let _gtMap = [];                        // [{z,lv,n,sh,co,ic}] จาก poll ล่าสุด
+  const _GT_FIRE_MS = 2600;               // คาบยิงต่อป้อม (เหลื่อมกันด้วย hash ของ index)
+  function drawGuildTurrets() {
+    if (!_gtMap.length || !spotDefs.length) return;
+    const { scale } = getCameraTransform();
+    const k = scale / displayScale;
+    if (k < 0.22) return;                 // ซูมออกไกลมาก → ข้าม (ประหยัด + จอไม่รก)
+    const now = Date.now();
+    const perZone = {};                   // นับป้อมในโซนเดียวกัน → จัดวางเป็นวงไม่ให้ทับ
+    _gtMap.forEach(t => { const z = t.z | 0; perZone[z] = (perZone[z] || 0) + 1; });
+    const seen = {};
+    _gtMap.forEach((t, i) => {
+      const spot = spotDefs[t.z | 0]; if (!spot) return;
+      const z = t.z | 0, n = perZone[z], idx = (seen[z] = (seen[z] || 0)); seen[z]++;
+      // วางรอบใจกลางโซน: ป้อมเดียว = กลาง · หลายป้อม = กระจายเป็นวงรัศมี 45% ของโซน
+      const ang = n <= 1 ? 0 : (Math.PI * 2 * idx / n) - Math.PI / 2;
+      const rad = n <= 1 ? 0 : spot.radius * 0.45;
+      const wx = spot.cx + Math.cos(ang) * rad, wy = spot.cy + Math.sin(ang) * rad;
+      const s = toScreen(wx, wy);
+      if (s.x < -80 || s.y < -80 || s.x > canvas.width / displayScale + 80 || s.y > canvas.height / displayScale + 80) return; // นอกจอ
+      // ── ลำแสงยิง (พอเป็นพิธี): โผล่ 320ms ทุก ~2.6 วิ · เหลื่อมกันด้วย index ──
+      const ph = (now + i * 617) % _GT_FIRE_MS;
+      if (ph < 320) {
+        const a = (1 - ph / 320), aim = (now / 900 + i) % (Math.PI * 2); // หมุนทิศไปเรื่อยๆ = ดูเหมือนกวาดยิง
+        const len = 46 * k;
+        ctx.save();
+        ctx.globalAlpha = a * 0.85;
+        ctx.strokeStyle = '#fbbf24'; ctx.lineWidth = Math.max(1.5, 3 * k); ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.moveTo(s.x, s.y - 10 * k);
+        ctx.lineTo(s.x + Math.cos(aim) * len, s.y - 10 * k + Math.sin(aim) * len * 0.55);
+        ctx.stroke();
+        ctx.globalAlpha = a; ctx.fillStyle = '#fef08a';
+        ctx.beginPath(); ctx.arc(s.x, s.y - 10 * k, Math.max(2, 4 * k), 0, Math.PI * 2); ctx.fill();
+        ctx.restore();
+      }
+      // ── ฐาน + ตัวป้อม ──
+      ctx.save();
+      ctx.globalAlpha = 0.28; ctx.fillStyle = '#0f172a';
+      ctx.beginPath(); ctx.ellipse(s.x, s.y + 4 * k, 13 * k, 5 * k, 0, 0, Math.PI * 2); ctx.fill(); // เงา
+      ctx.globalAlpha = 1;
+      ctx.font = `${Math.max(11, 22 * k)}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+      ctx.fillText('🔫', s.x, s.y);
+      // ── ป้ายชื่อกิล + Lv ป้อม (ชื่อมาจากผู้เล่น → ใช้ fillText ปลอดภัยอยู่แล้ว ไม่ใช่ HTML) ──
+      const fs = Math.max(8, 10.5 * k);
+      ctx.font = `bold ${fs}px sans-serif`;
+      const label = (t.n || '') + '  Lv.' + (t.lv | 0);
+      const w = ctx.measureText(label).width + 10 * k, h = fs + 6 * k, ly = s.y - 26 * k;
+      ctx.globalAlpha = 0.82; ctx.fillStyle = '#0f172a';
+      if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(s.x - w / 2, ly - h + 3 * k, w, h, 5 * k); ctx.fill(); }
+      else ctx.fillRect(s.x - w / 2, ly - h + 3 * k, w, h);
+      ctx.globalAlpha = 1; ctx.fillStyle = '#fbbf24';
+      ctx.fillText(label, s.x, ly);
+      ctx.textAlign = 'left';
+      ctx.restore();
+    });
+  }
+
   function drawSpots() {
     const { scale } = getCameraTransform();
     spotDefs.forEach((spot, sid) => {
@@ -2419,10 +3304,17 @@ const xhrpg = (() => {
     // ล็อกตัวถัดไปด้วยสายตา: เป้าเดิมตาย/ยังไม่มีล็อก แต่มีมอนเป็นๆ ใกล้ (≤150px) → หันประจันรอ tick ถัดไป — ตัดจังหวะยืนเคว้ง/เดินสุ่มหลังขว้างเสร็จ
     let _preAim = null;
     if (!_shooting && !aiming && !player.is_dead && !player.retreating_home) {
-      let _nd2 = 150 * 150;
+      let _nd2 = 200 * 200; // ระยะประจัน — ครอบระยะมีดยาวไกลสุด (177px) ไม่งั้นยืนมองสุ่มทั้งที่กำลังยิงอยู่
       for (const _pm of monsters) { if (!_pm || _pm.is_dead) continue; const _dx = _pm.x - player.x, _dy = _pm.y - player.y, _d2 = _dx * _dx + _dy * _dy; if (_d2 < _nd2) { _nd2 = _d2; _preAim = Math.atan2(_dy, _dx); } }
     }
-    if (_shooting) ang = _pShotAng;                                 // ยิงจริง → หันตรงกับเลเซอร์เสมอ
+    if (_shooting) {                                                // ยิงจริง → หันตรงกับเลเซอร์เสมอ
+      ang = _pShotAng;
+      // ตามตัวมอนที่ยิงอยู่ตลอดช่วงนัด — เดิม freeze มุม ณ ตอนปล่อย (มีดยาว 800ms) มอนเดินหนีก็หันคนละทาง
+      if (_pShotMid != null) {
+        const _sm = monsters.find(m => m.id == _pShotMid && !m.is_dead);
+        if (_sm) { const _ssp = smoothed('m' + _sm.id, _sm.x, _sm.y); ang = Math.atan2(_ssp.y - _psp.y, _ssp.x - _psp.x); }
+      }
+    }
     else if (aiming) { const _tsp = smoothed('m' + tm.id, tm.x, tm.y); ang = Math.atan2(_tsp.y - _psp.y, _tsp.x - _psp.x); } // ล็อกเป้า → หันเข้าเป้า (ตำแหน่ง smoothed = ตรงกับเส้นแดง/สไปรต์)
     else if (moving) ang = Math.atan2(_vY, _vX);                    // เดิน → หันตามทาง
     else if (_preAim != null) ang = _preAim;                        // ยืนเฉยแต่มีมอนใกล้ → หันเข้าหาตัวถัดไป (ท่าพร้อมสู้)
@@ -2471,7 +3363,7 @@ const xhrpg = (() => {
     const _noGun = !_canP && !_canS;
     let _key, _spd = 87; // จังหวะเดินเข้ากับความเร็วเดินใหม่ (+25/15/10%)
     if (_noGun) {
-      const _knifeNear = tm && dist(player, tm) <= 40; // ~13m ระยะมีด (sync knife range 30px + เผื่อฟันไว้ก่อน · fallback archer)
+      const _knifeNear = tm && dist(player, tm) <= 85; // ท่าฟัน: sync ระยะดาบ server 75px=25m + เผื่อฟันไว้ก่อนตอนพุ่งเข้า
       if (_knifeNear) { _key = 'hero2_knife_atk'; _spd = 70; }
       else _key = _moveAnim ? 'hero2_knife_walk' : 'hero2_knife_idle';
     } else {
@@ -2481,7 +3373,7 @@ const xhrpg = (() => {
     const sheet = SUM[_key];
     // ── นักธนู (archer) — state machine: ตาย > ดื่มยา > กลิ้งหลบ > ยิง(เฉพาะยืนนิ่ง) > มีดประชิด > เดินทางไกล(วิ่ง) > เดิน > ยืน ──
     // ชีทหันขวา default → ใช้ facing-flip (พลิกซ้ายเมื่อ cos(ang)<0) · ขนาด ×2.6 จากฮีโร่เดิม (0.202×1.3=0.263) · ภาพเลื่อนขึ้น 12% ให้ลำตัวทับจุดยึด (เส้นแดง/ธนูออกจากลำตัว ไม่ใช่หัว)
-    const _knifeAnim = _noGun && tm && dist(player, tm) <= 70; // ท่าฟันดาบ: โชว์เมื่อเข้าระยะเอื้อม (server ตีที่ 60px=20m + เผื่อฟันไว้ก่อนตอนพุ่งเข้า)
+    const _knifeAnim = _noGun && tm && dist(player, tm) <= 85; // ท่าฟันดาบ: โชว์เมื่อเข้าระยะเอื้อม (server ตีที่ 75px=25m + เผื่อฟันไว้ก่อนตอนพุ่งเข้า)
     let _arcKey, _arcProg = -1, _arcLoop = 90; // _arcProg ≥ 0 = ไล่เฟรมตามช่วงเวลา (ดื่มยา/กลิ้ง)
     if (player.is_dead) {
       if (!_heroDeadAt) _heroDeadAt = _now; // เริ่มท่าตาย — เล่นครั้งเดียวแล้วค้างเฟรมสุดท้าย
@@ -2622,8 +3514,9 @@ const xhrpg = (() => {
     // name
     ctx.fillStyle = '#d1fae5'; ctx.font = `${Math.max(5, Math.round(5.6 * scale))}px monospace`; ctx.textAlign = 'center';
     const _nmY = s.y - 15 * scale * (HERO_SIZE_MUL[player.hero_skin] || 1); // ดันชื่อขึ้นตามสไปรต์ที่ใหญ่ขึ้น (กันชื่อทับตัว)
-    _drawNameFlag(player.display_name || 'me', s.x, _nmY, _myCC(), scale); // 🏴 ธงตัวเองหน้าชื่อ
+    _drawNameFlag(player.display_name || 'me', s.x, _nmY, _myCC(), scale, player.vip_lv | 0, _svGm, _svCl); // 🏴👑🛡️💠 ธง+VIP+GM+CL ตัวเองหน้าชื่อ
     ctx.fillText((player.display_name || 'me').slice(0, 10), s.x, _nmY);
+    if (player.guild_tag) _drawGuildLine(player.guild_tag, s.x, _nmY - 6.8 * scale, scale); // 🏰 【ตรา+ชื่อกิล】 เหนือชื่อ
     // 💬 คำพูดของเราเอง (แชทรวม) — ขึ้นทันทีตอนกดส่ง ไม่รอ poll
     if (Date.now() < _sayUntil) _drawSayBubble(_sayText, s.x, _nmY - 13 * scale, scale);
   }
@@ -2746,8 +3639,9 @@ const xhrpg = (() => {
       ctx.globalAlpha = 1; ctx.fillStyle = o.is_ghost ? '#94a3b8' : '#1d4ed8';
       ctx.font = `bold ${Math.max(5, Math.round(5.6 * scale))}px monospace`; ctx.textAlign = 'center';
       const _onmY = s.y - 12 * scale * (HERO_SIZE_MUL[o.hero_skin] || 1); // ดันชื่อขึ้นตามขนาดสกินเพื่อน
-      if (!o.is_ghost) _drawNameFlag(o.name, s.x, _onmY, o.cc, scale); // 🏴 ธงเพื่อนหน้าชื่อ (ghost ไม่มี presence สด)
+      if (!o.is_ghost) _drawNameFlag(o.name, s.x, _onmY, o.cc, scale, o.vip | 0, !!o.gm, !!o.cl); // 🏴👑🛡️💠 ธง+VIP+GM+CL เพื่อนหน้าชื่อ (ghost ไม่มี presence สด)
       ctx.fillText((o.name || '?').slice(0, 10), s.x, _onmY);
+      if (!o.is_ghost && o.gd) _drawGuildLine(o.gd, s.x, _onmY - 6.8 * scale, scale); // 🏰 【ตรา+ชื่อกิล】 เหนือชื่อเพื่อน
       // 💬 คำพูดเพื่อน (presence say/sts จากแชทรวม) — ค้าง 6 วิ เหนือชื่อ
       if (!o.is_ghost && o.say && (Date.now() / 1000 - (+o.sts || 0)) < XHRPG_SAY_MS / 1000) {
         _drawSayBubble(String(o.say), s.x, _onmY - 13 * scale, scale);
@@ -2849,7 +3743,7 @@ const xhrpg = (() => {
           if (Math.abs(fY) >= Math.abs(fX)) row = fY > 0 ? 0 : 1;
           else { row = 2; flip = fX > 0; } // แถว2 หันซ้าย default → พลิกเมื่อต้องหันขวา
         }
-        const col = moving ? (Math.floor(_nowPA / 130) % cols) : 0; // เฟรมเดิน = ขยับตอนเดินจริง (idle=เฟรม0) · golem ได้ตำแหน่งใหม่ทุก poll → เดินได้ปกติ
+        const col = moving ? (Math.floor((_nowPA + ((m.id % 13) * 53)) / 130) % cols) : 0; // เฟรมเดิน + 🎲 เฟสต่อตัว (id-based กระจาย 0-636ms) — เดิมทุกมอนขยับเฟรมพร้อมกันเป๊ะทั้งจอ (metronome look)
         const _asz = fs * 1.368 * (MON_SIZE[_realLv] || 1); // +20% อีก (เดิม 1.14)
         ctx.save(); ctx.translate(s.x, s.y); if (flip) ctx.scale(-1, 1);
         ctx.drawImage(_anim, col * fw, row * fh, fw, fh, -_asz / 2, -_asz / 2, _asz, _asz);
@@ -2931,10 +3825,63 @@ const xhrpg = (() => {
         ctx.font = `${fs}px serif`;
         startAnim(); // ให้ดาวหมุนต่อเนื่องตลอดช่วงสตัน (แม้เฟรมอื่นนิ่ง)
       }
+      // 🤖 ป้าย "ฝีมือไททัน" บนหัวมอน — 🪓 = สตันขวาน · 🏹 = ธนูไททันช็อต (เจ้าของสั่งให้เห็นชัดว่าเป็นของหุ่น 2026-07-26)
+      const _rfx = robotFx[m.id];
+      if (_rfx) {
+        if (_nowPA - _rfx.born >= _rfx.life) { delete robotFx[m.id]; }
+        else {
+          // ไอคอนล้วน ไม่มีกรอบ/พื้นหลัง (เจ้าของสั่ง 2026-07-26 "ตัดกรอบออก แสดงแค่ไอคอนหุ่นกับไอคอนโจมตี แล้วจางหาย")
+          const _rp = (_nowPA - _rfx.born) / _rfx.life;
+          const _rTxt = _rfx.kind === 'axe' ? '🤖🪓' : '🤖🏹';
+          const _rFs  = Math.round(14 * scale * sizeMult);
+          const _rY   = s.y - r - 30 * scale * sizeMult - _rp * 10 * scale; // ลอยขึ้นเรื่อยๆ แล้วจางหาย
+          ctx.save();
+          ctx.font = `${_rFs}px serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          ctx.globalAlpha = Math.max(0, 1 - _rp * _rp);        // จางแบบ ease-out (ชัดตอนแรก จางเร็วตอนท้าย)
+          ctx.shadowColor = 'rgba(0,0,0,0.75)'; ctx.shadowBlur = 4 * scale; // เงาบางๆ ให้อ่านออกบนพื้นสว่าง (แทนกรอบ)
+          ctx.fillText(_rTxt, s.x, _rY);
+          ctx.restore();
+          startAnim();
+        }
+      }
       ctx.textBaseline = 'alphabetic';
 
+      // 👹 สกิลมอน — ออร่าบัฟ (แดง ATK / เทา DEF) + ป้ายสกิลเด้งบนหัว (m.sku = "key:ts" โชว์ 1.5 วิ · ทุกคนเห็นจาก record)
+      const _mskNow = Date.now() / 1000;
+      if ((m.ska && m.ska > _mskNow) || (m.skd && m.skd > _mskNow)) {
+        ctx.save();
+        ctx.globalAlpha = 0.30 + 0.30 * Math.abs(Math.sin(Date.now() / 260));
+        ctx.lineWidth = Math.max(1.5, 2 * scale);
+        if (m.ska && m.ska > _mskNow) { ctx.strokeStyle = '#f43f5e'; ctx.beginPath(); ctx.arc(s.x, s.y, r + 3 * scale, 0, Math.PI * 2); ctx.stroke(); }
+        if (m.skd && m.skd > _mskNow) { ctx.strokeStyle = '#94a3b8'; ctx.beginPath(); ctx.arc(s.x, s.y, r + 6 * scale, 0, Math.PI * 2); ctx.stroke(); }
+        ctx.restore();
+        startAnim();
+      }
+      if (m.sku) {
+        const _ms = String(m.sku), _mi = _ms.indexOf(':');
+        const _mk = _ms.slice(0, _mi), _mag = _mskNow - (+_ms.slice(_mi + 1) || 0);
+        const _MSKL = { atk: ['🗡️ ATK UP!', '#fbbf24'], def: ['🛡️ DEF UP!', '#93c5fd'], heal: ['💚 HEAL!', '#4ade80'], shield: ['🧊 SHIELD!', '#38bdf8'], fire: ['🔥 FIREBALL!', '#fb923c'] };
+        if (_mag >= 0 && _mag < 1.5 && _MSKL[_mk]) {
+          ctx.save();
+          ctx.globalAlpha = Math.max(0, 1 - _mag / 1.5);
+          ctx.font = `bold ${Math.round(8.5 * scale)}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          const _mw = ctx.measureText(_MSKL[_mk][0]).width + 10 * scale, _mh = 13 * scale;
+          const _my = s.y - r - (20 + _mag * 8) * scale; // ลอยขึ้นช้าๆ + จางหาย
+          ctx.fillStyle = '#0f172a';
+          ctx.fillRect(s.x - _mw / 2, _my - _mh / 2, _mw, _mh);
+          ctx.fillStyle = _MSKL[_mk][1]; ctx.fillText(_MSKL[_mk][0], s.x, _my + 0.5 * scale);
+          ctx.restore();
+          startAnim();
+        }
+      }
       // HP bar ที่เท้า + ชื่อเหนือหัว — สีเดียวทั้งระบบ (เขียว/แดง)
       _drawMonHpBar(s.x, s.y, r, m.hp / m.hp_max, isMvp, m.lv, m.name, scale);
+      if (m.skh > 0 && m.hp_max > 0) { // 🧊 แถบเกราะฟ้าใต้แถบ HP (สกิล SHIELD — กันก่อน HP)
+        const _rr2 = r * 0.7, _bw = (isMvp ? 44 : 22) * scale, _bh = 2.6 * scale;
+        const _bx = s.x - _bw / 2, _by = s.y + _rr2 + 3 * scale + (isMvp ? 5 : 3.4) * scale + 2.4 * scale;
+        ctx.fillStyle = 'rgba(15,23,42,.85)'; ctx.fillRect(_bx - scale, _by - scale, _bw + 2 * scale, _bh + 2 * scale);
+        ctx.fillStyle = '#38bdf8'; ctx.fillRect(_bx, _by, _bw * Math.min(1, m.skh / m.hp_max), _bh);
+      }
       if (_fadeIn < 1) ctx.globalAlpha = 1;
     });
   }
@@ -3041,7 +3988,7 @@ const xhrpg = (() => {
 
   function drawMinimap() {
     // สีพื้นตามแมพ (เดิม hardcode เขียว — บนทะเลทราย/แมพน้ำแข็งดูเป็นแมพผิด)
-    mCtx.fillStyle = currentMap === 3 ? '#e7edf3' : (currentMap === 2 || currentMap === 4) ? '#e3c98f' : '#b5e08a'; // 🏛️ map 4 = สีทรายเหมือนทะเลทราย
+    mCtx.fillStyle = (currentMap === 3 || currentMap === 9) ? '#e7edf3' : currentMap === 6 ? '#1d4463' : currentMap === 11 ? '#8d7f6a' : currentMap === 12 ? '#2e2740' : currentMap === 10 ? '#c2b493' : (currentMap === 2 || currentMap === 4 || currentMap === 8) ? '#e3c98f' : '#b5e08a'; // 🌊 map 6 = น้ำเงินลึก · 🐉 map 10 = หินมอสเบจ · 🏛️ map 4 + 🌱 map 8 = สีทราย · map 7 = เขียว (default)
     mCtx.fillRect(0, 0, 80, 80);
     const sx = 80 / MAP_W, sy = 80 / MAP_H;
     const mvpBlink = Math.floor(Date.now() / 500) % 2 === 0;
@@ -3110,7 +4057,7 @@ const xhrpg = (() => {
   const AURA_STYLE = {
     r: { color:'#ef4444', outerW:1.8, coreW:0.75 }, // เลเซอร์แดง เส้นเล็ก
     g: { color:'#22c55e', outerW:1.8, coreW:0.75 }, // เลเซอร์เขียว เส้นเล็ก
-    G: { color:'#22c55e', outerW:4,   coreW:1.6  }, // เลเซอร์เขียว เส้นใหญ่ (sw9)
+    G: { color:'#22c55e', outerW:1.8, coreW:0.75 }, // เลเซอร์เขียว (sw9) — ขนาดเท่าป้อม railgun (ผู้ใช้ขอ)
   };
   const SLASH_TH = 0.40, SLASH_SPREAD = 1.30; // ความหนา(×R)/ครึ่งมุมกาง — จูนจาก ztest render (ใบดาบโค้ง)
   // ขยายขนาดฮีโร่ในแมพตามสกิน (แสดงผลล้วน — ไม่กระทบ hitbox/gameplay ที่ใช้จุด x/y) · sw4-6 +15% · sw7-9 +30%
@@ -3162,14 +4109,21 @@ const xhrpg = (() => {
       } else {
         bullets.push({ kind: 'melee', tx, ty, icon, born: now, life: 420, done: false });
       }
-    } else {
+    } else if (isHouse) {
+      // 🏠 ปืนป้อมบ้าน = เม็ดกลมส้ม (แหล่งเดียวที่ตั้งใจให้เป็นก้อนกลมจริงๆ)
       bullets.push({
         kind: 'bullet', x: sx, y: sy, tx, ty, done: false,
         spd:   15,
-        color: isHouse ? '#f59e0b' : '#fb923c',
+        color: '#f59e0b',
         r:     3,
         trail: [],
       });
+    } else {
+      // 🛟 icon ที่ยังไม่มี routing (⛪ นักบวช · 🏺 สัตว์เทพ · 🏰 ป้อมกิล · ของใหม่ในอนาคต)
+      //    เดิมตกมาเป็น "เม็ดกลมส้ม" ซึ่งไม่สื่ออะไรและดูเหมือนบั๊ก (เจ้าของแจ้ง 2026-07-28)
+      //    ⚠️ ห้ามกลับไปใช้เม็ดกลมเป็น fallback อีก — กติกาเดิมต้องจำ icon ใหม่ 2 ที่ (_noBullet + routing ตรงนี้)
+      //       ลืมที่ใดที่หนึ่ง = โผล่เป็นก้อนกลมทันที · fallback แบบนี้แสดง icon ของแหล่งนั้นเอง อ่านออกทุกกรณี
+      bullets.push({ kind: 'melee', tx, ty, icon, born: now, life: 420, done: false });
     }
     startAnim();
   }
@@ -3377,9 +4331,9 @@ const xhrpg = (() => {
   let _snapGen = 0;       // นับรอบ snapshot จาก poll — ให้ smoothed แยกออกว่า "snapshot ใหม่มา" กับ "แค่ render frame ปกติ"
   // ระยะเวลา segment ปรับตามคาบ snapshot จริง (EMA วัดตอน poll มาถึง) — คาบจริง = 1000ms + RTT + เวลา server
   // เดิม fix 1100: เน็ตช้ากว่า 100ms → ไหลถึงเป้าก่อน snapshot ใหม่ทุกรอบ เข้าช่วง extrapolate ที่หน่วงความเร็ว = สะดุดเป็นจังหวะทุก tick
-  let _interpMs   = 1100; // ค่าเริ่ม (คาบ 1.0s + เผื่อ latency) — ลู่เข้าคาบจริงเองใน ~5 poll แรก
+  let _interpMs   = 1350; // ค่าเริ่ม (คาบ 1.25s + เผื่อ latency) — ลู่เข้าคาบจริงเองใน ~5 poll แรก
   let _lastSnapAt = 0;    // เวลาที่ snapshot ล่าสุดมาถึง (performance.now) — ใช้วัดคาบจริง + กันสร้าง ghost มั่วหลัง resume แท็บ
-  const EXTRAP_HOLD = 250; // เดินต่อ "เต็มความเร็วเดิม" 250ms แรกหลังถึงเป้า — snapshot ที่ช้ากว่าคาดเล็กน้อย (จิตเตอร์ปกติ) มาทันก่อนเริ่มชะลอ → ไม่มีจังหวะหน่วงท้าย segment ทุกรอบ
+  const EXTRAP_HOLD = 320; // เดินต่อ "เต็มความเร็วเดิม" หลังถึงเป้า — 250→320ms (2026-07-20 สเกลตามคาบ poll 1.0→1.25s ให้ jitter เดิมยังไม่ทันชะลอ)
   const EXTRAP_EASE = 650; // จากนั้นค่อย ease-out จนหยุดสนิท (รวม ~900ms เท่าเดิม) — ระยะรวมถูก cap 12px กัน rubber-band ตอน dash
   function smoothed(key, tx, ty) {
     const now = performance.now();
@@ -3412,7 +4366,7 @@ const xhrpg = (() => {
       if (over <= EXTRAP_HOLD) f = over;
       else { const e = Math.min(over - EXTRAP_HOLD, EXTRAP_EASE); f = EXTRAP_HOLD + e - (e * e) / (2 * EXTRAP_EASE); }
       const _v = Math.hypot(vx, vy);
-      if (_v > 0.0001) f = Math.min(f, 12 / _v); // เพดานระยะคาดการณ์ 12px — segment เร็ว (dash ~57px) ไม่พุ่งเลยเป้าไปไกลแล้วโดนดึงกลับ
+      if (_v > 0.0001) f = Math.min(f, 38 / _v); // เพดานระยะคาดการณ์ 12→30→38px (2026-07-20 สเกลตามคาบ poll 1.25s) — ที่ความเร็วเดิน ≈600ms ของการเดินต่อ · เลยเป้าแล้ว snapshot ใหม่ re-anchor จากตำแหน่งปัจจุบันแบบเนียนอยู่แล้ว
       p.x = p.tx + vx * f;
       p.y = p.ty + vy * f;
     }
@@ -3461,6 +4415,7 @@ const xhrpg = (() => {
     _optN++;
     const _ic = _sn ? '🎯' : '🔫', _mid = m.id;
     const _ps = smoothPos['player'] || player;
+    _pShotMid = _mid;
     _pShotAng = Math.atan2(m.y - _ps.y, m.x - _ps.x);                   // หันเข้าเป้า + เข้าท่าง้างทันที (จังหวะเดียวกับนัดจริง)
     _pShotUntil = Date.now() + (_sn ? 800 : 340);
     _thrHoldStart(_sn ? 350 : 280);
@@ -3510,6 +4465,24 @@ const xhrpg = (() => {
         const sz = ex.r * scale * 2.4;
         ctx.save(); ctx.globalAlpha = 1 - p * 0.4; ctx.imageSmoothingEnabled = true;
         ctx.drawImage(img, s.x - sz / 2, s.y - sz / 2, sz, sz);
+        ctx.restore();
+      } else if (ex.axe) { // 🪓 วงฟันขวานไททัน — ขอบวงเต็มรัศมี (อ่านขนาด area ได้) + เสี้ยวใบขวานกวาด 2 ชั้น
+        const R = ex.r * scale;
+        ctx.save();
+        ctx.globalAlpha = (1 - p) * 0.20; ctx.fillStyle = ex.color;
+        ctx.beginPath(); ctx.arc(s.x, s.y, R, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = (1 - p) * 0.95; ctx.strokeStyle = ex.color;
+        ctx.lineWidth = Math.max(2, 2.6 * scale); ctx.setLineDash([6 * scale, 4 * scale]);
+        ctx.beginPath(); ctx.arc(s.x, s.y, R, 0, Math.PI * 2); ctx.stroke(); // ขอบวงเต็ม = ขนาด area จริง
+        ctx.setLineDash([]);
+        ctx.shadowColor = ex.color; ctx.shadowBlur = 10 * scale;
+        ctx.lineWidth = Math.max(2, 4 * scale); ctx.lineCap = 'round';
+        const sw = -Math.PI * 0.75 + p * Math.PI * 1.9; // เสี้ยวกวาดหมุนออก
+        for (let k = 0; k < 2; k++) {
+          ctx.globalAlpha = (1 - p) * (k ? 0.5 : 0.9);
+          const rr = R * (k ? 0.62 : 0.88);
+          ctx.beginPath(); ctx.arc(s.x, s.y, rr, sw + k * 1.1, sw + k * 1.1 + 1.15); ctx.stroke();
+        }
         ctx.restore();
       } else { // fallback วงสี
         const rad = ex.r * scale * (0.45 + 0.55 * p);
@@ -3598,10 +4571,19 @@ const xhrpg = (() => {
     drawTiles();
     // drawRange(); — วงเส้นประระยะขว้างรอบตัว: ปิดถาวรตามคำขอ (อยากได้คืน → uncomment บรรทัดนี้)
     if (!_hideLines) { drawRobotRanges(); } // ปิดเส้น: ซ่อนเฉพาะวงระยะไททัน/ยานบิน + เส้นเป้าเพื่อน
-    if (currentMap === 2 || currentMap === 4) { drawOasisWater(); drawOasisTree(); }  // ทะเลทราย + 🏛️ สนามประลอง (พื้นชุดเดียวกัน): น้ำ ripple + ต้นไม้ + ปราสาท (หลังพื้น ก่อน entity)
-    else if (currentMap === 3) { drawWinterTree(); }              // ดินแดนเยือกแข็ง: ต้นไม้น้ำแข็งใหญ่กลาง + วงคริสตัล (หลังพื้น ก่อน entity)
-    else { drawPondsGrass(); }                                    // ทุ่งกลาง: บ่อ tile-based (ring+คลื่น+ใบบัว animated) หลังพื้น ก่อน entity
-    drawSpots(); drawMonsters(); drawDyingMons(); drawMonGhosts(); drawOtherHouses(); drawHouse(); drawOthers(); drawOtherDogs(); drawOtherMonPets(); drawOtherPriests(); drawOtherArchers(); drawRobot(); drawDog(); drawMonPet(); drawPlayer(); drawOtherTurrets(); drawTurrets(); drawPriest(); drawArcher(); drawBuffs(); drawCat(); drawDrone();
+    if (currentMap === 2 || currentMap === 4 || currentMap === 8) { drawOasisWater(); drawOasisTree(); }  // ทะเลทราย + 🏛️ สนามประลอง + 🌱 map8 ผู้เล่นใหม่ (พื้นชุดเดียวกัน): น้ำ ripple + ต้นไม้ + ปราสาท
+    else if (currentMap === 3 || currentMap === 9) { drawWinterTree(); }              // ดินแดนเยือกแข็ง: ต้นไม้น้ำแข็งใหญ่กลาง + วงคริสตัล (หลังพื้น ก่อน entity)
+    else if (currentMap === 6) { drawSeabedCenter(); }            // 🌊 ใต้ทะเลลึก: ซากปลาวาฬ+หมึกยักษ์กลาง
+    else if (currentMap === 10) { drawDragonCenter(); }           // 🐉 ป่ามังกรโบราณ: รูปปั้นมังกรหินกลาง
+    else if (currentMap === 5) { drawHomeOverlay(); }             // 🏡 บ้านของฉัน: ควันไฟ + แท่นสะสม + แปลงปลูก (หลังพื้น ก่อน entity)
+    else if (currentMap === 11) { _ctFetch(false); drawCastleOverlay(); } // 🏯 ปราสาทกิล: ดึงข้อมูล (cache 60 วิ) + ตรากิลเหนือประตู + ป้ายรายชื่อ + ประกายยอด T20
+    else if (currentMap === 12) { /* 🕳️ ดันกิล: พื้นถ้ำ bake ครบแล้ว ไม่มี overlay — ต้องมี branch นี้ไม่งั้นตกไป drawPondsGrass แล้วบ่อของ map1 (_pondTiles ค้าง) โผล่กลางถ้ำ */ }
+    else { drawPondsGrass(); }                                  // ทุ่งกลาง: บ่อ tile-based (ring+คลื่น+ใบบัว animated) หลังพื้น ก่อน entity
+    // 🏯 ปราสาทกิลไม่มีมอน = ไม่ต้องมีโซน — ข้าม drawSpots (เจ้าของแจ้ง 2026-07-26: วงโซน/ป้ายชื่อโซน/หมุดแลนด์มาร์ก
+    //    ของแมพ 1 ยังโผล่ทับปราสาท เพราะ spotDefs ค้างจากแมพเดิม · พื้นหญ้า/ต้นไม้คงไว้ตามที่เจ้าของชอบ)
+    if (currentMap !== 11) drawSpots();
+    drawGuildTurrets(); // 🏰🔫 ป้อมกิลของทุกกิลบนแมพนี้ (คอสเมติก — ยิงพอเป็นพิธี ไม่มีดาเมจฝั่ง client)
+    drawMonsters(); drawDyingMons(); drawMonGhosts(); drawOtherHouses(); drawHouse(); drawOthers(); drawOtherDogs(); drawOtherMonPets(); drawOtherPriests(); drawOtherArchers(); drawOtherKnights(); drawOtherDivines(); drawRobot(); drawDog(); drawMonPet(); drawPlayer(); drawOtherTurrets(); drawTurrets(); drawPriest(); drawArcher(); drawKnight(); drawDivine(); drawBuffs(); drawCat(); drawDrone();
     drawOthersTargets();
     drawTargetLine();
     drawDeathMarkers();
@@ -3779,11 +4761,16 @@ const xhrpg = (() => {
   ];
 
   // 🌟 Ragnalok: ตัวคูณ final ×(1+0.1%/แต้ม) — sync PHP xhrpg_rag_mult
-  function _ragMult(k) { return 1 + 0.001 * Math.max(0, parseInt(player && player['rag_' + k]) || 0); }
+  function _ragMult(k) {
+    let m = 1 + 0.001 * Math.max(0, parseInt(player && player['rag_' + k]) || 0);
+    // 🏺🎴 การ์ดเทพ Anubis +20%/ใบ — คูณทับเฉพาะ ATK (sync xhrpg_rag_mult ฝั่ง PHP)
+    if (k === 'atk') m *= 1 + GOD_ATK * _godN('anubis');
+    return m;
+  }
   function updateHUD() {
     if (!player) return;
     const z       = zone(player.x, player.y);
-    const need    = expNext(player.lv);
+    const need    = expNextHero(player.lv); // เส้นฮีโร่ขั้นบันได (sync PHP xhrpg_exp_next_hero)
     const expPct  = Math.min(100, Math.round(player.exp / need * 100));
     const expLeft = need - player.exp;
     const _cb      = _cardCB();
@@ -3796,9 +4783,17 @@ const xhrpg = (() => {
     document.getElementById('hud-lv').textContent    = `Lv.${player.lv}`;
     // ชื่อโซนตามวงแหวนระยะจากกลางเกาะ (แทนเลข Zone 0-4 ที่ผู้เล่นไม่เข้าใจ) — เฉพาะ map 1 · แมพอื่นโชว์ชื่อแมพ (เดิม hardcode "ทุ่งกลาง" ขึ้นทุกแมพ ทำสับสนว่าอยู่แมพไหน)
     const ZONE_NAMES = ['🌿 ทุ่งกลาง', '🌲 ป่ารอบนอก', '⛰️ เชิงเขา', '🏔️ แดนไกล', '🌋 สุดขอบแดน'];
-    document.getElementById('hud-zone').textContent  = currentMap === 4 ? '🏛️ ' + T('สนามประลอง')
+    document.getElementById('hud-zone').textContent  = currentMap === 5 ? '🏡 ' + T('บ้านของฉัน')
+                                                     : currentMap === 4 ? '🏛️ ' + T('สนามประลอง')
+                                                     : currentMap === 6 ? T('🌊 ดินแดนใต้ทะเลลึก')
+                                                     : currentMap === 10 ? T('🐉 ป่ามังกรโบราณ')
+                                                     : currentMap === 11 ? '🏯 ' + T('ปราสาทกิล')
+                                                     : currentMap === 12 ? '🕳️ ' + T('ดันกิล')
                                                      : currentMap === 3 ? T('❄️ ดินแดนเยือกแข็ง')
                                                      : currentMap === 2 ? T('🏜️ ทะเลทรายนิรันดร์')
+                                                     : currentMap === 7 ? T('🌿 ทุ่งกลาง (ผู้เล่นใหม่)')
+                                                     : currentMap === 8 ? T('🏜️ ทะเลทราย (ผู้เล่นใหม่)')
+                                                     : currentMap === 9 ? T('❄️ ดินแดนเยือกแข็ง (ผู้เล่นใหม่)')
                                                      : (ZONE_NAMES[z] ? T(ZONE_NAMES[z]) : `Zone ${z}`);
     document.getElementById('hud-gold').textContent  = `G ${player.gold}`;
 
@@ -3854,14 +4849,20 @@ const xhrpg = (() => {
     document.getElementById('stat-pts-badge').textContent = `+${player.stat_pts}`;
   }
 
-  const MAX_LV = 50; // 🧢 เพดานเลเวลฮีโร่ (sync PHP XHRPG_MAX_LV) — cap ที่ level-up loop/HUD เท่านั้น ไม่แตะ expNext (pet ใช้ร่วม cap 99)
-  function expNext(lv) { // ตรงกับ PHP xhrpg_exp_next: Lv41+ เชิงเส้น 100M+15M/lv · Lv1-40 tiered ≤10=1.5·11-20=1.45·21-30=1.40·31-40=1.35
+  const MAX_LV = 60; // 🧢 เพดานเลเวลฮีโร่ 50→60 (sync PHP XHRPG_MAX_LV · เจ้าของสั่ง 2026-07-22) — cap ที่ level-up loop/HUD เท่านั้น ไม่แตะ expNext (pet ใช้ร่วม cap 99)
+  function expNext(lv) { // ตรงกับ PHP xhrpg_exp_next: Lv41+ เชิงเส้น 100M+15M/lv · Lv1-40 tiered ≤10=1.5·11-20=1.45·21-30=1.40·31-40=1.35 — ⚠️ เส้นแชร์ PET/Ragnalok ห้ามแตะ
     if (lv >= 41) return 100000000 + (lv - 41) * 15000000;
     let e = 100;
     for (let k = 2; k <= lv; k++) {
       const b = k <= 10 ? 1.50 : k <= 20 ? 1.45 : k <= 30 ? 1.40 : 1.35;
       e = Math.round(e * b);
     }
+    return e;
+  }
+  function expNextHero(lv) { // เส้น EXP ฮีโร่ Lv41+ ขั้นบันได (sync PHP xhrpg_exp_next_hero): 42-49=+15M · 50-54=+80M · 55-59=+160M · 60+=+120M รอเคาะ (ปรับชันรอบ 2 · 2026-07-23 · PET/Ragnalok ใช้ expNext เดิม)
+    if (lv < 41) return expNext(lv);
+    let e = 100000000;
+    for (let k = 42; k <= lv; k++) e += (k >= 60 ? 120000000 : (k >= 55 ? 160000000 : (k >= 50 ? 80000000 : 15000000)));
     return e;
   }
   function wpOwned() { const w = player.weapon_parts; return Array.isArray(w) ? w : JSON.parse(w||'[]'); }
@@ -3877,6 +4878,7 @@ const xhrpg = (() => {
     }});
     // โมดูลไททัน: ทุกแกน +พลังงาน (ตีบวก+1)
     max += _robotModEnergyTotal();
+    max += _e2FxSum('ene'); // ⚔️ eq2 Energy MAX (sync server idle_logic robot tick)
     return max;
   }
   // รวมพลังงานจากโมดูลแกนไททันที่สวม (ทุกแกน +ตีบวก+1) — ใช้ทั้ง max และ recover
@@ -3903,7 +4905,7 @@ const xhrpg = (() => {
   function tierRes(lv) {
     lv = Math.max(1, lv);
     let b = Math.floor((lv-1)/10); if (b > 9) b = 9;
-    return lv * (10 + 20*b);
+    return Math.ceil(lv * (10 + 20*b) * (10 + b) / 10); // 💹 +10%/band (sync PHP xhrpg_tier_resource — 2026-07-17)
   }
   // ตัวคูณราคาอัพเกรดทบต้น (mirror ของ xhrpg_upg_cost_mult ใน xhrpg_config.php — ต้องตรงกันเสมอ)
   // t = เลเวลปลายทาง (current+1): <20 ×1.0 · 20-29 ×1.1 · 30-39 ×1.35 · 40-49 ×1.60 · ... · 100 ×3.10
@@ -4029,27 +5031,32 @@ const xhrpg = (() => {
       const _mo = _pmodsObj(w);
       Object.keys(_mo).forEach(slot => { const m=_mo[slot]; if(m&&m.stat) modBonus[m.stat]=(modBonus[m.stat]||0)+Math.max(1,Math.min(7,m.rarity||1)); });
     });
-    // bonus จากสกินไททันที่สวมอยู่ (stat+ค่า 1-10 ที่สุ่มได้ — ตรงกับ server xhrpg_robot_skin_stat_bonus)
-    const skinBonus = {};
-    if (player.robot_skin) {
-      let _sm = player.robot_skin_stats; if (typeof _sm === 'string') { try { _sm = JSON.parse(_sm); } catch(e) { _sm = null; } }
-      const _se = _sm && _sm[player.robot_skin];
-      if (typeof _se === 'string') skinBonus[_se] = 5; // legacy format
-      else if (_se && _se.s && _se.v) skinBonus[_se.s] = Math.max(1, Math.min(50, +_se.v)); // cap 50 (STAT MAX ตามราคา)
-    }
-    // bonus จากสัตว์เลี้ยงที่สวม (สกินหมา) — ตรงกับ server xhrpg_pet_skin_stat_bonus
-    const petBonus = {};
-    if (player.pet_skin) {
-      let _pm = player.pet_skin_stats; if (typeof _pm === 'string') { try { _pm = JSON.parse(_pm); } catch(e) { _pm = null; } }
-      const _pe = _pm && _pm[player.pet_skin];
-      if (_pe && _pe.s && _pe.v) petBonus[_pe.s] = Math.max(1, Math.min(50, +_pe.v)); // cap 50 (STAT MAX ตามราคา)
-    }
-    // bonus จากสกินฮีโร่ที่สวม — ตรงกับ server xhrpg_hero_skin_stat_bonus
-    const heroSkinBonus = {};
-    if (player.hero_skin) {
-      let _hm = player.hero_skin_stats; if (typeof _hm === 'string') { try { _hm = JSON.parse(_hm); } catch(e) { _hm = null; } }
-      const _he = _hm && _hm[player.hero_skin];
-      if (_he && _he.s && _he.v) heroSkinBonus[_he.s] = Math.max(1, Math.min(50, +_he.v)); // cap 50 (STAT MAX ตามราคา)
+    // ── 🎯 bonus จาก STAT สกิน 3 หมวด — ค่ากลางต่อผู้เล่น **ไม่ผูกกับตัวที่สวม** (v1.025 · docs/skin-stat-decouple.md)
+    //    ⚠️ server บวกเข้า effective stat แล้ว (game.php:519) แต่คืนค่า base ก่อนส่ง (บรรทัด 913)
+    //       → แผงนี้ต้องคิดโบนัสเองให้ตรงกับ xhrpg_skin_stat_pick() เป๊ะ ไม่งั้นเลขที่ผู้เล่นเห็น "ขาด" ทั้งที่ตีจริงได้
+    //    ของเดิมอ่านคีย์รายสกิน (_sm[player.robot_skin]) + มี if (player.robot_skin) ครอบ
+    //       → หลังย้ายไปคีย์ `_g` เลยอ่านไม่เจอ และคนใส่ตัวฟรีไม่ขึ้นเลย (บั๊กที่เจ้าของจับได้ 2026-07-28)
+    //    🎯 SKIN LV: ค่าที่ได้ = max(ค่าที่เลือกไว้, เพดานปัจจุบันของหมวด) — เลเวลขึ้นแล้วขยับเอง ต้องมิเรอร์ให้ตรง server
+    const _skBonusOf = (raw, ownedRaw, defs) => {
+      const o = {}; const r = _rollGlobal(raw);
+      const cap = defs ? _skinCap(ownedRaw, defs, raw) : 0;
+      if (r && r.s) o[r.s] = Math.max(1, Math.min(50, Math.max(r.v | 0, cap))); // clamp เดียวกับ server
+      return o;
+    };
+    const skinBonus     = _skBonusOf(player.robot_skin_stats, player.robot_skins, SKIN_DEFS);
+    const petBonus      = _skBonusOf(player.pet_skin_stats,   player.pet_skins,   PET_SKIN_DEFS);
+    const heroSkinBonus = _skBonusOf(player.hero_skin_stats,  player.hero_skins,  HERO_SKIN_DEFS);
+    // 🛡️ bonus จาก Equipment สวมใส่ (eq2) — ตรงกับ server xhrpg_eq2_stat_bonus (เฉพาะ option กลุ่ม STAT · int→intel)
+    //    server บวกเข้า effective stat ก่อน tick แล้ว (game.php:382) แต่แผงนี้คำนวณเลขเองฝั่ง client — ไม่ mirror = ผู้เล่นเห็นเลขไม่ขึ้น
+    const e2Bonus = {};
+    {
+      const _e2map = { str:'str', agi:'agi', dex:'dex', int:'intel', vit:'vit', luk:'luk' };
+      const _e2w = _eq2Worn();
+      EQ2_SLOTS.forEach(sl => {
+        const it = _e2w[sl];
+        if (!it || typeof it !== 'object') return;
+        (it.af || []).forEach(a => { const k = _e2map[a[0]]; if (k) e2Bonus[k] = (e2Bonus[k] || 0) + (+a[1] || 0); });
+      });
     }
     // bonus จากการ์ดที่เสียบในรูโมดูล (ทุกอาวุธ) — ตรงกับ server xhrpg_module_stat_bonus
     const cardBonus = {};
@@ -4057,19 +5064,32 @@ const xhrpg = (() => {
     ['pistol','sniper','knife','axe','robot','robot_gun','railgun','armor','house','turret'].forEach(w => {
       if (w === 'railgun' && (player.robot_railgun_expires || 0) <= _nowSec) return; // การ์ด railgun ให้ค่าเฉพาะตอนยังไม่หมดอายุ
       const mods = _pmodsObj(w);
+      // ★ mb ของการ์ด MVP ที่สุ่มได้เป็นชนิด STAT — server บวกเข้า effective stat ด้วย (xhrpg_module_stat_bonus:1143)
+      //   เดิม client นับแค่ c.v → เลขหน้า STAT น้อยกว่าค่าจริง (ผู้เล่นรายงานการ์ด MVP "ไม่แสดงผล" 2026-07-17)
+      const _addCard = c => {
+        if (!c) return;
+        if (c.s && c.v) cardBonus[c.s] = (cardBonus[c.s] || 0) + (parseInt(c.v) || 0);
+        if (c.mvp && c.mb && c.mb.t && ['str','agi','vit','dex','intel','luk'].includes(c.mb.t) && (parseInt(c.mb.a) || 0) > 0)
+          cardBonus[c.mb.t] = (cardBonus[c.mb.t] || 0) + (parseInt(c.mb.a) || 0);
+      };
       Object.keys(mods).forEach(slot => {
         const cs = (mods[slot] && Array.isArray(mods[slot].cards)) ? mods[slot].cards : [];
-        cs.forEach(c => { if (c && c.s && c.v) cardBonus[c.s] = (cardBonus[c.s] || 0) + (parseInt(c.v) || 0); });
+        cs.forEach(_addCard);
       });
     });
     // การ์ดที่เสียบสัตว์เลี้ยง (เฉพาะตอนมีสัตว์ฟักอยู่) — ตรงกับ server xhrpg_module_stat_bonus (เดิมตกหล่น → หน้า STAT โชว์ขาดค่าการ์ดสัตว์)
     if ((player.pet_mid | 0) > 0) {
-      _petCardsArr().forEach(c => { if (c && c.s && c.v) cardBonus[c.s] = (cardBonus[c.s] || 0) + (parseInt(c.v) || 0); });
+      _petCardsArr().forEach(c => {
+        if (!c) return;
+        if (c.s && c.v) cardBonus[c.s] = (cardBonus[c.s] || 0) + (parseInt(c.v) || 0);
+        if (c.mvp && c.mb && c.mb.t && ['str','agi','vit','dex','intel','luk'].includes(c.mb.t) && (parseInt(c.mb.a) || 0) > 0)
+          cardBonus[c.mb.t] = (cardBonus[c.mb.t] || 0) + (parseInt(c.mb.a) || 0); // ★ mb STAT ของการ์ดสัตว์ — server นับ (config:1160s) client ต้องนับตาม
+      });
     }
     const totals = {};
     // ✨ โบนัสสะสม (2026-07-16) ย้ายไป ATK/DEF/HP/MP แล้ว — ไม่บวกเข้า 6 STAT อีก
     STAT_META.forEach(s => {
-      const total = player[s.k] + (eqBonus[s.k] || 0) + (modBonus[s.k] || 0) + (spBonus[s.k] || 0) + (skinBonus[s.k] || 0) + (cardBonus[s.k] || 0) + (petBonus[s.k] || 0) + (heroSkinBonus[s.k] || 0);
+      const total = player[s.k] + (eqBonus[s.k] || 0) + (modBonus[s.k] || 0) + (spBonus[s.k] || 0) + (skinBonus[s.k] || 0) + (cardBonus[s.k] || 0) + (petBonus[s.k] || 0) + (heroSkinBonus[s.k] || 0) + (e2Bonus[s.k] || 0); // 🛡️ eq2
       totals[s.k] = total;
       const pct = Math.min(100, Math.round((total / 50) * 100));
       const row = document.createElement('div');
@@ -4170,15 +5190,18 @@ const xhrpg = (() => {
     //    totals[] รวม base+อุปกรณ์+โมดูล+สกิล+การ์ด+สกิน แล้ว → ค่าพวกนี้คือค่ากลางที่ใช้จริงไม่ว่าถืออาวุธอะไร
     //    แยก 4 ที่มา: STAT (ฐาน+แต้มที่กด) / ตีบวก / โมดูล / ✨ของวิเศษ (อุปกรณ์+ของสะสม+สกิน+การ์ด+โบนัสคอลเลกชัน) + ผลรวม
     const _cb2    = _cardCB();                                                  // การ์ด MVP socket: +atk/hp/mp (server บวกกลางทุกอาวุธ)
-    const _itemOf = k => Math.max(0, (totals[k]||0) - (player[k]||5) - (modBonus[k]||0)); // ✨ของวิเศษ = รวม − ฐาน − โมดูล
+    const _itemOf = k => Math.max(0, (totals[k]||0) - (player[k]||5) - (modBonus[k]||0)); // ✨ของวิเศษ = รวม − ฐาน − โมดูล (ยังรวม Option อยู่ — แยกด้วย _e2Of ด้านล่าง)
+    const _e2Of   = k => e2Bonus[k] || 0; // 🛡️ ส่วนของ Option ของสวมใส่ (แยกออกจาก ✨ → ✨ เหลือ สกิน/การ์ด/ของสะสม)
+    const _e2Rag  = (() => { const m = { rhp:'hp', atk:'atk', rdf:'def', exp:'exp', gld:'gold', drp:'drop' }, o = { hp:0, atk:0, def:0, exp:0, gold:0, drop:0 };
+      Object.values(_eq2Worn()).forEach(it => { if (it && Array.isArray(it.af)) it.af.forEach(a => { const k = m[a[0]]; if (k) o[k] += (+a[1] || 0); }); }); return o; })(); // % ชุด rag จาก option (หน่วย 0.01% — sync xhrpg_eq2_ragu)
     const _modAtk = _modTotalAtk();                                             // ATK โมดูล — บวกเท่ากันทุกอาวุธ
     const _vitB   = Math.max(0, (player.vit||5) - 5);                           // VIT ฐาน (แต้มที่กดเอง)
-    const _critPt = { stat:(player.luk||5)+(player.str||5), mod:(modBonus.luk||0)+(modBonus.str||0), item:_itemOf('luk')+_itemOf('str') };
-    const _defB   = { stat:10+_vitB, enh:Math.max(0,parseInt(player.armor_lv)||0), mod:(modBonus.vit||0)+_armorModDef(), item:_itemOf('vit') }; // sync xhrpg_def_total (ฐาน10+VIT−5+armor_lv+โมดูลเกราะ)
-    const _hpB    = { stat:(player.hp_max||100)+_vitB, mod:(modBonus.vit||0)*2, item:_itemOf('vit')*2+_cb2.hp };  // sync hpMaxEff ใน HUD (hp_max+_vitHpB+การ์ด)
-    const _mpB    = { stat:50+((player.intel||5)*5),   mod:(modBonus.intel||0)*5, item:_itemOf('intel')*5+_cb2.mp }; // sync mpMax ใน HUD
+    const _critPt = { stat:(player.luk||5)+(player.str||5), mod:(modBonus.luk||0)+(modBonus.str||0), item:_itemOf('luk')+_itemOf('str')-_e2Of('luk')-_e2Of('str'), opt:_e2Of('luk')+_e2Of('str') };
+    const _defB   = { stat:10+_vitB, enh:Math.max(0,parseInt(player.armor_lv)||0), mod:(modBonus.vit||0)+_armorModDef(), item:_itemOf('vit')-_e2Of('vit'), opt:_e2Of('vit')+_eq2BonusSum().def }; // sync xhrpg_def_total (ฐาน10+VIT−5+armor_lv+โมดูลเกราะ + 🛡️ VIT option + DEF ติดตัว eq2)
+    const _hpB    = { stat:(player.hp_max||100)+_vitB, mod:(modBonus.vit||0)*2, item:(_itemOf('vit')-_e2Of('vit'))*2+_cb2.hp, opt:_e2Of('vit')*2 };  // sync hpMaxEff ใน HUD (hp_max+_vitHpB+การ์ด)
+    const _mpB    = { stat:50+((player.intel||5)*5),   mod:(modBonus.intel||0)*5, item:(_itemOf('intel')-_e2Of('intel'))*5+_cb2.mp, opt:_e2Of('intel')*5 }; // sync mpMax ใน HUD
     const _critT  = Math.min(50, Math.floor((totals.luk + totals.str) / 10));   // คริ ×2 (LUK+STR · เพดานสเตต 50%)
-    const _dodgePt = { stat:(player.agi||5), mod:(modBonus.agi||0), item:_itemOf('agi') }; // 💨 หลบ = floor(AGI/3)% (sync xhrpg_dodge_roll)
+    const _dodgePt = { stat:(player.agi||5), mod:(modBonus.agi||0), item:_itemOf('agi')-_e2Of('agi'), opt:_e2Of('agi') }; // 💨 หลบ = floor(AGI/3)% (sync xhrpg_dodge_roll)
     const _dodgeT  = Math.min(75, Math.floor((totals.agi||5) / 3));             // เพดานส่วน AGI 75% (มอนเลเวลสูงลดโอกาสตอนสู้จริง)
     const _fmtD   = v => '+' + (v / 3).toFixed(1) + '%';                        // ชิปหลบ: ทุก 3 AGI = +1%
     // ── ATK รายอาวุธ (sync สูตรเมนูอาวุธ + server): STAT=ฐาน+สเตต+สกิล · ตีบวก=Lv อาวุธ/เคลือบ · โมดูล=pool รวม · ✨=การ์ด MVP +ATK ──
@@ -4188,25 +5211,100 @@ const xhrpg = (() => {
     const _plvC = player.gun_pistol_lv || 1, _slvC = player.gun_sniper_lv || 1, _klvC = player.knife_lv || 1;
     const _tSkC = parseInt(_wSk.deploy_turret) || 0, _tCoat = Math.max(1, player.turret_lv | 0 || 1);
     //    โมดูล/✨ของวิเศษ ให้ STAT เพิ่ม → คูณเรตอาวุธเข้าไปด้วย (server ฉีดโบนัสเข้า dex/str/intel ก่อน tick แล้ว — ค่าจริงตรงนี้)
-    const _wRow = (ic, name, stat, enh, modX, itemX) => ({ ic, c: '#f43f5e', name, total: `+${stat + enh + _modAtk + modX + _cb2.atk + itemX}`, b: { stat, enh, mod: _modAtk + modX, item: _cb2.atk + itemX } });
+    const _wRow = (ic, name, stat, enh, modX, itemX, optX) => ({ ic, c: '#f43f5e', name, total: `+${stat + enh + _modAtk + modX + _cb2.atk + itemX}`, b: { stat, enh, mod: _modAtk + modX, item: _cb2.atk + itemX - (optX || 0), opt: optX || 0 } }); // itemX รวม Option อยู่แล้ว — ชิปแยก item/opt ยอดรวมเท่าเดิม
     const _fmtC = v => '+' + (v / 10).toFixed(1) + '%';           // ชิป CRIT แสดงเป็น % ตรงๆ (pt/10)
     const CENTRAL = [
-      { ic: '⚔️', c: '#f43f5e', name: T('ATK โบนัส (ทุกอาวุธ)'), total: `+${_modAtk + _cb2.atk}`, b: { stat:null, enh:null, mod:_modAtk, item:_cb2.atk } },
-      _wRow(_LOG_KNIFE_S, 'ATK ' + T('มีดสั้น'), 20 + _dxO * 2 + _crSk, (_plvC - 1) * 2, (modBonus.dex || 0) * 2, _itemOf('dex') * 2),
-      _wRow(_LOG_KNIFE_B, 'ATK ' + T('มีดยาว'), Math.round(120 + _dxO * 2.5) + _crSk, (_slvC - 1) * 5, Math.round((modBonus.dex || 0) * 2.5), Math.round(_itemOf('dex') * 2.5)),
-      _wRow(_LOG_SWORD,   'ATK ' + T('ดาบ'),   ((player.str || 5) - 5) * 3 + 10, (_klvC - 1) * 8, (modBonus.str || 0) * 3, _itemOf('str') * 3),
-      _wRow('🗼',         'ATK ' + T('ป้อมปืน'), 20 + (player.intel || 5) * 3 + _tSkC * 5, (_tCoat - 1) * 2, (modBonus.intel || 0) * 3, _itemOf('intel') * 3),
-      { ic: '💥', c: '#f59e0b', name: T('CRIT (คริ ×2)'), total: `${_critT}%`, fmt: _fmtC, b: { stat:_critPt.stat, enh:null, mod:_critPt.mod, item:_critPt.item }, note: T('ทุก 10 pt (LUK+STR) = คริ +1% · เพดาน 50%') },
-      { ic: '💨', c: '#14b8a6', name: T('หลบหลีก'),      total: `${_dodgeT}%`, fmt: _fmtD, b: { stat:_dodgePt.stat, enh:null, mod:_dodgePt.mod, item:_dodgePt.item }, note: T('ทุก 3 AGI = หลบ +1% · เพดาน 75% · มอนเลเวลสูงลดโอกาส') },
-      { ic: '🔰', c: '#0ea5e9', name: 'DEF',             total: `+${_defB.stat+_defB.enh+_defB.mod+_defB.item}`, b: _defB },
-      { ic: '❤️', c: '#22c55e', name: T('HP สูงสุด'),     total: `${_hpB.stat+_hpB.mod+_hpB.item}`, b: { stat:_hpB.stat, enh:null, mod:_hpB.mod, item:_hpB.item } },
-      { ic: '🔷', c: '#6366f1', name: T('MP สูงสุด'),     total: `${_mpB.stat+_mpB.mod+_mpB.item}`, b: { stat:_mpB.stat, enh:null, mod:_mpB.mod, item:_mpB.item } },
+      { ic: '⚔️', c: '#f43f5e', name: T('ATK โบนัส (ทุกอาวุธ)'), total: `+${_modAtk + _cb2.atk}`, b: { stat:null, enh:null, mod:_modAtk, item:_cb2.atk, opt:null } },
+      _wRow(_LOG_KNIFE_S, 'ATK ' + T('มีดสั้น'), 20 + _dxO * 2 + _crSk, (_plvC - 1) * 2, (modBonus.dex || 0) * 2, _itemOf('dex') * 2, _e2Of('dex') * 2),
+      _wRow(_LOG_KNIFE_B, 'ATK ' + T('มีดยาว'), Math.round(120 + _dxO * 2.5) + _crSk, (_slvC - 1) * 5, Math.round((modBonus.dex || 0) * 2.5), Math.round(_itemOf('dex') * 2.5), Math.round(_e2Of('dex') * 2.5)),
+      _wRow(_LOG_SWORD,   'ATK ' + T('ดาบ'),   ((player.str || 5) - 5) * 3 + 10, (_klvC - 1) * 8, (modBonus.str || 0) * 3, _itemOf('str') * 3, _e2Of('str') * 3),
+      _wRow('🗼',         'ATK ' + T('ป้อมปืน'), 20 + (player.intel || 5) * 3 + _tSkC * 5, (_tCoat - 1) * 2, (modBonus.intel || 0) * 3, _itemOf('intel') * 3, _e2Of('intel') * 3),
+      { ic: '💥', c: '#f59e0b', name: T('CRIT (คริ ×2)'), total: `${_critT}%`, fmt: _fmtC, b: { stat:_critPt.stat, enh:null, mod:_critPt.mod, item:_critPt.item, opt:_critPt.opt }, note: T('ทุก 10 pt (LUK+STR) = คริ +1% · เพดาน 50%') },
+      { ic: '💨', c: '#14b8a6', name: T('หลบหลีก'),      total: `${_dodgeT}%`, fmt: _fmtD, b: { stat:_dodgePt.stat, enh:null, mod:_dodgePt.mod, item:_dodgePt.item, opt:_dodgePt.opt }, note: T('ทุก 3 AGI = หลบ +1% · เพดาน 75% · มอนเลเวลสูงลดโอกาส') },
+      { ic: '🔰', c: '#0ea5e9', name: 'DEF',             total: `+${_defB.stat+_defB.enh+_defB.mod+_defB.item+_defB.opt}`, b: _defB },
+      { ic: '❤️', c: '#22c55e', name: T('HP สูงสุด'),     total: `${_hpB.stat+_hpB.mod+_hpB.item+_hpB.opt}`, b: { stat:_hpB.stat, enh:null, mod:_hpB.mod, item:_hpB.item, opt:_hpB.opt } },
+      { ic: '🔷', c: '#6366f1', name: T('MP สูงสุด'),     total: `${_mpB.stat+_mpB.mod+_mpB.item+_mpB.opt}`, b: { stat:_mpB.stat, enh:null, mod:_mpB.mod, item:_mpB.item, opt:_mpB.opt } },
     ];
-    const _srcChip = (lbl, v, fmt) => `<span style="flex:1;min-width:0;text-align:center;font-size:9.5px;color:#64748b;background:#eef2f7;border-radius:6px;padding:3px 2px;overflow:hidden">${lbl}<br><b style="font-size:11px;color:${(v==null||v===0)?'#cbd5e1':'#334155'}">${(v==null||v===0)?'—':(fmt?fmt(v):'+'+v)}</b></span>`;
+    const _srcChip = (lbl, v, fmt, hl) => `<span style="flex:1;min-width:0;text-align:center;font-size:9.5px;color:${hl?'#7c3aed':'#64748b'};background:${hl?'#f3efff':'#eef2f7'};border-radius:6px;padding:3px 2px;overflow:hidden">${lbl}<br><b style="font-size:11px;color:${(v==null||v===0)?'#cbd5e1':(hl?'#7c3aed':'#334155')}">${(v==null||v===0)?'—':(fmt?fmt(v):'+'+v)}</b></span>`; // hl = ชิป 🛡️ Option โทนม่วง
+    // 🎁 โบนัสรับรางวัล (PREMIUM · VIP) — เจ้าของสั่ง 2026-07-17 · เลข mirror server เป๊ะ:
+    //    EXP = 35%(Premium) + 5%×VIP บวกกัน · DROP = 100%(Premium) + 5%×VIP บวกกัน (2026-07-17 เปลี่ยนจากคูณ ×2) · G = 35% จาก Premium เท่านั้น (VIP ไม่บวก G)
+    const _bnNow  = Date.now() / 1000;
+    const _bnVip  = Math.max(0, Math.min(VIP_MAX, player.vip_lv | 0));
+    const _bnDays = f => Math.max(1, Math.ceil(((player[f] || 0) - _bnNow) / 86400));
+    const _bnPE = (player.premium_exp_expires  || 0) > _bnNow;
+    const _bnPG = (player.premium_gold_expires || 0) > _bnNow;
+    const _bnPD = (player.premium_drop_expires || 0) > _bnNow;
+    const _bnChip = (lbl, val, on, c, sub) => `<span style="flex:1;min-width:0;text-align:center;font-size:9.5px;color:${on?c:'#64748b'};background:${on?c+'14':'#eef2f7'};border-radius:6px;padding:3px 2px;overflow:hidden">${lbl}<br><b style="font-size:11px;color:${on?c:'#cbd5e1'}">${val}</b>${sub?`<br><span style="font-size:8px;color:#94a3b8">${sub}</span>`:''}</span>`;
+    const _bnVipLbl   = 'VIP' + (_bnVip || '');
+    const _bnRows = [
+      { ic:'⚡', c:'#7c3aed', name:T('โบนัส EXP'), total:'+' + ((_bnPE ? 35 : 0) + _bnVip * 5) + '%',
+        chips: _bnChip('PREMIUM', _bnPE ? '+35%' : '—', _bnPE, '#7c3aed', _bnPE ? T('หมด {a} วัน', {a: _bnDays('premium_exp_expires')}) : null)
+             + _bnChip(_bnVipLbl, _bnVip ? '+' + (_bnVip * 5) + '%' : '—', _bnVip > 0, '#b45309')
+             + _bnChip('=', T('บวกกัน'), true, '#64748b'),
+        note:T('แสดงใน Log: บรรทัดปกติ = ฐาน · บรรทัด 🅿️ = โบนัส') },
+      { ic:'💎', c:'#0891b2', name:T('โบนัสดรอปของหายาก'), total:'+' + ((_bnPD ? 100 : 0) + _bnVip * 5) + '%',
+        chips: _bnChip('PREMIUM', _bnPD ? '+100%' : '—', _bnPD, '#0891b2', _bnPD ? T('หมด {a} วัน', {a: _bnDays('premium_drop_expires')}) : null)
+             + _bnChip(_bnVipLbl, _bnVip ? '+' + (_bnVip * 5) + '%' : '—', _bnVip > 0, '#b45309')
+             + _bnChip('=', T('บวกกัน'), true, '#64748b'),
+        note:T('การ์ด/ไข่/โมดูล/เพชร/กล่อง/ของ MVP — ไม่รวมแร่/พืช/ยา') },
+      { ic:'💰', c:'#b45309', name:T('โบนัส G'), total:'+' + (_bnPG ? 35 : 0) + '%',
+        chips: _bnChip('PREMIUM', _bnPG ? '+35%' : '—', _bnPG, '#b45309', _bnPG ? T('หมด {a} วัน', {a: _bnDays('premium_gold_expires')}) : null)
+             + _bnChip('VIP', '—', false, '#b45309')
+             + _bnChip('=', T('PREMIUM เท่านั้น'), true, '#64748b') },
+    ];
+    const bonusDiv = document.createElement('div');
+    bonusDiv.style.cssText = 'grid-column:1 / -1; margin-top:12px; border-top:2px solid #e2e8f0; padding-top:11px;';
+    bonusDiv.innerHTML = '<div style="font-size:13px;color:#0891b2;font-weight:700;margin-bottom:3px">' + T('🎁 โบนัสรับรางวัล (PREMIUM · VIP)') + '</div>'
+      + '<div style="font-size:10.5px;color:#94a3b8;margin-bottom:8px">' + T('บวกอัตโนมัติทุกการกำจัดมอน · ออนไลน์+ออฟไลน์') + '</div>'
+      + _bnRows.map(x => `<div style="background:#f8fafc;border-left:3px solid ${x.c};border-radius:0 8px 8px 0;padding:7px 10px;margin-bottom:6px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px">
+          <span style="font-size:15px;flex:0 0 auto">${x.ic}</span>
+          <span style="flex:1;min-width:0;font-size:12px;font-weight:700;color:#1e293b">${x.name}</span>
+          <span style="flex:0 0 auto;font-size:9.5px;color:#94a3b8">${T('รวม')}</span>
+          <b style="font-size:14px;color:${x.c};flex:0 0 auto">${x.total}</b>
+        </div>
+        <div style="display:flex;gap:4px">${x.chips}</div>
+        ${x.note ? `<div style="font-size:9px;color:#94a3b8;margin-top:4px">${x.note}</div>` : ''}
+      </div>`).join('');
+    el.appendChild(bonusDiv); // อยู่เหนือ 📊 ค่ากลางระบบ (sumDiv ต่อท้ายด้านล่าง)
+    // ── ⭐ โบนัส % รวม (Ragnalok · Option) — RAG = แต้ม rag_* ×0.1% (มีเฉพาะ hp/atk/def · mp/crit/เกราะ ดูหัวข้อ 🌟) · OPT = option ของสวมใส่ (sync xhrpg_rag_mult + xhrpg_eq2_ragu) ──
+    const _pctFmt = v => (Math.round(v * 100) / 100).toString();
+    const PCT_CARDS = [
+      { k:'hp',   ic:'❤️', c:'#22c55e', lbl:'HP',   rag:1 }, { k:'atk',  ic:'⚔️', c:'#f43f5e', lbl:'ATK',  rag:1 }, { k:'def',  ic:'🔰', c:'#0ea5e9', lbl:'DEF',  rag:1 },
+      { k:'exp',  ic:'⚡', c:'#7c3aed', lbl:'EXP',  rag:0 }, { k:'gold', ic:'💰', c:'#b45309', lbl:'GOLD', rag:0 }, { k:'drop', ic:'💎', c:'#0891b2', lbl:'DROP', rag:0 },
+    ];
+    const pctDiv = document.createElement('div');
+    pctDiv.style.cssText = 'grid-column:1 / -1; margin-top:12px; border-top:2px solid #e2e8f0; padding-top:11px;';
+    pctDiv.innerHTML = '<div style="font-size:13px;color:#d97706;font-weight:700;margin-bottom:3px">⭐ ' + T('โบนัส % รวม (Ragnalok · Option)') + '</div>'
+      + '<div style="font-size:10.5px;color:#94a3b8;margin-bottom:8px">' + T('% คูณท้ายสุด · แต้ม Ragnalok + Option ของสวมใส่ บวกกัน · EXP/GOLD/DROP มาจาก Option เท่านั้น') + '</div>'
+      + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px">'
+      + PCT_CARDS.map(x => { const r = x.rag ? (Math.max(0, parseInt(player['rag_' + x.k]) || 0)) * 0.1 : 0, o = (_e2Rag[x.k] || 0) / 100, t = r + o;
+          return `<div style="background:#f8fafc;border:1px solid ${o>0?'#ddd6fe':'#e2e8f0'};border-radius:8px;padding:6px 4px;text-align:center">
+            <div style="font-size:10px;color:#64748b">${x.ic} ${x.lbl}</div>
+            <b style="font-size:13px;color:${t>0?x.c:'#cbd5e1'}">${t>0?'+'+_pctFmt(t)+'%':'—'}</b>
+            <div style="font-size:8.5px;color:#94a3b8">RAG ${r>0?_pctFmt(r):'—'} · <span style="color:#7c3aed">OPT ${o>0?_pctFmt(o):'—'}</span></div>
+          </div>`; }).join('') + '</div>';
+    el.appendChild(pctDiv);
+    // ── ⛏️ โบนัสทรัพยากรต่อดรอป — การันตี/ดรอป = 1 + สมบัติ + Option (sync idle_logic resource drops · LUK สุ่ม + Lv มอน แปรผัน ไม่โชว์เลข) ──
+    const _resTre  = { iron:1, wood:4, copper:5, stone:6 }; // treasure id ต่อชนิด (sync $resTreasureBonus)
+    const _resOptK = { wood:'wod', stone:'stn', iron:'irn', copper:'cop', herb:'hrb' };
+    const _tOwnR   = (() => { const t = player.treasures; return Array.isArray(t) ? t : (typeof t === 'string' ? (JSON.parse(t || '[]') || []) : []); })();
+    const resDiv = document.createElement('div');
+    resDiv.style.cssText = 'grid-column:1 / -1; margin-top:12px; border-top:2px solid #e2e8f0; padding-top:11px;';
+    resDiv.innerHTML = '<div style="font-size:13px;color:#059669;font-weight:700;margin-bottom:3px">⛏️ ' + T('โบนัสทรัพยากรต่อดรอป') + '</div>'
+      + '<div style="font-size:10.5px;color:#94a3b8;margin-bottom:8px">' + T('ได้กี่ชิ้นทุกครั้งที่แร่/พืชดรอป = 1 + สมบัติ + Option ของสวมใส่ · มอน Lv สูงได้เพิ่ม') + '</div>'
+      + '<div style="display:flex;gap:4px">'
+      + [['wood','🪵'],['stone','🪨'],['iron','⚙️'],['copper','🟫'],['herb','🌿']].map(([k, ic]) => {
+          const tre = _resTre[k] && _tOwnR.includes(_resTre[k]) ? 1 : 0, opt = _e2FxSum(_resOptK[k]), n = 1 + tre + opt;
+          return `<span style="flex:1;text-align:center;font-size:10px;color:#64748b;background:#f8fafc;border:1px solid ${opt>0?'#ddd6fe':'#e2e8f0'};border-radius:8px;padding:5px 2px">${ic}<br><b style="font-size:12px;color:${opt>0?'#7c3aed':'#334155'}">+${n}</b></span>`; }).join('')
+      + '</div>'
+      + '<div style="font-size:9px;color:#94a3b8;margin-top:5px">' + T('ขอบม่วง = มี Option ของสวมใส่ช่วย · LUK สูงมีโอกาสสุ่มได้เพิ่มอีก') + '</div>';
+    el.appendChild(resDiv);
     const sumDiv = document.createElement('div');
     sumDiv.style.cssText = 'grid-column:1 / -1; margin-top:12px; border-top:2px solid #e2e8f0; padding-top:11px;';
     sumDiv.innerHTML = '<div style="font-size:13px;color:#7c3aed;font-weight:700;margin-bottom:3px">📊 ' + T('ค่ากลางระบบ (ใช้ร่วมทุกอาวุธ)') + '</div>' +
-      '<div style="font-size:10.5px;color:#94a3b8;margin-bottom:8px">' + T('บวกเท่ากันไม่ว่าถืออาวุธอะไร · ATK พื้นฐานของอาวุธแต่ละชนิดดูในเมนูอาวุธ') + '</div>' +
+      '<div style="font-size:10.5px;color:#94a3b8;margin-bottom:4px">' + T('บวกเท่ากันไม่ว่าถืออาวุธอะไร · ATK พื้นฐานของอาวุธแต่ละชนิดดูในเมนูอาวุธ') + '</div>' +
+      '<div style="font-size:10px;color:#64748b;background:#f1f5f9;border-radius:6px;padding:4px 8px;margin-bottom:8px">' + T('✨ ของวิเศษ = สกิน · การ์ด · ของสะสม — 🛡️ Option = จากของสวมใส่ที่ใส่อยู่') + '</div>' +
       CENTRAL.map(x => `<div style="background:#f8fafc;border-left:3px solid ${x.c};border-radius:0 8px 8px 0;padding:7px 10px;margin-bottom:6px">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px">
           <span style="font-size:15px;flex:0 0 auto">${x.ic}</span>
@@ -4214,7 +5312,7 @@ const xhrpg = (() => {
           <span style="flex:0 0 auto;font-size:9.5px;color:#94a3b8">${T('รวม')}</span>
           <b style="font-size:14px;color:${x.c};flex:0 0 auto">${x.total}</b>
         </div>
-        <div style="display:flex;gap:4px">${_srcChip('STAT', x.b.stat, x.fmt)}${_srcChip(T('ตีบวก'), x.b.enh, x.fmt)}${_srcChip(T('โมดูล'), x.b.mod, x.fmt)}${_srcChip('✨' + T('โบนัส'), x.b.item, x.fmt)}</div>
+        <div style="display:flex;gap:4px">${_srcChip('STAT', x.b.stat, x.fmt)}${_srcChip(T('ตีบวก'), x.b.enh, x.fmt)}${_srcChip(T('โมดูล'), x.b.mod, x.fmt)}${_srcChip('✨' + T('โบนัส'), x.b.item, x.fmt)}${_srcChip('🛡️Option', x.b.opt, x.fmt, 1)}</div>
         ${x.note ? `<div style="font-size:9px;color:#94a3b8;margin-top:4px">${x.note}</div>` : ''}
       </div>`).join('');
     el.appendChild(sumDiv);
@@ -4247,10 +5345,10 @@ const xhrpg = (() => {
   }
 
   // ── Ammo tier helpers ─────────────────────────────────────────────────────
-  const AMMO_TIER_COSTS      = [1, 2, 5, 8, 12, 15]; // เหล็ก/นัด
-  // ทองแดง/นัด = เหล็ก × ตัวคูณตามปืน (ตรงกับ PHP xhrpg_ammo_copper_cost)
+  const AMMO_TIER_COSTS      = [1, 3, 8, 12, 18, 23]; // เหล็ก/หน่วยผลิต (sync PHP XHRPG_AMMO_TIER_COSTS — เลขเก่า 1/2/5/8/12/15 ค้างจากก่อนปรับ ×1.5 2026-07-14)
+  // ทองแดง/หน่วย = เหล็ก × ตัวคูณตามปืน (ตรงกับ PHP xhrpg_ammo_copper_cost) — ยกเว้น T1 = 1 ทุกปืน
   const AMMO_COPPER_MULT     = { pistol:1.0, sniper:1.5, robot:1.25 };
-  function _copperCost(gun, tierIdx) { return Math.round(AMMO_TIER_COSTS[tierIdx] * (AMMO_COPPER_MULT[gun] || 1)); }
+  function _copperCost(gun, tierIdx) { if (tierIdx === 0) return AMMO_TIER_COSTS[0]; return Math.round(AMMO_TIER_COSTS[tierIdx] * (AMMO_COPPER_MULT[gun] || 1)); }
   const AMMO_TIER_CARRY_CAPS = [50, 40, 35, 30, 27, 25];
   const AMMO_TIER_HOUSE_CAPS = [30, 20, 15, 10, 7, 5];
   const AMMO_TIER_DMG        = [1.0, 1.2, 1.4, 1.6, 1.8, 2.0];
@@ -4264,7 +5362,7 @@ const xhrpg = (() => {
   const POTION_TIER_UNLOCK_LV  = [1, 10, 25, 50, 80, 100];
   const POTION_TIER_ICONS      = ['⚪','🟢','🔵','🟣','🟡','🔴'];
 
-  function _ammoCarryCap(tierIdx, p, gun) { return AMMO_TIER_CARRY_CAPS[tierIdx] + Math.max(0, (p.lv||1) - 1) * 5; } // อิงเลเวลผู้เล่น (ไม่ขึ้น STR/×3 · ทุกปืนเท่ากัน)
+  function _ammoCarryCap(tierIdx, p, gun) { return AMMO_TIER_CARRY_CAPS[tierIdx] + Math.max(0, (p.lv||1) - 1) * 5 + (gun === 'pistol' ? _e2FxSum('pam') : 0); } // อิงเลเวลผู้เล่น (ไม่ขึ้น STR/×3 · ทุกปืนเท่ากัน) + ⚔️ eq2 จุมีดสั้น (sync server xhrpg_ammo_carry_cap)
   function _ammoHouseCap(tierIdx, houseLv) { return Math.ceil((AMMO_TIER_HOUSE_CAPS[tierIdx] + houseLv * 5) * 1.5); } // ความจุคลังยานบิน ×1.5 (ตรงกับ PHP xhrpg_ammo_house_cap)
 
   function _potionCarryCap(tierIdx, vit) { return POTION_TIER_CARRY_CAPS[tierIdx] + vit * 2; }
@@ -4394,8 +5492,9 @@ const xhrpg = (() => {
   const _ROBOT_CORE_NAME = { core_back:'แกนหลัง', core_brain:'แกนสมอง', core_center:'แกนกลาง' };
   const _ROBOT_CORE_ICON = { core_back:'🔋', core_brain:'🧠', core_center:'🔩' }; // 🔩 แทน ⚙️ (เลี่ยงชน scan-replace ⚙️→เหล็ก)
   function _modRobotEnergy(m){ return m ? (parseInt(m.plus)||0) + 1 : 0; }
-  // โมดูลเกราะ 3 ช่อง (เอฟเฟกต์ต่างกัน)
-  const _ARMOR_SLOT_NAME = { a_max:'แกนเกราะ', a_regen:'แกนฟื้นฟู', a_return:'แกนสะท้อน' };
+  // โมดูลโล่ 3 ช่อง (เอฟเฟกต์ต่างกัน) — ระบบเกราะเดิม rebrand เป็น "โล่/Shield" (กันสับสนกับ 🛡️ Equipment ของสวมใส่ · เจ้าของสั่ง 2026-07-19)
+  const _SHIELD_ICO = sz => `<img src="assets/eq2/shield_sys.png" style="width:${sz|0}px;height:${sz|0}px;image-rendering:pixelated;vertical-align:-2px">`; // โล่เหล็ก craftpix — ไอคอนประจำระบบ
+  const _ARMOR_SLOT_NAME = { a_max:'แกนโล่', a_regen:'แกนฟื้นฟู', a_return:'แกนสะท้อน' };
   const _ARMOR_SLOT_ICON = { a_max:'🛡️', a_regen:'♻️', a_return:'⚡' };
   const _HOUSE_SLOT_NAME = { h_roof:'โมดูลหลังคา', h_wall:'โมดูลกำแพง', h_floor:'โมดูลพื้น' };
   const _HOUSE_SLOT_ICON = { h_roof:'🏠', h_wall:'🧱', h_floor:'▦' };
@@ -4456,7 +5555,7 @@ const xhrpg = (() => {
     if (w==='robot') return ['core_back','core_brain','core_center'].map(k => ({ key:k, name:_ROBOT_CORE_NAME[k], icon:_ROBOT_CORE_ICON[k], stat:'⚡ พลังงาน + 🔋 recover' }));
     if (w==='house') return ['h_roof','h_wall','h_floor'].map(k => ({ key:k, name:_HOUSE_SLOT_NAME[k], icon:_HOUSE_SLOT_ICON[k], stat:'⚡ พลังงาน' }));
     if (w==='armor') return [
-      { key:'a_max',    name:'แกนเกราะ',  icon:'🛡️', stat:'+เกราะสูงสุด' },
+      { key:'a_max',    name:'แกนโล่',  icon:'🛡️', stat:'+เกราะสูงสุด' },
       { key:'a_regen',  name:'แกนฟื้นฟู', icon:'♻️', stat:'+ฟื้นเกราะ/วิ' },
       { key:'a_return', name:'แกนสะท้อน', icon:'⚡', stat:'สะท้อนดาเมจ %' },
     ];
@@ -4517,7 +5616,7 @@ const xhrpg = (() => {
 
   let _modManage = { pistol:false, sniper:false, knife:false, axe:false, robot:false, robot_gun:false, railgun:false, armor:false, house:false, turret:false }; // โหมดจัดการคลังโมดูล แยกตามอาวุธ
   let _modSel    = { pistol:new Set(), sniper:new Set(), knife:new Set(), axe:new Set(), robot:new Set(), robot_gun:new Set(), railgun:new Set(), armor:new Set(), house:new Set(), turret:new Set() };
-  const _MOD_WEAPON_LABEL = { pistol:'โมดูลมีดสั้น', sniper:'โมดูลมีดยาว', knife:'โมดูลมีด', axe:'โมดูลขวาน', robot:'โมดูลไททัน (แกนพลังงาน)', robot_gun:'โมดูลธนูไททัน (ARM)', railgun:'โมดูล Premium Titan Beam', armor:'โมดูลเกราะ', house:'โมดูลยานบิน (แกนพลังงาน)', turret:'โมดูลป้อม' };
+  const _MOD_WEAPON_LABEL = { pistol:'โมดูลมีดสั้น', sniper:'โมดูลมีดยาว', knife:'โมดูลมีด', axe:'โมดูลขวาน', robot:'โมดูลไททัน (แกนพลังงาน)', robot_gun:'โมดูลธนูไททัน (ARM)', railgun:'โมดูล Premium Titan Beam', armor:'โมดูลโล่', house:'โมดูลยานบิน (แกนพลังงาน)', turret:'โมดูลป้อม' };
   function _renderModulePanel(weapon){
     weapon = weapon || 'pistol';
     const invField = _MOD_INV_FIELD[weapon] || 'module_inventory';
@@ -4649,11 +5748,16 @@ const xhrpg = (() => {
     const total = cnts.reduce((a, b) => a + b, 0);
     const cards = MODULE_BOX_META.map((m, i) => {
       const n = cnts[i], on = n > 0 && !_boxOpening;
+      // ✖️10 ปุ่มคู่ — โครงเดียวกับกล่องการ์ด/ไข่เป๊ะ (เจ้าของสั่ง 2026-07-28) · เหลือ <10 เปิดหมดเท่าที่มี ป้ายบอกจำนวนจริง
+      const m10 = Math.min(n, 10), on10 = n >= 2 && !_boxOpening;
       return `<div style="border:1px solid ${n>0?m.c+'55':'#e7e5e4'};border-left:3px solid ${n>0?m.c:'#d6d3d1'};border-radius:0 8px 8px 0;padding:6px 4px;background:${n>0?m.bg:'#fafaf9'};opacity:${n>0?1:0.55};text-align:center;min-width:0">
         <div style="font-size:16px">📦</div>
         <div style="font-size:9px;font-weight:600;color:${n>0?m.c:'#a8a29e'};line-height:1.2;min-height:22px;overflow:hidden">${T(m.n)}</div>
         <div style="font-size:11px;font-weight:700;color:#44403c;margin:1px 0">×${n}</div>
-        <button class="abtn ${on?'green':'grey'}" style="width:100%;font-size:10px;padding:2px 0" onclick="xhrpg.openModuleBox(${m.t})" ${on?'':'disabled'}>${T('เปิดกล่อง')}</button>
+        <div style="display:flex;gap:3px">
+          <button class="abtn ${on?'green':'grey'}" style="flex:1.3;font-size:10px;padding:2px 0;min-width:0;overflow:hidden" onclick="xhrpg.openModuleBox(${m.t},1)" ${on?'':'disabled'}>${T('เปิดกล่อง')}</button>
+          <button class="abtn ${on10?'blue':'grey'}" style="flex:1;font-size:10px;padding:2px 0;min-width:0" onclick="xhrpg.openModuleBox(${m.t},10)" ${on10?'':'disabled'}>×${on10?m10:10}</button>
+        </div>
       </div>`;
     }).join('');
     return `<div class="treasure-panel" style="margin-top:8px">
@@ -4663,20 +5767,57 @@ const xhrpg = (() => {
     </div>`;
   }
   const XHRPG_MODULE_INV_MAX_JS = 30; // sync PHP XHRPG_MODULE_INV_MAX
-  function openModuleBox(t) {
+  function openModuleBox(t, cnt) {
     if (_boxOpening) return;
     if (!(player['module_box' + t] | 0)) return;
     _boxOpening = true;
     renderItems();
-    $.post(baseUrl + 'xhrpg_upgrade.php', { line_uid: player.line_uid, action: 'open_module_box', param: t }).done(res => {
+    $.post(baseUrl + 'xhrpg_upgrade.php', { line_uid: player.line_uid, action: 'open_module_box', param: t, count: Math.max(1, Math.min(10, cnt | 0 || 1)), lang: LANG() }).done(res => {
       _boxOpening = false; // reset ก่อน parse — parse พังต้องไม่ทำให้ปุ่มค้าง disable
       try {
         const d = typeof res === 'string' ? JSON.parse(res) : res;
-        if (d.ok) { player = d.player; addLog([{ type: 'levelup', msg: d.msg }]); _showBoxResult(d.box_result); }
+        if (d.ok) {
+          player = d.player; addLog([{ type: 'levelup', msg: d.msg }]);
+          if (d.box_results && d.box_results.length > 1) _showModBoxMulti(d.box_results); // ✖️N popup ตาราง
+          else _showBoxResult(d.box_result);
+        }
         else addLog([{ type: 'dead', msg: d.error || T('เปิดกล่องไม่ได้') }]);
       } catch (e) {}
       renderItems();
     }).fail(() => { _boxOpening = false; renderItems(); });
+  }
+  // ✖️N popup — ตารางโมดูลที่ได้ทั้งชุด (มิเรอร์โครง _showBoxResultMulti ของกล่องการ์ด/ไข่)
+  //    ไม่มีสไปรต์มอนให้วาด → ใช้สีตาม rarity + ชื่ออาวุธ/ช่อง/สเตตัสแทน
+  function _showModBoxMulti(list) {
+    if (!Array.isArray(list) || !list.length) return;
+    const RC = ['#94a3b8', '#3b82f6', '#a855f7', '#f59e0b', '#dc2626', '#be123c', '#7f1d1d']; // rarity 1-7
+    const t0 = list[0].boxTier | 0, meta = MODULE_BOX_META[t0 - 1] || MODULE_BOX_META[0];
+    const eqN = list.filter(d => d.place === 'equip').length;
+    let cells = '';
+    for (const d of list) {
+      const c = RC[Math.max(0, Math.min(RC.length - 1, (d.rarity | 0) - 1))];
+      cells += `<div style="border:1px solid ${c}55;border-left:3px solid ${c};border-radius:0 8px 8px 0;background:#f8fafc;padding:4px 5px;text-align:left;min-width:0">
+        <div style="font-size:9px;font-weight:700;color:${c};line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_escHtml(T(d.rName || ''))}</div>
+        <div style="font-size:8.5px;color:#475569;line-height:1.25;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_escHtml(T(d.gunName || ''))} · ${_escHtml(T(d.slotName || ''))}</div>
+        <div style="font-size:9px;font-weight:700;color:#0f172a">${_escHtml(T(d.sName || ''))}${d.place === 'equip' ? ' ⚙️' : ''}</div>
+      </div>`;
+    }
+    const el = document.createElement('div');
+    el.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+    el.innerHTML = `<div style="background:#fff;border-radius:18px;max-width:340px;width:100%;overflow:hidden;box-shadow:0 12px 40px rgba(2,8,23,.35)">
+      <div style="background:${meta.c};padding:12px 16px 10px;text-align:center;color:#fff">
+        <div style="font-size:26px;line-height:1">📦</div>
+        <div style="font-size:13.5px;font-weight:800;margin-top:2px">${T('📦 กล่องสุ่มโมดูล')} ${_escHtml(T(meta.n))} — ×${list.length}</div>
+      </div>
+      <div style="padding:12px 14px 14px;max-height:56vh;overflow:auto">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,1fr));gap:5px">${cells}</div>
+        <div style="font-size:11.5px;color:#334155;text-align:center;margin-top:9px">${T('ได้โมดูล {a} ชิ้น', {a: list.length})}${eqN > 0 ? ' · ' + T('⚙️ ติดตั้งอัตโนมัติ {a} ชิ้น', {a: eqN}) : ''}</div>
+        <button id="modbox-multi-ok" style="width:100%;margin-top:10px;padding:9px;border-radius:10px;border:none;background:${meta.c};color:#fff;font-size:14px;font-weight:700;cursor:pointer">${T('ตกลง')}</button>
+      </div>
+    </div>`;
+    el.addEventListener('click', e => { if (e.target === el) el.remove(); });
+    document.body.appendChild(el);
+    const ok = document.getElementById('modbox-multi-ok'); if (ok) ok.onclick = () => el.remove();
   }
   // popup แจ้งผลเปิดกล่อง — โมดูลที่ได้ + ที่วาง (ติดตั้ง/คลัง) + ชิ้นต่ำสุดที่ถูกทำลาย (ถ้ามี)
   function _showBoxResult(d) {
@@ -4688,21 +5829,21 @@ const xhrpg = (() => {
     const cardBack = (d.destroyed && (d.destroyed.cards | 0) > 0)
       ? `<br><span style="color:#166534;font-weight:700">${T('🎴 คืนการ์ด {a} ใบเข้าคลัง', {a: d.destroyed.cards})}</span>` : '';
     const destroyLine = (d.place === 'inv_destroy' && d.destroyed)
-      ? `<div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:10px;padding:8px 10px;margin-top:10px;font-size:12px;color:#b91c1c;text-align:center">${T('🗑️ คลังเต็ม 30 → ทำลาย <b>{a} [{b}]</b> (ชิ้นต่ำสุด) แทน', {a: d.destroyed.rName, b: d.destroyed.sName})}${cardBack}</div>`
+      ? `<div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:10px;padding:8px 10px;margin-top:10px;font-size:12px;color:#b91c1c;text-align:center">${T('🗑️ คลังเต็ม 30 → ทำลาย <b>{a} [{b}]</b> (ชิ้นต่ำสุด) แทน', {a: T(d.destroyed.rName || ''), b: T(d.destroyed.sName || '')})}${cardBack}</div>`
       : '';
     const el = document.createElement('div');
     el.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
     el.innerHTML = `<div style="background:#fff;border-radius:18px;max-width:320px;width:100%;overflow:hidden;box-shadow:0 12px 40px rgba(2,8,23,.35)">
       <div style="background:${meta.c};padding:16px 20px 13px;text-align:center;color:#fff">
         <div style="font-size:34px;line-height:1">📦</div>
-        <div style="font-size:15px;font-weight:700;margin-top:4px">${T('เปิดกล่องโมดูล{a}!', {a: d.boxName || T(meta.n)})}</div>
+        <div style="font-size:15px;font-weight:700;margin-top:4px">${T('เปิดกล่องโมดูล{a}!', {a: T(d.boxName || meta.n)})}</div>
       </div>
       <div style="padding:16px 18px 18px">
         <div style="border:1px solid ${meta.c}55;border-left:4px solid ${meta.c};border-radius:0 10px 10px 0;background:${meta.bg};padding:12px 14px">
-          <div style="font-size:16px;font-weight:700;color:#0f172a">🔧 ${d.gunName} · ${d.slotName}</div>
+          <div style="font-size:16px;font-weight:700;color:#0f172a">🔧 ${T(d.gunName || '')} · ${T(d.slotName || '')}</div>
           <div style="display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap">
-            <span style="font-size:11px;font-weight:700;color:#fff;background:${meta.c};border-radius:5px;padding:1px 8px">${d.rName}</span>
-            <span style="font-size:12px;color:#475569">${T('💠 {a} รู · เพิ่ม [{b}]', {a: d.sockets, b: d.sName})}</span>
+            <span style="font-size:11px;font-weight:700;color:#fff;background:${meta.c};border-radius:5px;padding:1px 8px">${T(d.rName || '')}</span>
+            <span style="font-size:12px;color:#475569">${T('💠 {a} รู · เพิ่ม [{b}]', {a: d.sockets, b: T(d.sName || '')})}</span>
           </div>
         </div>
         <div style="text-align:center;font-size:13px;font-weight:600;color:#16a34a;margin-top:10px">${placeTxt}</div>
@@ -4721,30 +5862,40 @@ const xhrpg = (() => {
     for (let t = 1; t <= 8; t++) {
       const n = player['card_box' + t] | 0; total += n;
       const c = CARD_BOX_COLORS[t - 1], on = n > 0 && !_cardBoxOpening;
+      // ✖️10 ปุ่มคู่คงที่ทุกใบ (ไม่หาย — เทาเมื่อใช้ไม่ได้) · เหลือ <10 เปิดหมดเท่าที่มี ป้ายบอกจำนวนจริง · ฟรีทุกคน (เจ้าของยืนยัน)
+      const m10 = Math.min(n, 10), on10 = n >= 2 && !_cardBoxOpening;
       const lo = (t - 1) * 10 + 1, hi = t * 10;
       cards += `<div style="border:1px solid ${n>0?c+'55':'#e7e5e4'};border-left:3px solid ${n>0?c:'#d6d3d1'};border-radius:0 8px 8px 0;padding:6px 4px;background:${n>0?'#fff':'#fafaf9'};opacity:${n>0?1:0.55};text-align:center;min-width:0">
         <div style="font-size:16px">🎁</div>
         <div style="font-size:9px;font-weight:600;color:${n>0?c:'#a8a29e'};line-height:1.2;min-height:22px;overflow:hidden">${T('ระดับ {a}', {a: t})}<br>Lv.${lo}-${hi}</div>
         <div style="font-size:11px;font-weight:700;color:#44403c;margin:1px 0">×${n}</div>
-        <button class="abtn ${on?'green':'grey'}" style="width:100%;font-size:10px;padding:2px 0" onclick="xhrpg.openCardBox(${t})" ${on?'':'disabled'}>${T('เปิดกล่อง')}</button>
+        <div style="display:flex;gap:3px">
+          <button class="abtn ${on?'green':'grey'}" style="flex:1.3;font-size:10px;padding:2px 0;min-width:0;overflow:hidden" onclick="xhrpg.openCardBox(${t},1)" ${on?'':'disabled'}>${T('เปิดกล่อง')}</button>
+          <button class="abtn ${on10?'blue':'grey'}" style="flex:1;font-size:10px;padding:2px 0;min-width:0" onclick="xhrpg.openCardBox(${t},10)" ${on10?'':'disabled'}>×${on10?m10:10}</button>
+        </div>
       </div>`;
     }
-    return `<div class="treasure-panel" style="margin-top:8px">
+    return `<div class="treasure-panel" id="cardbox-panel" style="margin-top:8px">
       <div class="treasure-header">${T('🎁 กล่องสุ่มการ์ด')} <span class="treasure-count">${T('รวม {a} ใบ', {a: total})}</span></div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(72px,1fr));gap:6px;padding:4px 0">${cards}</div>
       <div style="font-size:10px;color:#6b7280;margin-top:2px;line-height:1.55">${T('เปิดสุ่ม<b>การ์ดมอน 1 ใบ</b>ตามช่วงเลเวลของกล่อง · โอกาสเป็นการ์ด <b style="color:#dc2626">⭐MVP 1%</b> · การ์ดเข้าสมุดทันที')}</div>
+      ${_vipShopRowHtml('card')}
     </div>`;
   }
-  function openCardBox(t) {
+  function openCardBox(t, cnt) {
     if (_cardBoxOpening) return;
     if (!(player['card_box' + t] | 0)) return;
     _cardBoxOpening = true;
     renderItems();
-    $.post(baseUrl + 'xhrpg_upgrade.php', { line_uid: player.line_uid, action: 'open_card_box', param: t }).done(res => {
+    $.post(baseUrl + 'xhrpg_upgrade.php', { line_uid: player.line_uid, action: 'open_card_box', param: t, count: Math.max(1, Math.min(10, cnt | 0 || 1)), lang: LANG() }).done(res => {
       _cardBoxOpening = false; // reset ก่อน parse — parse พังต้องไม่ทำให้ปุ่มค้าง disable
       try {
         const d = typeof res === 'string' ? JSON.parse(res) : res;
-        if (d.ok) { player = d.player; addLog([{ type: 'levelup', msg: d.msg }]); _showCardBoxResult(d.card_result); }
+        if (d.ok) {
+          player = d.player; addLog([{ type: 'levelup', msg: d.msg }]);
+          if (d.card_results && d.card_results.length > 1) _showBoxResultMulti('card', d.card_results); // ✖️10 popup ตาราง
+          else _showCardBoxResult(d.card_result);
+        }
         else addLog([{ type: 'dead', msg: d.error || T('เปิดกล่องไม่ได้') }]);
       } catch (e) {}
       renderItems();
@@ -4783,6 +5934,168 @@ const xhrpg = (() => {
     document.body.appendChild(el);
   }
 
+  // ── 🪨 แร่อวกาศ (หน้า ITEM ใต้แผงกล่องไข่) — ได้จากยานบุกอวกาศ · ใช้บริจาคอัพเลเวลกิล (docs/guild-ore-upgrade-design.md) ──
+  //    นิยามแร่ใช้ MKT_ORE_DEFS ชุดเดียวกับตลาด (ชื่อ/ไอคอนต้องตรงกันทุกหน้า) — แร่ที่มี 0 ชิ้นก็โชว์ ผู้เล่นจะได้รู้ว่ามีกี่ชนิด
+  function _renderOrePanel() {
+    let total = 0;
+    const chip1 = o => {
+      const n = player[o.slot] | 0; total += n;
+      return `<div style="border:1px solid #ddd6fe;border-left:3px solid ${o.color};border-radius:0 8px 8px 0;padding:5px 8px;background:${n > 0 ? '#faf5ff' : '#fafafa'};opacity:${n > 0 ? 1 : 0.6};min-width:0">
+        <div style="font-size:10.5px;font-weight:600;color:#1e293b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${o.icon} ${T(o.name)}</div>
+        <div style="font-size:9px;color:#64748b">×<b style="color:${o.color}">${n.toLocaleString()}</b></div>
+      </div>`;
+    };
+    // 🛸/🌾 แยก 2 กลุ่ม — คำอธิบายคนละบรรทัด (สายพื้นดินบริจาคกิลไม่ได้ ถ้าใช้บรรทัดเดียวจะกลายเป็นข้อมูลผิด)
+    const grid = list => `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:6px;padding:4px 0">${list.map(chip1).join('')}</div>`;
+    const sp = MKT_ORE_DEFS.filter(o => o.grp === 'sp'), fm = MKT_ORE_DEFS.filter(o => o.grp === 'fm');
+    const head = s => `<div style="font-size:10.5px;font-weight:800;color:#6d28d9;margin-top:5px">${T(s)}</div>`;
+    const note = s => `<div style="font-size:10px;color:#6b7280;margin-top:2px;line-height:1.55">${T(s)}</div>`;
+    const body = head('🛸 สายอวกาศ') + grid(sp) + note('ใช้บริจาคอัพเลเวลกิลที่แผง 🏰 กิล · ขายตลาดกลางและเทรด 1-1 ได้')
+               + head('🌾 สายพื้นดิน') + grid(fm) + note('ขุดเจอระหว่างเก็บเกี่ยวผัก — บ้านยิ่งเลเวลสูง ยิ่งมีโอกาสเจอ · ขายตลาดกลางและเทรด 1-1 ได้');
+    return `<div class="treasure-panel" id="ore-panel" style="margin-top:8px">
+      <div class="treasure-header">${T('🪨 แร่หายาก')} <span class="treasure-count">${T('รวม {a} ก้อน', {a: total.toLocaleString()})}</span></div>
+      ${body}
+    </div>`;
+  }
+
+  // ── 🌱 คลังเมล็ดพืช (หน้า ITEM ใต้แผงกล่องไข่) — ปลูกที่ 🏡 บ้านของฉัน (docs/home-design.md §6) ──
+  function _renderSeedsPanel() {
+    const seeds = _homeSeedsObj();
+    const ids = Object.keys(seeds).map(Number).filter(id => id >= 1 && id <= 24 && seeds[id] > 0).sort((a, b) => a - b);
+    const total = ids.reduce((s, id) => s + seeds[id], 0);
+    const chips = ids.map(id => `
+      <div style="border:1px solid ${seedGold(id) ? '#f4d29a' : '#bbf7d0'};border-left:3px solid ${seedGold(id) ? '#b45309' : '#16a34a'};border-radius:0 8px 8px 0;padding:5px 8px;background:${seedGold(id) ? '#fff8ec' : '#f0fdf4'};min-width:0">
+        <div style="font-size:10.5px;font-weight:600;color:#1e293b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">🌱 ${seedLabel(id)}</div>
+        <div style="font-size:9px;color:#64748b">T${seedTier(id)} · ×<b style="color:#166534">${seeds[id]}</b> · ${seedPrice(id).toLocaleString()}G/${T('ชิ้น')}</div>
+      </div>`).join('');
+    return `<div class="treasure-panel" id="seeds-panel" style="margin-top:8px">
+      <div class="treasure-header">${T('🌱 เมล็ดพืช')} <span class="treasure-count">${T('รวม {a} เมล็ด', {a: total})}</span></div>
+      ${ids.length ? `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:6px;padding:4px 0">${chips}</div>` : ''}
+      <div style="font-size:10px;color:#6b7280;margin-top:2px;line-height:1.55">${T('เมล็ดดรอปจากการล่ามอนสเตอร์ทุกระดับ · เอาไปปลูกที่ 🏡 บ้านของฉัน (ปุ่มบ้านซ้ายจอ) — สุกแล้วเก็บขายได้ G')}</div>
+    </div>`;
+  }
+
+  // ── 🧰 กล่องสุ่มไข่ 8 ระดับ (docs/egg-box-design.md) — ใต้กล่องการ์ด · มิเรอร์กล่องการ์ดทุกจุด ──
+  //    สีระดับใช้ CARD_BOX_COLORS ชุดเดียวกัน (ผู้เล่นจำ mapping เดียว) · icon = กล่อง 🧰 ไม่ใช่ไข่ (ผู้ใช้ขอ)
+  let _eggBoxOpening = false; // in-flight guard แยกจาก _cardBoxOpening — เปิดคนละชนิดพร้อมกันได้
+  function _renderEggBoxPanel() {
+    let total = 0, cards = '';
+    for (let t = 1; t <= 8; t++) {
+      const n = player['egg_box' + t] | 0; total += n;
+      const c = CARD_BOX_COLORS[t - 1], on = n > 0 && !_eggBoxOpening;
+      // ✖️10 ปุ่มคู่คงที่ทุกใบ — มิเรอร์แผงการ์ด
+      const m10 = Math.min(n, 10), on10 = n >= 2 && !_eggBoxOpening;
+      const lo = (t - 1) * 10 + 1, hi = t * 10;
+      cards += `<div style="border:1px solid ${n>0?c+'55':'#e7e5e4'};border-left:3px solid ${n>0?c:'#d6d3d1'};border-radius:0 8px 8px 0;padding:6px 4px;background:${n>0?'#fff':'#fafaf9'};opacity:${n>0?1:0.55};text-align:center;min-width:0">
+        <div style="font-size:16px">🧰</div>
+        <div style="font-size:9px;font-weight:600;color:${n>0?c:'#a8a29e'};line-height:1.2;min-height:22px;overflow:hidden">${T('ระดับ {a}', {a: t})}<br>Lv.${lo}-${hi}</div>
+        <div style="font-size:11px;font-weight:700;color:#44403c;margin:1px 0">×${n}</div>
+        <div style="display:flex;gap:3px">
+          <button class="abtn ${on?'green':'grey'}" style="flex:1.3;font-size:10px;padding:2px 0;min-width:0;overflow:hidden" onclick="xhrpg.openEggBox(${t},1)" ${on?'':'disabled'}>${T('เปิดกล่อง')}</button>
+          <button class="abtn ${on10?'blue':'grey'}" style="flex:1;font-size:10px;padding:2px 0;min-width:0" onclick="xhrpg.openEggBox(${t},10)" ${on10?'':'disabled'}>×${on10?m10:10}</button>
+        </div>
+      </div>`;
+    }
+    return `<div class="treasure-panel" id="eggbox-panel" style="margin-top:8px">
+      <div class="treasure-header">${T('🧰 กล่องสุ่มไข่')} <span class="treasure-count">${T('รวม {a} ใบ', {a: total})}</span></div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(72px,1fr));gap:6px;padding:4px 0">${cards}</div>
+      <div style="font-size:10px;color:#6b7280;margin-top:2px;line-height:1.55">${T('เปิดสุ่ม<b>ไข่มอน 1 ฟอง</b>ตามช่วงเลเวลของกล่อง · โอกาสเป็นไข่ <b style="color:#dc2626">⭐MVP 1%</b> · ไข่เข้าสมุด — ฟักที่เมนู 🐾 สัตว์เลี้ยง')}</div>
+      ${_vipShopRowHtml('egg')}
+    </div>`;
+  }
+  function openEggBox(t, cnt) {
+    if (_eggBoxOpening) return;
+    if (!(player['egg_box' + t] | 0)) return;
+    _eggBoxOpening = true;
+    renderItems();
+    $.post(baseUrl + 'xhrpg_upgrade.php', { line_uid: player.line_uid, action: 'open_egg_box', param: t, count: Math.max(1, Math.min(10, cnt | 0 || 1)), lang: LANG() }).done(res => {
+      _eggBoxOpening = false; // reset ก่อน parse — parse พังต้องไม่ทำให้ปุ่มค้าง disable
+      try {
+        const d = typeof res === 'string' ? JSON.parse(res) : res;
+        if (d.ok) {
+          player = d.player; addLog([{ type: 'levelup', msg: d.msg }]);
+          if (d.egg_results && d.egg_results.length > 1) _showBoxResultMulti('egg', d.egg_results); // ✖️10 popup ตาราง
+          else _showEggBoxResult(d.egg_result);
+        }
+        else addLog([{ type: 'dead', msg: d.error || T('เปิดกล่องไม่ได้') }]);
+      } catch (e) {}
+      renderItems();
+    }).fail(() => { _eggBoxOpening = false; renderItems(); });
+  }
+  // popup แจ้งผล — ไข่ที่ได้ (รูปมอนปกติ sprite เดียวกับสมุด) · ปกติ = header เขียว · MVP = แดง + ฉลองแจ็คพอต 1%
+  function _showEggBoxResult(d) {
+    if (!d || typeof d !== 'object') return;
+    const mvp = !!(+d.mvp || 0);
+    const hc  = mvp ? '#dc2626' : '#16a34a';
+    const lo  = ((d.boxTier | 0) - 1) * 10 + 1, hi = (d.boxTier | 0) * 10;
+    const D = mvp ? 64 : 52, sb = _monSpriteBg(d.lv | 0);
+    const mm = monMasters[d.mid] || {};
+    const art = sb
+      ? `<div style="width:${D}px;height:${D}px;background:url('${sb.url}') 0 0/${sb.cols * D}px ${sb.rows * D}px no-repeat;image-rendering:pixelated"></div>`
+      : `<div style="font-size:${mvp ? 42 : 34}px;line-height:1">${mm.e || '👾'}</div>`;
+    const note = mvp
+      ? `<div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;padding:6px;margin-top:9px;font-size:11px;color:#b91c1c">${T('🎉 แจ็คพอต 1%! ไข่ ⭐MVP เข้าสมุดแล้ว')}</div>`
+      : `<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:6px;margin-top:9px;font-size:11px;color:#166534">${T('✅ เข้าสมุดไข่แล้ว — ฟักที่เมนู 🐾 สัตว์เลี้ยง')}</div>`;
+    const el = document.createElement('div');
+    el.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+    el.innerHTML = `<div style="background:#fff;border-radius:18px;max-width:300px;width:100%;overflow:hidden;box-shadow:0 12px 40px rgba(2,8,23,.35)">
+      <div style="background:${hc};padding:12px 20px 10px;text-align:center;color:#fff">
+        <div style="font-size:15px;font-weight:700">${T('🧰 กล่องสุ่มไข่ ระดับ {a} (Lv.{b}-{c})', {a: d.boxTier | 0, b: lo, c: hi})}</div>
+      </div>
+      <div style="padding:14px 16px 16px;text-align:center">
+        <div style="width:${D + 18}px;height:${D + 18}px;margin:0 auto;background:${mvp ? '#fef2f2' : '#f8fafc'};border:${mvp ? '2px' : '1.5px'} solid ${mvp ? '#dc2626' : '#16a34a'};border-radius:12px;display:flex;align-items:center;justify-content:center;position:relative">${art}${mvp ? '<span style="position:absolute;top:-8px;right:-8px;font-size:17px">⭐</span>' : ''}<span style="position:absolute;bottom:-7px;right:-7px;font-size:16px">🥚</span></div>
+        <div style="font-size:14px;font-weight:700;color:${mvp ? '#b91c1c' : '#111'};margin-top:7px">${mvp ? '⭐ ' : ''}${T('ไข่ {a}', {a: T(d.name || '')})}${mvp ? ' MVP' : ''} <span style="font-size:10px;color:#64748b;font-weight:400">Lv.${d.lv | 0}</span></div>
+        ${note}
+        <button onclick="this.closest('div[style*=fixed]').remove()" style="width:100%;margin-top:11px;background:${hc};color:#fff;border:none;border-radius:10px;padding:10px;font-size:13px;font-weight:700;cursor:pointer">${T('รับแล้ว ✅')}</button>
+      </div>
+    </div>`;
+    document.body.appendChild(el);
+  }
+
+  // ── ✖️10 popup ผลเปิดกล่องหลายใบ (ใช้ร่วมการ์ด/ไข่) — ตาราง 5 คอลัมน์ · ช่อง MVP ไฮไลต์แดง+⭐ ──
+  function _showBoxResultMulti(kind, list) {
+    if (!Array.isArray(list) || !list.length) return;
+    const isCard = kind === 'card';
+    const mvpN = list.filter(r => +r.mvp).length;
+    const hc = mvpN > 0 ? '#dc2626' : (isCard ? '#7c3aed' : '#16a34a');
+    const t0 = list[0].boxTier | 0, lo = (t0 - 1) * 10 + 1, hi = t0 * 10;
+    const title = T(isCard ? '🎁 กล่องสุ่มการ์ด ระดับ {a} (Lv.{b}-{c})' : '🧰 กล่องสุ่มไข่ ระดับ {a} (Lv.{b}-{c})', {a: t0, b: lo, c: hi}) + ' — ×' + list.length;
+    const D = 36;
+    let cells = '';
+    for (const d of list) {
+      const mvp = !!(+d.mvp || 0);
+      const sb = _monSpriteBg(d.lv | 0), mm = monMasters[d.mid] || {};
+      const art = sb
+        ? `<div style="width:${D}px;height:${D}px;margin:0 auto;background:url('${sb.url}') 0 0/${sb.cols * D}px ${sb.rows * D}px no-repeat;image-rendering:pixelated"></div>`
+        : `<div style="font-size:24px;line-height:${D}px">${mm.e || '👾'}</div>`;
+      const clr = isCard ? (_CARD_STAT_CLR[(d.stat || '').toLowerCase()] || '#94a3b8') : '#16a34a';
+      const sub = isCard ? `+${d.value | 0} ${d.sName || ''}` : `Lv.${d.lv | 0} 🥚`;
+      cells += `<div style="border:${mvp ? '2px solid #dc2626' : '1px solid #e2e8f0'};border-radius:8px;background:${mvp ? '#fef2f2' : '#f8fafc'};padding:4px 2px;text-align:center;position:relative;min-width:0">
+        ${mvp ? '<span style="position:absolute;top:-7px;right:-4px;font-size:13px">⭐</span>' : ''}${art}
+        <div style="font-size:8px;color:${mvp ? '#b91c1c' : '#475569'};font-weight:${mvp ? 700 : 600};line-height:1.15;height:18px;overflow:hidden">${T(d.name || '')}</div>
+        <div style="font-size:9px;font-weight:700;color:${mvp ? '#dc2626' : clr}">${sub}</div>
+      </div>`;
+    }
+    const sum = isCard ? T('ได้การ์ด {a} ใบเข้าสมุดแล้ว', {a: list.length})
+                       : T('ได้ไข่ {a} ฟองเข้าสมุดแล้ว — ฟักที่เมนู 🐾 สัตว์เลี้ยง', {a: list.length});
+    const jackpot = mvpN > 0
+      ? `<div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;padding:6px;margin-top:8px;font-size:12px;font-weight:700;color:#b91c1c;text-align:center">${T('🎉 แจ็คพอต! ⭐MVP ×{a}', {a: mvpN})}</div>` : '';
+    const el = document.createElement('div');
+    el.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+    el.innerHTML = `<div style="background:#fff;border-radius:18px;max-width:340px;width:100%;overflow:hidden;box-shadow:0 12px 40px rgba(2,8,23,.35)">
+      <div style="background:${hc};padding:12px 16px 10px;text-align:center;color:#fff">
+        <div style="font-size:14px;font-weight:700">${title}</div>
+      </div>
+      <div style="padding:12px 12px 14px">
+        <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:5px">${cells}</div>
+        <div style="text-align:center;font-size:12px;font-weight:600;color:#166534;margin-top:9px">✅ ${sum}</div>
+        ${jackpot}
+        <button onclick="this.closest('div[style*=fixed]').remove()" style="width:100%;margin-top:10px;background:${hc};color:#fff;border:none;border-radius:10px;padding:10px;font-size:13px;font-weight:700;cursor:pointer">${T('รับแล้ว ✅')}</button>
+      </div>
+    </div>`;
+    document.body.appendChild(el);
+  }
+
   // ── การ์ด (Phase 2): เสียบ/ถอด การ์ดในรูโมดูล ──────────────────────────────────
   function _modRefresh(weapon){ // รีเฟรชแผงที่ถูกต้องตามอาวุธ (แต่ละ weapon อยู่คนละ renderer)
     if (weapon==='house') return renderHouse();
@@ -4803,18 +6116,18 @@ const xhrpg = (() => {
     weapon=_modWp(weapon);
     const _mod = _pmodsObj(weapon)[slot];
     const _rar = _mod ? Math.max(1, _mod.rarity||1) : 1;   // ระดับโมดูล 1-7
-    const _gCost = _CARD_UNSOCKET_G * _rar;                // 10000 × ระดับ
+    const _gCost = _CARD_UNSOCKET_G * _rar;                // 3000 × ระดับ
     const _g = player.gold||0, _p = player.p_points||0;
     const el = document.createElement('div');
     el.id = 'card-unsock-modal';
     el.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
-    const _gDis=_g<_gCost, _pDis=_p<19;
+    const _gDis=_g<_gCost, _pDis=_p<5;
     el.innerHTML = `<div style="background:#0f172a;border:1px solid #7c3aed;border-radius:14px;max-width:300px;width:100%;color:#e2e8f0;padding:18px;text-align:center;box-shadow:0 12px 40px rgba(2,8,23,.5)">
       <div style="font-size:30px">🎴</div>
       <div style="font-size:14px;font-weight:700;margin-top:4px">${T('ถอดการ์ดออกจากรู')}</div>
       <div style="font-size:11px;color:#94a3b8;margin-top:3px">${T('การ์ดกลับเข้าคลัง · เลือกวิธีจ่าย')}</div>
       <button onclick="xhrpg._cardUnsockGo('${weapon}','${slot}',${sidx},'gold')" ${_gDis?'disabled':''} style="width:100%;margin-top:12px;background:${_gDis?'#334155':'#b45309'};color:#fff;border:none;border-radius:10px;padding:11px;font-size:13px;font-weight:700;cursor:pointer;opacity:${_gDis?.5:1}">💰 ${_gCost.toLocaleString()} G <span style="font-size:10px;opacity:.85">${T('(ระดับโมดูล {a})', {a: _rar})}</span></button>
-      <button onclick="xhrpg._cardUnsockGo('${weapon}','${slot}',${sidx},'p')" ${_pDis?'disabled':''} style="width:100%;margin-top:8px;background:${_pDis?'#334155':'#7c3aed'};color:#fff;border:none;border-radius:10px;padding:11px;font-size:13px;font-weight:700;cursor:pointer;opacity:${_pDis?.5:1}">💎 19 P</button>
+      <button onclick="xhrpg._cardUnsockGo('${weapon}','${slot}',${sidx},'p')" ${_pDis?'disabled':''} style="width:100%;margin-top:8px;background:${_pDis?'#334155':'#7c3aed'};color:#fff;border:none;border-radius:10px;padding:11px;font-size:13px;font-weight:700;cursor:pointer;opacity:${_pDis?.5:1}">💎 5 P</button>
       <button onclick="xhrpg._cardUnsockClose()" style="width:100%;margin-top:8px;background:#334155;color:#cbd5e1;border:none;border-radius:10px;padding:9px;font-size:12px;cursor:pointer">${T('ยกเลิก')}</button>
     </div>`;
     el.addEventListener('click', e=>{ if(e.target===el) _cardUnsockClose(); });
@@ -4880,7 +6193,7 @@ const xhrpg = (() => {
       if(d.ok){ player=d.player; renderGuns(); addLog([{type:'default',msg:d.msg}]); } else addLog([{type:'dead',msg:d.error||T('ทำลายไม่ได้')}]);
     });
   }
-  // ── โหมดจัดการคลังโมดูล: เลือก & ทำลายทีละชิ้น/หลายชิ้น (แยกตามปืน · คืนเพชรที่ตีบวก + การ์ด) ────────────
+  // ── โหมดจัดการคลังโมดูล: เลือก & ทำลายทีละชิ้น/หลายชิ้น (แยกตามปืน · คืน "การ์ดที่เสียบ" อย่างเดียว — ค่าตีบวกไม่คืนตั้งแต่ 2026-07-15) ──
   function moduleManageToggle(weapon){ weapon=_modWp(weapon); _modManage[weapon]=!_modManage[weapon]; _modSel[weapon]=new Set(); renderGuns(); }
   function moduleSelToggle(weapon, i){ weapon=_modWp(weapon); i=parseInt(i); const s=_modSel[weapon]; if(s.has(i)) s.delete(i); else s.add(i); renderGuns(); }
   // เลือกทั้งหมด (ALL) — mark ทุกชิ้นในคลังอาวุธนั้น · กดซ้ำตอนครบแล้ว = ล้างทั้งหมด · จากนั้นกด "ทำลายที่เลือก" เข้า loop ทำลายปกติ
@@ -5030,7 +6343,7 @@ const xhrpg = (() => {
     const _kmods = _pmodsObj('knife');
     const _kModAtk = _modTotalAtk(); // ⚔️ ค่ากลาง: ATK รวมโมดูลทุกอาวุธ (เสริมดาบด้วย)
     const kAtk   = knifeAtk(klv) + _kModAtk;
-    const kReach = (20 + _modPoints(_kmods.sight) * 0.10).toFixed(1); // sync XHRPG_KNIFE_RANGE 60px = 20m (ยืดให้ตีข้ามไททันที่แปะมอน)
+    const kReach = (25 + _modPoints(_kmods.sight) * 0.10).toFixed(1); // sync XHRPG_KNIFE_RANGE 75px = 25m (20→25m 2026-07-18)
     const _kModAtkTxt = _kModAtk > 0 ? ` <span style="color:#aab6c8">${T('(+{a} โมดูล)', {a: _kModAtk})}</span>` : '';
     const knifeBox = `
       <div style="background:#1a2540;border-radius:8px;overflow:hidden">
@@ -5064,9 +6377,9 @@ const xhrpg = (() => {
     const armorBox = `
       <div style="background:#1a2540;border-radius:8px;overflow:hidden">
         <div style="display:flex;align-items:center;gap:10px;padding:11px 12px 0">
-          <span style="font-size:24px">🛡️</span>
+          <span style="line-height:1">${_SHIELD_ICO(28)}</span>
           <div style="flex:1">
-            <div style="font-size:14px;color:#e2e8f0;font-weight:500">${T('ความชำนาญ เกราะ')} <span style="font-size:11px;color:#fff;background:#3b82f6;border-radius:5px;padding:1px 6px">Lv.${armLv}</span></div>
+            <div style="font-size:14px;color:#e2e8f0;font-weight:500">${T('วัสดุเคลือบ โล่')} <span style="font-size:11px;color:#fff;background:#3b82f6;border-radius:5px;padding:1px 6px">Lv.${armLv}</span></div>
             <div style="font-size:11px;color:#7dd3fc;font-weight:700;margin-top:3px">${T('🛡️ รับดาเมจก่อน HP')}</div>
           </div>
         </div>
@@ -5148,7 +6461,7 @@ const xhrpg = (() => {
       ${_renderModulePanel('turret')}`;
     // ชิ้นส่วนเสริมอาวุธ ย้ายไปแสดงรวมในเมนู ITEM แล้ว (renderItems)
     el.innerHTML = `
-      <div style="display:flex;gap:5px;margin-bottom:8px">${tabBtn('pistol',_LOG_KNIFE_S+' '+T('อาวุธขว้าง'))}${tabBtn('knife',_LOG_SWORD+' '+T('ดาบ'))}${tabBtn('turret',T('🗼 ป้อม'))}${tabBtn('armor',T('🛡️ เกราะ'))}</div>
+      <div style="display:flex;gap:5px;margin-bottom:8px">${tabBtn('pistol',_LOG_KNIFE_S+' '+T('อาวุธขว้าง'))}${tabBtn('knife',_LOG_SWORD+' '+T('ดาบ'))}${tabBtn('turret',T('🗼 ป้อม'))}${tabBtn('armor',_SHIELD_ICO(13)+' '+T('โล่'))}</div>
       ${gunTab==='knife'?knifeBox:gunTab==='turret'?turretBox:gunTab==='armor'?armorBox:(pistolBox + '<div style="height:8px"></div>' + sniperBox)}`;
   }
   function setGunTab(t){ gunTab = t; renderGuns(); }
@@ -5368,8 +6681,10 @@ const xhrpg = (() => {
     }).join('');
     const totalSlots = SLOTS.length * 6;
     const gotSlots   = SLOTS.reduce((s,sl) => s + (Array.isArray(eqOwned[sl]) ? eqOwned[sl].length : 0), 0);
-    return `<div class="treasure-panel" style="margin-top:8px">
-      <div class="treasure-header">${T('🗃️ ของวิเศษ อุปกรณ์สวมใส่')} <span class="treasure-count">${gotSlots}/${totalSlots}</span></div>
+    // 🏺 หัวข้อ "ของโบราณ" + เปลี่ยนชื่อแผงเป็น Old King Equipment (เจ้าของ 2026-07-19 — จองคำว่า Equipment ไว้ให้ระบบคราฟต์ของสวมใส่ใหม่ในอนาคต ไม่ให้ชื่อทับกัน)
+    return `<div style="font-size:13px;font-weight:800;color:#78350f;margin-top:12px;padding:0 2px">🏺 ${T('ของโบราณ')}</div>
+    <div class="treasure-panel" style="margin-top:4px">
+      <div class="treasure-header">🗃️ Old King Equipment <span class="treasure-count">${gotSlots}/${totalSlots}</span></div>
       <div style="padding:4px 0">${cards}</div>
     </div>`;
   }
@@ -5529,7 +6844,9 @@ const xhrpg = (() => {
   }
 
   // ── การ์ดในรูโมดูล (Phase 2) — เสียบถาวร / ถอดเสีย P ────────────────────────────
-  const _CARD_UNSOCKET_G = 10000;                    // sync XHRPG_CARD_UNSOCKET_G (server) — ถอดการ์ดจ่าย Gold (เดิม 29 P)
+  const _CARD_UNSOCKET_G = 3000;                     // sync XHRPG_CARD_UNSOCKET_G (server) — ถอดการ์ดจ่าย Gold (เดิม 10000)
+  const _PETCARD_UNSOCK_G_PER_LV = 500, _PETCARD_UNSOCK_P = 15; // sync XHRPG_PETCARD_UNSOCKET_G_PER_LV / _P — ถอดการ์ดสัตว์เลี้ยง/สัตว์เทพ = Lv × 500 G หรือ 15 P
+  const _PET_RESET_G_PER_LV = 1000, _PET_RESET_P = 20; // sync XHRPG_PET_RESET_G_PER_LV / _P — รีเซ็ตแต้มอัพสัตว์เลี้ยง/สัตว์เทพ = Lv × 1000 G หรือ 20 P
   function _modSockets(rarity){ return Math.max(1, Math.min(7, (rarity|0)||1)); } // sync xhrpg_module_sockets
   let _cardPick = { weapon:null, slot:null };        // รูที่กำลังเลือกการ์ดเสียบ (null = ปิด)
   // แถบรูการ์ดใต้โมดูลที่สวม: ช่องมีการ์ด = ค่า+ปุ่มถอด, ช่องว่าง = ปุ่ม ＋ เปิด picker
@@ -5552,7 +6869,7 @@ const xhrpg = (() => {
           : `<div style="height:12px"></div>`;
         tiles += `<div title="${T('ถอด {a} G', {a: _CARD_UNSOCKET_G.toLocaleString()})}" style="position:relative;box-sizing:border-box;min-width:0;height:46px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;background:${mvp ? '#fef2f2' : '#fffdf8'};border:1px solid ${mvp ? '#dc2626' : clr};border-radius:8px;padding:2px 3px">`
           + `${mvp ? `<span style="position:absolute;top:1px;left:3px;font-size:8px;line-height:1;color:#dc2626">⭐</span>` : ''}`
-          + `<button onclick="xhrpg.cardUnsocket('${weapon}','${slotKey}',${i})" title="${T('ถอดการ์ด (เลือกจ่าย G ตามระดับ / 19 P)')}" style="position:absolute;top:1px;right:1px;width:14px;height:14px;border:none;background:#fee2e2;color:#dc2626;font-size:9px;font-weight:800;border-radius:5px;padding:0;cursor:pointer;line-height:14px">✕</button>`
+          + `<button onclick="xhrpg.cardUnsocket('${weapon}','${slotKey}',${i})" title="${T('ถอดการ์ด (เลือกจ่าย G ตามระดับ / 5 P)')}" style="position:absolute;top:1px;right:1px;width:14px;height:14px;border:none;background:#fee2e2;color:#dc2626;font-size:9px;font-weight:800;border-radius:5px;padding:0;cursor:pointer;line-height:14px">✕</button>`
           + `<div style="font-size:11px;line-height:12px;font-weight:800;color:${clr};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%">+${c.v | 0} ${su}</div>`
           + bonus
           + `</div>`;
@@ -5602,10 +6919,74 @@ const xhrpg = (() => {
   }
 
   // แผงการ์ด (เมนู CARD) — สมุดสะสมเต็มแผง · diff guard กัน rebuild ทุก poll (แวบ)
+  // ── 🏺🎴 การ์ด 3 เทพ (sync XHRPG_GOD_CARD_*) — แลกด้วยการ์ด MVP มอนทุกชนิด Lv≤50 ชนิดละ 3 ใบ ──
+  const GOD_MAX = 5, GOD_ATK = 0.20, GOD_COST = 3, GOD_MAX_LV = 50;
+  let _godTab = false; // false = สมุดการ์ด · true = แท็บ 3 เทพ
+  const _godCardsObj = () => { const g = player && player.god_cards; return (g && typeof g === 'object' && !Array.isArray(g)) ? g : (typeof g === 'string' ? (JSON.parse(g || '{}') || {}) : {}); };
+  const _godN = (k) => Math.max(0, Math.min(GOD_MAX, (_godCardsObj()[k || 'anubis'] | 0))); // จำนวนใบที่ถือ (clamp เพดาน sync PHP)
+  function _godSetTab(on) { _godTab = !!on; renderCard(); }
+  function _renderGodCards() { // เนื้อหาแท็บ 3 เทพ
+    const have = _godN('anubis'), full = have >= GOD_MAX;
+    // ความคืบหน้า: มอนทุกชนิด Lv ≤ 50 ต้องมีการ์ด MVP ชนิดละ ≥ GOD_COST
+    const cards = (player.cards && typeof player.cards === 'object' && !Array.isArray(player.cards)) ? player.cards
+                : (() => { try { return JSON.parse(player.cards || '{}') || {}; } catch (e) { return {}; } })();
+    const need = Object.keys(monMasters).map(k => monMasters[k] && { id: +k, lv: monMasters[k].lv | 0, n: monMasters[k].n || '' })
+      .filter(m => m && m.lv >= 1 && m.lv <= GOD_MAX_LV);
+    const missing = need.filter(m => (((cards[m.id] || {}).m) | 0) < GOD_COST);
+    const okN = need.length - missing.length, ready = need.length > 0 && missing.length === 0;
+    const pct = need.length ? Math.round(okN / need.length * 100) : 0;
+    const missTxt = missing.slice(0, 3).map(m => `${T(m.n)} (${((cards[m.id] || {}).m) | 0}/${GOD_COST})`).join(' · ') + (missing.length > 3 ? ` … +${missing.length - 3}` : '');
+    const lockedRows = [['dv_horus', 'Horus'], ['dv_medusa', 'Medusa']].map(([k, n]) =>
+      `<div style="border:1px solid #e2e8f0;border-radius:12px;background:#f8fafc;padding:8px 12px;display:flex;align-items:center;gap:10px;margin-top:8px">
+        <img src="${baseUrl}assets/pets/${k}.png" style="width:40px;height:40px;border-radius:10px;background:#e2e8f0;filter:grayscale(1);opacity:.5" alt="">
+        <div style="min-width:0"><div style="font-size:12.5px;color:#94a3b8;font-weight:600">${n}</div><div style="font-size:10px;color:#cbd5e1">??? · ${T('เร็วๆ นี้')}</div></div>
+        <span style="margin-left:auto;font-size:14px;color:#cbd5e1">🔒</span>
+      </div>`).join('');
+    const btnOn = ready && !full;
+    return `<div style="border:2px solid #f59e0b;border-radius:12px;background:#fffbeb;padding:11px 12px;margin-top:4px">
+      <div style="display:flex;gap:10px;align-items:center">
+        <img src="${baseUrl}assets/pets/dv_anubis.png" style="width:56px;height:56px;border-radius:12px;background:#1e293b" alt="">
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+            <span style="font-size:14px;font-weight:700;color:#78350f">${T('การ์ดเทพ Anubis')}</span>
+            <span style="font-size:10px;background:#fbbf24;color:#78350f;border-radius:6px;padding:1px 6px">${T('ถือครอง {n}/{m}', {n: have, m: GOD_MAX})}</span>
+          </div>
+          <div style="font-size:10.5px;color:#92400e;margin-top:2px">${T('⚔️ ATK ทุกแหล่ง +{p}% ต่อใบ (ติดตัวถาวร)', {p: Math.round(GOD_ATK * 100)})}</div>
+          <div style="font-size:10.5px;color:#b45309">🔒 ${T('ผูกกับตัวผู้เล่น — ขาย/เทรด/ลงตลาดไม่ได้')}</div>
+        </div>
+      </div>
+      ${have > 0 ? `<div style="margin-top:8px;background:#fff;border:1px solid #fcd34d;border-radius:9px;padding:7px 10px;text-align:center;font-size:12px;color:#78350f;font-weight:700">⚔️ ${T('พลังโจมตีรวมตอนนี้')} <b style="font-size:15px;color:#b45309">+${Math.round(GOD_ATK * 100 * have)}%</b></div>` : ''}
+      <div style="margin-top:9px;background:#fff;border-radius:9px;padding:8px 10px;border:1px solid #fcd34d">
+        <div style="display:flex;justify-content:space-between;font-size:11px;color:#92400e">
+          <span>${T('🎴⭐ การ์ด MVP Lv.1-{a} (ทุกชนิด · ชนิดละ {c})', {a: GOD_MAX_LV, c: GOD_COST})}</span>
+          <span style="font-weight:700">${okN}/${need.length} ${T('ชนิด')}</span>
+        </div>
+        <div style="height:8px;background:#fde68a;border-radius:4px;margin-top:5px;overflow:hidden"><div style="width:${pct}%;height:100%;background:${ready ? '#16a34a' : '#f59e0b'}"></div></div>
+        ${missing.length ? `<div style="font-size:9.5px;color:#b45309;margin-top:4px">${T('ขาด:')} ${missTxt}</div>` : ''}
+      </div>
+      <button onclick="xhrpg.godCardExchange()" ${btnOn ? '' : 'disabled'} style="width:100%;margin-top:8px;text-align:center;padding:9px 0;border-radius:9px;border:none;background:${btnOn ? '#d97706' : '#d6d3d1'};color:${btnOn ? '#fff' : '#78716c'};font-size:13px;font-weight:700;cursor:${btnOn ? 'pointer' : 'default'}">${full ? T('✅ เต็มเพดานแล้ว ({m} ใบ)', {m: GOD_MAX}) : (ready ? T('🏺🎴 แลกการ์ดเทพ Anubis') : T('🔒 สะสมการ์ด MVP ให้ครบเพื่อแลก'))}</button>
+    </div>` + lockedRows;
+  }
+  function godCardExchange() {
+    if (!player || player.line_uid === 'demo') return;
+    if (!confirm(T('แลกการ์ดเทพ Anubis? จะใช้การ์ด ⭐MVP ทุกชนิด Lv.1-{a} ชนิดละ {c} ใบ (ใช้แล้วหายถาวร)', {a: GOD_MAX_LV, c: GOD_COST}))) return;
+    $.post(baseUrl + 'xhrpg_upgrade.php', { line_uid: player.line_uid, action: 'god_card_exchange', lang: LANG() })
+      .done(res => {
+        let d; try { d = typeof res === 'string' ? JSON.parse(res) : res; } catch (e) { return; }
+        if (d.ok) { player = d.player; renderCard(); updateHUD(); addLog([{ type: 'levelup', msg: d.msg }]); }
+        else addLog([{ type: 'dead', msg: d.error || T('แลกไม่สำเร็จ') }]);
+      })
+      .fail(() => addLog([{ type: 'dead', msg: T('❌ แลกไม่สำเร็จ (เชื่อมต่อ server ไม่ได้)') }]));
+  }
   function renderCard() {
     const el = document.getElementById('card-list');
     if (!el) return;
-    const html = _renderCardBook() || '<div style="text-align:center;color:#94a3b8;padding:22px;font-size:13px">' + T('ยังไม่มีข้อมูลการ์ด — เข้าเกมสักครู่') + '</div>';
+    // แท็บ: 📖 สมุดการ์ด | 🏺 การ์ด 3 เทพ
+    const tab = (on, lbl, fn) => `<button onclick="xhrpg._godSetTab(${fn})" style="flex:1;padding:7px 0;border:none;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer;background:${on ? '#d97706' : '#f1f5f9'};color:${on ? '#fff' : '#64748b'};font-family:inherit">${lbl}</button>`;
+    const tabBar = `<div style="display:flex;gap:6px;margin-bottom:6px">${tab(!_godTab, '📖 ' + T('สมุดการ์ด'), 'false')}${tab(_godTab, '🏺 ' + T('การ์ด 3 เทพ'), 'true')}</div>`;
+    const body = _godTab ? _renderGodCards()
+               : (_renderCardBook() || '<div style="text-align:center;color:#94a3b8;padding:22px;font-size:13px">' + T('ยังไม่มีข้อมูลการ์ด — เข้าเกมสักครู่') + '</div>');
+    const html = tabBar + body;
     if (el._lastHtml !== html) { el._lastHtml = html; el.innerHTML = html; }
   }
 
@@ -5670,7 +7051,10 @@ const xhrpg = (() => {
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center;background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;padding:5px 9px;margin-top:7px">
         <span style="font-size:11px;font-weight:700;color:#92400e">${T('🎯 แต้มอัพเกรด (Lv up +1)')}</span>
-        <span style="font-size:13px;font-weight:800;color:#b45309">${T('{a} แต้ม', {a: st.pts})}</span>
+        <span style="display:flex;align-items:center;gap:6px">
+          <span style="font-size:13px;font-weight:800;color:#b45309">${T('{a} แต้ม', {a: st.pts})}</span>
+          <button onclick="xhrpg.petResetUp()" title="${T('รีเซ็ตแต้มอัพ (เลือกจ่าย G ตาม Lv / {p} P)', {p: _PET_RESET_P})}" style="font-size:9.5px;font-weight:700;color:#b45309;background:#fff;border:1px solid #f59e0b;border-radius:6px;padding:2px 7px;cursor:pointer">${T('♻️ รีเซ็ต')}</button>
+        </span>
       </div>
       <div style="display:flex;gap:5px;margin-top:6px">
         <div style="flex:1;display:flex;flex-direction:column;background:#fff;border:1.5px solid #f87171;border-radius:9px;padding:6px 4px;text-align:center">
@@ -5710,7 +7094,7 @@ const xhrpg = (() => {
         const bonus = (mvp && ba > 0) ? `<div style="height:11px;line-height:11px;font-size:8px;font-weight:800;color:#7c3aed;white-space:nowrap;overflow:hidden;max-width:100%">+${ba} ${bl}</div>` : '<div style="height:11px"></div>';
         tiles += `<div style="position:relative;box-sizing:border-box;min-width:0;height:44px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;background:${mvp ? '#fef2f2' : '#fffdf8'};border:1px solid ${mvp ? '#dc2626' : clr};border-radius:8px;padding:2px 3px">`
           + (mvp ? `<span style="position:absolute;top:1px;left:3px;font-size:8px;line-height:1;color:#dc2626">⭐</span>` : '')
-          + `<button onclick="xhrpg.petCardUnsocket(${i})" title="${T('ถอด {a} G', {a: _CARD_UNSOCKET_G.toLocaleString()})}" style="position:absolute;top:1px;right:1px;width:14px;height:14px;border:none;background:#fee2e2;color:#dc2626;font-size:9px;font-weight:800;border-radius:5px;padding:0;cursor:pointer;line-height:14px">✕</button>`
+          + `<button onclick="xhrpg.petCardUnsocket(${i})" title="${T('ถอดการ์ด (เลือกจ่าย G ตาม Lv / {p} P)', {p: _PETCARD_UNSOCK_P})}" style="position:absolute;top:1px;right:1px;width:14px;height:14px;border:none;background:#fee2e2;color:#dc2626;font-size:9px;font-weight:800;border-radius:5px;padding:0;cursor:pointer;line-height:14px">✕</button>`
           + `<div style="font-size:11px;line-height:12px;font-weight:800;color:${clr};white-space:nowrap;overflow:hidden;max-width:100%">+${c.v | 0} ${su}</div>`
           + bonus + `</div>`;
       } else {
@@ -5823,9 +7207,228 @@ const xhrpg = (() => {
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(70px,1fr));gap:5px;padding:3px 0">${cells}</div>
     </div>`;
   }
+  // ── 🏺 สัตว์เทพ (Divine Pet · docs/divine-pet-design.md) — แท็บ 2 ในเมนู PET ──
+  let _dvTab = false; // false = แท็บสัตว์เลี้ยงเดิม · true = แท็บสัตว์เทพ
+  const DV_BASE = { hp: 183000, atk: 2748, def: 372 }; // sync PHP XHRPG_DV_BASE_* (MVP Lv.60 ×3 · เจ้าของสั่ง 2026-07-22)
+  const DV_EGG_MAX_LV = 50, DV_SLOTS = 8, DV_EGG_COST = 3, DV_CHAIN_MULT = 6; // sync XHRPG_DV_EGG_MAX_LV / CARD_SLOTS(4→8 · 2026-07-23) / EGG_COST / CHAIN_MULT (×6)
+  function _dvLvInfo(expRaw) { // เกณฑ์ = เส้นฮีโร่ ×10 · cap 99 (sync xhrpg_dv_lv)
+    let e = Math.max(0, parseInt(expRaw) || 0), lv = 1;
+    while (lv < 99) { const need = expNextHero(lv) * 10; if (e < need) break; e -= need; lv++; }
+    return { lv, cur: e, need: expNextHero(lv) * 10 };
+  }
+  function _dvStatsC() { // mirror xhrpg_dv_stats (PHP)
+    const p = player || {};
+    const lv = _dvLvInfo(p.dv_exp).lv, g = 1 + 0.02 * (lv - 1);
+    return { lv,
+      atk:    Math.max(1, Math.round(DV_BASE.atk * (g + 0.10 * (p.dv_up_atk | 0)))),
+      hp_max: Math.max(1, Math.round(DV_BASE.hp * (g + 0.05 * (p.dv_up_hp | 0)))),
+      def:    Math.max(0, Math.round(DV_BASE.def * g) + 2 * (p.dv_up_hp | 0)),
+      regen:  1 + 0.2 * (p.dv_up_reco | 0),
+      pts:    Math.max(0, (lv - 1) - (p.dv_up_atk | 0) - (p.dv_up_hp | 0) - (p.dv_up_reco | 0)) };
+  }
+  function _dvAllStatC() { // ALL STAT effective รวม 6 ค่า (sync xhrpg_dv_allstat — *_eff จาก server)
+    let s = 0; ['str','agi','vit','dex','intel','luk'].forEach(k => { s += (player[k + '_eff'] ?? player[k] ?? 5) | 0; });
+    return s;
+  }
+  function _dvChainDmgC() { // mirror xhrpg_dv_chain_dmg — เลขโชว์แผง (× CHAIN_MULT 3)
+    const lv = _dvLvInfo(player?.dv_exp).lv;
+    return Math.max(1, Math.round((_dvAllStatC() + _modTotalAtk() + ((_cardCB().atk) | 0)) * (1 + 0.01 * lv) * _ragMult('atk') * DV_CHAIN_MULT));
+  }
+  function _dvCardsArrC() { const c = player && player.dv_cards; return Array.isArray(c) ? c : (typeof c === 'string' ? (JSON.parse(c || '[]') || []) : []); }
+  function _dvSocketStrip() { // การ์ด DV_SLOTS ช่อง (โครงเดียวกับ _petSocketStrip · grid 4 คอลัมน์ → 8 ช่อง = 2 แถว)
+    const cards = _dvCardsArrC();
+    let tiles = '';
+    for (let i = 0; i < DV_SLOTS; i++) {
+      const c = cards[i];
+      if (c) {
+        const st = (c.s || '').toLowerCase(), clr = _CARD_STAT_CLR[st] || '#94a3b8', su = _CARD_STAT_LBL[st] || '?';
+        const mvp = !!c.mvp, ba = (c.mb && c.mb.a) | 0, bl = _CB_LBL[(c.mb && c.mb.t) || ''] || '';
+        const bonus = (mvp && ba > 0) ? `<div style="height:11px;line-height:11px;font-size:8px;font-weight:800;color:#7c3aed;white-space:nowrap;overflow:hidden;max-width:100%">+${ba} ${bl}</div>` : '<div style="height:11px"></div>';
+        tiles += `<div style="position:relative;box-sizing:border-box;min-width:0;height:44px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;background:${mvp ? '#fef2f2' : '#fffdf8'};border:1px solid ${mvp ? '#dc2626' : clr};border-radius:8px;padding:2px 3px">`
+          + (mvp ? `<span style="position:absolute;top:1px;left:3px;font-size:8px;line-height:1;color:#dc2626">⭐</span>` : '')
+          + `<button onclick="xhrpg.dvCardUnsocket(${i})" title="${T('ถอดการ์ด (เลือกจ่าย G ตาม Lv / {p} P)', {p: _PETCARD_UNSOCK_P})}" style="position:absolute;top:1px;right:1px;width:14px;height:14px;border:none;background:#fee2e2;color:#dc2626;font-size:9px;font-weight:800;border-radius:5px;padding:0;cursor:pointer;line-height:14px">✕</button>`
+          + `<div style="font-size:11px;line-height:12px;font-weight:800;color:${clr};white-space:nowrap;overflow:hidden;max-width:100%">+${c.v | 0} ${su}</div>`
+          + bonus + `</div>`;
+      } else {
+        tiles += `<button onclick="xhrpg.dvCardPickOpen()" title="${T('เสียบการ์ด')}" style="box-sizing:border-box;min-width:0;height:44px;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;color:#d97706;background:#fffbeb;border:1px dashed #f59e0b;border-radius:8px;padding:0;cursor:pointer;line-height:1">＋</button>`;
+      }
+    }
+    return `<div style="border:1px solid #fde68a;background:#fffbeb99;border-radius:10px;padding:8px 9px;margin-top:8px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <span style="font-size:11px;font-weight:700;color:#b45309">${T('🎴 การ์ดเสริมพลัง')}</span>
+        <span style="font-size:10px;font-weight:600;color:#b45309;background:#fef3c7;border-radius:5px;padding:1px 7px">${T('{a}/{b} รู', {a: Math.min(cards.length, DV_SLOTS), b: DV_SLOTS})}</span>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px">${tiles}</div>
+    </div>`;
+  }
+  function _renderDivine() { // เนื้อหาแท็บสัตว์เทพ
+    const awake = (player && +player.dv_pet | 0) > 0;
+    // แถวล็อก Horus/Medusa (เต็มบรรทัด · เทา)
+    const lockedRows = [['dv_horus', 'Horus'], ['dv_medusa', 'Medusa']].map(([k, n]) =>
+      `<div style="border:1px solid #e2e8f0;border-radius:12px;background:#f8fafc;padding:8px 12px;display:flex;align-items:center;gap:10px;margin-top:8px">
+        <img src="${baseUrl}assets/pets/${k}.png" style="width:40px;height:40px;border-radius:10px;background:#e2e8f0;filter:grayscale(1);opacity:.5" alt="">
+        <div style="min-width:0"><div style="font-size:12.5px;color:#94a3b8;font-weight:600">${n}</div><div style="font-size:10px;color:#cbd5e1">??? · ${T('เร็วๆ นี้')}</div></div>
+        <span style="margin-left:auto;font-size:14px;color:#cbd5e1">🔒</span>
+      </div>`).join('');
+    if (!awake) {
+      // ความคืบหน้าไข่ MVP: มอนทุกชนิด Lv ≤ 50 ชนิดละ ≥1 ฟอง
+      const eggs = _eggsArr();
+      const needList = Object.keys(monMasters).map(k => monMasters[k] && { id: +k, lv: monMasters[k].lv | 0, n: monMasters[k].n || '' })
+        .filter(m => m && m.lv >= 1 && m.lv <= DV_EGG_MAX_LV);
+      const missing = needList.filter(m => (((eggs[m.id] || {}).m) | 0) < DV_EGG_COST); // ต้องมีชนิดละ ≥3
+      const have = needList.length - missing.length, ready = needList.length > 0 && missing.length === 0;
+      const pct = needList.length ? Math.round(have / needList.length * 100) : 0;
+      const missTxt = missing.slice(0, 3).map(m => `${T(m.n)} (${((eggs[m.id] || {}).m) | 0}/${DV_EGG_COST})`).join(' · ') + (missing.length > 3 ? ` … +${missing.length - 3}` : '');
+      return `<div style="border:2px solid #f59e0b;border-radius:12px;background:#fffbeb;padding:11px 12px">
+        <div style="display:flex;gap:10px;align-items:center">
+          <img src="${baseUrl}assets/pets/dv_anubis.png" style="width:56px;height:56px;border-radius:12px;background:#1e293b" alt="">
+          <div style="min-width:0">
+            <div style="font-size:14px;font-weight:700;color:#78350f">Anubis <span style="font-size:10px;background:#fbbf24;color:#78350f;border-radius:6px;padding:1px 6px">${T('เทพอียิปต์')}</span></div>
+            <div style="font-size:10.5px;color:#92400e;margin-top:2px">${T('⚔️ จู่โจมมอนอัตโนมัติ')}</div>
+            <div style="font-size:10.5px;color:#92400e">${T('⚡ Chain Lightning กระจาย {n} ตัว · 🎴 ใส่การ์ดได้ {s} ช่อง', {n: 8, s: DV_SLOTS})}</div>
+          </div>
+        </div>
+        <div style="margin-top:9px;background:#fff;border-radius:9px;padding:8px 10px;border:1px solid #fcd34d">
+          <div style="display:flex;justify-content:space-between;font-size:11px;color:#92400e">
+            <span>${T('🥚⭐ ไข่ MVP Lv.1-{a} (ทุกชนิด · ชนิดละ {c})', {a: DV_EGG_MAX_LV, c: DV_EGG_COST})}</span>
+            <span style="font-weight:700">${have}/${needList.length} ${T('ชนิด')}</span>
+          </div>
+          <div style="height:8px;background:#fde68a;border-radius:4px;margin-top:5px;overflow:hidden"><div style="width:${pct}%;height:100%;background:${ready ? '#16a34a' : '#f59e0b'}"></div></div>
+          ${missing.length ? `<div style="font-size:9.5px;color:#b45309;margin-top:4px">${T('ขาด:')} ${missTxt}</div>` : ''}
+        </div>
+        <button onclick="xhrpg.dvAwaken()" ${ready ? '' : 'disabled'} style="width:100%;margin-top:8px;text-align:center;padding:9px 0;border-radius:9px;border:none;background:${ready ? '#d97706' : '#d6d3d1'};color:${ready ? '#fff' : '#78716c'};font-size:13px;font-weight:700;cursor:${ready ? 'pointer' : 'default'}">${ready ? T('🏺⚡ ปลุก Anubis!') : T('🔒 สะสมไข่ให้ครบเพื่อปลุก')}</button>
+      </div>` + lockedRows;
+    }
+    // ปลุกแล้ว — Lv/EXP + พลัง + การ์ด + แต้มอัพ + toggle
+    const info = _dvLvInfo(player.dv_exp), st = _dvStatsC();
+    const pct = Math.max(0, Math.min(100, Math.round(info.cur / Math.max(1, info.need) * 100)));
+    const hpC = Math.max(0, Math.min(st.hp_max, parseInt(player.dv_hp) || 0));
+    const down = !!(+player.dv_down || 0), on = (parseInt(player.dv_on ?? 1) || 0) === 1;
+    const chain = _dvChainDmgC();
+    const hpPct = Math.round(hpC / Math.max(1, st.hp_max) * 100);
+    // ค่าโตต่อแต้ม (sync _dvStatsC): atk +10% ฐาน · hp +5% ฐาน & +2 DEF · reco +0.20%
+    const gAtk = Math.round(DV_BASE.atk * 0.10), gHp = Math.round(DV_BASE.hp * 0.05);
+    // ปุ่มอัพ mirror _petCombatRows (margin-top:auto ปักก้นกล่อง — มือถือบรรทัดตัดไม่เท่ากันปุ่มยังตรงแถว ไม่เบียดกัน) · ธีมทอง Anubis (เจ้าของเคาะ ไม่ใช้สีสาย PET)
+    const dvBtn = (stat, on) => `<button onclick="xhrpg.dvUp('${stat}')" ${on ? '' : 'disabled'} style="width:100%;margin-top:auto;padding:4px;border:none;border-radius:6px;background:${on ? '#d97706' : '#e2e8f0'};color:${on ? '#fff' : '#94a3b8'};font-size:11px;font-weight:700;cursor:${on ? 'pointer' : 'default'}">${T('+ อัพ (1 แต้ม)')}</button>`;
+    return `<div style="border:2px solid #f59e0b;border-radius:12px;background:#fffbeb;padding:11px 12px">
+      <div style="display:flex;gap:10px;align-items:center">
+        <img src="${baseUrl}assets/pets/dv_anubis.png" style="width:56px;height:56px;border-radius:12px;background:#1e293b;${down ? 'filter:grayscale(.7);opacity:.7' : ''}" alt="">
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+            <span style="font-size:14px;font-weight:700;color:#78350f">Anubis</span>
+            <span style="font-size:11px;background:#7c3aed;color:#fff;border-radius:6px;padding:1px 7px;font-weight:700">Lv.${info.lv}</span>
+            <span style="font-size:9.5px;background:#fee2e2;color:#991b1b;border-radius:6px;padding:1px 6px">⭐ ${T('ระดับ MVP Lv.60')}${info.lv > 1 ? '+' : ''}</span>
+            ${down ? `<span style="font-size:9.5px;background:#fef3c7;color:#b45309;border-radius:6px;padding:1px 6px">💫 ${T('สลบ — พักฟื้น')}</span>` : ''}
+          </div>
+          <div style="height:8px;background:#fde68a;border-radius:4px;margin-top:6px;overflow:hidden"><div style="width:${info.lv >= 99 ? 100 : pct}%;height:100%;background:#f59e0b"></div></div>
+          <div style="display:flex;justify-content:space-between;font-size:9.5px;color:#b45309;margin-top:3px">
+            <span>EXP ${info.cur.toLocaleString()} / ${info.need.toLocaleString()}</span>
+          </div>
+        </div>
+      </div>
+      <div style="display:flex;gap:5px;margin-top:9px">
+        <div style="flex:1;background:#fff;border:1px solid #fcd34d;border-radius:8px;padding:5px 6px;text-align:center">
+          <div style="font-size:9.5px;color:#92400e">⚔️ ATK</div><div style="font-size:15px;font-weight:800;color:#78350f">${st.atk.toLocaleString()}</div>
+        </div>
+        <div style="flex:1;background:#fff;border:1px solid #fcd34d;border-radius:8px;padding:5px 6px;text-align:center">
+          <div style="font-size:9.5px;color:#92400e">🛡️ DEF</div><div style="font-size:15px;font-weight:800;color:#78350f">${st.def.toLocaleString()}</div>
+        </div>
+        <div style="flex:1.3;background:#fff;border:1px solid #fcd34d;border-radius:8px;padding:5px 6px;text-align:center">
+          <div style="font-size:9.5px;color:#92400e">❤️ HP ${down ? '<b style="color:#dc2626">' + T('💫 สลบ') + '</b>' : ''}</div>
+          <div style="font-size:14px;font-weight:800;color:${down ? '#dc2626' : '#16a34a'}">${hpC.toLocaleString()} <span style="font-size:9px;color:#94a3b8">/ ${st.hp_max.toLocaleString()}</span></div>
+          <div style="height:4px;background:#e2e8f0;border-radius:2px;margin-top:2px"><div style="width:${hpPct}%;height:100%;background:${down ? '#dc2626' : '#16a34a'};border-radius:2px"></div></div>
+        </div>
+        <div style="flex:1;background:#fff;border:1px solid #fcd34d;border-radius:8px;padding:5px 6px;text-align:center">
+          <div style="font-size:9.5px;color:#92400e">${T('💚 ฟื้น/วิ')}</div><div style="font-size:15px;font-weight:800;color:#78350f">${st.regen.toFixed(2)}%</div>
+        </div>
+      </div>
+      <div style="margin-top:8px;background:#fff;border-radius:9px;padding:8px 10px;border:1px solid #fcd34d">
+        <div style="font-size:11.5px;font-weight:700;color:#78350f">⚡ Chain Lightning <span style="font-size:9.5px;color:#b45309;font-weight:400">${T('ทุกจังหวะ · กระจาย {n} ตัว', {n: 8})}</span></div>
+        <div style="display:flex;gap:6px;margin-top:6px">
+          <span style="flex:1;text-align:center;background:#fef3c7;border-radius:7px;padding:5px 0;font-size:10px;color:#92400e">${T('DMG สายฟ้า')}<br><b style="font-size:12px">${chain.toLocaleString()}</b></span>
+          <span style="flex:1;text-align:center;background:#fef3c7;border-radius:7px;padding:5px 0;font-size:10px;color:#92400e">ALL STAT<br><b style="font-size:12px">${_dvAllStatC().toLocaleString()}</b></span>
+          <span style="flex:1;text-align:center;background:#fef3c7;border-radius:7px;padding:5px 0;font-size:10px;color:#92400e">${T('โบนัส Lv')}<br><b style="font-size:12px">+${info.lv}%</b></span>
+        </div>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;padding:5px 9px;margin-top:7px">
+        <span style="font-size:11px;font-weight:700;color:#92400e">${T('🎯 แต้มอัพเกรด (Lv up +1)')}</span>
+        <span style="display:flex;align-items:center;gap:6px">
+          <span style="font-size:13px;font-weight:800;color:#b45309">${T('{a} แต้ม', {a: st.pts})}</span>
+          <button onclick="xhrpg.dvResetUp()" title="${T('รีเซ็ตแต้มอัพ (เลือกจ่าย G ตาม Lv / {p} P)', {p: _PET_RESET_P})}" style="font-size:9.5px;font-weight:700;color:#b45309;background:#fff;border:1px solid #f59e0b;border-radius:6px;padding:2px 7px;cursor:pointer">${T('♻️ รีเซ็ต')}</button>
+        </span>
+      </div>
+      <div style="display:flex;gap:5px;margin-top:6px">
+        <div style="flex:1;display:flex;flex-direction:column;background:#fff;border:1.5px solid #fbbf24;border-radius:9px;padding:6px 4px;text-align:center">
+          <div style="font-size:10px;font-weight:700;color:#92400e">⚔️ ATK <span style="color:#64748b;font-weight:400">Lv.${player.dv_up_atk | 0}</span></div>
+          <div style="font-size:8.5px;color:#64748b;margin:2px 0">${T('+{a} ATK/แต้ม', {a: gAtk.toLocaleString()})}</div>${dvBtn('atk', st.pts > 0)}
+        </div>
+        <div style="flex:1;display:flex;flex-direction:column;background:#fff;border:1.5px solid #fbbf24;border-radius:9px;padding:6px 4px;text-align:center">
+          <div style="font-size:10px;font-weight:700;color:#92400e">❤️ HP <span style="color:#64748b;font-weight:400">Lv.${player.dv_up_hp | 0}</span></div>
+          <div style="font-size:8.5px;color:#64748b;margin:2px 0">${T('+{a} HP · +2 DEF/แต้ม', {a: gHp.toLocaleString()})}</div>${dvBtn('hp', st.pts > 0)}
+        </div>
+        <div style="flex:1;display:flex;flex-direction:column;background:#fff;border:1.5px solid #fbbf24;border-radius:9px;padding:6px 4px;text-align:center">
+          <div style="font-size:10px;font-weight:700;color:#92400e">${T('💚 ฟื้นตัว')} <span style="color:#64748b;font-weight:400">Lv.${player.dv_up_reco | 0}</span></div>
+          <div style="font-size:8.5px;color:#64748b;margin:2px 0">${T('+0.20%/แต้ม')}</div>${dvBtn('reco', st.pts > 0)}
+        </div>
+      </div>
+      ${_dvSocketStrip()}
+      <button onclick="xhrpg.dvToggle()" style="width:100%;margin-top:8px;padding:8px 0;border-radius:9px;border:none;background:${on ? '#16a34a' : '#f1f5f9'};color:${on ? '#fff' : '#64748b'};font-size:12.5px;font-weight:700;cursor:pointer">${on ? T('✓ เปิดใช้งานอยู่ — กดเพื่อปิด') : T('ปิดอยู่ — กดเพื่อเปิดใช้งาน')}</button>
+    </div>` + lockedRows;
+  }
+  function _dvSetTab(on) { _dvTab = !!on; renderPet(); }
+  function dvAwaken() { _petPost('dv_awaken', {}); }
+  function dvUp(stat) { _petPost('dv_up', { stat }); }
+  function dvToggle() { _petPost('dv_toggle', {}); }
+  function dvCardUnsocket(sidx) { _petCardUnsockOpen('dv', sidx | 0); }
+  function dvCardSocket(mid, mvp) {
+    const ov = document.getElementById('dv-cardpick'); if (ov) ov.remove();
+    _petPost('dv_card_socket', { mid: mid | 0, mvp: mvp ? 1 : 0 });
+  }
+  function dvCardPickOpen() { // เลือกการ์ดจากคลัง (โครงเดียวกับ picker สัตว์เลี้ยง · player.cards = {mid:{n,m}})
+    if (document.getElementById('dv-cardpick')) return;
+    const cards = (player.cards && typeof player.cards === 'object' && !Array.isArray(player.cards)) ? player.cards
+                : (() => { try { return JSON.parse(player.cards || '{}') || {}; } catch (e) { return {}; } })();
+    let cells = '';
+    Object.keys(cards).sort((a, b) => ((monMasters[a] && monMasters[a].lv) || 0) - ((monMasters[b] && monMasters[b].lv) || 0)).forEach(k => {
+      const own = cards[k] || {}, mm = monMasters[k];
+      if (!mm) return;
+      [['n', false], ['m', true]].forEach(([f, mvp]) => {
+        if ((own[f] | 0) < 1) return;
+        const id = +k;
+        const st = (mm.cs || '').toLowerCase(), clr = _CARD_STAT_CLR[st] || '#94a3b8', su = _CARD_STAT_LBL[st] || '?'; // STAT การ์ด (mm.cs) — เดิม dv picker ไม่โชว์
+        cells += `<button onclick="xhrpg.dvCardSocket(${id},${mvp ? 1 : 0})" style="display:flex;align-items:center;gap:7px;width:100%;background:${mvp ? '#fef2f2' : '#f8fafc'};border:1px solid ${mvp ? '#fca5a5' : '#e5e7eb'};border-radius:9px;padding:6px 9px;cursor:pointer;text-align:left;margin-bottom:5px">
+          <span style="font-size:16px">${mm.e || '👾'}</span>
+          <span style="flex:1;min-width:0;font-size:11.5px;font-weight:600;color:#334155;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${mvp ? '⭐' : ''}${T(mm.n || '')} <span style="font-size:9px;color:#64748b;font-weight:400">Lv.${mm.lv || 1} ×${own[f] | 0}</span></span>
+          <span style="flex:none;text-align:right;line-height:1.25">
+            <span style="display:block;font-size:11px;font-weight:700;color:${clr}">+${_cardValue(mm.lv || 1, mvp)} ${su}</span>
+            ${mvp ? (() => { const b = _mvpCardBonus(id, mm.lv || 1); return b.a > 0 ? `<span style="display:block;font-size:8.5px;font-weight:700;color:#7c3aed">+${b.a} ${_CB_LBL[b.t] || b.t}</span>` : ''; })() : ''}
+          </span>
+        </button>`;
+      });
+    });
+    const el = document.createElement('div');
+    el.id = 'dv-cardpick';
+    el.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:10005;display:flex;align-items:center;justify-content:center;padding:16px';
+    el.innerHTML = `<div style="background:#fff;border-radius:16px;width:300px;max-width:100%;max-height:70vh;display:flex;flex-direction:column;overflow:hidden">
+      <div style="background:#d97706;color:#fff;padding:11px 14px;font-size:13.5px;font-weight:700;display:flex;justify-content:space-between;align-items:center">${T('🎴 เลือกการ์ดให้ Anubis')}<button onclick="document.getElementById('dv-cardpick').remove()" style="border:none;background:rgba(0,0,0,.25);color:#fff;width:24px;height:24px;border-radius:7px;cursor:pointer">✕</button></div>
+      <div style="padding:10px 12px;overflow:auto">${cells || '<div style="text-align:center;color:#94a3b8;font-size:12px;padding:14px">' + T('ยังไม่มีการ์ดในคลัง') + '</div>'}</div>
+    </div>`;
+    el.addEventListener('click', e => { if (e.target === el) el.remove(); });
+    document.body.appendChild(el);
+  }
   function renderPet() {
     const el = document.getElementById('pet-list');
     if (!el) return;
+    // 🏺 แถบแท็บ: สัตว์เลี้ยง | สัตว์เทพ
+    const tabBar = `<div style="display:flex;gap:6px;margin-bottom:9px">
+      <button onclick="xhrpg._dvSetTab(0)" style="flex:1;text-align:center;padding:7px 0;border-radius:9px;border:none;background:${_dvTab ? '#f1f5f9' : '#7c3aed'};color:${_dvTab ? '#64748b' : '#fff'};font-size:12.5px;font-weight:${_dvTab ? 400 : 700};cursor:pointer">🐾 ${T('สัตว์เลี้ยง')}</button>
+      <button onclick="xhrpg._dvSetTab(1)" style="flex:1;text-align:center;padding:7px 0;border-radius:9px;border:none;background:${_dvTab ? '#fbbf24' : '#f1f5f9'};color:${_dvTab ? '#78350f' : '#64748b'};font-size:12.5px;font-weight:${_dvTab ? 700 : 400};cursor:pointer">🏺 ${T('สัตว์เทพ')}</button>
+    </div>`;
+    if (_dvTab) {
+      const html = tabBar + _renderDivine();
+      if (el._lastHtml !== html) { el._lastHtml = html; el.innerHTML = html; }
+      return;
+    }
     let top = '';
     const mid = (player && player.pet_mid) | 0;
     if (mid > 0 && monMasters[mid]) {
@@ -5855,7 +7458,7 @@ const xhrpg = (() => {
         <span style="font-size:10.5px">${T('สัตว์จะเดินตามคุณ · ช่วยโจมตีมอน (ATK/HP ตาม master) · อัพเกรดได้เมื่อ Lv up · ใส่การ์ดได้ตามระดับมอน')}</span>
       </div>`;
     }
-    const html = top + (_renderEggBook() || '<div style="text-align:center;color:#94a3b8;padding:16px;font-size:12px">' + T('ยังไม่มีข้อมูลมอนสเตอร์ — เข้าเกมสักครู่') + '</div>');
+    const html = tabBar + top + (_renderEggBook() || '<div style="text-align:center;color:#94a3b8;padding:16px;font-size:12px">' + T('ยังไม่มีข้อมูลมอนสเตอร์ — เข้าเกมสักครู่') + '</div>');
     if (el._lastHtml !== html) { el._lastHtml = html; el.innerHTML = html; }
   }
   function petHatchAsk(mid, mvp) {
@@ -5889,9 +7492,65 @@ const xhrpg = (() => {
     if (!confirm(T('เก็บสัตว์เลี้ยงเข้าไข่? เสีย 10,000 G\nLv(UP) จะรีเซ็ตเป็น 1 · การ์ดที่เสียบคืนเข้าคลังฟรี · ไข่กลับเข้าสมุด'))) return;
     _petPost('pet_recall', {});
   }
-  function petCardUnsocket(sidx) {
-    if (!confirm(T('ถอดการ์ดออกจากสัตว์เลี้ยง? เสีย {a} G — การ์ดกลับเข้าคลัง\n(เก็บเข้าไข่ = การ์ดคืนทั้งหมดฟรี)', {a: _CARD_UNSOCKET_G.toLocaleString()}))) return;
-    _petPost('pet_card_unsocket', { sidx: sidx | 0 });
+  function petCardUnsocket(sidx) { _petCardUnsockOpen('pet', sidx | 0); }
+  // popup เลือกจ่าย 💰 G(=Lv×500) หรือ 💎 15 P — ใช้ทั้งสัตว์เลี้ยง (kind='pet') และสัตว์เทพ (kind='dv') · mirror popup ถอดการ์ดโมดูล
+  function _petCardUnsockOpen(kind, sidx) {
+    const dv = kind === 'dv';
+    const lv = Math.max(1, dv ? _dvLvInfo(player.dv_exp).lv : ((_petCombatStats(player) || {}).lv || 1));
+    const gCost = _PETCARD_UNSOCK_G_PER_LV * lv, pCost = _PETCARD_UNSOCK_P;
+    const g = player.gold || 0, p = player.p_points || 0;
+    const gDis = g < gCost, pDis = p < pCost, ico = dv ? '🏺' : '🐾';
+    const el = document.createElement('div');
+    el.id = 'petcard-unsock-modal';
+    el.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+    el.innerHTML = `<div style="background:#0f172a;border:1px solid #d97706;border-radius:14px;max-width:300px;width:100%;color:#e2e8f0;padding:18px;text-align:center;box-shadow:0 12px 40px rgba(2,8,23,.5)">
+      <div style="font-size:30px">🎴</div>
+      <div style="font-size:14px;font-weight:700;margin-top:4px">${T('ถอดการ์ดออกจากรู')}</div>
+      <div style="font-size:11px;color:#94a3b8;margin-top:3px">${T('การ์ดกลับเข้าคลัง · เลือกวิธีจ่าย')}</div>
+      <button onclick="xhrpg._petCardUnsockGo('${kind}',${sidx},'gold')" ${gDis ? 'disabled' : ''} style="width:100%;margin-top:12px;background:${gDis ? '#334155' : '#b45309'};color:#fff;border:none;border-radius:10px;padding:11px;font-size:13px;font-weight:700;cursor:pointer;opacity:${gDis ? .5 : 1}">💰 ${gCost.toLocaleString()} G <span style="font-size:10px;opacity:.85">${T('({i} Lv.{a})', {i: ico, a: lv})}</span></button>
+      <button onclick="xhrpg._petCardUnsockGo('${kind}',${sidx},'p')" ${pDis ? 'disabled' : ''} style="width:100%;margin-top:8px;background:${pDis ? '#334155' : '#7c3aed'};color:#fff;border:none;border-radius:10px;padding:11px;font-size:13px;font-weight:700;cursor:pointer;opacity:${pDis ? .5 : 1}">💎 ${pCost} P</button>
+      <button onclick="xhrpg._petCardUnsockClose()" style="width:100%;margin-top:8px;background:#334155;color:#cbd5e1;border:none;border-radius:10px;padding:9px;font-size:12px;cursor:pointer">${T('ยกเลิก')}</button>
+    </div>`;
+    el.addEventListener('click', e => { if (e.target === el) _petCardUnsockClose(); });
+    document.body.appendChild(el);
+  }
+  function _petCardUnsockClose() { const el = document.getElementById('petcard-unsock-modal'); if (el) el.remove(); }
+  function _petCardUnsockGo(kind, sidx, pay) {
+    _petCardUnsockClose();
+    _petPost(kind === 'dv' ? 'dv_card_unsocket' : 'pet_card_unsocket', { sidx: sidx | 0, pay });
+  }
+  // ── ♻️ รีเซ็ตแต้มอัพ (คืนแต้มทั้งหมด) — popup เลือกจ่าย 💰 Lv×1000 G หรือ 💎 20 P · ใช้ทั้งสัตว์เลี้ยง/สัตว์เทพ (kind='pet'|'dv') ──
+  function petResetUp() { _petResetOpen('pet'); }
+  function dvResetUp() { _petResetOpen('dv'); }
+  function _petResetOpen(kind) {
+    const dv = kind === 'dv';
+    const st = dv ? _dvStatsC() : _petCombatStats(player);
+    if (!st) return;
+    const used = dv ? ((player.dv_up_atk | 0) + (player.dv_up_hp | 0) + (player.dv_up_reco | 0))
+                    : ((player.pet_up_atk | 0) + (player.pet_up_hp | 0) + (player.pet_up_reco | 0));
+    if (used < 1) { addLog([{ type: 'dead', msg: T('ยังไม่ได้ลงแต้ม — ไม่ต้องรีเซ็ต') }]); return; }
+    const lv = Math.max(1, dv ? _dvLvInfo(player.dv_exp).lv : (st.lv || 1));
+    const gCost = _PET_RESET_G_PER_LV * lv, pCost = _PET_RESET_P;
+    const g = player.gold || 0, p = player.p_points || 0;
+    const gDis = g < gCost, pDis = p < pCost, ico = dv ? '🏺' : '🐾';
+    const el = document.createElement('div');
+    el.id = 'petreset-modal';
+    el.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+    el.innerHTML = `<div style="background:#0f172a;border:1px solid #d97706;border-radius:14px;max-width:300px;width:100%;color:#e2e8f0;padding:18px;text-align:center;box-shadow:0 12px 40px rgba(2,8,23,.5)">
+      <div style="font-size:30px">♻️</div>
+      <div style="font-size:14px;font-weight:700;margin-top:4px">${T('รีเซ็ตแต้มอัพเกรด')}</div>
+      <div style="font-size:11px;color:#94a3b8;margin-top:3px">${T('คืนแต้มทั้งหมด {n} แต้ม · เลือกวิธีจ่าย', {n: used})}</div>
+      <button onclick="xhrpg._petResetGo('${kind}','gold')" ${gDis ? 'disabled' : ''} style="width:100%;margin-top:12px;background:${gDis ? '#334155' : '#b45309'};color:#fff;border:none;border-radius:10px;padding:11px;font-size:13px;font-weight:700;cursor:pointer;opacity:${gDis ? .5 : 1}">💰 ${gCost.toLocaleString()} G <span style="font-size:10px;opacity:.85">${T('({i} Lv.{a})', {i: ico, a: lv})}</span></button>
+      <button onclick="xhrpg._petResetGo('${kind}','p')" ${pDis ? 'disabled' : ''} style="width:100%;margin-top:8px;background:${pDis ? '#334155' : '#7c3aed'};color:#fff;border:none;border-radius:10px;padding:11px;font-size:13px;font-weight:700;cursor:pointer;opacity:${pDis ? .5 : 1}">💎 ${pCost} P</button>
+      <button onclick="xhrpg._petResetClose()" style="width:100%;margin-top:8px;background:#334155;color:#cbd5e1;border:none;border-radius:10px;padding:9px;font-size:12px;cursor:pointer">${T('ยกเลิก')}</button>
+    </div>`;
+    el.addEventListener('click', e => { if (e.target === el) _petResetClose(); });
+    document.body.appendChild(el);
+  }
+  function _petResetClose() { const el = document.getElementById('petreset-modal'); if (el) el.remove(); }
+  function _petResetGo(kind, pay) {
+    _petResetClose();
+    _petPost(kind === 'dv' ? 'dv_reset_up' : 'pet_reset_up', { pay });
   }
   // picker เลือกการ์ดจากคลังเสียบสัตว์ (ทุกใบเสียบได้ ไม่จำกัดอาวุธ)
   function petCardPickOpen() {
@@ -5907,7 +7566,10 @@ const xhrpg = (() => {
         cells += `<button onclick="xhrpg.petCardSocket(${id},${mvp ? 1 : 0})" style="display:flex;align-items:center;gap:7px;width:100%;background:${mvp ? '#fef2f2' : '#f8fafc'};border:1px solid ${mvp ? '#fca5a5' : '#e5e7eb'};border-radius:9px;padding:6px 9px;cursor:pointer;text-align:left">
           <span style="font-size:16px;flex:none">${mm.e || '🎴'}</span>
           <span style="flex:1;min-width:0;font-size:12px;font-weight:600;color:#1c1917;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${mvp ? '⭐' : ''}${T(mm.n || 'การ์ด')} <span style="font-size:9px;color:#64748b;font-weight:400">Lv.${mm.lv || 1} ×${cnt}</span></span>
-          <span style="flex:none;font-size:11px;font-weight:700;color:${clr}">+${_cardValue(mm.lv || 1, mvp)} ${su}</span>
+          <span style="flex:none;text-align:right;line-height:1.25">
+            <span style="display:block;font-size:11px;font-weight:700;color:${clr}">+${_cardValue(mm.lv || 1, mvp)} ${su}</span>
+            ${mvp ? (() => { const b = _mvpCardBonus(+id, mm.lv || 1); return b.a > 0 ? `<span style="display:block;font-size:8.5px;font-weight:700;color:#7c3aed">+${b.a} ${_CB_LBL[b.t] || b.t}</span>` : ''; })() : ''}
+          </span>
         </button>`;
       });
     });
@@ -5921,7 +7583,7 @@ const xhrpg = (() => {
         <span style="font-size:13.5px;font-weight:700;color:#1c1917">${T('🎴 เลือกการ์ดเสียบสัตว์เลี้ยง')}</span>
         <button onclick="this.closest('#pet-cardpick-overlay').remove()" style="border:none;background:#f1f5f9;color:#475569;font-size:14px;border-radius:8px;padding:3px 10px;cursor:pointer">✕</button>
       </div>
-      <div style="font-size:10.5px;color:#78716c;margin-bottom:8px">${T('เสียบถาวร (ถอดเสีย {a} G · เก็บเข้าไข่คืนฟรี) · stat มีผลกับผู้เล่นเหมือนการ์ดในโมดูล', {a: _CARD_UNSOCKET_G.toLocaleString()})}</div>
+      <div style="font-size:10.5px;color:#78716c;margin-bottom:8px">${T('เสียบถาวร (ถอด Lv×{g} G หรือ {p} P · เก็บเข้าไข่คืนฟรี) · stat มีผลกับผู้เล่นเหมือนการ์ดในโมดูล', {g: _PETCARD_UNSOCK_G_PER_LV, p: _PETCARD_UNSOCK_P})}</div>
       <div style="display:flex;flex-direction:column;gap:5px">${cells}</div>
     </div>`;
     document.body.appendChild(ov);
@@ -5994,6 +7656,9 @@ const xhrpg = (() => {
       </div>
       ${_renderModuleBoxPanel()}
       ${_renderCardBoxPanel()}
+      ${_renderEggBoxPanel()}
+      ${_renderOrePanel()}
+      ${_renderSeedsPanel()}
       ${renderEquipment()}
       <div class="treasure-panel">
         <div class="treasure-header">${T('🗃️ ของวิเศษ ของล้ำค่า')} <span class="treasure-count">${owned.length}/${TREASURE_MASTER.length}</span></div>
@@ -6209,6 +7874,242 @@ const xhrpg = (() => {
     else           { inner = `<span class="rank-emoji">${emoji}</span>`; }
     return `<div class="rank-toon ${kind}${ec}">${star}<div class="rank-frame">${inner}</div><div class="rank-cap">${cap}</div></div>`;
   }
+  // 🎖️⭐ ชิประดับความชำนาญบนแถวอันดับ (เจ้าของเคาะม็อกอัพ 2026-07-28)
+  //    ข้อมูล 3 อย่างซ้อนบนไอคอนเดียวเพื่อประหยัดที่: ไอคอนสาย · จำนวนดาวมุมบนขวา · % เป็นแถบที่ฐาน
+  //    ⚠️ ใช้ "ตัวเลขดาว" ไม่ใช่ ⭐ ซ้ำๆ — กินที่คงที่ รองรับ 10 ดาวโดยไม่ต้องแก้ layout
+  const _LB_J2 = [['atk', '🏹'], ['def', '🛡️'], ['melee', '⚔️'], ['turret', '🗼']]; // เรียงตามแท็บสกิล
+  // 📐 v4 (เจ้าของสั่ง 2026-07-28) — 2 บรรทัดตายตัว ไม่มีตัวจาง
+  //    บรรทัด 1 = สายการเล่นครบ 4 สาย **สีเข้มทุกสาย** (เดิม opacity .4 ตอนยังไม่ปลด — เจ้าของสั่งเอาออก)
+  //    บรรทัด 2 = ของสะสม 🎴 การ์ด · 🥚 ไข่ · 📚 รวม
+  //    4 คอลัมน์ตายตัวทั้ง 2 บรรทัด → ไอคอนเรียงตรงกันเป็นตาราง ไม่เหลื่อมตอนคอลัมน์แคบ/กว้าง
+  let _lbTotals = null;  // totals ก้อนล่าสุดจาก endpoint อันดับ (ใช้ตัวส่วนเกจของสะสม)
+  function _lbMasteryHTML(r) {
+    const j2 = r && r.j2;
+    if (!j2 || typeof j2 !== 'object') return '';           // server เก่ายังไม่ส่ง → ไม่โชว์ ไม่พัง
+    const cell = 'min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
+    const line1 = _LB_J2.map(([tr, ico]) => {
+      const c = j2[tr] || {}, st = c.s | 0, pc = Math.max(0, Math.min(100, +c.p || 0));
+      const col = (SKILL_TREE_LABELS[tr] || {}).color || '#64748b';
+      const full = st >= _J2_MAX_STAR;
+      return `<div title="${_gdEsc(T(_J2_TREE_NAME[tr] || tr))}" style="${cell}">
+        <div style="display:flex;align-items:baseline;gap:3px;font-size:9.5px">
+          <span style="font-size:11px;line-height:1">${ico}</span>
+          ${st > 0 ? `<span style="font-size:8.5px;font-weight:800;color:#fff;background:${col};border-radius:5px;padding:0 3px;line-height:1.5">${st}</span>` : ''}
+          <span style="font-weight:700;color:${col}">${full ? T('เต็ม') : pc + '%'}</span>
+        </div>
+        <div style="height:3px;border-radius:2px;background:#eef2f7;margin-top:2px;overflow:hidden"><div style="width:${full ? 100 : pc}%;height:100%;background:${col}"></div></div>
+      </div>`;
+    }).join('');
+
+    // ── บรรทัด 2: ของสะสม (ตัวส่วน = ชนิดทั้งหมดในเกม · server เก่าไม่ส่ง kind → โชว์แค่ตัวเลข) ──
+    const km = (_lbTotals && _lbTotals.kind | 0) || 0;
+    const cdk = r.cdk | 0, egk = r.egk | 0;
+    const stat = (ico, k, max, col, span, tip) => {
+      const pc = max > 0 ? Math.min(100, Math.round(k * 100 / max)) : 0, done = max > 0 && k >= max;
+      return `<div title="${_gdEsc(T(tip))}" style="${cell}${span > 1 ? ';grid-column:span ' + span : ''}">
+        <div style="display:flex;align-items:baseline;gap:3px;font-size:9.5px">
+          <span style="font-size:11px;line-height:1">${ico}</span>
+          <span style="font-weight:700;color:${done ? '#15803d' : col};font-variant-numeric:tabular-nums">${k}${max > 0 ? `<span style="color:#94a3b8;font-weight:600">/${max}</span>` : ''}</span>
+        </div>
+        <div style="height:3px;border-radius:2px;background:#eef2f7;margin-top:2px;overflow:hidden"><div style="width:${pc}%;height:100%;background:${done ? '#16a34a' : col}"></div></div>
+      </div>`;
+    };
+    const line2 = stat('🎴', cdk, km, '#6d28d9', 1, 'การ์ด')
+                + stat('🥚', egk, km, '#c2410c', 1, 'ไข่')
+                + stat('📚', cdk + egk, km * 2, '#0ea5e9', 2, 'ของสะสมทั้งหมด');
+
+    const row = `display:grid;grid-template-columns:repeat(4,1fr);gap:3px 6px`;
+    return `<div style="${row}">${line1}</div><div style="${row};margin-top:4px">${line2}</div>`;
+  }
+  // ══ 👀 ป๊อปอัปอวดของ (เจ้าของสั่ง 2026-07-28) — ของสวมใส่ / การ์ด+ไข่ / ของหายาก ══
+  //    ยิง endpoint แยกตอนกดเท่านั้น (ลิสต์อันดับไม่แบกข้อมูลนี้) · read-only ล้วน
+  let _lbShowData = null, _lbShowTab = 'eq', _lbShowFit = null;
+  const _LB_RARE = { tr: ['🏆', 'ของวิเศษ'], hw: ['🤖', 'ชิ้นส่วนไททัน'], wp: ['🔧', 'ชิ้นส่วนอาวุธขว้าง'], sp: ['⚡', 'ชิ้นส่วน Stat'], hp: ['🛸', 'ชิ้นส่วนยานบิน'] };
+  function lbShow(uid) {
+    document.getElementById('lb-show')?.remove();
+    _lbShowData = null; _lbShowTab = 'eq';
+    const el = document.createElement('div');
+    el.id = 'lb-show';
+    // 📜 ฉากหลังเลื่อนได้เอง + จัดชิดบน (ไม่ใช่ center) — **ตาข่ายกันเลื่อนไม่ถึงท้าย**
+    //    ทำไมต้องมี: ถ้า max-height ของการ์ดไม่ทำงานด้วยเหตุใดก็ตาม การ์ดจะโตเกินจอ และเพราะเดิม
+    //    overlay จัด align-items:center + ไม่มี overflow → เนื้อหา **ล้นทั้งบนและล่างโดยเลื่อนไม่ได้เลย**
+    //    (เจ้าของรายงาน 3 รอบ · รอบล่าสุดยืนยันว่าเป็นบนคอม = ไม่ใช่ปัญหาหน่วย vh/dvh บนมือถือ)
+    //    flex-start + margin:auto ที่การ์ด = ยังลอยกลางจอเมื่อเนื้อหาสั้น แต่ล้นเมื่อไหร่ฉากหลังเลื่อนรับทันที
+    el.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:10050;display:flex;align-items:flex-start;justify-content:center;padding:14px;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch';
+    el.onclick = e => { if (e.target === el) _lbShowClose(); };
+    // 📐 ความสูงการ์ด: ใช้ทั้ง 100% (ของ overlay) และ dvh เป็นตัวสำรอง — เอาอันที่เล็กกว่าเสมอด้วย min()
+    //    ผ่านมา 3 รอบยังเลื่อนไม่ถึงท้าย (82vh → 82dvh → 100%) จึงเลิกพึ่งหน่วยเดียว:
+    //      · ถ้า max-height ทำงาน → body เลื่อนข้างใน หัวป๊อปอัพติดอยู่กับที่ (แบบที่อยากได้)
+    //      · ถ้าไม่ทำงาน → การ์ดโตเกินจอ แต่ overlay ด้านบนมี overflow-y:auto รับไว้ ยังไงก็เลื่อนถึง
+    //    margin:auto = ลอยกลางจอเหมือนเดิมเมื่อเนื้อหาสั้น (overlay จัด flex-start ไว้)
+    el.innerHTML = `<div style="background:#fff;border-radius:14px;width:100%;max-width:400px;margin:auto;max-height:100%;max-height:min(100%,calc(100dvh - 28px));display:flex;flex-direction:column;overflow:hidden;box-shadow:0 12px 34px rgba(2,8,23,.4)">
+      <div id="lb-show-head" style="flex:none;padding:11px 13px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;gap:8px">
+        <span style="font-size:13.5px;font-weight:800;color:#1e293b">${T('⏳ กำลังโหลด...')}</span>
+        <button onclick="xhrpg._lbShowClose()" aria-label="${T('ปิดหน้าต่าง')}" style="margin-left:auto;width:26px;height:26px;border:none;border-radius:8px;background:#f1f5f9;color:#64748b;font-size:14px;cursor:pointer">✕</button>
+      </div>
+      <div id="lb-show-body" style="padding:11px 13px 18px;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;flex:1 1 auto;min-height:0"></div>
+    </div>`;
+    document.body.appendChild(el);
+    // 📏 กำหนดความสูงการ์ดเป็น **พิกเซลจริงด้วย JS** — เลิกพึ่ง CSS max-height ทุกหน่วย
+    //    ผ่านมา 4 รอบ (82vh → 82dvh → 100% → min(100%,dvh)) เจ้าของยังรายงานว่าเลื่อนไม่ถึงท้ายบนคอม
+    //    อาการฟ้อง: ขอบบนป๊อปอัพถูกตัด = การ์ดสูงเกินจอ → % ไม่ถูก resolve ในบริบทนี้
+    //    px จาก window.innerHeight ไม่มีทางเพี้ยน · ผูก resize ด้วย (ย่อ/ขยายหน้าต่างบนคอมแล้วยังพอดี)
+    _lbShowFit = () => {
+      const card = el.firstElementChild;
+      if (card) card.style.maxHeight = Math.max(240, window.innerHeight - 28) + 'px';
+    };
+    _lbShowFit();
+    window.addEventListener('resize', _lbShowFit);
+    $.getJSON('xhrpg_leaderboard.php', { show: uid })
+      .done(d => { if (!d || !d.ok) { _lbShowFail(); return; } _lbShowData = d; _lbShowRender(); })
+      .fail(_lbShowFail);
+  }
+  function _lbShowClose() {
+    if (_lbShowFit) { window.removeEventListener('resize', _lbShowFit); _lbShowFit = null; } // เก็บ listener ทิ้ง กัน leak เปิด/ปิดหลายรอบ
+    document.getElementById('lb-show')?.remove(); _lbShowData = null;
+  }
+  function _lbShowFail() { const b = document.getElementById('lb-show-body'); if (b) b.innerHTML = `<div style="text-align:center;color:#94a3b8;font-size:12px;padding:16px 0">${T('โหลดไม่ได้')}</div>`; }
+  function _lbShowTabSet(t) { _lbShowTab = t; _lbShowRender(); }
+  // 🔧 โมดูลที่สวมอยู่ทุกอาวุธ — ต่อท้ายแท็บ "ของสวมใส่" ในป๊อปอัพอวดของ
+  //    เจ้าของสั่ง 2026-07-28: **ไม่ต้องโชว์การ์ดที่เสียบ** (แถวยาวล้น อ่านไม่ออก) → เหลือ ระดับ · +ตีบวก · STAT
+  //    พอตัดการ์ดออก แถวสั้นลงมาก → เปลี่ยนจาก 1 ชิ้น/บรรทัด เป็นกริดยืดหยุ่น (auto-fit) ประหยัดความสูงครึ่งหนึ่ง
+  function _lbModsHTML(mods) {
+    if (!mods.length) return '';
+    const grp = {};
+    mods.forEach(m => { const w = String(m.w || '').replace(/_modules$/, ''); (grp[w] = grp[w] || []).push(m); });
+    const body = Object.keys(grp).map(w => {
+      const defs = _modSlotsFor(w) || [];
+      const cells = grp[w].map(m => {
+        const sd = defs.find(s => s.key === m.sl) || { icon: '🔧', name: m.sl };
+        const r = Math.max(1, Math.min(MODULE_RARITY.length, m.r | 0)), rar = MODULE_RARITY[r - 1];
+        return `<div title="${_gdEsc(T(sd.name || m.sl))}" style="display:flex;align-items:center;gap:4px;min-width:0;padding:3px 6px;border-left:3px solid ${rar.c};background:#f8fafc;border-radius:0 6px 6px 0">
+          <span style="font-size:11px;flex:none">${sd.icon}</span>
+          <span style="font-size:9px;color:#fff;${_rarBg(r)};border-radius:4px;padding:0 4px;font-weight:700;flex:none">${_gdEsc(T(rar.n))}</span>
+          ${(m.p | 0) > 0 ? `<span style="font-size:10px;font-weight:800;color:#dc2626;flex:none">+${m.p | 0}</span>` : ''}
+          <span style="flex:1"></span>
+          ${m.s ? `<span style="font-size:9px;color:#7c3aed;font-weight:700;flex:none;white-space:nowrap">${_gdEsc(_modStatLabel(m.s))}+${r}</span>` : ''}
+        </div>`;
+      }).join('');
+      return `<div style="margin-bottom:8px">
+        <div style="font-size:9.5px;font-weight:800;color:#94a3b8;margin-bottom:3px;text-transform:uppercase;letter-spacing:.3px">${_gdEsc(T(_MOD_WEAPON_LABEL[w] || w))}</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(132px,1fr));gap:3px">${cells}</div>
+      </div>`;
+    }).join('');
+    return `<div style="margin-top:10px;padding-top:9px;border-top:1px solid #f1f5f9">
+      <div style="font-size:11px;font-weight:800;color:#334155;margin-bottom:7px">🔧 ${T('โมดูลที่ติดตั้ง')} <span style="color:#94a3b8;font-weight:600">${mods.length}</span></div>
+      ${body}</div>`;
+  }
+  function _lbShowRender() {
+    const d = _lbShowData; if (!d) return;
+    const hd = document.getElementById('lb-show-head'), bd = document.getElementById('lb-show-body');
+    if (!bd) return;
+    if (hd) hd.querySelector('span').innerHTML = `${_gdEsc(d.name)} <span style="font-weight:400;color:#94a3b8;font-size:11px">Lv.${d.lv | 0}${(d.rag | 0) > 0 ? ' · 🌟 ' + (d.rag | 0) : ''}</span>`;
+    const rareTot = (d.rare || []).reduce((a, g) => a + ((g.own || []).length), 0);
+    const tabs = [['eq', '⚔️ ' + T('ของสวมใส่'), (d.eq || []).length],
+                  ['cd', '🎴 ' + T('การ์ด') + '/🥚 ' + T('ไข่'), ((d.cards || {}).t | 0) + ((d.eggs || {}).t | 0)],
+                  ['ra', '🏆 ' + T('ของหายาก'), rareTot]];
+    let h = `<div style="display:flex;gap:5px;margin-bottom:9px">` + tabs.map(([k, lb, n]) => {
+      const on = _lbShowTab === k;
+      return `<button onclick="xhrpg._lbShowTabSet('${k}')" style="flex:1;min-width:0;padding:6px 2px;border:none;border-radius:8px;font-size:10.5px;font-weight:800;cursor:pointer;line-height:1.3;${on ? 'background:#ede9fe;color:#6d28d9;box-shadow:inset 0 0 0 2px #c4b5fd' : 'background:#f1f5f9;color:#64748b'}">${lb}<br><span style="font-size:9px;font-weight:600;opacity:.8">${n}</span></button>`;
+    }).join('') + `</div>`;
+
+    if (_lbShowTab === 'eq') {
+      const list = d.eq || [];
+      h += list.length ? `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(112px,1fr));gap:6px">` + list.map(it => {
+        const t = Math.max(1, Math.min(6, it.t | 0));
+        const af = (it.af || []).map(a => `<span style="font-size:8.5px;background:#f1f5f9;color:#475569;border-radius:5px;padding:0 4px">${_gdEsc(T(EQ2_OPT_TXT[a[0]] || a[0], { v: a[1] | 0 }))}</span>`).join(' ');
+        return `<div style="background:#f8fafc;border-radius:9px;padding:6px 7px">
+          <div style="display:flex;align-items:center;gap:6px">
+            ${_eq2Ico(it, 26)}
+            <div style="min-width:0">
+              <div style="font-size:10.5px;font-weight:800;color:${RARITY_TEXT[EQ2_TCOL[t - 1]]}">T${t}${(it.p | 0) > 0 ? ` <span style="color:#dc2626">+${it.p | 0}</span>` : ''}</div>
+              <div style="font-size:9px;color:#94a3b8">Lv.${it.lv | 0}</div>
+            </div>
+          </div>
+          ${af ? `<div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:4px">${af}</div>` : ''}
+        </div>`;
+      }).join('') + `</div>
+        <div style="display:flex;gap:9px;margin-top:9px;padding-top:8px;border-top:1px solid #f1f5f9;font-size:11px">
+          <div><div style="color:#94a3b8;font-size:9.5px">DEF</div><div style="font-weight:800;color:#1e293b">${(d.def | 0).toLocaleString()}</div></div>
+          ${Object.keys(d.stat || {}).map(k => `<div><div style="color:#94a3b8;font-size:9.5px">${_gdEsc(String(k).toUpperCase())}</div><div style="font-weight:800;color:#15803d">+${d.stat[k] | 0}</div></div>`).join('')}
+        </div>`
+        : `<div style="text-align:center;color:#94a3b8;font-size:11.5px;padding:14px 0">${T('ยังไม่ได้สวมใส่อะไรเลย')}</div>`;
+      h += _lbModsHTML(d.mods || []); // 🔧 โมดูล + การ์ดที่เสียบ ต่อท้ายของสวมใส่ (เจ้าของสั่ง 2026-07-28)
+    } else if (_lbShowTab === 'cd') {
+      // 🎴🥚 สมุดสะสมรายตัว (เจ้าของสั่ง 2026-07-28) — ไอคอนมอนเรียงทีละตัว **สี = ได้แล้ว · เทา = ยังไม่ได้** · ไม่มีแถบคืบหน้า
+      //    รายชื่อมาจาก master ฝั่ง server → มอนที่เพิ่มในอนาคตโผล่เองอัตโนมัติ ไม่ต้องแก้ client
+      //    ชื่อมอนอยู่ใน title และผ่าน T() (คีย์ชื่อมอนมีครบทุกภาษาอยู่แล้ว — ห้ามต่อสตริงก่อนเรียก T)
+      const KM = d.kindmax | 0, book = Array.isArray(d.book) ? d.book : [];
+      const cd = d.cards || {}, eg = d.eggs || {};
+      const head = (ico, lab, k, max, col, sub) => `<div style="display:flex;align-items:baseline;gap:6px;margin-bottom:5px">
+        <span style="font-size:14px">${ico}</span>
+        <span style="font-size:11.5px;font-weight:800;color:#1e293b">${_gdEsc(lab)}</span>
+        <span style="flex:1"></span>
+        ${sub ? `<span style="font-size:9.5px;color:#94a3b8">${sub}</span>` : ''}
+        <span style="font-size:13px;font-weight:800;color:${max > 0 && k >= max ? '#15803d' : col};font-variant-numeric:tabular-nums">${k}${max > 0 ? `<span style="font-size:10px;color:#94a3b8">/${max}</span>` : ''}</span>
+      </div>`;
+      // ช่องละ 1 ตัว — **รูปสไปรต์มอนจริง** ชุดเดียวกับสมุดการ์ด (เจ้าของสั่ง 2026-07-28 "เอา icon บนการ์ดมาแปะ")
+      //    ได้แล้ว = สีเต็ม · ยังไม่ได้ = ขาวดำจาง — grayscale ตัวเดียวกับ _renderCardBook
+      //    สไปรต์อ่านจาก Lv ของมอน (MON_ANIM/SUM ของ "คนที่กำลังดู") → ไม่ต้องให้ server ส่งรูปมา
+      //    ไม่มีสไปรต์ (ยังโหลดไม่เสร็จ/Lv ไม่มีชีท) → ตกกลับเป็นอีโมจิ m.i ที่ server ส่งมา
+      //    ⭐ server ส่ง c/e เป็น bitmask (1=ปกติ · 2=MVP · 3=ทั้งคู่) → วาดแยก 2 แถว: ปกติ / MVP
+      const D = 30;
+      const grid = (key, bit, mvp) => `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(${D + 4}px,1fr));gap:3px">`
+        + book.map(m => {
+            const has = ((m[key] | 0) & bit) !== 0;
+            const dim = has ? '' : 'filter:grayscale(1);opacity:.35;';
+            const sb = _monSpriteBg(m.lv | 0);
+            const art = sb
+              ? `<div style="width:${D}px;height:${D}px;background:url('${sb.url}') 0 0/${sb.cols * D}px ${sb.rows * D}px no-repeat;image-rendering:pixelated;${dim}"></div>`
+              : `<div style="font-size:17px;line-height:1;${dim}">${m.i}</div>`;
+            const bg = has ? (mvp ? '#fffbeb' : '#f5f3ff') : '#f8fafc';
+            const ring = has ? (mvp ? 'box-shadow:inset 0 0 0 1.5px #fbbf24;' : '') : 'box-shadow:inset 0 0 0 1px #eef2f7;';
+            return `<div title="${_gdEsc(T(m.n))} Lv.${m.lv | 0}${mvp ? ' ⭐ MVP' : ''}${has ? '' : ' — ' + T('ยังไม่มี')}"
+              style="aspect-ratio:1;border-radius:7px;display:flex;align-items:center;justify-content:center;overflow:hidden;background:${bg};${ring}">${art}</div>`;
+          }).join('') + `</div>`;
+      const cntBit = (key, bit) => book.reduce((a, m) => a + ((((m[key] | 0) & bit) !== 0) ? 1 : 0), 0);
+      // แถวย่อย ⭐ MVP — โชว์เสมอถ้ามีข้อมูลสมุด (เห็นชัดว่าขาด MVP ตัวไหนบ้าง เจ้าของสั่ง 2026-07-28)
+      const mvpRow = (key, col) => !book.length ? '' : `
+        <div style="display:flex;align-items:baseline;gap:6px;margin:7px 0 4px">
+          <span style="font-size:10.5px;font-weight:800;color:#b45309">⭐ MVP</span>
+          <span style="flex:1"></span>
+          <span style="font-size:11.5px;font-weight:800;color:${KM > 0 && cntBit(key, 2) >= KM ? '#15803d' : '#b45309'};font-variant-numeric:tabular-nums">${cntBit(key, 2)}${KM > 0 ? `<span style="font-size:9.5px;color:#94a3b8">/${KM}</span>` : ''}</span>
+        </div>` + grid(key, 2, true);
+
+      const sumK = (cd.k | 0) + (eg.k | 0);
+      h += `<div style="background:linear-gradient(135deg,#ede9fe,#f5f3ff);border:1px solid #ddd6fe;border-radius:11px;padding:9px 12px;margin-bottom:11px;display:flex;align-items:baseline;gap:6px">
+        <span style="font-size:11.5px;font-weight:800;color:#5b21b6">📚 ${T('ของสะสมทั้งหมด')}</span>
+        <span style="flex:1"></span>
+        <span style="font-size:15px;font-weight:800;color:#6d28d9;font-variant-numeric:tabular-nums">${sumK}${KM > 0 ? `<span style="font-size:10.5px;color:#a78bfa">/${KM * 2}</span>` : ''}</span>
+      </div>`;
+      const sub = s => `${T('รวมทั้งหมด')} ${(s.t | 0).toLocaleString()}${(s.m | 0) > 0 ? ' · ⭐ MVP ' + (s.m | 0) : ''}`;
+      h += `<div style="margin-bottom:14px">${head('🎴', T('การ์ด'), cd.k | 0, KM, '#6d28d9', sub(cd))}`
+         +   `${book.length ? grid('c', 1, false) + mvpRow('c', '#6d28d9') : ''}</div>`
+         + `<div>${head('🥚', T('ไข่'), eg.k | 0, KM, '#c2410c', sub(eg))}`
+         +   `${book.length ? grid('e', 1, false) + mvpRow('e', '#c2410c') : ''}</div>`;
+    } else {
+      // 📗 แบบสมุดสะสม (เจ้าของทัก "ไม่สวย รก" 2026-07-28) — เดิมเป็นชิปชื่อยาวหลายสิบอันต่อหมวด อ่านไม่ออกว่าขาดอะไร
+      //    ใหม่: หัวหมวด + แถบคืบหน้า + x/y บรรทัดเดียว · ไทล์ไอคอนล้วนขนาดเท่ากัน · ช่องที่ยังไม่มีเป็น "?" จาง
+      //    ชื่อไอเทมย้ายไป title (แตะ/ชี้เพื่อดู) → ไม่มีข้อความยาวมาดันบรรทัด และเห็นทันทีว่าเหลืออีกกี่ช่อง
+      h += (d.rare || []).map(g => {
+        const meta = _LB_RARE[g.k] || ['❓', g.k], own = g.own || [], tot = Math.max(own.length, g.tot | 0);
+        const done = own.length >= tot && tot > 0;   // (แถบคืบหน้าถูกถอดออก 2026-07-28 — เจ้าของสั่ง "เอา bar ออก ไม่สวย")
+        const cell = 'aspect-ratio:1;border-radius:6px;display:flex;align-items:center;justify-content:center';
+        return `<div style="margin-bottom:11px">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+            <span style="font-size:11px;font-weight:800;color:#334155;white-space:nowrap">${meta[0]} ${_gdEsc(T(meta[1]))}</span>
+            <span style="flex:1"></span>
+            <span style="font-size:10px;font-weight:800;color:${done ? '#15803d' : '#94a3b8'};white-space:nowrap;font-variant-numeric:tabular-nums">${own.length}/${tot}</span>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(30px,1fr));gap:3px">
+            ${own.map(o => `<div title="${_gdEsc(T(o.n))}" style="${cell};background:#f5f3ff;font-size:15px">${o.i}</div>`).join('')}
+            ${Array.from({ length: Math.max(0, tot - own.length) }, () => `<div style="${cell};background:#f8fafc;font-size:11px;color:#cbd5e1">?</div>`).join('')}
+          </div>
+        </div>`;
+      }).join('') + `<div style="font-size:10px;color:#94a3b8;border-top:1px solid #f1f5f9;padding-top:7px">🎽 ${T('ของสวมใส่')} ${(d.eqold | 0)}/${(d.eqoldmax | 0)}</div>`;
+    }
+    bd.innerHTML = h;
+  }
   function _lbCast(r) {
     const heroU  = _lbAvatarURL(r.hero_skin  ? SUM['hs_' + r.hero_skin + '_idle'] : SUM['th_idle'], 4);
     const titanU = _lbAvatarURL(r.robot_skin ? SUM['skin_' + r.robot_skin + '_idle'] : SUM['robot_idle'], 1);
@@ -6253,6 +8154,8 @@ const xhrpg = (() => {
     let m;
     // 🎁 กล่องการ์ด Lv.{lo}-{hi}
     if ((m = s.match(/^🎁 กล่องการ์ด Lv\.(\d+)-(\d+)$/u))) return '🎁 ' + T('กล่องการ์ด Lv.{a}-{b}', {a: m[1], b: m[2]});
+    // 🧰 กล่องไข่ Lv.{lo}-{hi} (รับ icon เก่า 🪺/🥚 ด้วย — hist แถวเก่าก่อนสลับ icon)
+    if ((m = s.match(/^(🧰|🪺|🥚) กล่องไข่ Lv\.(\d+)-(\d+)$/u))) return m[1] + ' ' + T('กล่องไข่ Lv.{a}-{b}', {a: m[2], b: m[3]});
     // 📦 กล่องโมดูล{ระดับ}
     if ((m = s.match(/^📦 กล่องโมดูล(.+)$/u))) return '📦 ' + T('กล่องโมดูล{a}', {a: T(m[1].trim())});
     // 🔧 {อาวุธ} {ช่อง} ({ระดับ}) — โมดูลดรอปตรง (ชื่ออาวุธมีวรรคได้ เช่น "ธนูไททัน (ARM)" → ยึดชุดชื่อระดับปิดท้าย)
@@ -6278,15 +8181,84 @@ const xhrpg = (() => {
     return s; // ไม่รู้จัก → ไทยตามเดิม (แถวเก่า/ฟอร์แมตอนาคต — ห้ามพัง)
   }
 
+  // ══ 📦 แท็บ DROP — ของที่ได้รับ 100 รายการล่าสุด (endpoint xhrpg_droplog.php · จาก xhrpg_item_log เก็บ 7 วัน) ══
+  //    ไม่มีแร่/พืช/ยา โดยธรรมชาติ (item log ไม่เคย log ของพวกนั้น) · 🌐 ชื่อของ = local_name ภาษาผู้เล่น ณ ตอนได้
+  //    ⚠️ ชื่อของมาจาก DB → สร้างด้วย textContent เท่านั้น (มาตรฐานเดียวกับแชท)
+  let _logTab = 'drop'; // 'drop' = ค่าเริ่มต้น (คำขอเจ้าของ) · 'ev' = บันทึกเหตุการณ์เดิม
+  const DROP_CAT = { // action → หมวด (icon + คีย์ i18n) · หมวดแปลเสมอ ไม่พึ่ง DB
+    card_drop:{ic:'🎴',k:'การ์ด'},          off_card_drop:{ic:'🎴',k:'การ์ด'},   card_mvp_exchange:{ic:'🎴',k:'การ์ด'},
+    egg_drop:{ic:'🥚',k:'ไข่'},             off_egg_drop:{ic:'🥚',k:'ไข่'},      egg_mvp_exchange:{ic:'🥚',k:'ไข่'},
+    diamond_drop:{ic:'💎',k:'เพชร'},        off_diamond_drop:{ic:'💎',k:'เพชร'}, admin_grant_diamond:{ic:'💎',k:'เพชร'},
+    module_drop:{ic:'🔧',k:'โมดูล'},        off_module_drop:{ic:'🔧',k:'โมดูล'}, admin_grant_module:{ic:'🔧',k:'โมดูล'},
+    box_drop:{ic:'📦',k:'กล่อง'},           open_module_box:{ic:'📦',k:'กล่อง'}, open_card_box:{ic:'🎴',k:'การ์ด'},
+    open_egg_box:{ic:'🥚',k:'ไข่'},         admin_grant_egg_box:{ic:'📦',k:'กล่อง'}, // เปิดกล่อง = ได้การ์ด/ไข่ → จัดหมวดตามของที่ได้ ไม่ใช่กล่อง
+    admin_grant_card_box:{ic:'📦',k:'กล่อง'}, admin_grant_module_box:{ic:'📦',k:'กล่อง'}, admin_grant_card:{ic:'🎴',k:'การ์ด'},
+    admin_grant_egg:{ic:'🥚',k:'ไข่'},      mvp_drop:{ic:'⭐',k:'ของ MVP'},
+    market_buy:{ic:'🛒',k:'ซื้อจากตลาด'},    arena_win:{ic:'🏟️',k:'ดันบอส'},
+  };
+  function _logTabs() {
+    const el = document.getElementById('log-tabs'); if (!el) return;
+    el.textContent = '';
+    [['drop', '📦 ' + T('ของที่ได้รับ')], ['ev', '📜 ' + T('บันทึกเหตุการณ์')]].forEach(([k, label]) => {
+      const b = document.createElement('button');
+      b.style.cssText = `flex:1;padding:6px 0;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;`
+        + (_logTab === k ? 'background:#0f766e;color:#fff' : 'background:#f1f5f9;color:#475569');
+      b.textContent = label;
+      b.onclick = () => { _logTab = k; renderLogPanel(); };
+      el.appendChild(b);
+    });
+  }
+  function _dropDraw(list) {
+    const box = document.getElementById('drop-log'); if (!box) return;
+    box.textContent = '';
+    if (!list.length) {
+      const d = document.createElement('div');
+      d.style.cssText = 'text-align:center;color:#94a3b8;font-size:11px;padding:20px 8px;line-height:1.7';
+      d.textContent = T('ยังไม่ได้ของหายากใน 7 วันนี้ — ออกไปล่ามอนกันเถอะ!');
+      box.appendChild(d); return;
+    }
+    list.forEach(d => {
+      const cat = DROP_CAT[d.a] || { ic: '✨', k: 'อื่นๆ' };
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;align-items:center;gap:7px;border-left:3px solid #cbd5e1;background:#f8fafc;border-radius:0 7px 7px 0;padding:5px 8px;margin-bottom:3px';
+      const ic = document.createElement('span'); ic.textContent = cat.ic; ic.style.cssText = 'font-size:15px;flex:none';
+      row.appendChild(ic);
+      const mid = document.createElement('div'); mid.style.cssText = 'flex:1;min-width:0';
+      const nm = document.createElement('div');
+      // ⚠️ textContent — ชื่อของมาจาก DB · tr=true (แถวเก่า/ไม่มี local) → ลอง T() เผื่อเป็นคีย์ที่แปลได้
+      nm.textContent = (d.tr ? T(d.n || '') : (d.n || '')) + (d.q > 1 ? ` ×${d.q}` : '');
+      nm.style.cssText = 'font-size:12px;font-weight:600;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
+      const sub = document.createElement('div'); sub.textContent = T(cat.k);
+      sub.style.cssText = 'font-size:9.5px;color:#94a3b8';
+      mid.appendChild(nm); mid.appendChild(sub); row.appendChild(mid);
+      const tm = document.createElement('span'); tm.textContent = _chatTime(d.t);
+      tm.style.cssText = 'flex:none;font-size:9px;color:#cbd5e1';
+      row.appendChild(tm);
+      box.appendChild(row);
+    });
+  }
+  // render แผง 📖 บันทึก (เรียกตอนเปิด + สลับแท็บ)
+  function renderLogPanel() {
+    _logTabs();
+    const dl = document.getElementById('drop-log'), ev = document.getElementById('event-log');
+    const ttl = document.getElementById('log-title');
+    if (ttl) ttl.textContent = _logTab === 'drop' ? ('📦 ' + T('ของที่ได้รับ')) : ('📜 ' + T('บันทึกเหตุการณ์'));
+    if (dl) dl.style.display = _logTab === 'drop' ? 'block' : 'none';
+    if (ev) ev.style.display = _logTab === 'drop' ? 'none' : 'block';
+    if (_logTab === 'ev') { if (ev) ev.scrollTop = ev.scrollHeight; return; }
+    if (!player) return;
+    $.post(baseUrl + 'xhrpg_droplog.php', { line_uid: player.line_uid, session_token: sessionToken || '' },
+      r => { if (r && r.ok) _dropDraw(r.drops || []); }, 'json').fail(() => {});
+  }
   // ══ 💬 แชท (รวมทั้งเกม + ส่วนตัว · endpoint xhrpg_chat.php · docs sql/add_chat.sql) ══════
   //    ⚠️ ข้อความผู้เล่นสร้างด้วย textContent เท่านั้น — ห้าม innerHTML (กัน XSS: ข้อความมาจากคนอื่นพิมพ์)
   const CHAT_EMOJI = ['😀','😂','🥹','😍','😎','🤔','😭','😱','🥳','😴','👍','👎','🙏','👏','💪','🤝',
                       '🔥','⚡','💥','✨','⭐','🎉','🎁','💰','💎','🎴','🥚','🐾','⚔️','🛡️','🏹','🗡️',
                       '🛸','⛪','💀','👾','🌿','❤️','💔','🆘','❓','❗','➡️','⬅️','🆙','🏆'];
-  let _chatTab = 'g';        // 'g' = รวม · 'dm' = ส่วนตัว
+  let _chatTab = 'g';        // 'g' = รวม · 'gd' = กิล (docs/guild-chat-design.md) · 'dm' = ส่วนตัว
   let _chatWith = null;      // uid คู่สนทนา (แท็บ dm · null = โชว์รายชื่อห้อง)
   let _chatWithName = '', _chatWithCC = ''; // 🏴 ธงคู่สนทนา — โชว์ที่หัวข้อห้อง DM
-  let _chatN = 0, _chatDmN = 0; // badge จาก poll
+  let _chatN = 0, _chatDmN = 0, _chatGdN = 0; // badge จาก poll (รวม / ส่วนตัว / 🏰 กิล)
   let _chatBusy = false;
 
   // icon แมพอย่างเดียว (ไม่เอาชื่อ — คำขอเจ้าของ) · title = ชื่อเต็มตามภาษา (hover ดูได้)
@@ -6296,7 +8268,7 @@ const xhrpg = (() => {
   // badge ข้างปุ่ม 💬 (เรียกทุก poll จาก updateHUD)
   function _chatBadgeUpd() {
     const el = document.getElementById('chat-badge'); if (!el) return;
-    const n = _chatN + _chatDmN;
+    const n = _chatN + _chatDmN + _chatGdN; // 🏰 รวม badge กิลด้วย — ปุ่มเดียวเห็นครบ ไม่ต้องมีปุ่มใหม่ให้จำ
     if (n > 0 && openPanel !== 'chat') { el.style.display = 'block'; el.textContent = n > 99 ? '99+' : String(n); }
     else el.style.display = 'none';
   }
@@ -6331,6 +8303,18 @@ const xhrpg = (() => {
       d.textContent = T('ยังไม่มีข้อความ — ทักทายกันได้เลย');
       box.appendChild(d); return;
     }
+    // 🌐 GMC auto-TH: จองโควตายิงเฉพาะ "8 ข้อความใหม่สุด" ที่ยังไม่เคยแปล — ที่เก่ากว่าใช้ปุ่ม 🌐 กดเอง (กัน burst ตอนเปิดแชท)
+    _gmcAutoAllow = null;
+    if (_svGmc) {
+      _gmcAutoAllow = new Set();
+      let _n = 0;
+      for (let i = msgs.length - 1; i >= 0 && _n < 8; i--) {
+        if (!_gmcAutoEligible(msgs[i], me)) continue;
+        const k = _gmcAutoKey(msgs[i]);
+        if (_gmcAutoCache[k]) continue; // เคยแปล/เคยลองแล้ว — ไม่กินโควตา (ok วางจาก cache ได้เสมอ)
+        _gmcAutoAllow.add(k); _n++;
+      }
+    }
     msgs.forEach(m => {
       const mine = m.u === me;
       const row = document.createElement('div');
@@ -6338,17 +8322,21 @@ const xhrpg = (() => {
       // หัว: [ธง] ชื่อ · แมพ · เวลา
       const hd = document.createElement('div');
       hd.style.cssText = 'font-size:9.5px;color:#64748b;margin-bottom:1px;display:flex;gap:4px;align-items:center';
+      if (m.gm) hd.appendChild(_gmChipEl(7.5)); // 🛡️ ป้าย GM น้ำเงิน — นำหน้าธงชาติ (คำขอเจ้าของ)
+      if (m.cl) hd.appendChild(_clChipEl(7.5)); // 💠 ป้าย CL ฟ้า (Country Lead) — ต่อจาก GM ก่อนธง
       const _fl = _flagEl(m.cc, 9); if (_fl) hd.appendChild(_fl); // 🏴 ธงชาติผู้พูด (ทั้งของเราและคนอื่น)
+      const _vp = _vipChipEl(m.vp, 7.5); if (_vp) hd.appendChild(_vp); // 👑 ชิป VIP ต่อจากธง
       if (!mine) {
         const nm = document.createElement('b');
         nm.textContent = m.n || '?';
         nm.style.cssText = 'color:#0f766e;cursor:pointer';
         nm.title = T('💌 แชทส่วนตัว');
-        nm.onclick = () => chatOpenDm(m.u, m.n || '?', m.cc);
+        nm.onclick = () => chatOpenDm(m.u, m.n || '?', m.cc, m.gm, m.cl);
         hd.appendChild(nm);
       } else {
         const nm = document.createElement('b'); nm.textContent = T('ฉัน'); nm.style.color = '#16a34a'; hd.appendChild(nm);
       }
+      const _gdc = _gdChipEl(m.gd, 8); if (_gdc) hd.appendChild(_gdc); // 🏰 ป้ายกิลต่อจากชื่อ (createElement ล้วน — กติกา XSS แชท)
       // 🌿 icon สถานที่ (แชทรวมเท่านั้น · hover = ชื่อเต็ม) → Lv. → 🌟 Ragnalok Lv
       if (m.mp) { const _md = _chatMapIcon(m.mp);
         if (_md) { const mp = document.createElement('span'); mp.textContent = _md.emoji; mp.title = T(_md.name); hd.appendChild(mp); } }
@@ -6361,19 +8349,172 @@ const xhrpg = (() => {
       bb.textContent = m.m || ''; // ⚠️ textContent = ปลอดภัย ห้ามเปลี่ยนเป็น innerHTML
       bb.style.cssText = `max-width:82%;padding:5px 9px;border-radius:11px;font-size:12.5px;line-height:1.45;white-space:pre-wrap;word-break:break-word;`
         + (mine ? 'background:#16a34a;color:#fff;border-bottom-right-radius:3px' : 'background:#fff;color:#0f172a;border:1px solid #e2e8f0;border-bottom-left-radius:3px');
-      row.appendChild(bb);
+      if ((m.m || '') !== '') row.appendChild(bb); // image-only (m.m ว่าง) → ไม่โชว์ฟองเปล่า
+      // 📎 รูปแนบ — <img> จาก id ที่ validate (ปลอดภัย: src = endpoint เรา + hex32 เท่านั้น · ไม่ innerHTML · ไม่รับ URL ดิบจากข้อความ)
+      if (m.img && /^[a-f0-9]{32}$/.test(m.img)) {
+        const im = document.createElement('img');
+        im.src = baseUrl + 'xhrpg_chat_img.php?id=' + m.img;
+        im.alt = '📷'; im.loading = 'lazy';
+        im.style.cssText = 'max-width:82%;max-height:200px;border-radius:11px;margin-top:3px;cursor:pointer;border:1px solid #e2e8f0;object-fit:contain;background:#f8fafc';
+        im.onclick = () => _chatImgBox(m.img);
+        im.onerror = () => { const x = document.createElement('div'); x.textContent = '🖼️ ' + T('รูปหมดอายุแล้ว'); x.style.cssText = 'font-size:11px;color:#94a3b8;padding:4px 8px'; im.replaceWith(x); };
+        row.appendChild(im);
+        if (!mine) { const rp = document.createElement('button'); rp.textContent = '🚩 ' + T('รายงานรูป');
+          rp.style.cssText = 'align-self:flex-start;margin-top:1px;font-size:10px;color:#dc2626;background:none;border:none;cursor:pointer;padding:0 2px';
+          rp.onclick = () => _chatReportImg(m.img, rp); row.appendChild(rp); }
+      }
+      // 🌐 บรรทัดแปลจาก GMC ตอบหลายภาษา (m.tr จาก server — ทุกคนเห็น · textContent ล้วนตามกติกา XSS)
+      if (m.tr && typeof m.tr === 'object') {
+        const FL = { th: '🇹🇭', vi: '🇻🇳', tw: '🇹🇼', en: '🇬🇧', ja: '🇯🇵', pt: '🇧🇷' };
+        ['th', 'vi', 'tw', 'en', 'ja', 'pt'].forEach(k => {
+          if (!m.tr[k]) return;
+          const tl = document.createElement('div');
+          tl.textContent = FL[k] + ' ' + String(m.tr[k]);
+          tl.style.cssText = 'max-width:82%;margin-top:2px;padding:3px 9px;border-radius:9px;font-size:11px;line-height:1.4;white-space:pre-wrap;word-break:break-word;background:#f8fafc;color:#475569;border:1px dashed #e2e8f0';
+          row.appendChild(tl);
+        });
+      }
+      if (_svGmc && m.m && !mine) _gmcAutoTh(row, m); // 🌐 GMC: auto-แปล TH ต่อท้ายทันทีถ้าไม่ใช่ภาษาไทย (มติเจ้าของ 2026-07-19)
+      if (_svGmc && m.m) _gmcReadBtn(row, m.m, mine); // 🌐 GMC: ปุ่มแปลท้ายข้อความ (แชทรวม+DM — มติเจ้าของ)
       box.appendChild(row);
     });
     box.scrollTop = box.scrollHeight;
+  }
+  // 🎉 ป้ายอีเวนต์ตัวคูณ EXP/DROP (docs/event-mult-design.md) — บรรทัดเดียวเหนือ minimap (มติเจ้าของ 2026-07-19
+  //    "ทับแผนที่นิดๆ และ bar ด้านบนนิดๆ ก็ไม่เป็นไร") · ข้อความ latin+ตัวเลขล้วน = ไม่ต้อง i18n · หายเองเมื่ออีเวนต์จบ
+  function _evBannerUpd(ev) {
+    let el = document.getElementById('ev-mult-banner');
+    const e = ev ? +ev.e || 1 : 1, dd = ev ? +ev.d || 1 : 1, gg = ev ? +ev.g || 1 : 1;
+    if (e <= 1 && dd <= 1 && gg <= 1) { if (el) el.remove(); return; }
+    const parts = [];
+    if (e > 1)  parts.push('EXP ×' + e);
+    if (dd > 1) parts.push('DROP ×' + dd);
+    if (gg > 1) parts.push('G ×' + gg);
+    // 🏷️ ชื่ออีเวนต์สั้นๆ (admin ตั้ง เช่น WEEKEND) — latin ล้วนไม่ต้อง i18n · textContent กัน XSS อยู่แล้ว
+    const nm = ev && ev.n ? String(ev.n).replace(/[^A-Za-z0-9 _-]/g, '').slice(0, 16).trim() : '';
+    const txt = '🎉 ' + (nm ? nm + ' · ' : '') + parts.join(' · ');
+    if (!el) {
+      const mm = document.getElementById('minimapCanvas'); // เกาะ parent เดียวกับ minimap (มุมขวาบน — minimap top:5 → ป้ายคร่อมขอบบน)
+      el = document.createElement('div');
+      el.id = 'ev-mult-banner';
+      el.style.cssText = 'position:absolute;top:-2px;right:3px;background:linear-gradient(90deg,#f59e0b,#ef4444);color:#fff;font-size:9.5px;font-weight:800;border-radius:999px;padding:2px 9px;line-height:1.3;white-space:nowrap;z-index:30;box-shadow:0 2px 6px rgba(0,0,0,.35);pointer-events:none';
+      (mm && mm.parentNode ? mm.parentNode : document.body).appendChild(el);
+    }
+    if (el.textContent !== txt) el.textContent = txt;
+  }
+  // ── 🌐 GMC (Game Admin Chat · docs/gmc-design.md) — เครื่องมือแปล เฉพาะ uid ใน xhrpg:gmcs ──
+  // auto-แปล TH: ข้อความคนอื่นที่ "ไม่มีอักษรไทย" → แปลเป็นไทยต่อท้ายให้เลยไม่ต้องกด (ปุ่ม 🌐 ยังใช้เลือกภาษาอื่นได้)
+  const _gmcAutoCache = {}; // key(id ข้อความ) → {st:'ok'|'pending'|'fail', text} — แปลครั้งเดียวต่อข้อความต่อเซสชัน
+  let _gmcAutoAllow = null; // Set ของ key ที่อนุญาตยิงรอบ render นี้ (ใหม่สุด 8 ข้อความ — กันเปิดแชทแล้ว burst ทั้งหน้า)
+  function _gmcAutoKey(m) { return m.id != null ? String(m.id) : String(m.m || '').slice(0, 80); }
+  function _gmcAutoEligible(m, me) { // เข้าเกณฑ์ auto-TH ไหม: ไม่ใช่ของเรา · ไม่มีไทย · มีตัวอักษรจริง (ไม่ใช่อีโมจิ/ตัวเลขล้วน) · ไม่มีคำแปลไทยฝังมาแล้ว
+    if (!m || m.u === me || !m.m) return false;
+    if (m.tr && m.tr.th) return false;
+    const t = String(m.m);
+    return !/[ก-๙]/.test(t) && /[A-Za-zÀ-ỿ぀-ヿㇰ-ㇿ一-鿿가-힯]/.test(t);
+  }
+  function _gmcAutoTh(row, m) {
+    if (m.tr && m.tr.th) return;
+    const txt = String(m.m || '');
+    if (/[ก-๙]/.test(txt) || !/[A-Za-zÀ-ỿ぀-ヿㇰ-ㇿ一-鿿가-힯]/.test(txt)) return;
+    const key = _gmcAutoKey(m);
+    const mk = () => { const l = document.createElement('div');
+      l.style.cssText = 'max-width:82%;margin-top:2px;padding:3px 9px;border-radius:9px;font-size:11px;line-height:1.4;white-space:pre-wrap;word-break:break-word;background:#f0fdfa;color:#0f766e;border:1px dashed #99f6e4';
+      return l; };
+    const c = _gmcAutoCache[key];
+    if (c && c.st === 'ok') { const l = mk(); l.textContent = '🌐→TH: ' + c.text; row.appendChild(l); return; } // เคยแปลแล้ว — วางจาก cache ไม่ยิงซ้ำ
+    if (c) return;                                        // pending/fail — ไม่ยิงซ้ำ (fail กดปุ่ม 🌐 เองได้)
+    if (!_gmcAutoAllow || !_gmcAutoAllow.has(key)) return; // เกินโควตารอบนี้ (ข้อความเก่า) — กดปุ่ม 🌐 เองได้
+    _gmcAutoCache[key] = { st: 'pending' };
+    const l = mk(); l.textContent = '🌐→TH: …'; row.appendChild(l);
+    $.post(baseUrl + 'xhrpg_translate.php', { line_uid: player.line_uid, session_token: sessionToken || '', text: txt, target: 'th' })
+      .done(d => {
+        if (d && d.ok) { _gmcAutoCache[key] = { st: 'ok', text: d.text }; l.textContent = '🌐→TH: ' + d.text; }
+        else { _gmcAutoCache[key] = { st: 'fail' }; l.remove(); }
+      })
+      .fail(() => { _gmcAutoCache[key] = { st: 'fail' }; l.remove(); });
+  }
+  function _gmcReadBtn(row, text, mine) {
+    const b = document.createElement('button');
+    b.textContent = '🌐';
+    b.title = T('แปลข้อความนี้');
+    b.style.cssText = 'align-self:' + (mine ? 'flex-end' : 'flex-start') + ';margin-top:2px;border:1px solid #e2e8f0;background:#fff;border-radius:6px;font-size:10px;padding:1px 6px;cursor:pointer;color:#0d9488';
+    let bar = null;
+    b.onclick = () => {
+      if (bar) { bar.remove(); bar = null; return; } // กดซ้ำ = พับเก็บ
+      bar = document.createElement('div');
+      bar.style.cssText = 'display:flex;gap:4px;margin-top:2px;align-self:' + (mine ? 'flex-end' : 'flex-start');
+      [['th', 'TH'], ['vi', 'VN'], ['tw', 'TW'], ['en', 'EN'], ['ja', 'JP'], ['pt', 'PT']].forEach(([k, lb]) => {
+        const tb = document.createElement('button');
+        tb.textContent = lb;
+        tb.style.cssText = 'border:1px solid #cbd5e1;background:#f1f5f9;border-radius:6px;font-size:10px;font-weight:700;padding:1px 7px;cursor:pointer;color:#334155';
+        tb.onclick = () => {
+          tb.disabled = true; tb.textContent = '…';
+          $.post(baseUrl + 'xhrpg_translate.php', { line_uid: player.line_uid, session_token: sessionToken || '', text: text, target: k })
+            .done(d => {
+              tb.textContent = lb; tb.disabled = false;
+              const out = document.createElement('div');
+              if (d && d.ok) out.textContent = '🌐→' + lb + ': ' + d.text;
+              else out.textContent = '⚠️ ' + T(d && d.error === 'no_key' ? 'ยังไม่ตั้งค่า API แปลภาษา' : d && d.error === 'rate_limit' ? 'แปลถี่เกินไป — รอสักครู่' : 'แปลไม่สำเร็จ — ลองใหม่');
+              out.style.cssText = 'max-width:82%;margin-top:2px;padding:3px 9px;border-radius:9px;font-size:11px;line-height:1.4;white-space:pre-wrap;word-break:break-word;background:#f0fdfa;color:#0f766e;border:1px dashed #99f6e4;align-self:' + (mine ? 'flex-end' : 'flex-start');
+              row.insertBefore(out, bar);
+            })
+            .fail(() => { tb.textContent = lb; tb.disabled = false; });
+        };
+        bar.appendChild(tb);
+      });
+      row.appendChild(bar);
+    };
+    row.appendChild(b);
+  }
+  let _gmcLangs = null; // ภาษาที่ GMC เปิดตอบ — จำใน localStorage
+  function _gmcLangsGet() {
+    if (_gmcLangs) return _gmcLangs;
+    try {
+      const s = localStorage.getItem('xhrpg_gmc_tr');
+      if (s !== null) return _gmcLangs = s.split(',').filter(x => ['th', 'vi', 'tw', 'en', 'ja', 'pt'].includes(x));
+    } catch (e) {}
+    return _gmcLangs = ['th', 'vi', 'tw', 'en', 'ja', 'pt']; // default เปิดครบ 6 (ภาษาที่ตรงกับต้นฉบับ server ตัดทิ้งเอง)
+  }
+  function _gmcBarUpd() { // แถบ toggle ภาษาเหนือช่องพิมพ์ — โผล่เฉพาะ GMC
+    const inp = document.getElementById('chat-input');
+    let bar = document.getElementById('gmc-langbar');
+    if (!_svGmc || !inp) { if (bar) bar.remove(); return; }
+    const rowEl = inp.parentNode;
+    if (!bar) {
+      bar = document.createElement('div');
+      bar.id = 'gmc-langbar';
+      bar.style.cssText = 'display:flex;gap:4px;align-items:center;margin-top:5px;flex-wrap:wrap';
+      rowEl.parentNode.insertBefore(bar, rowEl);
+    }
+    bar.textContent = '';
+    const lb = document.createElement('span');
+    lb.textContent = '🌐 ' + T('ตอบหลายภาษา') + ':';
+    lb.style.cssText = 'font-size:10px;color:#0d9488;font-weight:700';
+    bar.appendChild(lb);
+    const on = _gmcLangsGet();
+    [['th', 'TH 🇹🇭'], ['vi', 'VN 🇻🇳'], ['tw', 'TW 🇹🇼'], ['en', 'EN 🇬🇧'], ['ja', 'JP 🇯🇵'], ['pt', 'PT 🇧🇷']].forEach(([k, t]) => {
+      const tb = document.createElement('button');
+      const act = on.includes(k);
+      tb.textContent = t;
+      tb.style.cssText = 'border:1px solid ' + (act ? '#0d9488' : '#e2e8f0') + ';background:' + (act ? '#f0fdfa' : '#fff') + ';color:' + (act ? '#0f766e' : '#94a3b8') + ';border-radius:6px;font-size:10px;font-weight:700;padding:2px 7px;cursor:pointer';
+      tb.onclick = () => {
+        const cur = _gmcLangsGet();
+        _gmcLangs = act ? cur.filter(x => x !== k) : cur.concat([k]);
+        try { localStorage.setItem('xhrpg_gmc_tr', _gmcLangs.join(',')); } catch (e) {}
+        _gmcBarUpd();
+      };
+      bar.appendChild(tb);
+    });
   }
   // ── แท็บ ──
   function _chatTabs() {
     const el = document.getElementById('chat-tabs'); if (!el) return;
     el.textContent = '';
     // ⚠️ key 'แชทรวม' (ไม่ใช่ 'รวม' — คีย์นั้นแปลว่า Total ใช้ในตลาดอยู่แล้ว คนละความหมาย)
-    [['g', '🌐 ' + T('แชทรวม'), _chatN], ['dm', '💌 ' + T('แชทส่วนตัว'), _chatDmN]].forEach(([k, label, n]) => {
+    [['g', '🌐 ' + T('แชทรวม'), _chatN], ['gd', '🏰 ' + T('กิล'), _chatGdN], ['dm', '💌 ' + T('แชทส่วนตัว'), _chatDmN]].forEach(([k, label, n]) => {
       const b = document.createElement('button');
-      b.style.cssText = `flex:1;padding:6px 0;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;position:relative;`
+      b.style.cssText = `flex:1;min-width:0;padding:6px 0;border:none;border-radius:8px;font-size:11.5px;font-weight:700;cursor:pointer;position:relative;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`
         + (_chatTab === k ? 'background:#0f766e;color:#fff' : 'background:#f1f5f9;color:#475569');
       b.textContent = label;
       if (n > 0 && _chatTab !== k) {
@@ -6385,6 +8526,19 @@ const xhrpg = (() => {
       b.onclick = () => { _chatTab = k; _chatWith = null; renderChat(); };
       el.appendChild(b);
     });
+    // 🛡️💠 คำอธิบายป้าย GM/CL ใต้แถบแท็บ (เจ้าของขอ 2026-07-19 — element ล้วน + แปลตามภาษาผู้เล่น · rebuild ทุก render รับสลับภาษา)
+    let lg = document.getElementById('chat-role-legend');
+    if (!lg) {
+      lg = document.createElement('div');
+      lg.id = 'chat-role-legend';
+      lg.style.cssText = 'display:flex;gap:4px;align-items:center;flex-wrap:wrap;font-size:9.5px;color:#64748b;margin-top:4px;line-height:1.4';
+      el.parentNode.insertBefore(lg, el.nextSibling);
+    }
+    lg.textContent = '';
+    lg.appendChild(_gmChipEl(8));
+    lg.appendChild(document.createTextNode('= ' + T('ทีมงานเกม') + '  ·  '));
+    lg.appendChild(_clChipEl(8));
+    lg.appendChild(document.createTextNode('= ' + T('ผู้เล่นตัวแทนประเทศ')));
   }
   // ── รายชื่อห้อง DM ──
   function _chatDmList(dms) {
@@ -6399,11 +8553,14 @@ const xhrpg = (() => {
     dms.forEach(d => {
       const row = document.createElement('div');
       row.style.cssText = 'display:flex;gap:7px;align-items:center;padding:7px 8px;border:1px solid #e2e8f0;border-radius:9px;margin-bottom:4px;cursor:pointer;background:#fff';
-      row.onclick = () => chatOpenDm(d.uid, d.name, d.cc);
+      row.onclick = () => chatOpenDm(d.uid, d.name, d.cc, d.gm, d.cl);
       const mid = document.createElement('div'); mid.style.cssText = 'flex:1;min-width:0';
       const nm = document.createElement('div');
       nm.style.cssText = 'font-size:12.5px;font-weight:700;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;gap:4px;align-items:center';
+      if (d.gm) nm.appendChild(_gmChipEl(8)); // 🛡️ ป้าย GM นำหน้าธง (ลำดับเดียวกับ map/แชท: [GM][CL][ธง][VIP])
+      if (d.cl) nm.appendChild(_clChipEl(8)); // 💠 ป้าย CL
       const _dfl = _flagEl(d.cc, 10); if (_dfl) nm.appendChild(_dfl); // 🏴 ธงคู่สนทนา
+      const _dvp = _vipChipEl(d.vp, 8); if (_dvp) nm.appendChild(_dvp); // 👑 ชิป VIP ต่อจากธง
       const _dnm = document.createElement('span'); _dnm.textContent = d.name || '?'; nm.appendChild(_dnm);
       const ls = document.createElement('div'); ls.textContent = d.last || '';
       ls.style.cssText = 'font-size:10.5px;color:#64748b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
@@ -6420,15 +8577,18 @@ const xhrpg = (() => {
       el.appendChild(row);
     });
   }
-  function chatOpenDm(uid, name, cc) {
+  function chatOpenDm(uid, name, cc, gm, cl) {
     if (!uid || uid === player.line_uid) return;
     _chatTab = 'dm'; _chatWith = uid; _chatWithName = name || '?'; _chatWithCC = cc || '';
+    _chatWithGm = !!gm; _chatWithCl = !!cl; // 🛡️💠 ป้าย role ในหัวห้อง DM
     if (openPanel !== 'chat') togglePanel('chat'); else renderChat();
   }
+  let _chatWithGm = false, _chatWithCl = false;
   // ── render หลัก (เรียกตอนเปิดแผง + สลับแท็บ + poll ตอนเปิดอยู่) ──
   function renderChat() {
     if (!player) return;
     _chatTabs();
+    _gmcBarUpd(); // 🌐 แถบตอบหลายภาษา (GMC เท่านั้น — คนทั่วไปฟังก์ชันลบแถบทิ้งเอง)
     const room = document.getElementById('chat-room'), dl = document.getElementById('chat-dmlist');
     const ttl = document.getElementById('chat-title');
     const inDmList = _chatTab === 'dm' && !_chatWith;
@@ -6439,25 +8599,52 @@ const xhrpg = (() => {
       if (_chatWith) {
         ttl.style.cssText = 'display:flex;gap:5px;align-items:center';
         const _t1 = document.createElement('span'); _t1.textContent = '💌'; ttl.appendChild(_t1);
+        if (_chatWithGm) ttl.appendChild(_gmChipEl(8)); // 🛡️ ป้าย GM หัวห้อง DM
+        if (_chatWithCl) ttl.appendChild(_clChipEl(8)); // 💠 ป้าย CL
         const _tf = _flagEl(_chatWithCC, 11); if (_tf) ttl.appendChild(_tf);
         const _t2 = document.createElement('span'); _t2.textContent = _chatWithName; ttl.appendChild(_t2);
+      } else if (_chatTab === 'gd') { // 🏰 หัวข้อห้องกิล — ชื่อกิลมาจากผู้เล่น จึงใช้ DOM ไม่ใช่ innerHTML
+        ttl.style.cssText = 'display:flex;gap:5px;align-items:center';
+        const _g1 = document.createElement('span'); _g1.textContent = '🏰'; ttl.appendChild(_g1);
+        const _gg = _gdParseTag((player && player.guild_tag) || '');
+        const _g2 = document.createElement('span'); _g2.textContent = _gg ? _gg.name : T('แชทกิล'); ttl.appendChild(_g2);
       } else { ttl.style.cssText = ''; ttl.textContent = '💬 ' + T('แชท'); }
     }
     if (inDmList) { _chatPost({ action: 'dms' }, r => { if (r && r.ok) _chatDmList(r.dms || []); }); return; }
-    _chatPost({ action: 'fetch', with: _chatWith || '' }, r => {
-      if (!r || !r.ok) return;
+    // 🏰 ยังไม่มีกิล → ไม่ต้องยิง server เลย โชว์คำแนะนำ + ปุ่มเปิดเมนูกิล
+    if (_chatTab === 'gd' && !(player && player.guild_id)) { _chatNoGuild(); return; }
+    _chatPost({ action: 'fetch', with: _chatWith || '', room: _chatTab === 'gd' ? 'guild' : '' }, r => {
+      if (!r || !r.ok) { if (_chatTab === 'gd') _chatNoGuild(); return; }
       _chatDraw(r.msgs || [], r.me);
-      if (_chatWith) _chatDmN = Math.max(0, _chatDmN - 1); else _chatN = 0; // อ่านแล้ว → ดับ badge ทันที (poll ยืนยันอีกที)
+      if (_chatTab === 'gd') _chatGdN = 0;                                    // 🏰 อ่านห้องกิลแล้ว
+      else if (_chatWith) _chatDmN = Math.max(0, _chatDmN - 1); else _chatN = 0; // อ่านแล้ว → ดับ badge ทันที (poll ยืนยันอีกที)
       _chatBadgeUpd(); _chatTabs();
     });
   }
+  // 🏰 กล่องแทนห้องแชทเมื่อยังไม่ได้อยู่กิล (element ล้วน — ไม่มีข้อความจากผู้เล่นก็จริง แต่คงสไตล์เดียวกับที่อื่น)
+  function _chatNoGuild() {
+    const room = document.getElementById('chat-room'); if (!room) return;
+    room.textContent = '';
+    const box = document.createElement('div');
+    box.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:9px;padding:26px 14px;color:#64748b;font-size:12.5px;text-align:center';
+    const t = document.createElement('div'); t.textContent = '🏰 ' + T('ต้องอยู่ในกิลก่อนจึงจะคุยในแชทกิลได้'); box.appendChild(t);
+    const b = document.createElement('button');
+    b.textContent = '🏰 ' + T('เปิดเมนูกิล');
+    b.style.cssText = 'padding:8px 18px;border:none;border-radius:9px;background:#0f766e;color:#fff;font-size:12px;font-weight:700;cursor:pointer';
+    b.onclick = () => { closePanel(); openGuildPanel(); };
+    box.appendChild(b);
+    room.appendChild(box);
+  }
+  // 🏰💬 เปิดแผงแชทค้างที่แท็บกิล (เรียกจากปุ่มในเมนูกิล)
+  function chatOpenGuild() { _chatTab = 'gd'; _chatWith = null; togglePanel('chat'); }
   function chatSend() {
     if (_chatBusy || !player) return;
     const i = document.getElementById('chat-input'); if (!i) return;
-    const msg = i.value.trim(); if (!msg) return;
+    const msg = i.value.trim();
+    if (!msg && !_chatPendingImg) return; // ต้องมีข้อความหรือรูปอย่างน้อย 1
     _chatBusy = true;
     const btn = document.getElementById('chat-send-btn'); if (btn) btn.disabled = true;
-    _chatPost({ action: 'send', message: msg, to: _chatWith || '' }, r => {
+    _chatPost({ action: 'send', message: msg, to: _chatWith || '', room: _chatTab === 'gd' ? 'guild' : '', img: _chatPendingImg || '', tr: (_svGmc && msg) ? _gmcLangsGet().join(',') : '' }, r => { // 🌐 GMC แนบภาษาที่เปิด · 📎 img = รูปแนบ · 🏰 room=guild = ห้องกิล
       _chatBusy = false; if (btn) btn.disabled = false;
       if (!r) return;
       if (r.error) { // muted / spam → เตือนใต้ช่องพิมพ์ (ไม่ใช้ alert กันขวางเกม)
@@ -6465,8 +8652,47 @@ const xhrpg = (() => {
         return;
       }
       i.value = '';
-      if (!_chatWith) { _sayUntil = Date.now() + XHRPG_SAY_MS; _sayText = msg.slice(0, 60); } // 💬 บับเบิลบนหัวเราเอง (ทันที ไม่รอ poll)
+      _chatClearPendingImg();
+      if (!_chatWith && msg) { _sayUntil = Date.now() + XHRPG_SAY_MS; _sayText = msg.slice(0, 60); } // 💬 บับเบิลบนหัวเราเอง (ทันที ไม่รอ poll)
       renderChat();
+    });
+  }
+  // ── 📎 รูปแชท: อัป / preview / lightbox / report ──────────────────────────────
+  let _chatPendingImg = ''; // image_id ที่อัปแล้วรอส่ง (แนบกับข้อความถัดไป)
+  function _chatClearPendingImg() { _chatPendingImg = ''; const p = document.getElementById('chat-img-preview'); if (p) p.style.display = 'none'; }
+  function chatPickImage() { const f = document.getElementById('chat-file'); if (f) { f.value = ''; f.click(); } }
+  function _chatUploadImg(file) {
+    if (!file || !player) return;
+    if (file.size > 3 * 1024 * 1024) { addLog([{ type: 'dead', msg: T('รูปใหญ่เกิน 3MB') }]); return; }
+    if (!/^image\/(jpeg|png|webp)$/.test(file.type)) { addLog([{ type: 'dead', msg: T('รับเฉพาะ JPG / PNG / WebP') }]); return; }
+    const prev = document.getElementById('chat-img-preview');
+    if (prev) { prev.style.display = 'flex'; prev.querySelector('.cip-txt').textContent = T('⏳ กำลังอัปรูป...'); }
+    const fd = new FormData();
+    fd.append('line_uid', player.line_uid); fd.append('session_token', sessionToken || ''); fd.append('image', file);
+    $.ajax({ url: baseUrl + 'xhrpg_chat_upload.php', method: 'POST', data: fd, processData: false, contentType: false, dataType: 'json' })
+      .done(r => {
+        if (r && r.ok && /^[a-f0-9]{32}$/.test(r.img || '')) {
+          _chatPendingImg = r.img;
+          if (prev) { prev.style.display = 'flex'; prev.querySelector('.cip-txt').textContent = T('📎 แนบรูปแล้ว — กดส่ง'); }
+        } else { _chatClearPendingImg(); addLog([{ type: 'dead', msg: (r && r.msg) || T('อัปรูปไม่สำเร็จ') }]); }
+      })
+      .fail(() => { _chatClearPendingImg(); addLog([{ type: 'dead', msg: T('อัปรูปไม่สำเร็จ') }]); });
+  }
+  function _chatImgBox(id) { // คลิกรูป = ขยายเต็มจอ
+    if (!/^[a-f0-9]{32}$/.test(id)) return;
+    document.getElementById('chat-img-box')?.remove();
+    const ov = document.createElement('div'); ov.id = 'chat-img-box';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:2147483000;display:flex;align-items:center;justify-content:center;padding:16px;cursor:zoom-out';
+    const im = document.createElement('img'); im.src = baseUrl + 'xhrpg_chat_img.php?id=' + id;
+    im.style.cssText = 'max-width:100%;max-height:100%;border-radius:8px;object-fit:contain';
+    ov.appendChild(im); ov.onclick = () => ov.remove(); document.body.appendChild(ov);
+  }
+  function _chatReportImg(id, btn) {
+    if (!/^[a-f0-9]{32}$/.test(id) || !player) return;
+    if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
+    _chatPost({ action: 'report_img', img: id }, r => {
+      if (btn) { btn.textContent = (r && r.ok) ? '✓ ' + T('รายงานแล้ว') : '🚩 ' + T('รายงานรูป'); }
+      if (r && r.ok) addLog([{ type: 'levelup', msg: T('🚩 รายงานรูปแล้ว — ทีมงานจะตรวจสอบ') }]);
     });
   }
   function renderRank() {
@@ -6477,6 +8703,7 @@ const xhrpg = (() => {
     $.getJSON('xhrpg_leaderboard.php', { tab: rankCurrentTab, uid, cc: rankCC === 'ALL' ? '' : rankCC })
       .done(d => {
         if (!d.ok) { box.innerHTML = '<div class="rank-loading">' + T('โหลดไม่ได้') + '</div>'; return; }
+        _lbTotals = d.totals || null;   // 🎴 totals.kind = จำนวนชนิดการ์ด/ไข่ทั้งหมด (ตัวส่วนเกจในแถว)
         const _ccBarHtml = rankCurrentTab === 'country' ? '' : _rankCCBar(d.ccs); // 🌐 แถบธงกรอง (แท็บประเทศไม่ต้องกรอง)
 
         // ── 🌍 อันดับประเทศ: พลังรบรวม Top 1-10 ต่อประเทศ ──
@@ -6507,7 +8734,7 @@ const xhrpg = (() => {
             return `<div class="rank-row" style="${hl ? 'border:2px solid #f59e0b;background:#fffbeb' : ''}">
               <div class="rank-top">
                 <div class="rank-num">${medal}</div>
-                <div class="rank-name">${r.cc ? _ccFlag(r.cc) : ''}${_ce(r.name)}</div>
+                <div class="rank-name">${_roleChip(r.gm, r.cl)}${r.cc ? _ccFlag(r.cc) : ''}${_vipChip(r.vip)}${_ce(r.name)}${_gdChipHTML(r.gd, 9)}</div>
                 <div class="rank-score">
                   <div class="rank-score-val">⚔️ ${Number(r.kills).toLocaleString()}</div>
                   <div class="rank-score-label">💀 ${Number(r.deaths).toLocaleString()} · K/D ${r.kd}</div>
@@ -6516,10 +8743,10 @@ const xhrpg = (() => {
             </div>`;
           };
           const _hdr = '<div style="text-align:center;font-size:10.5px;color:#92400e;background:#fef3c7;border-radius:8px;padding:4px 8px;margin-bottom:8px;font-weight:600">' + T('🏛️ อันดับสังหารวันนี้ — รีเซ็ตเที่ยงคืน') + '</div>';
-          if (!d.list || !d.list.length) { box.innerHTML = _ccBarHtml + _hdr + '<div class="rank-loading">' + T('วันนี้ยังไม่มีการต่อสู้ในสนาม') + '</div>'; return; }
-          let _h = _ccBarHtml + _hdr + d.list.map(r => _colRow(r, d.me && r.uid === d.me.uid)).join('');
-          if (d.me && !d.list.some(r => r.uid === d.me.uid)) _h += _colRow(d.me, true); // แถวเราหลุด Top 50 — ต่อท้าย
-          box.innerHTML = _h;
+          const _killHtml = (!d.list || !d.list.length) ? _hdr + '<div class="rank-loading">' + T('วันนี้ยังไม่มีการต่อสู้ในสนาม') + '</div>'
+            : _hdr + d.list.map(r => _colRow(r, d.me && r.uid === d.me.uid)).join('') + (d.me && !d.list.some(r => r.uid === d.me.uid) ? _colRow(d.me, true) : '');
+          box.innerHTML = _ccBarHtml + '<div id="raid-feed-box"></div>' + _killHtml; // 🏴‍☠️ ฟีดปล้นบนสุด (async) เหนืออันดับสังหาร
+          _loadRaidFeed();
           return;
         }
 
@@ -6540,7 +8767,7 @@ const xhrpg = (() => {
               <div style="flex:1;min-width:0;padding:8px 10px">
                 <div style="display:flex;align-items:center;justify-content:space-between;gap:6px">
                   <div style="display:flex;align-items:center;gap:6px;min-width:0">
-                    ${r.killer_cc ? `<span style="flex:none;display:inline-flex;align-items:center">${_ccFlag(r.killer_cc)}</span>` : ''}
+                    ${_roleChip(r.killer_gm, r.killer_cl)}${r.killer_cc ? `<span style="flex:none;display:inline-flex;align-items:center">${_ccFlag(r.killer_cc)}</span>` : ''}${_vipChip(r.killer_vip)}
                     <span style="font-size:13px;font-weight:600;color:#111;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">🧑 ${_esc(r.killer_name)}</span>
                     <span style="flex:none;background:#dbeafe;color:#1d4ed8;border-radius:6px;padding:1px 6px;font-size:10px;font-weight:500">Lv.${r.killer_lv}</span>
                   </div>
@@ -6578,7 +8805,7 @@ const xhrpg = (() => {
           return `<div class="rank-row${isMe?' me':''}">
             <div class="rank-top">
               <div class="rank-num">${medal}</div>
-              <div class="rank-name">${r.cc ? _ccFlag(r.cc) : ''}${_rEsc(r.name)}</div>
+              <div class="rank-name">${_roleChip(r.gm, r.cl)}${r.cc ? _ccFlag(r.cc) : ''}${_vipChip(r.vip)}${_rEsc(r.name)}${_gdChipHTML(r.gd, 9)} <button onclick="xhrpg.homeVisit('${_rEsc(r.uid)}')" title="${T('เยี่ยมบ้าน')}" style="border:none;background:#f0fdf4;border-radius:5px;font-size:11px;padding:0 4px;cursor:pointer;vertical-align:1px">🏡</button></div>
               <div class="rank-score">
                 <div class="rank-score-val">${sc.val}</div>
                 ${sc.rag ? `<div class="rank-score-label" style="color:#b45309;font-weight:700">🌟 Ragnalok Lv.${sc.rag}</div>` : ''}
@@ -6587,13 +8814,11 @@ const xhrpg = (() => {
             </div>
             <div class="rank-body">
               ${_lbCast(r)}
-              <div class="rank-chips">
-                <div class="rank-chip">🎽 <span>${r.eq}/${r.max.eq}</span></div>
-                <div class="rank-chip">🏆 <span>${r.tr}/${r.max.tr}</span></div>
-                <div class="rank-chip">🤖 <span>${r.hw}/${r.max.hw}</span></div>
-                <div class="rank-chip">🔧 <span>${r.wp}/${r.max.wp}</span></div>
-                <div class="rank-chip">⚡ <span>${r.sp}/${r.max.sp}</span></div>
-                <div class="rank-chip">🛸 <span>${r.hp2}/${r.max.hp}</span></div>
+              <div style="flex:1 1 150px;min-width:0;display:flex;flex-direction:column;justify-content:space-between;gap:5px;align-self:stretch">
+                ${_lbMasteryHTML(r)}
+                <div style="display:flex;justify-content:flex-end">
+                  <button onclick="xhrpg.lbShow('${_rEsc(r.uid)}')" style="padding:3px 11px;border:1px solid #ddd6fe;border-radius:8px;background:#f5f3ff;color:#6d28d9;font-size:10px;font-weight:800;cursor:pointer;white-space:nowrap">👀 ${T('ดูของที่สะสม')}</button>
+                </div>
               </div>
             </div>
           </div>`;
@@ -6609,14 +8834,30 @@ const xhrpg = (() => {
       .fail(() => { box.innerHTML = '<div class="rank-loading">' + T('โหลดไม่ได้') + '</div>'; });
   }
 
+  // ═══ 📌 กล่องลอย (แบนเนอร์อีเวนต์ / toast) — ต้องเกาะ "กรอบเกม" ไม่ใช่ viewport ═══
+  //   บั๊กเดิม: ทุกอันใช้ position:fixed + max-width เป็น vw → บนเดสก์ท็อปที่กรอบเกมเป็นคอลัมน์แคบ
+  //   แบนเนอร์กว้าง 92vw จะยื่นทะลุออกนอกกรอบเกมทั้งซ้าย-ขวา และไม่เลื่อนตามเวลาสกรอลล์หน้า (ทับแถบ HUD)
+  //   วิธีแก้: ฝังใน .map-wrap ซึ่งเป็น position:relative + overflow:hidden อยู่แล้ว → absolute ข้างในถูกคลิปพอดีกรอบเสมอ
+  //   ⚠️ .map-wrap ไม่ได้ตั้ง z-index จึงไม่สร้าง stacking context ใหม่ — ค่า z-index เดิมยังเทียบกับ popup ที่ body ได้ตรงๆ
+  //   ⚠️ ถ้ายังไม่เข้าเกม (#game-screen ซ่อนอยู่) ต้อง fallback เป็น body ไม่งั้น toast จะไปโผล่ในกล่องที่ซ่อน = มองไม่เห็น
+  function _floatHost() {
+    const w = document.querySelector('.map-wrap'), gs = document.getElementById('game-screen');
+    return (w && gs && gs.style.display !== 'none') ? w : document.body;
+  }
+  function _floatMount(el, css) {
+    const h = _floatHost();
+    el.style.cssText = (h === document.body ? 'position:fixed;' : 'position:absolute;') + css;
+    h.appendChild(el);
+    return el;
+  }
+
   function notYetOpen() {
     const el = document.getElementById('not-yet-toast');
     if (el) { el.style.opacity = '1'; setTimeout(() => { el.style.opacity = '0'; }, 2000); return; }
     const toast = document.createElement('div');
     toast.id = 'not-yet-toast';
-    toast.textContent = 'ยังไม่เปิด';
-    toast.style.cssText = 'position:fixed;bottom:140px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.75);color:#fff;padding:8px 20px;border-radius:20px;font-size:15px;z-index:9999;pointer-events:none;transition:opacity 0.4s;';
-    document.body.appendChild(toast);
+    toast.textContent = T('ยังไม่เปิด');
+    _floatMount(toast, 'bottom:14px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.75);color:#fff;padding:8px 20px;border-radius:20px;font-size:15px;z-index:9999;pointer-events:none;transition:opacity 0.4s;max-width:90%;text-align:center');
     setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 400); }, 2000);
   }
 
@@ -6848,6 +9089,12 @@ const xhrpg = (() => {
     (d.eggs || []).forEach(e => {
       tiles.push(tile('#fcd34d', '🥚', T(String(e.name || 'ไข่').trim()), T('ไข่ PET'), '', e.count));
     });
+    (d.eq2 || []).forEach(q => { // 🛡️ Equipment สวมใส่ — ขอบ/ป้ายสีตาม tier · ไอคอน PNG ชุดเดียวกับแผง
+      const t = Math.max(1, Math.min(6, q.t | 0));
+      const badge = `<span style="display:inline-block;margin-top:3px;font-size:8px;color:#fff;background:${RARITY_BORDER[EQ2_TCOL[t - 1]] || '#9ca3af'};border-radius:3px;padding:0 5px">T${t}</span>`;
+      const ico = `<img src="assets/eq2/eq2_${q.s === 'ring1' || q.s === 'ring2' ? 'ring' : (q.s || 'head')}_t${t}.png" style="width:19px;height:19px;image-rendering:pixelated">`;
+      tiles.push(tile(RARITY_BORDER[EQ2_TCOL[t - 1]] || '#9ca3af', ico, T(EQ2_KIND_TH[q.s === 'ring1' || q.s === 'ring2' ? 'ring' : q.s] || 'ของสวมใส่'), 'Lv.' + (q.lv | 0), badge, q.count));
+    });
     // โชว์ section เสมอ (แม้รอบนี้ไม่ได้ของ) — กันเข้าใจผิดว่าฟีเจอร์หาย · empty = บอกว่า RNG ไม่เข้า
     // 💎 ป้าย PREMIUM DROP +100% — บัฟนี้คูณดรอปออฟไลน์ด้วย → บอกให้เห็นว่ามีผลอยู่ (dropOn ส่งมาจาก r.prem_drop)
     const _dpBadge = dropOn
@@ -6928,6 +9175,53 @@ const xhrpg = (() => {
   }
 
   // ── API ───────────────────────────────────────────────────────────────────
+  // 🆕 แถบแจ้งอัปเดต — โชว์บนสุดของ popup รางวัลออฟไลน์ ครั้งเดียวต่อเวอร์ชัน (เจ้าของสั่ง 2026-07-26)
+  //    2026-07-28 เปลี่ยนจาก "3 บรรทัดแรกของเวอร์ชันล่าสุด" → รายการพับได้ + กดย้อนหน้าดูเวอร์ชันเก่าได้
+  //    ⚠️ ยังโชว์ครั้งเดียวต่อเวอร์ชันเหมือนเดิม (localStorage xh_rn_seen) — ไม่ได้เด้งทุกครั้งที่กลับจากออฟไลน์
+  function _releaseNoteBox() {
+    try {
+      if (localStorage.getItem('xh_rn_seen') === XHRPG_VERSION) return '';
+      localStorage.setItem('xh_rn_seen', XHRPG_VERSION);
+    } catch (e) { return ''; } // localStorage ปิด → ไม่โชว์ (กันเด้งซ้ำทุกครั้ง)
+    if (!RELEASE_NOTES.length) return '';
+    _offRnPage = 0; _offRnOpen = 0; // เปิด popup ครั้งใหม่ = กลับมาหน้าแรก กางเวอร์ชันล่าสุดเสมอ
+    return `<div style="background:#ecfdf5;border:1px solid #6ee7b7;border-radius:11px;padding:9px 11px;margin-bottom:12px">
+      <div style="font-size:12.5px;font-weight:800;color:#047857;margin-bottom:4px">🆕 ${T('อัปเดตล่าสุด')}</div>
+      <div id="off-rn-body">${_offRnHTML()}</div>
+    </div>`;
+  }
+  // 🆕 รายการอัปเดตในป๊อปอัพออฟไลน์ — แบบเดียวกับบท 🆕 ในคู่มือ: พับ/กางรายเวอร์ชัน + กดย้อนหน้าได้
+  //    ⚠️ state แยกจากคู่มือ (_rnPage) โดยตั้งใจ — เปิดคู่มือค้างหน้า 3 แล้วมาเปิดออฟไลน์ต้องไม่เห็นหน้า 3
+  //    ค่าเริ่มต้น: หน้าแรก + กางเวอร์ชันล่าสุด (เจ้าของสั่ง 2026-07-28)
+  let _offRnPage = 0, _offRnOpen = 0;
+  function _offRnHTML() {
+    const pages = _rnPages(), st = _offRnPage * RN_PER_PAGE;
+    const rows = RELEASE_NOTES.slice(st, st + RN_PER_PAGE).map((rn, k) => {
+      const gi = st + k, open = gi === _offRnOpen;
+      return `<div style="border-top:1px solid #a7f3d0">
+        <div onclick="xhrpg._offRnTog(${gi})" style="display:flex;align-items:center;gap:5px;padding:5px 1px;cursor:pointer">
+          <span style="color:#059669;font-size:9px;width:8px">${open ? '▾' : '▸'}</span>
+          <b style="font-size:11.5px;color:#047857">v${rn.v}</b>
+          <span style="font-size:10px;color:#6ee7b7">·</span>
+          <span style="font-size:10px;color:#059669">${rn.d}</span>
+        </div>
+        ${open ? `<ul style="margin:0 0 6px;padding-left:22px;font-size:11px;color:#065f46;line-height:1.65">${rn.items.map(t => `<li>${_rnT(t)}</li>`).join('')}</ul>` : ''}
+      </div>`;
+    }).join('');
+    if (pages <= 1) return rows;
+    const btn = (d, tx, on) => on
+      ? `<button onclick="xhrpg._offRnGo(${d})" style="padding:3px 11px;border:1px solid #6ee7b7;border-radius:7px;background:#fff;color:#047857;font-size:11px;font-weight:700;cursor:pointer">${tx}</button>`
+      : `<span style="padding:3px 11px;color:#a7f3d0;font-size:11px">${tx}</span>`;
+    return rows + `<div style="display:flex;align-items:center;justify-content:center;gap:8px;padding-top:6px;border-top:1px solid #a7f3d0">
+        ${btn(-1, '←', _offRnPage > 0)}
+        <span style="font-size:10.5px;color:#059669;font-weight:700;min-width:58px;text-align:center">${T('หน้า {a}/{b}', { a: _offRnPage + 1, b: pages })}</span>
+        ${btn(1, '→', _offRnPage < pages - 1)}
+      </div>`;
+  }
+  function _offRnPaint() { const el = document.getElementById('off-rn-body'); if (el) el.innerHTML = _offRnHTML(); }
+  function _offRnTog(i) { _offRnOpen = (_offRnOpen === i) ? -1 : i; _offRnPaint(); }
+  function _offRnGo(d)  { _offRnPage = Math.max(0, Math.min(_rnPages() - 1, _offRnPage + d)); _offRnPaint(); }
+
   function showOfflineReward(r) {
     const h = (s) => Math.floor(s/3600), m = (s) => Math.floor((s%3600)/60);
     const timeStr = h(r.secs) > 0 ? T('{a} ชม {b} นาที', {a: h(r.secs), b: m(r.secs)}) : T('{a} นาที', {a: m(r.secs)});
@@ -6961,6 +9255,7 @@ const xhrpg = (() => {
     const lvLine = r.lv_ups > 0
       ? `<div style="background:#fef9c3;border:1px solid #fde047;border-radius:10px;padding:9px;margin-bottom:12px;font-size:14px;font-weight:700;color:#a16207;text-align:center">🎉 Level Up! +${r.lv_ups} → Lv.${r.new_lv}</div>`
       : '';
+    const rnBox = _releaseNoteBox(); // 🆕 แถบแจ้งอัปเดต — บนสุดของเนื้อหา (เจ้าของสั่ง) · โชว์ครั้งเดียวต่อเวอร์ชัน
     const el = document.createElement('div');
     el.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
     el.innerHTML = `<div style="background:#fff;border-radius:18px;max-width:330px;width:100%;max-height:90vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 12px 40px rgba(2,8,23,.35)">
@@ -6970,7 +9265,7 @@ const xhrpg = (() => {
         <div style="font-size:12px;opacity:.92;margin-top:3px">${T('ออฟไลน์ไป {a}', {a: timeStr})}${miner}</div>
       </div>
       <div style="padding:16px 18px 18px;overflow-y:auto">
-        ${lvLine}${zoneLine}
+        ${rnBox}${lvLine}${zoneLine}
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-bottom:12px">${chips.join('')}</div>
         ${premiumBox}
         ${premiumOffBox}
@@ -7003,9 +9298,17 @@ const xhrpg = (() => {
   function schedulePoll() {
     if (pollTimer) clearTimeout(pollTimer);
     pollTimer = null;
-    if (_pollStopped || _inflight) return; // สลับ tab: poll ต่อในพื้นหลัง 10 นาทีแรก (ออนไลน์ต่อ · presence ไม่หาย) · browser อาจ throttle เป็น ~1/นาที
+    if (_pollStopped || _inflight) return;
     _lastInputAt = Date.now(); // Bypass idle timeout
-    _tabHiddenAt = 0; // Bypass hidden tab timeout
+    _tabHiddenAt = 0; // Bypass hidden tab timeout // สลับ tab: poll ต่อในพื้นหลัง 10 นาทีแรก (ออนไลน์ต่อ · presence ไม่หาย) · browser อาจ throttle เป็น ~1/นาที
+    if (document.hidden && _tabHiddenAt && Date.now() - _tabHiddenAt > 600000) return; // ซ่อนครบ 10 นาที → หยุด poll ให้ gap สะสม → กลับมารับ offline catch-up (เกณฑ์ server 600s)
+    if (_bmOn) return; // 🤖 อยู่จอเฝ้าบอท = ออฟไลน์เต็มตัว → หยุด poll เกมทุกกรณี (รวมแท็บพื้นหลัง) เหลือ sync 10 นาที/ครั้ง = เงียบ+ประหยัด
+    if (!document.hidden && player && Date.now() - _lastInputAt > _idleCutMs()) {
+      // 😴 ไม่มี "การเล่นจริง" เกินเพดานของคนนั้น (👑 VIP3+ ยาวขึ้น) → เข้าจอเฝ้าบอท · ถ้า event ยังไหลเข้าอยู่ = เครื่องมือกดอัตโนมัติ → ติดธง suspect (ออกต้องกดค้าง)
+      _bmWhy = _hbRecentN(120000) > 0 ? 'bot' : 'idle';
+      _idleSuspect = _bmWhy === 'bot';
+      _showIdleOverlay(); return;
+    }
     // backoff ตอนพังติดกัน: 2s→4s→8s→16s→30s (สำเร็จเมื่อไหร่รีเซ็ตกลับ 1s) — สำคัญตอนโดน Cloudflare 1015: ยิงถี่ต่อไปมีแต่ต่ออายุแบน
     // ปกติ: ยึดคาบจากเวลาส่งรอบก่อน (+60ms กันชน guard 0.8s ฝั่ง server เมื่อ RTT แกว่ง) — jitter คาบ snapshot ต่ำลง = interpolation นิ่งขึ้น
     const _delay = _pollFails > 0 ? Math.min(30000, POLL_MS * (2 ** Math.min(5, _pollFails)))
@@ -7039,13 +9342,15 @@ const xhrpg = (() => {
         const _hadPollFails = _pollFails > 0; // poll ก่อนหน้าเพิ่งพัง (มี backoff 2s+) — คาบรอบนี้ไม่ใช่ cadence จริง ห้ามป้อนเข้า EMA
         _pollFails = 0; // server ตอบ JSON ได้ = การเชื่อมต่อปกติ
         if (d.kicked) { _showKickedPopup(); return; }
-        if (d.idle) { _lastInputAt = 0; _showIdleOverlay(); return; } // 😴 server ยืนยัน idle — บังคับ overlay + หยุด poll ตาม (schedulePoll เห็น _lastInputAt=0 = เกินเกณฑ์แน่นอน)
+        if (d.idle) { _bmWhy = 'server'; _lastInputAt = 0; _showIdleOverlay(); return; } // 😴 server ยืนยัน idle — บังคับ overlay + หยุด poll ตาม (schedulePoll เห็น _lastInputAt=0 = เกินเกณฑ์แน่นอน)
         if (!d.ok) return;
         const _prevP = player;
         player   = d.player;
         // B2: cold sections ที่ server ไม่ได้ส่ง (poll ปกติ hot only) → carry-forward จาก poll ก่อน (ข้อมูลคลัง/การ์ด/ไข่/ของสะสมคงไว้ไม่หาย)
         //     server ส่ง cold เมื่อ full=1 (เปิด panel/ทุก 10 poll) หรือโหลดแรก → ตอนนั้น player[cf] มีค่าสด ทับ carry-forward
         if (_prevP) { for (let _i = 0; _i < _COLD_FIELDS.length; _i++) { const _cf = _COLD_FIELDS[_i]; if (player[_cf] === undefined && _prevP[_cf] !== undefined) player[_cf] = _prevP[_cf]; } }
+        // 🛸🌌 ยานกลับจากภารกิจอวกาศ — server ส่ง oraid_done มาครั้งเดียวในรอบที่ settle
+        if (player.oraid_done) { _oraidDonePopup(player.oraid_done); _oraidInfo = null; _oraidCdStop(); delete player.oraid_done; }
         // เก็บ master table ที่ cache ไว้ข้ามการทับ player (server ส่ง master แค่ครั้งแรก)
         if (_prevP && _prevP._equipmentMaster) player._equipmentMaster = _prevP._equipmentMaster;
         if (_prevP && _prevP._equipmentQty)    player._equipmentQty    = _prevP._equipmentQty;
@@ -7154,6 +9459,9 @@ const xhrpg = (() => {
                          : isPet ? (_mpY ?? player.pet_y ?? player.y)
                          : ROBOT_ICONS.includes(e.icon) ? ry : player.y;
                 const _isPistol = e.icon.startsWith('🔫'), _isSniper = e.icon.startsWith('🎯');
+                // 🎲 stagger: ผู้ติดตาม/ไททัน/ยาน/สัตว์/สัตว์เทพ เริ่ม FX ไม่พร้อมกันตอน poll กลับ (เจ้าของขอ 2026-07-22 — เดิมทุก action ออกพร้อมกันเป๊ะ)
+                //    อาวุธฮีโร่ (🔫/🎯/🔪) มี choreography จังหวะของตัวเองแล้ว = 0 · ที่เหลือสุ่ม 0-550ms (จบก่อน tick ถัดไป ~2s สบายๆ)
+                const _stg = (_isPistol || _isSniper || e.icon.startsWith('🔪')) ? 0 : Math.floor(Math.random() * 1000); // 🎲 550→1000ms — เจ้าของบอกยังดูพร้อมกันอยู่
                 let _impMs = 0; // ms จนนัดนี้ถึงตัวมอน — รู้จังหวะเฉพาะมีดสั้น (pistol/sniper) · อาวุธอื่น = 0 (ผลทันทีแบบเดิม)
                 if (_isPistol) {
                   // มีดสั้นรัว 3 นัด/tick → ต่อนัด: ง้างสั้น(_dly) → มีดพุ่ง+เสียง(+130ms = จังหวะปล่อยจริงของท่า เริ่มเฟรม 1) → เลข/แว่บโดน(+270ms = มีดถึงตัว บิน ~140ms)
@@ -7166,7 +9474,9 @@ const xhrpg = (() => {
                   const _tx = tgt.x, _ty = tgt.y, _ic = e.icon, _mid = e.mid;
                   setTimeout(() => { // เริ่มเหวี่ยงนัดนี้ + ปักหลักจนมีดถึงเป้า (~ปล่อย 130 + บิน 140)
                     if (!player) return;
-                    _pShotAng = Math.atan2(_ty - player.y, _tx - player.x); _pShotUntil = Date.now() + 340;
+                    { const _fo = _fxOrigin(_ic), _ft = _monFxPos(_mid, _tx, _ty);   // ใช้พิกัดชุดเดียวกับมีดที่พุ่งจริง — หน้าตรงวิถีเสมอ
+                      _pShotAng = Math.atan2(_ft.y - _fo.y, _ft.x - _fo.x); }
+                    _pShotMid = _mid; _pShotUntil = Date.now() + 340;
                     _thrHoldStart(280);
                     startAnim();
                   }, _dly);
@@ -7181,14 +9491,24 @@ const xhrpg = (() => {
                     spawnFloatText(_t.x, _t.y - 8, (e.crit ? '💥-' : '-') + e.dmg, e.crit ? '#facc15' : '#f8fafc', e.crit ? 12 : 9);
                     _hitFlash[_mid] = Date.now() + 120; startAnim();
                   }, _dly + 270);
-                  _pShotAng = Math.atan2(tgt.y - sy, tgt.x - sx); _pShotUntil = Date.now() + 340; // นัดแรกหันเข้าเป้าทันที (นัดถัดไปรีเซ็ตเองตามจังหวะ)
+                  { const _fo = _fxOrigin(e.icon), _ft = _monFxPos(e.mid, tgt.x, tgt.y);
+                    _pShotAng = Math.atan2(_ft.y - _fo.y, _ft.x - _fo.x); }
+                  _pShotMid = e.mid; _pShotUntil = Date.now() + 340; // นัดแรกหันเข้าเป้าทันที (นัดถัดไปรีเซ็ตเองตามจังหวะ)
                 } else {
                   // '🗼' ป้อมปืน — มีเลเซอร์แดง (event beam) ของตัวเองแล้ว · '✨⚡' สกิลยิงสังหาร — มีลำแสงม่วง (beam) ของตัวเองแล้ว → ไม่ยิงเม็ดกลมซ้ำ/ไม่เข้าไททัน
                   const _isKnifeMelee = e.icon.startsWith('🔪'); // มีดประชิด → แสดงผลรัว 3 จังหวะ (server ตีครั้งเดียวเท่าเดิม — display เท่านั้น)
-                  if (!e.icon.startsWith('🗼') && !e.icon.startsWith('✨') && !e.icon.startsWith('🛸')) { // 🗼(ป้อม+SHOCK+ปืนใหญ่)/✨(สกิล)/🛸(railgun+cannon) มี beam/วงของตัวเอง — ไม่ยิงเม็ดกลมซ้ำ
+                  // ⚠️ icon ที่ไม่เข้าเงื่อนไขไหนใน spawnBullet เลย จะตกไปเป็น "เม็ดกลมสีส้ม" (สาขา else ท้ายสุด)
+                  //    และ origin ถูกคิดเป็น player.x/y → เม็ดกลมพุ่งออกจากตัว HERO ผิดที่ผิดทาง
+                  //    🏹 นักธนู  — FX จริงคือ event 'arrow' (เลเซอร์ฟ้า) ยิงจากตัวนักธนู → เม็ดกลมเป็นของซ้ำ
+                  //    💥 มีดขว้างระเบิด — FX จริงคือ event 'beam' + 'explosion' → เม็ดกลมเป็นของซ้ำ
+                  //    🛡️ เกราะสะท้อนดาเมจ · ⏩ Skip ดันบอส — ไม่ใช่การยิง (มีแค่เลข+แว่บขาว) → ไม่ต้องมีลูกกระสุนเลย
+                  const _noBullet = ['🗼', '✨', '🛸', '🏹', '💥', '🛡️', '⏩']; // มี FX ของตัวเอง / ไม่ใช่การยิง — ไม่ยิงเม็ดกลมซ้ำ
+                  if (!_noBullet.some(_p => e.icon.startsWith(_p))) {
                     if (_isSniper) {
                       // มีดยาว: ง้างเต็มจากเฟรม 0 (~200ms) ค่อยปล่อย — มีดพุ่ง+เสียง +200ms ตรงจังหวะเหวี่ยงพอดี (โยนหนักแน่น) · 800ms คุมท่า+ค้าง follow-through ยาว ลด gap ก่อน tick ถัดไป
-                      _pShotAng = Math.atan2(tgt.y - sy, tgt.x - sx); _pShotUntil = Date.now() + 800; _thrHoldStart(350); startAnim(); // ปักหลัก ง้าง+ปล่อย+บิน (200+140)
+                      { const _fo = _fxOrigin(e.icon), _ft = _monFxPos(e.mid, tgt.x, tgt.y);
+                        _pShotAng = Math.atan2(_ft.y - _fo.y, _ft.x - _fo.x); }
+                      _pShotMid = e.mid; _pShotUntil = Date.now() + 800; _thrHoldStart(350); startAnim(); // ปักหลัก ง้าง+ปล่อย+บิน (200+140)
                       _impMs = 340; // ง้าง+ปล่อย 200 + บิน 140 — จังหวะมีดใหญ่ถึงตัวมอน
                       if (e.dmg != null) (_killHits[e.mid] = _killHits[e.mid] || []).push({ at: _impMs, dmg: +e.dmg });
                       setTimeout(() => {
@@ -7198,9 +9518,13 @@ const xhrpg = (() => {
                         _pMuzzleUntil = Date.now() + 110; sfxThrowBig(); startAnim(); // มีดยาว (หนักกว่ามีดสั้น)
                       }, 200);
                     } else {
-                      const _o = _fxOrigin(e.icon), _t = _monFxPos(e.mid, tgt.x, tgt.y); // ยึดพิกัด smoothed ณ ตอน push — ตรงกับสไปรต์ที่วาดจริง
-                      spawnBullet(_o.x, _o.y, _t.x, _t.y, e.icon);
-                      if (isPet) sfxPet(); // 🐾 สัตว์เลี้ยงกัด
+                      setTimeout(() => { // 🎲 stagger — คิด origin/เป้าใหม่ ณ ตอนยิงจริง (pattern เดียวกับนัด delay ของปืน)
+                        if (!player) return;
+                        const _o = _fxOrigin(e.icon), _t = _monFxPos(e.mid, tgt.x, tgt.y);
+                        spawnBullet(_o.x, _o.y, _t.x, _t.y, e.icon);
+                        if (isPet) sfxPet(); // 🐾 สัตว์เลี้ยงกัด
+                        startAnim();
+                      }, _stg);
                       if (_isKnifeMelee) {
                         sfxSlash(); // ดาบฟัน (วืบ)
                         _thMeleeAt = Date.now(); // ฟันจังหวะแรกทันที
@@ -7232,18 +9556,26 @@ const xhrpg = (() => {
                         }, _i * 110);
                       }
                     } else {
-                      const _isRobotDmg = ROBOT_ICONS.includes(e.icon); // ไททัน (ขวาน 🪓 / railgun ⚡) → เลขดาเมจสีม่วง เด้งเด่น
-                      const _isOrion = e.icon.startsWith('🛸'); // Orion railgun/cannon → เหลืองเข้ม
-                      const _skIco = e.icon.startsWith('✨') ? [...e.icon].slice(1).join('') : ''; // สกิลผู้เล่น (✨⚡/✨🛡️/✨🔥/✨🔱) → โชว์ icon สกิลหน้าเลข DMG ให้รู้ว่าสกิลไหนทำ
-                      const _clr = e.crit ? '#facc15' : (_isRobotDmg ? '#c084fc' : (isPet ? '#fb923c' : (_isOrion ? '#ca8a04' : '#f8fafc'))); // 🐾 สัตว์เลี้ยง = ส้ม
-                      spawnFloatText(_fp.x, _fp.y - 8, _skIco + (e.crit ? '💥-' : '-') + e.dmg, _clr, e.crit ? 12 : ((_isRobotDmg || isPet || _isOrion || _skIco) ? 11 : 9), (_isRobotDmg || isPet || _isOrion || _skIco) ? { pop: true } : undefined);
+                      setTimeout(() => { // 🎲 stagger เลขดาเมจตามจังหวะยิงของแหล่งนั้น (คิดตำแหน่งใหม่ ณ ตอนโชว์)
+                        const _isRobotDmg = ROBOT_ICONS.includes(e.icon); // ไททัน (ขวาน 🪓 / railgun ⚡) → เลขดาเมจสีม่วง เด้งเด่น
+                        const _isOrion = e.icon.startsWith('🛸'); // Orion railgun/cannon → เหลืองเข้ม
+                        const _skIco = e.icon.startsWith('✨') ? [...e.icon].slice(1).join('') : ''; // สกิลผู้เล่น (✨⚡/✨🛡️/✨🔥/✨🔱) → โชว์ icon สกิลหน้าเลข DMG ให้รู้ว่าสกิลไหนทำ
+                        const _clr = e.crit ? '#facc15' : (_isRobotDmg ? '#c084fc' : (isPet ? '#fb923c' : (_isOrion ? '#ca8a04' : '#f8fafc'))); // 🐾 สัตว์เลี้ยง = ส้ม
+                        const _fp2 = _monFxPos(e.mid, tgt.x, tgt.y);
+                        spawnFloatText(_fp2.x, _fp2.y - 8, _skIco + (e.crit ? '💥-' : '-') + e.dmg, _clr, e.crit ? 12 : ((_isRobotDmg || isPet || _isOrion || _skIco) ? 11 : 9), (_isRobotDmg || isPet || _isOrion || _skIco) ? { pop: true } : undefined);
+                        _hitFlash[e.mid] = Date.now() + 120; startAnim();
+                      }, _stg);
                     }
-                    _hitFlash[e.mid] = Date.now() + 120;
                   }
                 }
-                if (ROBOT_ICONS.includes(e.icon)) { _rAtkUntil = Date.now() + 700; startAnim(); if (e.icon.startsWith('🪓')) sfxAxe(); } // ไททันโจมตี → เล่นท่าตี + เสียงขวาน
+                if (ROBOT_ICONS.includes(e.icon)) setTimeout(() => { _rAtkUntil = Date.now() + 700; startAnim(); if (e.icon.startsWith('🪓')) sfxAxe(); }, _stg); // ไททันโจมตี → เล่นท่าตี + เสียงขวาน (🎲 ตามจังหวะนัดตัวเอง)
                 if (e.icon === '⚡' && e.type === 'hit' && e.stun) { shockFx[e.mid] = { born: performance.now(), life: e.stun * 1000 }; startAnim(); } // ARM ช็อตติดสตันจริงเท่านั้น — วงไฟฟ้ายาวตามวินาทีสตัน
+                // 🤖 ป้ายเจ้าของสถานะ — บอกชัดว่ามาจากไททัน (axe=🪓 สตันขวาน · arm=🏹 ธนูไททัน) · โชว์อย่างน้อย 1.2s ให้ทันเห็น
+                if (e.type === 'hit' && (e.src === 'axe' || e.src === 'arm') && e.mid != null) {
+                  robotFx[e.mid] = { born: performance.now(), life: Math.max(1200, (+e.stun || 0) * 1000), kind: e.src }; startAnim();
+                }
                 if (e.type === 'kill') {
+                  if (_impMs === 0) _impMs = _stg; // 🎲 แหล่งที่ไม่มี choreography เอง → X แดง/💰/ฉากตายตามจังหวะ stagger เดียวกับนัด (มอน "ยืนต่อ" จนนัดถึงตัว)
                   const _kp = _monFxPos(e.mid, tgt.x, tgt.y); // ตำแหน่ง smoothed ณ ตอน push — marker/ของเด้งวางตรงตัวมอนที่วาดจริง
                   if (_impMs > 0 && _snapGap < 3000) { // gap ยาว (หลัง resume แท็บ) ไม่มีฉากตาย → marker/💰 ออกทันทีแบบเดิม ไม่ป็อปกลางพื้นว่าง
                     _killImpact[e.mid] = _impMs; // รู้จังหวะนัดตาย → diff ด้านล่างให้มอน "ยืนต่อ" จนมีดถึงตัว ค่อยล้ม
@@ -7277,9 +9609,10 @@ const xhrpg = (() => {
               }
               startAnim();
             }
-            // ── มอนตีพลาด (dodge) → MISS เหลืองอำพันลอยเหนือหัวเรา + นักธนูกลิ้งหลบ ~600ms ──
+            // ── มอนตีพลาด (dodge) → MISS เหลืองอำพันลอยเหนือหัว "มอนตัวที่ตีพลาด" (เจ้าของย้ายจากหัวเรา 2026-07-18) + นักธนูกลิ้งหลบ ~600ms ──
             if (e.type === 'dodge') {
-              const _dpp = smoothed('player', player.x, player.y);
+              const _dm = e.mid != null ? monsters.find(mm => mm.id == e.mid && !mm.is_dead) : null;
+              const _dpp = _dm ? smoothed('m' + e.mid, _dm.x, _dm.y) : smoothed('player', player.x, player.y); // มอนหาย/นอกจอ → fallback หัวเราเหมือนเดิม
               spawnFloatText(_dpp.x, _dpp.y - 12, 'MISS', '#f59e0b', 9);
               _heroRollUntil = Date.now() + 600; startAnim();
             }
@@ -7290,6 +9623,9 @@ const xhrpg = (() => {
               const col = e.color || '#a855f7';
               const wf = e.thin ? 0.75 : 1; // บางลง 25% (สกิลดึงมอน)
               const dash = !!e.dash;
+              // 🎲 beam จากตัวผู้เล่น (สกิลมีด) = ทันที ไม่งั้นรู้สึกหน่วง · beam ป้อม/Rail/ARM/Orion = สุ่มหน่วง 0-900ms กันยิงพร้อมกันทั้งจอ
+              const _bmFromPlayer = player && Math.hypot((+e.path[0][0]) - player.x, (+e.path[0][1]) - player.y) < 25;
+              const _doBeam = () => {
               // เสียงแยกตามชนิด: ป้อม(แดง) · สกิล(ม่วง) · Rail/Orion(เหลือง) · ดึงมอน(เขียว) · ARM ไททัน(ฟ้า)
               if      (col === '#ef4444') sfxTurret();
               else if (col === '#a855f7') sfxSkill();
@@ -7326,6 +9662,7 @@ const xhrpg = (() => {
                 // สกิลขว้าง (มีดเวท/มีดไฟ) ออกจากตัวเรา → trigger ท่าฟันด้วย (ขว้างอะไรก็เห็นแอ็กชัน ไม่เฉพาะมีดปกติ)
                 if (player && Math.hypot((+_fa[0]) - player.x, (+_fa[1]) - player.y) < 30) {
                   _pShotAng = Math.atan2((+_fb[1]) - (+_fa[1]), (+_fb[0]) - (+_fa[0]));
+                  _pShotMid = (e.mid != null) ? e.mid : null;
                   _pShotUntil = Date.now() + 380;
                   _thrHoldStart(300); // สกิลขว้างก็ปักหลักเช่นกัน
                 }
@@ -7336,6 +9673,21 @@ const xhrpg = (() => {
                 spawnFloatText(_bt.x, _bt.y - 8, (e.crit ? '💥-' : '-') + e.dmg, e.crit ? '#facc15' : '#f8fafc', e.crit ? 12 : 9);
                 _hitFlash[e.mid] = Date.now() + 120;
               }
+              }; // จบ _doBeam
+              if (_bmFromPlayer) _doBeam(); else setTimeout(_doBeam, Math.floor(Math.random() * 900));
+            }
+            // 🪓 วง AOE ขวานไททัน — วงส้มขอบชัด + ใบขวานหมุน (เจ้าของสั่ง 2026-07-26)
+            // ⏸️ ปิดเอฟเฟกต์ชั่วคราว (เจ้าของสั่ง 2026-07-28 "ขวานหมุนๆ บนแผนที่ มันแปลกๆ")
+            //    ปิดแค่ภาพ — ดาเมจ AOE ยังทำงานปกติทุกอย่าง (คิดฝั่ง server) · เปิดคืน = AXE_AOE_FX = true
+            if (e.type === 'axe_aoe' && AXE_AOE_FX) {
+              explosions.push({ x:+e.x, y:+e.y, r:+e.r, color:'#fb923c', ring:true, axe:true, born: performance.now() });
+              startAnim();
+            }
+            // 🌀 แทงรอบตัว — ใบดาบกวาดรอบตัวสีส้ม (เจ้าของสั่ง 2026-07-28: ย้ายเอฟเฟกต์ที่ปิดจากขวานไททันมาใช้ที่สกิลนี้)
+            //    เรนเดอร์ตัวเดียวกับ ex.axe (ดู drawExplosions) · คอสเมติกล้วน ดาเมจคิดฝั่ง server
+            if (e.type === 'spin_aoe') {
+              explosions.push({ x:+e.x, y:+e.y, r:+e.r, color:'#fb923c', ring:true, axe:true, born: performance.now() });
+              startAnim();
             }
             if (e.type === 'explosion') {
               const _doExp = () => {
@@ -7348,27 +9700,44 @@ const xhrpg = (() => {
                 });
                 startAnim();
               };
-              if (e.sic === '🏹💥') setTimeout(_doExp, XHRPG_ARROW_EX_MS); else _doExp(); // 🏹 ธนูระเบิด: เลเซอร์หนานำไปก่อน → วงค่อยแตกตอนถึงเป้าพอดี (เท่)
+              // 🏹 ธนูระเบิด: เลเซอร์หนานำไปก่อน → วงแตกตอนถึงเป้าพอดี · สกิลผู้เล่น (มี sic) = ทันที · ระเบิดแหล่งอื่น (ป้อมใหญ่ ฯลฯ) = 🎲 สุ่ม 0-700ms
+              if (e.sic === '🏹💥') setTimeout(_doExp, XHRPG_ARROW_EX_MS);
+              else if (e.sic) _doExp();
+              else setTimeout(_doExp, Math.floor(Math.random() * 700));
             }
-            if (e.type === 'shock_ring') { // 🌩️ SHOCK ออร่าป้อม: เลขดาเมจเล็กทุกตัวในวง (วงฟ้ากระพริบวาดต่อเนื่องใน drawTurrets จาก tu.sh)
-              if (Array.isArray(e.hits)) e.hits.forEach((h, _hi) => {
-                const _sp2 = _monFxPos(h[0], +e.x, +e.y);
-                spawnFloatText(_sp2.x, _sp2.y - 6, (_hi === 0 ? '🌩️' : '') + (e.crit ? '💥-' : '-') + h[1], e.crit ? '#facc15' : '#7dd3fc', e.crit ? 10 : 8);
-              });
-              startAnim();
+            if (e.type === 'shock_ring') { // 🌩️ SHOCK ออร่าป้อม: เลขดาเมจเล็กทุกตัวในวง (วงฟ้ากระพริบวาดต่อเนื่องใน drawTurrets จาก tu.sh) · 🎲 สุ่ม 0-700ms
+              setTimeout(() => {
+                if (Array.isArray(e.hits)) e.hits.forEach((h, _hi) => {
+                  const _sp2 = _monFxPos(h[0], +e.x, +e.y);
+                  spawnFloatText(_sp2.x, _sp2.y - 6, (_hi === 0 ? '🌩️' : '') + (e.crit ? '💥-' : '-') + h[1], e.crit ? '#facc15' : '#7dd3fc', e.crit ? 10 : 8);
+                });
+                startAnim();
+              }, Math.floor(Math.random() * 700));
             }
-            if (e.type === 'priest_skill') { // ⛪ นักบวชร่ายสกิล — ท่า Special + icon ลอยหัว + เลขลอยที่เป้า
-              const _prIco = { heal: '💚', mp: '💧', def: '🛡️', armor: '🔰', energy: '⚡' }[e.skill] || '✨';
-              const _prClr = { heal: '#4ade80', mp: '#60a5fa', def: '#7dd3fc', armor: '#38bdf8', energy: '#facc15' }[e.skill] || '#e2e8f0';
-              _priestCastUntil = Date.now() + 700; _priestCastIcon = _prIco;
-              if (e.skill === 'def') _priestDefUntilMs = (parseInt(e.until) || (Math.floor(Date.now() / 1000) + 30)) * 1000; // จำเวลาหมดบัฟจาก event ตรงๆ (dual-source)
-              if (e.skill !== 'def') _priestFx = { skill: e.skill, born: Date.now() }; // icon ค้างบนหัวผู้รับ + จางถึง tick ถัดไป (def วาดค้างตาม buff แยกใน drawPriest)
-              // เลขลอยที่ "ผู้รับจริง": ⚡พลังงาน → ตัวหุ่น · ที่เหลือ → ตัวเรา (เดิมเด้งที่เราหมดทุกสกิล — ดูเหมือนเอาพลังงานใส่คน)
-              const _prTgt = (e.skill === 'energy' && player.robot_x != null)
-                ? smoothed('robot', parseFloat(player.robot_x), parseFloat(player.robot_y))
-                : smoothed('player', player.x, player.y);
-              spawnFloatText(_prTgt.x, _prTgt.y - 14, `${_prIco}+${e.v}`, _prClr, 11, { pop: true });
-              startAnim();
+            if (e.type === 'dv_chain' && Array.isArray(e.fx)) { // 🏺⚡ สายฟ้าลูกโซ่ — สร้าง segs จากจุดปล่อย → เป้าไล่ลำดับ (🎲 stagger 0-550ms ไม่ให้ออกพร้อม FX อื่น)
+              setTimeout(() => {
+                const segs = []; let px = e.sx | 0, py = e.sy | 0;
+                e.fx.forEach(t => { segs.push({ x1: px, y1: py, x2: t.x | 0, y2: t.y | 0 }); px = t.x | 0; py = t.y | 0; });
+                _dvChainFx = { segs, born: Date.now() };
+                _dvAtkUntil = Date.now() + 600;
+                startAnim();
+              }, Math.floor(Math.random() * 1000));
+            }
+            if (e.type === 'priest_skill') { // ⛪ นักบวชร่ายสกิล — ท่า Special + icon ลอยหัว + เลขลอยที่เป้า (🎲 stagger 0-500ms · e.until เป็นเวลา absolute จาก server ไม่กระทบ)
+              setTimeout(() => {
+                if (!player) return;
+                const _prIco = { heal: '💚', mp: '💧', def: '🛡️', armor: '🔰', energy: '⚡' }[e.skill] || '✨';
+                const _prClr = { heal: '#4ade80', mp: '#60a5fa', def: '#7dd3fc', armor: '#38bdf8', energy: '#facc15' }[e.skill] || '#e2e8f0';
+                _priestCastUntil = Date.now() + 700; _priestCastIcon = _prIco;
+                if (e.skill === 'def') _priestDefUntilMs = (parseInt(e.until) || (Math.floor(Date.now() / 1000) + 30)) * 1000; // จำเวลาหมดบัฟจาก event ตรงๆ (dual-source)
+                if (e.skill !== 'def') _priestFx = { skill: e.skill, born: Date.now() }; // icon ค้างบนหัวผู้รับ + จางถึง tick ถัดไป (def วาดค้างตาม buff แยกใน drawPriest)
+                // เลขลอยที่ "ผู้รับจริง": ⚡พลังงาน → ตัวหุ่น · ที่เหลือ → ตัวเรา (เดิมเด้งที่เราหมดทุกสกิล — ดูเหมือนเอาพลังงานใส่คน)
+                const _prTgt = (e.skill === 'energy' && player.robot_x != null)
+                  ? smoothed('robot', parseFloat(player.robot_x), parseFloat(player.robot_y))
+                  : smoothed('player', player.x, player.y);
+                spawnFloatText(_prTgt.x, _prTgt.y - 14, `${_prIco}+${e.v}`, _prClr, 11, { pop: true });
+                startAnim();
+              }, Math.floor(Math.random() * 500));
             }
             if (e.type === 'pvp_hit') { // ⚔️ PVP: โดนคู่ดวลตี — เลขแดงเด้งที่ตัวเรา
               const _pp = smoothed('player', player.x, player.y);
@@ -7468,7 +9837,7 @@ const xhrpg = (() => {
                 _archerShootUntil = Date.now() + 340;
                 const _o1 = _aOrig();
                 bullets.push({ kind: 'laser', x: _o1.x, y: _o1.y, tx: _at.x, ty: _at.y, color: '#38bdf8',
-                  outerW: 4, coreW: 1.6, born: performance.now(), life: XHRPG_ARROW_EX_MS + 160, done: false });
+                  outerW: 1.8, coreW: 0.75, born: performance.now(), life: XHRPG_ARROW_EX_MS + 160, done: false }); // ขนาดเท่าป้อม railgun (ผู้ใช้ขอ)
                 sfxSlash();
               } else { // ── ปกติ: ซัลโว 3 เส้นรัว (UI ล้วน — server ตีนัดเดียว · เลขโชว์แบ่ง 3 ส่วน รวมเท่าเดิม) ──
                 _archerShootUntil = Date.now() + 560; // ค้างท่า Attack คลุมทั้งชุด
@@ -7480,7 +9849,7 @@ const xhrpg = (() => {
                     const _o1 = _aOrig();
                     bullets.push({ kind: 'laser', x: _o1.x + (Math.random() * 4 - 2), y: _o1.y + (Math.random() * 4 - 2),
                       tx: _ah.x + (Math.random() * 8 - 4), ty: _ah.y + (Math.random() * 8 - 4), color: '#38bdf8',
-                      outerW: 2.4, coreW: 1, born: performance.now(), life: 300, done: false });
+                      outerW: 1.8, coreW: 0.75, born: performance.now(), life: 300, done: false }); // ขนาดเท่าป้อม railgun (ผู้ใช้ขอ)
                     if (_ai === 0) sfxSlash();
                     if (_dTot > 0) { // เส้นเลเซอร์ถึงเป้าทันที → เลขดาเมจ+แว่บ พร้อมเส้น
                       spawnFloatText(_ah.x + (_ai - 1) * 7, _ah.y - 8, '-' + _parts[_ai], '#38bdf8', 10, _ai === 2 ? { pop: true } : undefined);
@@ -7644,6 +10013,9 @@ const xhrpg = (() => {
           if (el) el.textContent = T('ออนไลน์') + ' ' + d.online_count;
         }
         if (d.region && d.region !== _svRegion) { _svRegion = d.region; applyLang(); } // 🌐 th|intl จาก Cloudflare — ครั้งแรกที่รู้ประเทศ แปล UI ทันที (override ได้ที่ปุ่ม 🌐)
+        _svGm = !!d.gm; // 🛡️ ป้าย GM ตัวเอง — server เช็ค xhrpg:gms ทุก poll (ถอดแล้วป้ายหายเอง)
+        _svGmc = !!d.gmc; // 🌐 GMC — เครื่องมือแปลในแชท (ถอดแล้วหายเอง)
+        _svCl = !!d.cl; // 💠 ป้าย CL (Country Lead) ตัวเอง
         // ── สลับเป้า + ขว้างคั่นล่วงหน้า (optimistic — ภาพล้วน) ─────────────────────────
         targetMonsterId = d.target_monster_id ?? null; // ตั้งตรงๆ ไม่หน่วง — เดิม setTimeout หน่วงย้ายเส้นล็อก เสี่ยง poll ถัดไปทับ / ปลุกเป้าที่ตาย/ออกโซนแล้ว
         if (_sawGunKill && targetMonsterId != null && !_shotMids.has(targetMonsterId)) {
@@ -7658,17 +10030,33 @@ const xhrpg = (() => {
           const rawQty = d.player.equipment_qty;
           player._equipmentQty = (rawQty && typeof rawQty === 'object') ? rawQty : JSON.parse(rawQty || '{}');
         }
-        if (d.map != null && d.map !== currentMap) { currentMap = d.map; if (player) player.map = d.map; currentSpotId = 0; travelingToSpot = null; { const _s = document.getElementById('spot-select'); if (_s) _s.dataset.built = ''; } _haveMon = false; buildGround(); } // เปลี่ยน map → รีเซ็ตโซน + rebuild dropdown + รีเฟรช spots + พื้น
+        if (d.map != null && d.map !== currentMap) { const _prevMap = currentMap; currentMap = d.map; if (player) player.map = d.map; currentSpotId = 0; travelingToSpot = null; { const _s = document.getElementById('spot-select'); if (_s) _s.dataset.built = ''; } _haveMon = false; if (d.map !== 11) { _ctInfo = null; _ctBakeKey = ''; } buildGround(); _homeBtnUpd(); // 🏯 ออกจากปราสาท (เด้งจาก server) → ล้างข้อมูลปราสาทกันฉากค้าง · เปลี่ยน map → รีเซ็ตโซน + rebuild dropdown + รีเฟรช spots + พื้น + icon ปุ่มบ้าน
+          if ((_prevMap === 7 && d.map === 1) || (_prevMap === 8 && d.map === 2) || (_prevMap === 9 && d.map === 3)) { // 🌱 จบผู้เล่นใหม่ (เลเวลเกินเพดาน server เด้งออก) → toast ต้อนรับ
+            delete smoothPos['player']; // snap กล้อง (ข้ามแมพ)
+            addLog([{type:'levelup', msg: T('🎓 จบการเป็นผู้เล่นใหม่! ยินดีต้อนรับสู่โลกกว้าง')}]);
+            _arenaToast(T('🎓 จบการเป็นผู้เล่นใหม่!'));
+          }
+        }
         if (d.col_n != null) _colN = d.col_n;                                  // 🏛️ จำนวนคนในสนามประลอง (การ์ดเมนูแผนที่ + ป้ายมุมจอ)
+        _homeView = (d.home_view && typeof d.home_view === 'object') ? d.home_view : null; // 🏡👥 อยู่บ้านเพื่อน = ข้อมูลบ้านเจ้าของ · null = บ้านตัวเอง/ไม่ได้อยู่บ้าน (server ส่งเฉพาะตอนเยี่ยม)
+        _homeVisitBanner();                                                                //     แบนเนอร์บอกว่าอยู่บ้านใคร + ปุ่มออก
+        _invUpd(d.inv || null);                                                // 🧟 อีเวนต์บุกทะเลทราย — แบนเนอร์/แถบ HP ต้นไม้/popup ผล
+        if (d.trade_inv) _trInvitePopup(d.trade_inv);                          // 🤝 คำเชิญแลกเปลี่ยน — popup ยอมรับ/ปฏิเสธ (dedup ด้วย tid)
+        _evBannerUpd(d.ev);                                                    // 🎉 แบนเนอร์อีเวนต์ตัวคูณ EXP/DROP (ไม่มี = ลบ)
         // 💬 badge แชท (chat_n = แชทรวมยังไม่อ่าน · dm_n = จำนวนห้อง DM ที่มีใหม่) — เปิดแผงอยู่ → refresh ห้องด้วย
+        _vipBtnUpd(); // 👑 ปุ่ม VIP โชว์ระดับ (อัปเดตเมื่อระดับเปลี่ยนเท่านั้น — no-op ปกติ)
+        _aucAnnounce(); // 🔨 แจ้งรอบประมูล 12:00/21:00 (dedup รายวัน localStorage — no-op นอกช่วงเวลา)
         if (d.chat_n != null || d.dm_n != null) {
           const _cPrev = _chatN + _chatDmN;
           if (d.chat_n != null) _chatN = d.chat_n;
           if (d.dm_n != null)   _chatDmN = d.dm_n;
+          _chatGdN = (d.gchat_n != null) ? d.gchat_n : 0; // 🏰 ออกจากกิล = server ไม่ส่งมา → ดับ badge เอง
+          _gtMap = Array.isArray(d.gturrets) ? d.gturrets : []; // 🏰🔫 ป้อมกิลบนแมพนี้ (ไม่มี = ล้างทิ้ง เช่นวาร์ปเข้าบ้าน)
           _chatBadgeUpd();
           if (openPanel === 'chat' && (_chatN + _chatDmN) !== _cPrev && !_uiTouchBusy()) renderChat(); // มีข้อความใหม่ + แผงเปิดอยู่ → ดึงมาโชว์
         }
         if (d.col_sh > 0) _colShUntil = Date.now() + d.col_sh * 1000;          // 🛡️ เกราะจุดเกิด — วงทองรอบตัว (server ส่งเฉพาะตอนยังเหลือ)
+        _aucSetState(d.auc);                                                   // ⏳🔨 ป้ายนับถอยหลังประมูล (server ส่งเฉพาะช่วงรอบเปิด)
         _colBadgeUpd();
         if (d.spots) { spotDefs = Object.values(d.spots); updateSpotSelect(); if (!travelingToSpot) { exploreRadius = 300; _syncExploreBtns(); } } // default 300m ตอนโหลด (ตรงปุ่ม → ไฮไลต์) · spots ส่งครั้งเดียว ไม่ทับตอนกดปุ่มอื่นภายหลัง
         checkArrival();
@@ -7723,34 +10111,373 @@ const xhrpg = (() => {
     if (!_pollStopped && !_inflight && !pollTimer && sessionToken && player && player.line_uid) poll();
   });
 
-  // ── 😴 Idle 10 นาที (จอเปิดอยู่): จับ input จริงทุกชนิด — ไม่กดเกิน 10 นาที → schedulePoll หยุด + overlay แตะกลับมา ──
+  // ── 😴 Idle 10 นาที (จอเปิดอยู่): จับ "การเล่นจริง" ไม่ใช่แค่ "มี event" (docs/idle-strict-design.md · เจ้าของเคาะ 2026-07-27) ──
   //    poll หยุด = last_active ฝั่ง server ค้าง → gap สะสมเข้า offline catch-up เหมือนสลับแท็บ/ปิดเกม (เกณฑ์ 600s)
-  //    เกณฑ์บังคับจริงอยู่ฝั่ง server (act=1 + last_action_at ใน game.php) — แก้ JS ฝั่งนี้ข้ามได้แค่ overlay ไม่ได้เรตออนไลน์
+  //    🖐️ v2: event ทุกตัวถูก "จด" ลง ring buffer แต่การต่ออายุ (_lastInputAt/_actFlag) เกิดเฉพาะช่วงที่ scorer
+  //       รับรองแล้วว่าเป็นคน (_humanUntil) — auto-clicker จุดเดิม/จังหวะเป๊ะจึงเหมือนไม่มี input เลย และไม่รู้ตัวว่าโดนจับ
   ['pointerdown', 'keydown', 'touchstart', 'wheel'].forEach(_ev =>
-    document.addEventListener(_ev, () => {
-      _lastInputAt = Date.now(); _actFlag = true;
+    document.addEventListener(_ev, (e) => {
+      const _k = _ev === 'pointerdown' ? 0 : _ev === 'touchstart' ? 1 : _ev === 'keydown' ? 2 : 3;
+      const _tp = _k === 1 ? (e.touches && e.touches[0]) : e;
+      _hbRec(_k, (_k <= 1 && _tp) ? _tp.clientX : 0, (_k <= 1 && _tp) ? _tp.clientY : 0);
+      if (Date.now() < _humanUntil) { _lastInputAt = Date.now(); _actFlag = true; }
+      // 🖐️ มีป้ายยืนยันค้าง = **ต้องแตะที่ตัวป้าย** เท่านั้น (เจ้าของสั่ง 2026-07-28)
+      //    เดิมแตะที่ไหนก็ผ่าน → ป้ายสุ่มตำแหน่งไว้เปล่าประโยชน์ auto-clicker จุดเดิมกดผ่านได้ทุกรอบ
+      //    ตอนนี้ตัวรับอยู่ที่ป้ายเอง (ดู _chShow) · ที่นี่แค่ "กลืน" การแตะที่อื่นไม่ให้ไปโดนเกม
+      if (_chEl) return;
       const _ov = document.getElementById('idle-overlay');
-      if (_ov && _ov.style.display !== 'none') _idleResume(); // แตะที่ไหนก็ได้ตอน overlay ขึ้น = กลับมาเล่น
+      if (_ov && _ov.style.display !== 'none' && !_idleSuspect) _idleResume(); // แตะที่ไหนก็ได้ตอน overlay ขึ้น = กลับมาเล่น (ยกเว้นโดนจับว่าเป็นบอท → ต้องกดค้างที่ปุ่ม)
     }, { passive: true, capture: true }));
-  function _showIdleOverlay() {
-    let ov = document.getElementById('idle-overlay');
-    if (!ov) {
-      ov = document.createElement('div');
-      ov.id = 'idle-overlay';
-      ov.style.cssText = 'position:fixed;inset:0;z-index:99990;background:rgba(2,8,23,0.82);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;cursor:pointer;text-align:center;padding:20px';
-      document.body.appendChild(ov);
+
+  // ── 🖐️ Human-check: ring buffer 24 ช่อง (จดสูงสุด 10 ครั้ง/วิ) + คิดคะแนนนาทีละครั้ง O(24) ──
+  //    เกณฑ์ 2 ใน 3: จุดกดกระจาย ≥3 ช่อง 48px · ชนิด event ≥2 · จังหวะมี jitter (SD/mean > 12%)
+  //    การเล่นจริงผ่านง่ายมาก (เดินครั้งเดียว/เปิดแผง 2-3 ที) · เครื่องมือกดอัตโนมัติทั่วไปตกทุกข้อ
+  const _HB_N = 24;
+  const _hbT = new Float64Array(_HB_N), _hbX = new Int16Array(_HB_N), _hbY = new Int16Array(_HB_N), _hbK = new Int8Array(_HB_N);
+  let _hbI = 0, _hbLen = 0, _hbLastRec = 0;
+  let _humanUntil = Date.now() + 120000;      // เพิ่งโหลดหน้า = คนจริง (กด F5/เปิดลิงก์เอง) — ผ่อนผันจน scorer รอบแรกตัดสิน
+  let _lastHumanPassAt = Date.now(), _idleSuspect = false, _bmWhy = 'idle';
+  let _chEl = null, _chTimer = null, _chCoolUntil = 0;
+  // 🔴 A. บังคับยืนยันตามรอบ — ต่อให้คะแนนความเป็นคนผ่านตลอดก็ต้องกด 1 ครั้งทุก _chForceMs()
+  const CH_FORCE_MS = 1200000;                 // 20 นาที = รอบพื้น (คนไม่มี VIP · ปรับที่นี่ที่เดียว)
+  // 👑 ผ่อนตามระดับ VIP ทุกขั้น (เจ้าของสั่ง 2026-07-28 รอบ 2 — ลดฐานจาก 60 → 20 เพื่อบีบบัญชีตัวเปล่าที่ไม่เติมเงิน)
+  //    สูตร: 20 + (เพดานพักจอ − เพดานของ VIP0) → VIP0 ได้ 20 แล้วบวกขึ้นทุกระดับตามสิทธิ์ที่จ่ายมา
+  //    VIP0 20 · 1 25 · 2 30 · 3 35 · 4 40 · 5 45 · 6 55 · 7 65 · 8 75 · 9 85 · 10 100 · 11-15 130/160/190/220/250 นาที
+  //    ✅ เช็คอินมากกว่าเพดานพักจอ 10 นาทีทุกระดับเสมอ → สิทธิ์พักจอของ VIP ไม่เคยถูกป้ายกินก่อน
+  const CH_VIP_BASE_MIN = VIP_IDLE_MIN[0];     // อ่านจากตารางตรงๆ — ปรับตาราง §VIP_IDLE_MIN แล้วตัวนี้ตามเอง ไม่มีทางหลุด sync
+  const _chForceMs = () => CH_FORCE_MS + Math.max(0, _idleCutMin(player ? player.vip_lv : 0) - CH_VIP_BASE_MIN) * 60000;
+  // 🖐️ B. scorer เลื่อนตามระดับ VIP **เท่าเพดานพักจอของระดับนั้นตรงๆ** (เจ้าของสั่ง 2026-07-28 รอบ 3)
+  //    เดิมคิดเป็นสัดส่วนของรอบเช็คอิน (8/60 · 15/60) → VIP10 ได้แค่ 13 นาที + คูลดาวน์ 25 นาที
+  //    ผลคือคนเล่นจริงที่มือนิ่ง (เกม idle เปิด AUTO) เจอป้ายทุก ~30 นาที ทั้งที่จ่ายเงินซื้อสิทธิ์พักจอ 90 นาทีมา
+  //    เหตุที่ scorer ตัดสินคนมือนิ่งว่า "ไม่ผ่าน": _humanScore() ต้องได้ 2/3 ข้อ ซึ่งต้องมีตัวอย่าง ≥6 การกระทำ/10 นาที
+  //    → คนดู AUTO เฉยๆ ตัวอย่างไม่พอ = ถูกนับเท่าบอท (บอทจริงยิง event รัว ตัวอย่างเหลือเฟือ ยังโดนจับเหมือนเดิม)
+  //    ตอนนี้: B = เพดานพักจอ (VIP10 = 90 นาที) · A = เพดาน+10 (100 นาที) → B ยังมาก่อน A 10 นาทีทุกระดับ ชั้นกันบอทไม่หาย
+  //    คูลดาวน์หลังกดผ่าน = เท่ากับ B → ป้ายซ้ำเร็วกว่ารอบของระดับตัวเองไม่ได้เลย
+  //    ⚠️ พื้น 5 นาทีคงไว้กันตารางถูกแก้เป็นค่าต่ำผิดปกติ
+  const _chFailMs = () => Math.max(300000, _idleCutMin(player ? player.vip_lv : 0) * 60000);
+  const _chCoolMs = () => _chFailMs();
+  let _chLastPassAt = Date.now(), _chForce = false;
+  function _hbRec(kind, x, y) {
+    const now = Date.now();
+    if (now - _hbLastRec < 100) return;       // เพดานจด 10/วิ — มือรัวจริงยังติดครบ แต่เครื่องยิง 50cps ไม่ท่วม buffer
+    _hbLastRec = now;
+    _hbT[_hbI] = now; _hbX[_hbI] = x | 0; _hbY[_hbI] = y | 0; _hbK[_hbI] = kind;
+    _hbI = (_hbI + 1) % _HB_N; if (_hbLen < _HB_N) _hbLen++;
+  }
+  function _hbRecentN(ms) { const cut = Date.now() - ms; let n = 0; for (let i = 0; i < _hbLen; i++) if (_hbT[i] >= cut) n++; return n; }
+  function _humanScore() {
+    const cut = Date.now() - 600000, cells = new Set(), kinds = new Set(), ts = [];
+    for (let i = 0; i < _hbLen; i++) {
+      if (_hbT[i] < cut) continue;
+      ts.push(_hbT[i]); kinds.add(_hbK[i]);
+      if (_hbK[i] <= 1) cells.add((((_hbX[i] / 48) | 0) * 1000) + ((_hbY[i] / 48) | 0));
     }
-    ov.innerHTML = `<div style="font-size:46px">😴</div>
-      <div style="font-size:16px;font-weight:700;color:#f1f5f9">${T('พักหน้าจอ — เข้าโหมดออฟไลน์')}</div>
-      <div style="font-size:12px;color:#94a3b8;line-height:1.5">${T('ไม่มีการใช้งานเกิน 10 นาที · ฟาร์มออฟไลน์เดินต่อให้อยู่')}</div>
-      <div style="margin-top:6px;font-size:13px;font-weight:700;color:#0f172a;background:#4ade80;border-radius:10px;padding:9px 20px">${T('แตะเพื่อเล่นต่อ')}</div>`;
+    if (!ts.length) return false;
+    let ok = 0;
+    if (cells.size >= 3) ok++;
+    if (kinds.size >= 2) ok++;
+    if (ts.length >= 2) {
+      ts.sort((a, b) => a - b);
+      // ยุบ event ห่างกัน <500ms เป็น "การกระทำเดียว" ก่อนวัดจังหวะ — มือถือแตะ 1 ทียิง touchstart+pointerdown คู่ (~120ms)
+      // ถ้าไม่ยุบ คู่ event ทำ SD พุ่งจนบอทแตะจุดเดิมทุก 10 วิเป๊ะ "ดูมี jitter" (เจอจริงจาก harness 2026-07-27)
+      const acts = [ts[0]];
+      for (let i = 1; i < ts.length; i++) if (ts[i] - acts[acts.length - 1] >= 500) acts.push(ts[i]);
+      if (acts.length >= 6) {                 // jitter ต้องมีตัวอย่างพอ (5 ช่วงขึ้นไป) ถึงตัดสิน
+        let sum = 0; const n = acts.length - 1;
+        for (let i = 0; i < n; i++) sum += acts[i + 1] - acts[i];
+        const mean = sum / n; let v = 0;
+        for (let i = 0; i < n; i++) { const d = (acts[i + 1] - acts[i]) - mean; v += d * d; }
+        if (mean > 0 && Math.sqrt(v / n) / mean > 0.12) ok++;
+      }
+    }
+    return ok >= 2;
+  }
+  // scorer นาทีละครั้ง — จุด "ต่ออายุจริง" จุดเดียวของระบบ · ไม่ผ่านติดต่อกัน 8 นาที + ยังมี event ไหลเข้า → ป้ายยืนยัน
+  setInterval(() => {
+    if (_bmOn || !player) return;
+    const now = Date.now();
+    // 🔴 A. บังคับยืนยันตามรอบ (เจ้าของเคาะ 2026-07-27) — ออนไลน์ต่อเนื่องครบ CH_FORCE_MS ต้องกดยืนยัน 1 ครั้ง
+    //    ไม่สนคะแนนความเป็นคน: auto-mouse ที่ผ่าน scorer ได้ก็ยังต้องเจอปุ่มนี้ (ตำแหน่งสุ่ม กดแทนไม่ได้)
+    //    คนเล่นจริงเจอชั่วโมงละครั้ง แตะที่ไหนก็ผ่าน (ทั้งจอนับเป็นคำตอบ — ดู listener บรรทัด ~9640)
+    if (now - _chLastPassAt > _chForceMs() && !_chEl) { _chForce = true; _chShow(); return; }
+    if (_humanScore()) {
+      _lastHumanPassAt = now; _humanUntil = now + 150000;
+      _lastInputAt = now; _actFlag = true;
+      return;
+    }
+    if (now - _lastHumanPassAt > _chFailMs() && _hbRecentN(120000) > 0 && now > _chCoolUntil && !_chEl) _chShow();
+  }, 60000);
+  // ── ป้ายยืนยัน "ยังเล่นอยู่ไหม" — ตำแหน่งสุ่มทุกครั้ง · ตอบใน 90 วิ · ผ่านแล้วเงียบ 15 นาที ──
+  function _chShow() {
+    const d = document.createElement('div');
+    d.id = 'human-check';
+    const lx = 12 + Math.random() * 56, ty = 18 + Math.random() * 52; // % viewport — โซนกลางจอ ไม่ทับปุ่มเกมขอบจอ
+    d.style.cssText = `position:fixed;left:${lx.toFixed(1)}%;top:${ty.toFixed(1)}%;z-index:99989;background:#0f172a;color:#fff;border:2px solid #fbbf24;border-radius:14px;padding:12px 16px;font-size:13.5px;font-weight:700;box-shadow:0 8px 30px rgba(2,8,23,.55);cursor:pointer;display:flex;align-items:center;gap:8px;max-width:78vw`;
+    d.innerHTML = `🖐️ ${T(_chForce ? 'เช็คอินรายชั่วโมง — แตะเพื่อเล่นต่อ' : 'ยังเล่นอยู่ไหม? แตะเพื่อเล่นต่อ')} <span id="hc-t" style="background:#fbbf24;color:#0f172a;border-radius:7px;padding:1px 8px;font-size:12px">90</span>`;
+    // 🎯 ตัวรับคำตอบอยู่ที่ป้ายเท่านั้น — ป้ายสุ่มตำแหน่งทุกครั้ง (lx/ty ด้านบน) จึงกลายเป็นด่านจริง
+    //    auto-clicker ที่กดจุดเดิมซ้ำๆ จะพลาดเกือบทุกครั้ง · คนจริงเห็นป้ายกลางจอ แตะทีเดียวจบ
+    //    capture:true กันเกมกินอีเวนต์ไปก่อน · ผูกทั้ง pointerdown/touchstart/click ให้ครบทุกอุปกรณ์
+    ['pointerdown', 'touchstart', 'click'].forEach(ev =>
+      d.addEventListener(ev, e => { e.stopPropagation(); _chPass(); }, { capture: true }));
+    document.body.appendChild(d);
+    _chEl = d;
+    const dl = Date.now() + 90000;
+    _chTimer = setInterval(() => {
+      const left = Math.ceil((dl - Date.now()) / 1000);
+      const t = document.getElementById('hc-t'); if (t) t.textContent = Math.max(0, left);
+      if (left <= 0) _chFail();
+    }, 1000);
+  }
+  function _chClear() { if (_chTimer) { clearInterval(_chTimer); _chTimer = null; } if (_chEl) { _chEl.remove(); _chEl = null; } }
+  function _chPass() {
+    _chClear();
+    const now = Date.now();
+    _chLastPassAt = now; _chForce = false;   // 🔴 A. รีเซ็ตนาฬิกาเช็คอินรายชั่วโมง (ต้องอยู่ก่อน — ไม่งั้นป้ายเด้งซ้ำนาทีถัดไป)
+    _lastHumanPassAt = now; _humanUntil = now + 150000; _chCoolUntil = now + _chCoolMs();
+    _lastInputAt = now; _actFlag = true;
+    try { $.post(baseUrl + 'xhrpg_offline.php', { line_uid: player && player.line_uid, session_token: sessionToken || '', action: 'idlestat', k: 'chpass' }); } catch (e) {} // สถิติแอดมิน — ยิงทิ้ง ไม่รอคำตอบ
+  }
+  function _chFail() {
+    _chClear();
+    _idleSuspect = true; _bmWhy = 'chfail'; _lastInputAt = 0;
+    _showIdleOverlay(); // ไม่ตอบ 90 วิ = ไม่มีคน → เข้าออฟไลน์มอนิเตอร์ (ของยังฟาร์มต่อ ไม่ใช่บทลงโทษ)
+  }
+  // ══ 🤖 BOT MONITOR (docs/bot-monitor-design.md · เจ้าของเคาะ 2026-07-26) ═══════════════════════
+  //    แทนจอ 😴 เดิม: ผู้เล่นเป็นออฟไลน์เต็มตัว (poll เกมหยุด) แต่เห็นฟีดสดว่าบอทตีอะไรได้อะไร
+  //    เรตเท่าออนไลน์ทุกไบต์ (settle ด้วยเครื่องยนต์ offline เดิมทุก 10 นาที) — ฟีดคือการ "ฉาย" เรตจริง ไม่ใช่ตัวเลขปลอม
+  //    ⚠️ ทุกอย่างคิดจาก timestamp ไม่ใช่นับ tick — แท็บพื้นหลังโดน browser หน่วง timer ก็ไม่เพี้ยน
+  let _bmOn = false, _bmTimer = null, _bmZones = [], _bmNoZone = false;
+  let _bmStartAt = 0, _bmSyncAt = 0, _bmSyncEvery = 600, _bmSyncN = 0, _bmBusy = false;
+  let _bmPullAt = 0, _bmPullS = 5, _bmPullBusy = false;                    // 🛰️ ดึงฟีดจาก STACK ฝั่ง server (v2)
+  let _bmGotOnce = false;                                                  // ได้ settle ก้อนแรกหรือยัง — bootstrap ยิง sync ถี่จนกว่าจะได้
+  let _bmQ = [], _bmQNext = 0, _bmQGap = 3000;                             // buffer แสดงผลไม่กี่วิ (stack จริงอยู่ server)
+  let _bmTot = { exp: 0, gold: 0, kills: 0, cards: 0, eggs: 0, mods: 0 };   // ยืนยันแล้ว (จาก server) — ตัวเลขเดียวที่โชว์ (เจ้าของสั่งตัด "ประมาณ" ออก งง)
+  let _bmFeed = [], _bmSeq = 0;                                            // _bmSeq = ลำดับสัมบูรณ์ → แถบสลับสีนิ่ง ไม่กระพริบตอนบรรทัดใหม่เข้า
+  const _BM_LH = 15;                                                       // px/บรรทัดฟีด — ผูกกับ line-height ใน _bmPaint (ใช้คำนวณว่ากล่องรับได้กี่บรรทัด)
+  // จำนวนบรรทัดที่วาดจริง = ความสูงกล่องจริง ÷ _BM_LH → เต็มกล่องพอดีทุกขนาดจอ (เดิม fix 16 → จอสูงเหลือที่ว่างครึ่งหน้า)
+  function _bmRows() {
+    const f = document.getElementById('bm-feed');
+    return Math.max(6, Math.min(90, Math.floor(((f ? f.clientHeight : 0) - 12) / _BM_LH)));
+  }
+  const _bmHms = s => { s = Math.max(0, s | 0); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), q = s % 60;
+    return h > 0 ? h + ':' + ('0' + m).slice(-2) + ':' + ('0' + q).slice(-2) : m + ':' + ('0' + q).slice(-2); };
+  const _bmClock = ts => { const d = new Date(ts); return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2) + ':' + ('0' + d.getSeconds()).slice(-2); };
+
+  function _showIdleOverlay() { _botmonOpen(); }   // ⬅ จุดเรียกเดิม (server ส่ง idle:1 / client เช็ค 10 นาที) — เปลี่ยนปลายทางเป็นจอเฝ้าบอท
+  function openBotMonitor() { _bmWhy = 'manual'; _lastInputAt = 0; _botmonOpen(); } // กดเองจากแผง OFFLINE (สาย 24 ชม. ไม่ต้องรอ 10 นาที)
+
+  function _botmonOpen() {
+    if (_bmOn) return;
+    _bmOn = true; _bmStartAt = Date.now();
+    _bmTot = { exp: 0, gold: 0, kills: 0, cards: 0, eggs: 0, mods: 0 };
+    _bmFeed = []; _bmSeq = 0;
+    _bmQ = []; _bmQNext = 0; _bmSyncN = 0; _bmGotOnce = false; _bmPullAt = Date.now() + 1200; // เริ่ม pull หลังเปิดจอ 1.2 วิ (settle ก้อนแรกลง stack แล้ว)
+    let ov = document.getElementById('idle-overlay');
+    if (!ov) { ov = document.createElement('div'); ov.id = 'idle-overlay'; document.body.appendChild(ov); }
+    // เต็มจอ (มือถือ = เต็มพอดี · จอกว้าง = คอลัมน์กลาง 460px แต่สูงเต็ม) — ฟีดยืดกินที่ว่างทั้งหมด
+    ov.style.cssText = 'position:fixed;inset:0;z-index:99990;background:linear-gradient(180deg,#020817,#0f172a);display:flex;align-items:stretch;justify-content:center;padding:0;overflow:hidden';
+    ov.innerHTML = `<div style="width:100%;max-width:460px;height:100%;display:flex;flex-direction:column;padding:10px 12px;box-sizing:border-box">
+        <!-- 👤 top panel ผู้เล่น (เจ้าของขอ: ให้รู้ว่าใคร อยู่ไหน) — วาดใหม่ทุกวินาทีจาก player object -->
+        <div id="bm-top" style="flex:none;background:#0b1220;border:1px solid #1e293b;border-radius:11px;padding:8px 10px;margin-bottom:8px"></div>
+        <div style="flex:none;display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">
+          <span style="font-size:14.5px;font-weight:800;color:#e2e8f0">🤖 ${T('ออฟไลน์ มอนิเตอร์')}</span>
+          <span id="bm-live" style="font-size:11px;font-weight:700;color:#4ade80">● ${T('กำลังฟาร์ม')}</span>
+        </div>
+        <div id="bm-zone" style="flex:none;font-size:11.5px;color:#94a3b8;margin-bottom:7px">…</div>
+        <div id="bm-feed" style="flex:1;min-height:120px;background:#0b1220;border:1px solid #1e293b;border-radius:10px;padding:6px 8px;overflow:hidden;display:flex;flex-direction:column;justify-content:flex-end;font-size:11px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace"></div>
+        <div style="flex:none;display:flex;align-items:center;gap:9px;background:#0b1220;border:1px solid #14532d;border-radius:10px;padding:8px 11px;margin-top:8px">
+          <div style="flex:none;font-size:9.5px;color:#64748b;line-height:1.3">${T('ยืนยันแล้ว')}</div>
+          <div id="bm-tot" style="flex:1;min-width:0;text-align:right;font-size:13.5px;font-weight:800;color:#4ade80;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">—</div>
+        </div>
+        <div id="bm-time" style="flex:none;font-size:10.5px;color:#64748b;text-align:center;margin-top:7px">…</div>
+        <div style="flex:none;font-size:9.5px;color:#475569;text-align:center;margin-top:3px;line-height:1.45">${T('เรตเท่าตอนออนไลน์ทุกอย่าง · ปิดจอไปก็ฟาร์มต่อ แค่ไม่เห็นสดๆ')}</div>
+        <div style="flex:none;display:flex;gap:7px;margin-top:9px;padding-bottom:4px">
+          ${_idleSuspect
+            ? `<button id="bm-hold" style="flex:1;padding:13px 0;border:none;border-radius:11px;background:#fbbf24;color:#451a03;font-size:13.5px;font-weight:800;cursor:pointer;user-select:none;-webkit-user-select:none">🖐️ ${T('กดค้างเพื่อกลับเข้าเกม')}</button>`
+            : `<button onclick="xhrpg._bmBack()" style="flex:2;padding:13px 0;border:none;border-radius:11px;background:#4ade80;color:#052e16;font-size:13.5px;font-weight:800;cursor:pointer">🎮 ${T('กลับเข้าเกม')}</button>
+          <button onclick="xhrpg._bmZonePick()" style="flex:1;padding:13px 0;border:1px solid #334155;border-radius:11px;background:#1e293b;color:#cbd5e1;font-size:12px;font-weight:700;cursor:pointer">⛏️ ${T('โซน')}</button>`}
+        </div>
+      </div>`;
+    // 🖐️ โหมด suspect (โดนจับว่าเป็นเครื่องกดอัตโนมัติ): ออกได้ทางเดียวคือ "กดค้าง 0.8 วิ" ที่ปุ่มนี้
+    //    เครื่องกดทั่วไปยิง down+up ติดกัน = ค้างไม่ถึง · คนจริงแค่กดแช่แป๊บเดียว — ไม่มี CAPTCHA ไม่มีโจทย์
+    const _hbBtn = document.getElementById('bm-hold');
+    if (_hbBtn) {
+      let _t0 = 0;
+      _hbBtn.addEventListener('pointerdown', () => { _t0 = Date.now(); _hbBtn.style.opacity = '.55'; });
+      _hbBtn.addEventListener('pointerup', () => {
+        const ok = _t0 > 0 && Date.now() - _t0 >= 800;
+        _t0 = 0; _hbBtn.style.opacity = '1';
+        if (ok) { _idleSuspect = false; _idleResume(); }
+      });
+      _hbBtn.addEventListener('pointerleave', () => { _t0 = 0; _hbBtn.style.opacity = '1'; });
+    }
     ov.style.display = 'flex';
+    _bmSync(true);
+    if (_bmTimer) clearInterval(_bmTimer);
+    _bmTimer = setInterval(_bmTick, 1000);
+  }
+  function _bmClose() {
+    _bmOn = false;
+    if (_bmTimer) { clearInterval(_bmTimer); _bmTimer = null; }
+    const ov = document.getElementById('idle-overlay'); if (ov) ov.style.display = 'none';
+  }
+  // กลับเข้าเกม / เปลี่ยนโซน → เข้าทางเดียวกันหมดที่ _idleResume() (sync งวดสุดท้าย + ปิดจอ + ปลด idle + poll + ปลุก rAF)
+  //    ⚠️ ห้ามเรียก _bmClose() ก่อน _idleResume() — จะข้าม sync งวดสุดท้ายไป
+  function _bmBack() { _idleResume(); }
+  function _bmZonePick() { _idleResume(); openOfflinePanel(); }
+
+  // ── sync = settle ฝั่ง server (mini-รอบแรก +60 วิ · หลังจากนั้นทุก 10 นาที) — ฟีดจริงมาทาง feed_pull ──
+  function _bmSync(isStart, isEnd) {
+    if (_bmBusy || !player || !player.line_uid) return;
+    _bmBusy = true;
+    $.post(baseUrl + 'xhrpg_offline.php', { line_uid: player.line_uid, session_token: sessionToken || '', action: 'monitor_sync', start: isStart ? 1 : 0, end: isEnd ? 1 : 0, why: isStart ? _bmWhy : '' })
+      .done(res => {
+        let d; try { d = typeof res === 'string' ? JSON.parse(res) : res; } catch (e) { return; }
+        if (!d || !d.ok) return;
+        _bmSyncEvery = Math.max(60, d.sync_s | 0);
+        _bmPullS = Math.max(2, (d.pull_s | 0) || 5);
+        _bmSyncN++;
+        // ⚠️ ต้องมี "คิลจริง" ถึงนับว่าได้ก้อนแรก — settle ที่ได้ 0 คิล (หน้าต่าง 6 วิ ทอยไม่ติด) ก็ตอบ got กลับมา
+        //    ถ้านับ got เปล่าๆ = กระโดดไป 61 วิทันทีทั้งที่ยังไม่มีบรรทัดเดียว = "Log รอบแรกรอเป็นนาที" (บั๊กจริง 2026-07-27)
+        if (d.got && (d.got.kills | 0) > 0) _bmGotOnce = true;
+        // bootstrap: ยังไม่มีบรรทัดเลย → ยิงถี่ทุก 6 วิ (เพดาน 15 ครั้ง ≈90 วิ กันคนไร้โซน/DPS ต่ำวนถี่ตลอด)
+        // steady state: ทุก ~1 นาที (batch เล็ก ฟีดไหลสม่ำเสมอ latency ≤1 นาที)
+        _bmSyncAt = Date.now() + ((_bmGotOnce || _bmSyncN > 15) ? 61000 : 6000);
+        _bmZones = Array.isArray(d.zones) ? d.zones : [];
+        _bmNoZone = !!d.no_zone;
+        if (d.tot) _bmTot = { exp: d.tot.exp | 0, gold: d.tot.gold | 0, kills: d.tot.kills | 0, cards: d.tot.cards | 0, eggs: d.tot.eggs | 0, mods: d.tot.mods | 0 };
+        // settle ถี่ขึ้นเป็นรายนาที → ไม่ปักบรรทัด ✅ ทุกรอบแล้ว (สแปม) — กล่อง "ยืนยันแล้ว" ขยับแทน · เหลือแค่ LV UP
+        if (d.got && (d.got.lv_ups | 0) > 0) _bmPush('🎉 LV UP → Lv.' + (d.got.new_lv | 0), '#fbbf24');
+        _bmPaint();
+      })
+      .always(() => { _bmBusy = false; });
+  }
+  // ── 🛰️ feed_pull ทุก 5 วิ: ดึงบรรทัดจาก STACK server (server ไม่ประมวลผลอะไร — LPOP แล้วจบ) ──
+  const _BM_ORE = { w: ['🪵', 'ไม้'], s: ['🪨', 'หิน'], i: ['⚙️', 'เหล็ก'], cp: ['🟫', 'ทองแดง'], h: ['🌿', 'สมุนไพร'] };
+  function _bmPull() {
+    if (_bmPullBusy || !player || !player.line_uid) return;
+    _bmPullBusy = true;
+    $.post(baseUrl + 'xhrpg_offline.php', { line_uid: player.line_uid, session_token: sessionToken || '', action: 'feed_pull' })
+      .done(res => {
+        let d; try { d = typeof res === 'string' ? JSON.parse(res) : res; } catch (e) { return; }
+        if (!d || !d.ok || !Array.isArray(d.lines) || !d.lines.length) return;
+        d.lines.forEach(L => { // แปลงบรรทัดดิบ → รายการแสดงผล (จัดรูป+แปลที่ client — server ไม่ต้องรู้ภาษา)
+          if (L.k) _bmQ.push({ ic: L.ic || '👾', nm: L.nm || 'มอน', lv: L.lv | 0, e: L.e | 0, g: L.g | 0, be: L.be | 0, bg: L.bg | 0 });
+          else if (L.c)  _bmQ.push({ d: 1, s: '🎴 ' + T('การ์ด') + ' ' + T(L.nm || '') + (L.st ? ' (+' + T(L.st) + ')' : ''), c: '#c084fc' });
+          else if (L.eg) _bmQ.push({ d: 1, s: '🥚 ' + T('ไข่') + ' ' + T(L.nm || ''), c: '#f9a8d4' });
+          else if (L.md) _bmQ.push({ d: 1, s: '⚙️ ' + T('โมดูล') + ' ' + T(L.gun || '') + ' · ' + T(L.sl || '') + (L.rn ? ' (' + T(L.rn) + ')' : ''), c: '#38bdf8' });
+          else if (L.q2) _bmQ.push({ d: 1, s: '⚔️ ' + T(L.s || '') + ' T' + (L.tt | 0), c: '#fbbf24' });
+          else if (L.o) {
+            const parts = [];
+            Object.keys(_BM_ORE).forEach(k2 => { if (L[k2] > 0) parts.push(_BM_ORE[k2][0] + ' ' + T(_BM_ORE[k2][1]) + ' +' + (L[k2] | 0).toLocaleString()); });
+            if (parts.length) _bmQ.push({ d: 1, s: parts.join(' · '), c: '#a8a29e' });
+          }
+          else if (L.db) _bmQ.push({ d: 1, s: '💎 ' + T('เพชรฟ้า') + ' +' + (L.n | 0), c: '#38bdf8' });
+          else if (L.dr) _bmQ.push({ d: 1, s: '💎 ' + T('เพชรแดง') + ' +' + (L.n | 0), c: '#f87171' });
+          // ⭐/💎 ก้อนโบนัสท้ายรอบ — po=1 = มาจาก Premium Offline 24H (+35% EXP) ระบุให้ชัดว่าเป็นสิทธิ์ที่จ่ายเงินมา
+          else if (L.xb) _bmQ.push({ d: 1, s: (L.po ? '💎 ' + T('โบนัส Premium ออฟไลน์ 24 ชม.') : '⭐ ' + T('โบนัสเพิ่มเติม'))
+                                        + ' +' + (L.e | 0).toLocaleString() + ' EXP' + ((L.g | 0) > 0 ? ' · +' + (L.g | 0).toLocaleString() + ' G' : ''), c: '#fbbf24', e: L.e | 0, g: L.g | 0 });
+          else if (L.sm) _bmQ.push({ d: 1, s: '⚔️ ' + T('เก็บกวาดอีก {n} ตัว', { n: (L.n | 0).toLocaleString() }) + ' +' + (L.e | 0).toLocaleString() + ' EXP · +' + (L.g | 0).toLocaleString() + ' G', c: '#cbd5e1', e: L.e | 0, g: L.g | 0, n: L.n | 0 });
+        });
+        if (_bmQ.length) _bmGotOnce = true;   // มีบรรทัดถึงมือแล้ว = เลิก bootstrap ถี่ (เกณฑ์เดียวกับใน _bmSync)
+        // พ่นให้หมดพอดีก่อน pull รอบถัดไป (เร็วสุด 4 บรรทัด/วิ)
+        _bmQGap = Math.max(250, Math.floor(_bmPullS * 1000 / Math.max(1, _bmQ.length)));
+        if (!_bmQNext) _bmQNext = Date.now() + 150;
+      })
+      .always(() => { _bmPullBusy = false; });
+  }
+  // buffer เก็บ 120 บรรทัดพอ (วาดจริง ≤90 ตามความสูงกล่อง) — ตัดหัวทิ้งทุกครั้งที่เกิน = หน่วยความจำคงที่แม้เปิดทิ้ง 24 ชม.
+  function _bmPush(txt, col) {
+    _bmFeed.push({ t: Date.now(), s: txt, c: col || '#94a3b8', q: _bmSeq++ });
+    if (_bmFeed.length > 120) _bmFeed.splice(0, _bmFeed.length - 120);
+  }
+  // (v2) การแตกบรรทัด/แทรกของดรอปย้ายไปทำฝั่ง server ตอน settle ทั้งหมด — client เหลือแค่ดึงจาก stack มาแสดง
+  // ── เดินฟีดจาก rate card: มอนแต่ละตัวมี s = วินาที/ตัว (สูตร server) → เดินตาม timestamp กันแท็บพื้นหลังหน่วง ──
+  function _bmTick() {
+    if (!_bmOn) return;
+    const now = Date.now();
+    // 📦 ทยอยพ่นจาก buffer (เติมโดย feed_pull — เลขทุกบรรทัดมาจาก settle จริงฝั่ง server ไม่มีการเดา)
+    let guard = 0;
+    while (_bmQ.length && now >= _bmQNext && guard++ < 25) {
+      const it = _bmQ.shift();
+      if (it.d) _bmPush(it.s, it.c);                                                // 🎁 ของดรอป/แร่/โบนัส/สรุปยุบ
+      else {
+        // ส่วนโบนัส (Premium/VIP/อีเวนต์/eq2) แยกโชว์ในวงเล็บเป็นตัว P — เลขหน้า = ยอดรวมที่ได้จริง (โบนัสรวมแล้ว)
+        //    ใช้ "P" ไม่ใช้ 💎 (เจ้าของสั่ง 2026-07-26 — 💎 ในเกมหมายถึงเพชร/แต้ม P ชวนสับสน)
+        _bmPush('⚔️ ' + it.ic + ' ' + T(it.nm) + ' Lv.' + it.lv + '  +' + (it.e | 0).toLocaleString() + ((it.be | 0) > 0 ? ' (P+' + (it.be | 0).toLocaleString() + ')' : '') + ' EXP · +' + (it.g | 0).toLocaleString() + ((it.bg | 0) > 0 ? ' (P+' + (it.bg | 0).toLocaleString() + ')' : '') + ' G', '#cbd5e1');
+      }
+      _bmQNext += _bmQGap;
+    }
+    if (!_bmQ.length) _bmQNext = 0;                                                // buffer หมด → pull รอบหน้าตั้งจังหวะใหม่
+    else if (_bmQNext < now - _bmQGap * 3) _bmQNext = now + _bmQGap;               // แท็บพื้นหลังหน่วงนาน → รีเซ็ตจังหวะ
+    if (_bmPullAt && now >= _bmPullAt && !_bmPullBusy) { _bmPullAt = now + _bmPullS * 1000; _bmPull(); } // 🛰️ ดึง stack
+    // ตั้งรอบถัดไปไว้ก่อนยิง (กันยิงซ้ำถ้า response หาย) — ช่วง bootstrap ต้องใช้ 6 วิเหมือนกัน ไม่ใช่ 60
+    if (_bmSyncAt && now >= _bmSyncAt && !_bmBusy) { _bmSyncAt = now + ((_bmGotOnce || _bmSyncN > 15) ? 60000 : 6000); _bmSync(false); }
+    _bmPaint();
+  }
+  // 👤 top panel: ชื่อ+ธง+ป้ายกิล+VIP · Lv/🌟 · HP · เงิน/P · แผนที่+พิกัด (ข้อมูลจาก player ที่ poll ล่าสุดทิ้งไว้)
+  function _bmTopHTML() {
+    const p = player || {};
+    const mp = MAP_DEFS.find(x => x.id === ((p.map | 0) || 1));
+    const hp = p.hp | 0, hpm = Math.max(1, p.hp_max | 0), hpPct = Math.max(0, Math.min(100, Math.round(hp / hpm * 100)));
+    const gd = _gdParseTag(p.guild_tag || '');
+    return `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+        ${p.country ? _ccFlag(p.country) : ''}
+        <b style="font-size:13px;color:#f1f5f9">${_gdEsc(p.display_name || '-')}</b>
+        ${gd ? `<span style="font-size:10px;color:#fbbf24">【${_gdEsc(gd.name)}】</span>` : ''}
+        ${(p.vip_lv | 0) > 0 ? `<span style="font-size:9.5px;font-weight:800;color:#052e16;background:#fbbf24;border-radius:5px;padding:1px 5px">VIP${p.vip_lv | 0}</span>` : ''}
+        <span style="font-size:11px;color:#93c5fd">Lv.${p.lv | 0}</span>
+        ${(p.rag_lv | 0) > 1 ? `<span style="font-size:10.5px;color:#c084fc">🌟${p.rag_lv | 0}</span>` : ''}
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;margin-top:5px">
+        <span style="font-size:10px;color:#f87171;flex:none">❤️ ${hp.toLocaleString()}/${hpm.toLocaleString()}</span>
+        <div style="flex:1;height:5px;background:#1e293b;border-radius:3px;overflow:hidden"><div style="width:${hpPct}%;height:100%;background:${hpPct > 30 ? '#22c55e' : '#ef4444'}"></div></div>
+      </div>
+      <div style="display:flex;gap:9px;margin-top:5px;font-size:10.5px;flex-wrap:wrap">
+        <span style="color:#facc15">💰 ${(p.gold | 0).toLocaleString()}</span>
+        <span style="color:#a78bfa">💎 ${(p.p_points | 0).toLocaleString()} P</span>
+        <span style="color:#94a3b8">🗺️ ${mp ? mp.emoji + ' ' + T(mp.name) : '#' + (p.map | 0)} <span style="color:#475569">(${Math.round(p.x | 0)}, ${Math.round(p.y | 0)})</span></span>
+      </div>`;
+  }
+  function _bmPaint() {
+    if (!_bmOn) return;
+    const tp = document.getElementById('bm-top'); if (tp) tp.innerHTML = _bmTopHTML();
+    const z = document.getElementById('bm-zone'); if (!z) return;
+    z.innerHTML = _bmNoZone
+      ? `<span style="color:#f87171">⚠️ ${T('ยังไม่ได้เลือกโซนฟาร์ม — บอทยังไม่เริ่มตี')}</span>`
+      // ชื่อโซนต้องแปลจาก "ชื่อล้วน" — emoji มาแยกจาก server (สตริงรวมจะหาคีย์ไม่เจอ) · เผื่อ server รุ่นเก่าส่งสตริงมาก็ยังรับได้
+      : '⛏️ ' + T('ฟาร์ม') + ': ' + _bmZones.map(z => (typeof z === 'string')
+          ? _gdEsc(T(z))
+          : _gdEsc(z.e || '📍') + ' ' + _gdEsc(T(z.n || ''))).join(' · ');
+    // 📜 ฟีด: วาดตามความสูงกล่องจริง (เต็มพอดี ไม่เหลือที่ว่าง) · เวลาเป็นคอลัมน์ตายตัว + แถบสลับสีตามลำดับสัมบูรณ์ (ไม่กระพริบ)
+    const f = document.getElementById('bm-feed');
+    if (f) f.innerHTML = _bmFeed.length
+      ? _bmFeed.slice(-_bmRows()).map(r => `<div style="display:flex;gap:7px;align-items:baseline;height:${_BM_LH}px;line-height:${_BM_LH}px;padding:0 4px;border-radius:3px;background:${(r.q & 1) ? 'transparent' : 'rgba(148,163,184,.055)'}"><span style="flex:none;color:#475569">${_bmClock(r.t)}</span><span style="flex:1;min-width:0;color:${r.c};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_gdEsc(r.s)}</span></div>`).join('')
+      : `<div style="color:#475569;text-align:center;font-family:system-ui;line-height:${_BM_LH}px">${_bmNoZone ? '' : '⚔️ ' + T('บอทออกล่าแล้ว — รายงานแรกกำลังมา...')}</div>`; // ฟีดว่างช่วง 2-3 วิแรก — ไม่ปล่อยกล่องโล่ง
+    // 🟢 กล่องเดียว = "ยืนยันแล้ว" จาก server (เจ้าของสั่งตัดกล่อง "ประมาณ" ออก — สองตัวเลขทำให้งง)
+    const t = document.getElementById('bm-tot');
+    if (t) t.innerHTML = `⭐ ${_bmTot.exp.toLocaleString()} <span style="font-size:9.5px;color:#64748b">EXP</span> · 💰 ${_bmTot.gold.toLocaleString()}`
+      + ((_bmTot.cards + _bmTot.eggs + _bmTot.mods) > 0 ? `<span style="font-size:10.5px;color:#c084fc"> · 🎴${_bmTot.cards} 🥚${_bmTot.eggs} ⚙️${_bmTot.mods}</span>` : '');
+    const ti = document.getElementById('bm-time');
+    if (ti) ti.textContent = '🔄 ' + T('sync ยอดจริงอีก {t}', { t: _bmHms(Math.max(0, Math.round((_bmSyncAt - Date.now()) / 1000))) })
+      + ' · ' + T('เปิดมาแล้ว {t}', { t: _bmHms(Math.round((Date.now() - _bmStartAt) / 1000)) });
   }
   function _idleResume() {
+    // 🤖 ⚠️ ต้องปิดจอเฝ้าบอทให้ "ครบขั้นตอน" ก่อนเสมอ — ไม่ใช่แค่ซ่อน overlay
+    //    เหตุ (บั๊กจริง 2026-07-26): handler ดัก input แบบ capture ด้านบนเรียก _idleResume() ทุกครั้งที่คลิกตอน overlay เปิด
+    //    ถ้า _bmOn ยังเป็น true อยู่ → guard ใน schedulePoll() บล็อก poll ทั้งหมด = ตัวละครหยุดเดินถาวร (แต่จอดูเหมือนออนไลน์)
+    if (_bmOn) { _bmSync(false, true); _bmClose(); } // end=1: settle งวดสุดท้าย (เกณฑ์ 60 วิ) + server ล้าง stack แล้วเคลียร์ _bmOn
     const ov = document.getElementById('idle-overlay');
     if (ov) ov.style.display = 'none';
     _lastInputAt = Date.now(); _actFlag = true; // act=1 รอบแรกหลังกลับมา → server ปลด idle + เครดิต offline catch-up ทันที
+    // 🖐️ กลับมา = การกระทำโดยเจตนา → ผ่อนผัน human-check 2.5 นาที (scorer รอบถัดไปตัดสินต่อเอง) + ล้างป้ายยืนยันถ้าค้าง
+    _lastHumanPassAt = Date.now(); _humanUntil = Date.now() + 150000; _bmWhy = 'idle';
+    _chLastPassAt = Date.now(); _chForce = false; // 🔴 A. กดออกจากจอเฝ้า = คนจริงแน่ → เริ่มนับรอบเช็คอินใหม่
+    _chCoolUntil = Date.now() + _chCoolMs();      // 🖐️ B. ต้องรีเซ็ตคูลดาวน์ด้วย — เดิมลืมไว้ ทำให้ขากลับจากจอเฝ้าเจอป้ายซ้ำเร็วกว่ารอบของระดับตัวเอง
+    _chClear();
+    startAnim(); // 🎞️ เดิน render loop ต่อ — rAF หยุดไปตอนพักจอ ถ้าไม่ปลุกจะเห็นภาพค้าง (ตัวละครดูเหมือน "หยุดเดิน")
     if (!_pollStopped && !_inflight && !pollTimer && sessionToken && player && player.line_uid) poll();
+    else if (!_pollStopped && sessionToken && player && player.line_uid && !pollTimer) schedulePoll(); // กันเคส _inflight ค้าง → ยังมีคนนัดรอบถัดไปให้
   }
 
   function ragUp(stat, amount) { // 🌟 Ragnalok: ลงแต้ม +0.1%/แต้ม (server ตรวจ Lv50 + rag_pts พอ)
@@ -7806,10 +10533,10 @@ const xhrpg = (() => {
     document.querySelectorAll('.xhpg-bar').forEach(bar => {
       const fill = bar.querySelector('.xhpg-fill'), txt = bar.querySelector('.xhpg-txt');
       const st = bar.dataset.state;
-      if (st === 'full') { if (fill) fill.style.width = '100%'; if (txt) txt.textContent = 'คลังเต็ม'; return; }
-      if (st === 'off')  { if (fill) fill.style.width = '0%';   if (txt) txt.textContent = 'ปิดผลิต';  return; }
+      if (st === 'full') { if (fill) fill.style.width = '100%'; if (txt) txt.textContent = T('คลังเต็ม'); return; } // 🌐 updater วิ่งทุก 1s — ต้อง T() ไม่งั้นทับข้อความแปลของ render แรก
+      if (st === 'off')  { if (fill) fill.style.width = '0%';   if (txt) txt.textContent = T('ปิดผลิต');  return; }
       if (fill) fill.style.width = pct + '%';
-      if (txt) txt.textContent = `${Math.floor(pct)}% · ครบรอบใน ${remain}s`;
+      if (txt) txt.textContent = T('{a}% · ครบรอบใน {b}s', {a: Math.floor(pct), b: remain});
     });
   }
   setInterval(_houseGaugeStep, 1000);
@@ -7826,6 +10553,8 @@ const xhrpg = (() => {
     // ผลผลิต = นัด/ขวด ต่อนาที โดยตรง (Lv.1=10, +2/Lv) เท่ากันทุกชนิด/ทุก tier
     const prodP = Math.round((10 + (lv - 1) * 2) * 5.4); // ปืนพก ×5.4 (3.6×1.5 ตรงกับ server prodRateMap)
     const prodS = Math.round((10 + (lv - 1) * 2) * 1.5); // Sniper/ARM/Robot ×1.5 (ตรงกับ server)
+    // ⚪ T1 พื้นขั้นต่ำ 100 นัด/นาที ทุกปืน (sync server) — ป้ายหัวแผงบอกสองเรตเมื่อเรตจริงยังต่ำกว่าพื้น
+    const _prodLbl = r => r >= 100 ? `${r}${T('/นาที')}` : `T1 100 · T2+ ${r}${T('/นาที')}`;
     const maxAmmo = 200 + (lv - 1) * 10;
     // Upgrade cost formula (mirrors PHP xhrpg_house_cost) — ×ตัวคูณทบต้นตามเลเวลปลายทาง
     const _r = Math.ceil(tierRes(lv + 1) * _upgCostMult(lv + 1));
@@ -7872,8 +10601,9 @@ const xhrpg = (() => {
         if (!on) return;
         const mask = _houseProdMask(g);
         for (let t=1;t<=6;t++) if (mask & (1<<(t-1))) {
-          const y = g==='pistol' ? AMMO_YIELD_PISTOL : (t===1 ? 6 : AMMO_YIELD); // นัด/หน่วยผลิต
-          const units = Math.ceil(rate / y); // rate=นัด/นาที → หน่วยผลิต/นาที
+          const y = t===1 ? AMMO_YIELD_T1 : (g==='pistol' ? AMMO_YIELD_PISTOL : AMMO_YIELD); // นัด/หน่วยผลิต (T1 = 10 ทุกปืน)
+          const r = t===1 ? Math.max(100, rate) : rate; // ⚪ T1 พื้น 100/นาที (sync server)
+          const units = Math.ceil(r / y); // rate=นัด/นาที → หน่วยผลิต/นาที
           iron += units*AMMO_TIER_COSTS[t-1]; copper += units*_copperCost(g,t-1);
         }
       });
@@ -7900,7 +10630,7 @@ const xhrpg = (() => {
         const bottom   = locked
           ? `<div style="font-size:8px;color:#a8a29e">Lv.${unlock}</div>`
           : `<button style="font-size:8.5px;padding:1px 0;width:100%;border-radius:3px;border:none;font-weight:500;${enabled?'background:#16a34a;color:#fff':'background:#e7e5e4;color:#57534e'};cursor:pointer" onclick="${onclick}">${enabled?T('เปิด'):T('ปิด')}</button>`;
-        html += `<div title="${locked ? T('ปลดล็อก Lv.{a}',{a:unlock}) : T('คลัง {a}/{b} นัด · ⚙️{c} 🟫{d} ⚡{e}',{a:stock,b:cap,c:c,d:cc,e:t})}" style="background:${bg};border:1px solid ${border};border-radius:6px;padding:4px 2px;text-align:center;opacity:${op}">
+        html += `<div title="${locked ? T('ปลดล็อก Lv.{a}',{a:unlock}) : T('คลัง {a}/{b} นัด · ⚙️{c} 🟫{d} ⚡{e}',{a:stock,b:cap,c:c,d:cc,e:1})}" style="background:${bg};border:1px solid ${border};border-radius:6px;padding:4px 2px;text-align:center;opacity:${op}">
           <div style="font-size:9px;color:${iconClr};margin-bottom:1px;white-space:nowrap">${AMMO_TIER_ICONS[t-1]}T${t}</div>
           <div style="font-size:13px;font-weight:600;color:${numClr};margin-bottom:1px">${locked ? '🔒' : stock}</div>
           ${!locked ? `<div style="font-size:7.5px;font-weight:700;color:#16a34a;height:9px;margin-bottom:1px">${full ? T('เต็ม') : ''}</div>` : ''}
@@ -7994,9 +10724,9 @@ const xhrpg = (() => {
             <span style="font-size:13px">${T('🛸 ยาน Orion Lv.{a}/100', {a:'<b>'+lv+'</b>'})}</span>
           </div>
           ${(() => { const _hcap = (player.lv||1) + 5; return _upgBar("xhrpg.upgradeHouse()", 'Lv.'+(lv+1), houseUpCosts, lv>=100 || lv>=_hcap, lv>=100 ? 'MAX Lv.100' : T('ยานสูงสุด Lv.{a} ที่ผู้เล่น Lv.{b} — อัพเลเวลผู้เล่นก่อน', {a:_hcap, b:(player.lv||1)})); })()}
-          ${(()=>{ // ── 🛸⚡ Rail Gun ยิงสนับสนุน — DMG 50+50×Lv + ผู้เล่นLv×50 · AOE 15+0.2×Lv m · ระยะ 300m · CD 15s · 20⚡/นัด · ปลดล็อกยาน Lv.20 ──
+          ${(()=>{ // ── 🛸⚡ Rail Gun ยิงสนับสนุน — DMG 50+50×Lv + ผู้เล่นLv×50 · AOE 10+0.1×Lv m · ระยะ 150m+ · CD 15s · 20⚡/นัด · ปลดล็อกยาน Lv.20 ──
             const oglv = Math.max(1, Math.min(100, player.orion_gun_lv|0 || 1));
-            const ogAtk = 50 + 50*oglv + 50*(player.lv||1) + _modTotalAtk() + (_cardCB().atk||0), ogAoe = (15 + 0.2*(oglv-1)).toFixed(1); // + ⚔️ ค่ากลาง (sync server 2026-07-16)
+            const ogAtk = 50 + 50*oglv + 50*(player.lv||1) + _modTotalAtk() + (_cardCB().atk||0) + _e2FxSum('hda'), ogAoe = (10 + 0.1*(oglv-1)).toFixed(1), ogRng = Math.round(150 + 0.25*(oglv-1)); // AOE 10m+0.1/Lv · ระยะ 150m+0.25/Lv (sync server 2026-07-24)
             if (lv < 20) return `<div style="background:#fafaf9;border:1px dashed #d6d3d1;border-radius:8px;padding:7px 8px;margin-bottom:8px">
               <div style="display:flex;justify-content:space-between;align-items:center">
                 <span style="font-size:12px;font-weight:700;color:#78716c">🛸⚡ Rail Gun</span>
@@ -8011,7 +10741,7 @@ const xhrpg = (() => {
                 <span style="font-size:12px;font-weight:700;color:#a16207">🛸⚡ Rail Gun <span style="font-size:10px;color:#ca8a04;font-weight:400">Lv.${oglv}/100</span></span>
                 <span style="font-size:10px;color:#854d0e">DMG ${ogAtk.toLocaleString()} · AOE ${ogAoe}m</span>
               </div>
-              <div style="font-size:9.5px;color:#a16207;margin:2px 0 4px">${T('ยิงสนับสนุนอัตโนมัติ · ระยะ 300m · CD 15s · ใช้ 20⚡/นัด')}</div>
+              <div style="font-size:9.5px;color:#a16207;margin:2px 0 4px">${T('ยิงสนับสนุนอัตโนมัติ · ระยะ {r}m · CD 15s · ใช้ 20⚡/นัด', {r: ogRng})}</div>
               <div style="margin-bottom:5px">${_gunToggleBtn('ใช้งาน', player.orion_rail_on??1, "xhrpg.toggleOrionRail()")}</div>
               ${oglv >= 100 ? '<div style="background:#f1f5f9;border-radius:7px;padding:5px;text-align:center;font-size:11px;font-weight:700;color:#64748b">🏆 MAX Lv.100</div>'
                 : (()=>{ const _oc=(player.lv||1)+5; return _upgBar("xhrpg.orionGunUp()", 'Lv.'+_ogTo, ogCosts, oglv>=_oc, oglv>=_oc?T('สูงสุด Lv.{a} ที่ผู้เล่น Lv.{b}', {a:_oc, b:player.lv||1}):''); })()}
@@ -8020,7 +10750,7 @@ const xhrpg = (() => {
           ${(()=>{ // ── 🛸🔥 Auto Cannon (Premium Orion Gun) — AOE 3 นัดติด · DMG 1.25× railgun · CD 5s ──
             const _ogeAct = (parseInt(player.orion_gun_expires)||0) > Math.floor(Date.now()/1000);
             const oclv = Math.max(1, Math.min(100, player.orion_cannon_lv|0 || 1));
-            const ocAtk = Math.round(1.875*(50 + 50*oclv)) + 100*(player.lv||1) + _modTotalAtk() + (_cardCB().atk||0); // + ผู้เล่น Lv×100 + ⚔️ ค่ากลาง (sync server 2026-07-16)
+            const ocAtk = Math.round(1.875*(50 + 50*oclv)) + 100*(player.lv||1) + _modTotalAtk() + (_cardCB().atk||0) + _e2FxSum('hda'); // + ผู้เล่น Lv×100 + ⚔️ ค่ากลาง + eq2 DMG ยาน (sync server 2026-07-16)
             if (!_ogeAct) return `<div style="background:#fafaf9;border:1px dashed #d6d3d1;border-radius:8px;padding:7px 8px;margin-bottom:8px">
               <div style="display:flex;justify-content:space-between;align-items:center">
                 <span style="font-size:12px;font-weight:700;color:#78716c">${_ICO_CANNON(15)} Premium Auto Cannon <span style="font-size:8.5px;font-weight:800;color:#fff;background:#a8a29e;padding:1px 6px;border-radius:5px;vertical-align:1px">PREMIUM</span> <span style="font-size:10px;font-weight:400">Lv.${oclv}/100</span></span>
@@ -8033,10 +10763,10 @@ const xhrpg = (() => {
             const ocCosts = [{icon:'💰',need:_ocGold,have:player.gold||0},{icon:'🪵',need:_ocRes,have:player.wood||0},{icon:'🪨',need:_ocRes,have:player.stone||0}];
             return `<div style="background:#fff7ed;border:1px solid #fdba74;border-radius:8px;padding:7px 8px;margin-bottom:8px">
               <div style="display:flex;justify-content:space-between;align-items:center">
-                <span style="font-size:12px;font-weight:700;color:#c2410c">${_ICO_CANNON(15)} Premium Auto Cannon <span style="font-size:8.5px;font-weight:800;color:#fff;background:linear-gradient(90deg,#f59e0b,#d97706);padding:1px 6px;border-radius:5px;vertical-align:1px">PREMIUM</span> <span style="font-size:10px;color:#ea580c;font-weight:400">Lv.${oclv}/100</span></span>
-                <span style="font-size:10px;color:#9a3412">${T('DMG {a}/ชุด · ⏳ {b} วัน', {a:ocAtk.toLocaleString(), b:_ocDays})}</span>
+                <span style="font-size:12px;font-weight:700;color:#c2410c">${_ICO_CANNON(15)} Premium Auto Cannon <span style="font-size:8.5px;font-weight:800;color:#fff;background:linear-gradient(90deg,#f59e0b,#d97706);padding:1px 6px;border-radius:5px;vertical-align:1px">PREMIUM</span> <span style="font-size:10px;color:#ea580c;font-weight:400">Lv.${oclv}/100 · ⏳${_ocDays}d</span></span>
+                <span style="font-size:10px;color:#9a3412">DMG ${ocAtk.toLocaleString()} · AOE ${Math.round((10 + 0.1*(oclv-1))*10)/10}m</span>
               </div>
-              <div style="font-size:9.5px;color:#c2410c;margin:2px 0 4px">${T('ปืนกลหนัก AOE — ยิงชุดละ 3 นัดติด · ระยะ 300m · AOE {a}m · CD 5s · 5⚡/ชุด', {a: Math.round((15 + 0.2*(oclv-1))*10)/10})}</div>
+              <div style="font-size:9.5px;color:#c2410c;margin:2px 0 4px">${T('ปืนกลหนัก 3 นัดติด · ระยะ {r}m · CD 5s · 5⚡/ชุด', {r: Math.round(150 + 0.25*(oclv-1))})}</div>
               <div style="margin-bottom:5px">${_gunToggleBtn('ใช้งาน', player.orion_cannon_on??1, "xhrpg.toggleOrionCannon()")}</div>
               ${oclv >= 100 ? '<div style="background:#f1f5f9;border-radius:7px;padding:5px;text-align:center;font-size:11px;font-weight:700;color:#64748b">🏆 MAX Lv.100</div>'
                 : (()=>{ const _oc=(player.lv||1)+5; return _upgBar("xhrpg.orionCannonUp()", 'Lv.'+_ocTo, ocCosts, oclv>=_oc, oclv>=_oc?T('สูงสุด Lv.{a} ที่ผู้เล่น Lv.{b}', {a:_oc, b:player.lv||1}):''); })()}
@@ -8069,7 +10799,7 @@ const xhrpg = (() => {
               if(!on) return;
               for(let t=1;t<=6;t++){ if(!(mask&(1<<(t-1))) || lv<AMMO_TIER_UNLOCK_LV[t-1]) continue;
                 if(_houseStockT(g,t) >= _ammoHouseCap(t-1,lv)) continue; // คลังเต็ม → ไม่ผลิต
-                ammoDemand += rate; } }); // 1⚡/นัด
+                ammoDemand += (t===1 ? Math.max(100, rate) : rate); } }); // 1⚡/นัด · ⚪ T1 พื้น 100/นาที (sync server)
             let potDemand = 0;
             const _potMask = player.house_prod_potion_mask ?? 1;
             if(onPot) for(let t=1;t<=6;t++){ if(!(_potMask&(1<<(t-1))) || lv<POTION_TIER_UNLOCK_LV[t-1]) continue;
@@ -8103,6 +10833,7 @@ const xhrpg = (() => {
               </button>
             </div>`;
           })()}
+        ${_oraidCardHTML()}
         ${_renderModulePanel('house')}
         <div class="gun-row" style="display:none;background:#fff;border-color:#bfdbfe;flex-wrap:wrap"><!-- ⛔ Premium Titan Beam ยานบิน ปิดใช้งาน (ซ่อน · อัพ railgun ได้ที่แผงไททัน) — เอา display:none ออกเพื่อโชว์กลับ -->
           <span class="gun-icon">⚡</span>
@@ -8142,7 +10873,7 @@ const xhrpg = (() => {
         <div style="font-size:12px;color:#4b5563;margin:6px 0 4px">${(()=>{const e=_ironPerMinAll();return T('ใช้วัตถุดิบประมาณ ⚙️{a} 🟫{b}/นาที',{a:e.iron,b:e.copper});})()}</div>
         <div class="gun-row" style="flex-direction:column;align-items:stretch;padding:0">
           <div style="padding:8px 10px 2px">
-            <span style="font-size:14px;color:#1e293b;display:flex;align-items:center;gap:5px">${_LOG_KNIFE_S} ${T('มีดสั้น')} <span style="font-size:11px;color:#475569">${prodP}${T('/นาที')}</span></span>
+            <span style="font-size:14px;color:#1e293b;display:flex;align-items:center;gap:5px">${_LOG_KNIFE_S} ${T('มีดสั้น')} <span style="font-size:11px;color:#475569">${_prodLbl(prodP)}</span></span>
             <div style="font-size:10px;margin-top:2px">${_prodBreakStr('pistol',ptierMask,AMMO_TIER_UNLOCK_LV)}</div>
           </div>
           ${gauge(gaugePct,'#22c55e',null,_gunState('pistol',ptierMask))}
@@ -8150,7 +10881,7 @@ const xhrpg = (() => {
         </div>
         <div class="gun-row" style="flex-direction:column;align-items:stretch;padding:0">
           <div style="padding:8px 10px 2px">
-            <span style="font-size:14px;color:#1e293b;display:flex;align-items:center;gap:5px">${_LOG_KNIFE_B} ${T('มีดยาว')} <span style="font-size:11px;color:#475569">${prodS}${T('/นาที')}</span></span>
+            <span style="font-size:14px;color:#1e293b;display:flex;align-items:center;gap:5px">${_LOG_KNIFE_B} ${T('มีดยาว')} <span style="font-size:11px;color:#475569">${_prodLbl(prodS)}</span></span>
             <div style="font-size:10px;margin-top:2px">${_prodBreakStr('sniper',stierMask,AMMO_TIER_UNLOCK_LV)}</div>
           </div>
           ${gauge(gaugePct,'#22c55e',null,_gunState('sniper',stierMask))}
@@ -8158,7 +10889,7 @@ const xhrpg = (() => {
         </div>
         <div class="gun-row" style="flex-direction:column;align-items:stretch;padding:0">
           <div style="padding:8px 10px 2px">
-            <span style="font-size:14px;color:#1e293b;display:flex;align-items:center;gap:5px">🦾 ${T('ลูกธนูไททัน')} <span style="font-size:11px;color:#475569">${prodS}${T('/นาที')}</span></span>
+            <span style="font-size:14px;color:#1e293b;display:flex;align-items:center;gap:5px">🦾 ${T('ลูกธนูไททัน')} <span style="font-size:11px;color:#475569">${_prodLbl(prodS)}</span></span>
             <div style="font-size:10px;margin-top:2px">${_prodBreakStr('robot',rtierMask,AMMO_TIER_UNLOCK_LV)}</div>
           </div>
           ${gauge(gaugePct,'#22c55e',null,_gunState('robot',rtierMask))}
@@ -8358,7 +11089,7 @@ const xhrpg = (() => {
     return `width:${box}px;height:${box}px;background-image:url('${url}');background-repeat:no-repeat;background-position:0 0;background-size:${bgSize};image-rendering:pixelated`;
   }
   function _petFrame0Style(key, box) {
-    return _frame0Style(SUM['pet_' + key + '_walk'] || SUM['pet_' + key + '_idle'], `${assetsBaseUrl}assets/hero/pets/pet_${key}_walk.png`, box);
+    return _frame0Style(SUM['pet_' + key + '_walk'] || SUM['pet_' + key + '_idle'], `${baseUrl}assets/hero/pets/pet_${key}_walk.png`, box);
   }
 
   // ── คู่หูวิ่งตาม — แสดงเฉพาะ "ตัวที่สวมอยู่" (pet_skin ปัจจุบัน) · ตัวอื่นที่มี/default ไม่แสดง ──
@@ -8385,7 +11116,6 @@ const xhrpg = (() => {
 
   function _renderCatPanel(p) {
     const catLv  = p.cat_lv || 0;
-    const catOn  = (p.cat_enabled ?? 1) ? true : false;
     const cost   = Math.ceil(tierGold(catLv + 1) * _upgCostMult(catLv + 1)); // ×ตัวคูณทบต้น (sync PHP upgrade_cat)
     const catStone = Math.ceil(tierRes(catLv + 1) * _upgCostMult(catLv + 1));
     const canUpg = catLv < 30 && (p.gold || 0) >= cost && (p.stone || 0) >= catStone;
@@ -8396,10 +11126,11 @@ const xhrpg = (() => {
     const stateLabel = state === 'running' ? T('🐱 กำลังวิ่ง...') : cd > now ? T('⏳ {a} นาที', {a:Math.ceil((cd-now)/60)}) : T('✅ พร้อม');
     const stateColor = state === 'running' ? '#f59e0b' : cd > now ? '#94a3b8' : '#22c55e';
 
-    const toggleBtn = `<button onclick="xhrpg.toggleCat()" style="font-size:11px;padding:3px 10px;border-radius:6px;border:none;cursor:pointer;font-weight:600;background:${catOn?'#22c55e':'#94a3b8'};color:#fff">${catOn?T('✅ ใช้งาน'):T('⏸ ปิด')}</button>`;
+    const toggleBtn = `<span style="font-size:11px;color:#16a34a;font-weight:600">✅ ${T('ทำงานอัตโนมัติ')}</span>`; // เนโกะเปิดตลอด — ป้ายสถานะแทนปุ่มปิด (ถอดปุ่ม toggle)
 
-    // เนโกะ Lv.0 = ฟรีติดตัวทุกคน (Base 50 นัด) → ใช้การ์ดปกติเลย ไม่มีหน้าซื้อแยก
-    const ammoCap = 50 + Math.max(0, catLv) * 5; // sync PHP xhrpg_cat_ammo_cap (Base 50 +5/Lv)
+    // เนโกะ Lv.0 = ฟรีติดตัวทุกคน (Base 100 นัด) → ใช้การ์ดปกติเลย ไม่มีหน้าซื้อแยก
+    const ammoCap = 100 + Math.max(0, catLv) * 5; // sync PHP xhrpg_cat_ammo_cap (Base 100 +5/Lv)
+    const potCap  = 5 + Math.max(0, catLv);       // sync PHP xhrpg_cat_pot_cap (Base 5 +1/Lv)
     let cargoHtml = '';
     if (state === 'running') {
       const tierIcons = ['⚪','🟢','🔵','🟣','🟡','🔴'];
@@ -8421,7 +11152,8 @@ const xhrpg = (() => {
           <span style="font-size:19px">🐱</span>
           <div>
             <div style="font-size:13px;font-weight:500">${T('เนโกะ Lv.{a}', {a:catLv})}</div>
-            <div style="font-size:11px;color:#475569">${T('แบก {a} นัด · ยา 5 ขวด (มีดสั้น+ยาว)', {a:ammoCap})}</div>
+            <div style="font-size:11px;color:#475569">${T('แบก {a} นัด · ยา {b} ขวด (มีดสั้น+ยาว)', {a:ammoCap, b:potCap})}</div>
+            <div style="font-size:10px;color:#94a3b8;margin-top:2px;line-height:1.35">${T('🐱 ขนกระสุน/ยาจากคลังมาเติมให้อัตโนมัติ · ต้องมีของในคลังก่อน')}</div>
           </div>
         </div>
         <div style="display:flex;align-items:center;gap:8px">
@@ -8441,20 +11173,7 @@ const xhrpg = (() => {
     const state    = p.drone_state || 'idle';
     const cd       = p.drone_cooldown || 0;
 
-    if (!active) { // 🔒 ยังไม่เช่า — การ์ดแนวนอนกะทัดรัด (layout เดียวกับนักบวช · 2026-07-14 เดิมแนวตั้งสูงเกิน)
-      return `<div style="border:1.5px solid #a78bfa55;border-radius:10px;padding:10px;margin-bottom:8px;background:#7c3aed08">
-        <div style="font-size:10px;color:#7c3aed;font-weight:600;margin-bottom:5px;letter-spacing:.5px">⭐ PREMIUM</div>
-        <div style="display:flex;align-items:center;gap:6px">
-          <span style="font-size:19px;opacity:.55">🚁</span>
-          <div style="flex:1;min-width:0;opacity:.55">
-            <div style="font-size:13px;font-weight:500">Premium Delivery</div>
-            <div style="font-size:10px;color:#64748b">${T('ส่งมีดสั้น+ยาถึงตัว ไม่ต้องวาร์ปยานบิน')}</div>
-          </div>
-          <span style="background:#fef3c7;color:#92400e;border-radius:8px;padding:3px 8px;font-size:10px;font-weight:700;white-space:nowrap">🔒 49P/10${T('วัน')}</span>
-        </div>
-        <button onclick="xhrpg.togglePanel('premium')" style="width:100%;margin-top:8px;padding:7px;border:none;border-radius:8px;background:#7c3aed;color:#fff;font-size:12px;font-weight:700;cursor:pointer">🌟 ${T('เช่าที่ร้าน PREMIUM')}</button>
-      </div>`;
-    }
+    if (!active) return ''; // ⛔ ปิดขาย 2026-07-17 — ตัดการ์ดโฆษณาเช่าออก (คนที่ยังไม่หมดอายุเห็นแผงปกติจนหมดเวลา)
 
     const ammoCap  = droneAmmoCap(dLv);
     const potCap   = dronePotCap(dLv);
@@ -8545,7 +11264,7 @@ const xhrpg = (() => {
     }
     const daysLeft = Math.ceil((prExp - _nowS) / 86400);
     const cost = priestUpgCost(prLv);
-    const _sv = k => 20 + (prLv - 1) * (k === 'def' ? 2 : 3); // เริ่ม +20 · +3/Lv (DEF +2/Lv) — มิเรอร์ idle_logic
+    const _sv = k => Math.round((20 + (prLv - 1) * (k === 'def' ? 2 : 3)) * 3.0); // ×3.0 — เริ่ม +60 (มิเรอร์ idle_logic · เจ้าของสั่ง 2026-07-22 เดิม ×1.5)
     return `<div style="border:1.5px solid #a78bfa55;border-radius:10px;padding:10px;margin-bottom:8px;background:#7c3aed08">
       <div style="font-size:10px;color:#7c3aed;font-weight:600;margin-bottom:5px;letter-spacing:.5px">⭐ PREMIUM</div>
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px">
@@ -8564,8 +11283,9 @@ const xhrpg = (() => {
         <div style="background:#fff;border-left:3px solid #7dd3fc;border-radius:0 6px 6px 0;padding:4px 8px;font-size:10.5px;color:#334155">🛡️ DEF 30s <b style="float:right;color:#38bdf8">+${_sv('def')}</b></div>
         <div style="background:#fff;border-left:3px solid #0ea5e9;border-radius:0 6px 6px 0;padding:4px 8px;font-size:10.5px;color:#334155">🔰 ${T('เกราะ')} <b style="float:right;color:#0ea5e9">+${_sv('armor')}</b></div>
         <div style="background:#fff;border-left:3px solid #f59e0b;border-radius:0 6px 6px 0;padding:4px 8px;font-size:10.5px;color:#334155">⚡ ${T('พลังงานหุ่น')} <b style="float:right;color:#f59e0b">+${_sv('energy')}</b></div>
-        <div style="background:#fff;border-left:3px solid #a78bfa;border-radius:0 6px 6px 0;padding:4px 8px;font-size:10.5px;color:#334155">🧱 MAX ${T('เกราะ')} <b style="float:right;color:#a78bfa">+${100 + (prLv - 1) * 5}</b></div>
+        <div style="background:#fff;border-left:3px solid #a78bfa;border-radius:0 6px 6px 0;padding:4px 8px;font-size:10.5px;color:#334155">🧱 MAX ${T('เกราะ')} <b style="float:right;color:#a78bfa">+${Math.round((100 + (prLv - 1) * 5) * 3.0)}</b></div>
       </div>
+      <div style="margin-bottom:5px">${_gunToggleBtn('ใช้งาน', (p.priest_on ?? 1) ? 1 : 0, "xhrpg.togglePriest()")}</div>
       ${_upgBar("xhrpg.priestUp()", 'Lv.'+(prLv+1), [{icon:'🪵',need:cost.wood,have:p.wood||0},{icon:'🌿',need:cost.herb,have:p.herb||0},{icon:'💰',need:cost.gold,have:p.gold||0}], prLv>=100, 'MAX Lv.100')}
     </div>`;
   }
@@ -8603,7 +11323,7 @@ const xhrpg = (() => {
     const cost = archerUpgCost(arLv);
     const dmg = Math.round((80 + (arLv - 1) * 30) * 1.8) + _modTotalAtk() + (_cardCB().atk||0); // + ⚔️ ค่ากลาง (sync server 2026-07-16 · ก่อนคูณ Ragnalok — แผงโชว์ฐาน)
     const rng = Math.round((150 + 0.25 * (arLv - 1)) * 10) / 10;
-    const aoe = 15 + (arLv - 1);
+    const aoe = Math.round((10 + 0.1 * (arLv - 1)) * 10) / 10; // 10m + 0.1m/Lv (มาตรฐาน AOE รวม · sync server)
     const on = (p.archer_on ?? 1) ? 1 : 0;
     return `<div style="border:1.5px solid #16a34a55;border-radius:10px;padding:10px;margin-bottom:8px;background:#16a34a08">
       <div style="font-size:10px;color:#16a34a;font-weight:600;margin-bottom:5px;letter-spacing:.5px">⭐ PREMIUM</div>
@@ -8664,6 +11384,8 @@ const xhrpg = (() => {
     const axModAtk = _modTotalAtk(); // ⚔️ ค่ากลาง: ATK รวมโมดูลทุกอาวุธ
     const axReach  = (8 + _modPoints(_axmods.sight) * 0.10).toFixed(1);
     const axModTxt = axModAtk > 0 ? ` <span style="color:#475569">${T('(+{a} โมดูล)',{a:axModAtk})}</span>` : '';
+    const axAllStat = _dvAllStatC(); // 🪓 ขวานบวก ALL STAT ผู้เล่นแล้ว (sync xhrpg_robot_axe_dmg)
+    const axStatTxt = ` <span style="color:#0d9488">${T('(+{a} STAT)',{a:axAllStat})}</span>`;
     const _rgmods  = _pmodsObj('robot_gun');
     const rgModAtk = _modTotalAtk(); // ⚔️ ค่ากลาง: ATK รวมโมดูลทุกอาวุธ
     const rgModRng = _modPoints(_rgmods.sight) * 0.30;
@@ -8680,7 +11402,7 @@ const xhrpg = (() => {
     const gRange    = ((87 + GUN_RANGE_BONUS_PX + (glv-1)*0.2) / 3 + rgModRng).toFixed(1);
     const maxRAmmo  = robotAmmoMax();
     const rAmmo     = player.ammo_robot_gun ?? 0;
-    const railRange = ((180 + (rlv-1)*0.2 + _hwRailRangeBonus()) / 3 + rlModRng).toFixed(1);
+    const railRange = ((180 + (rlv-1)*0.2 + _hwRailRangeBonus() + _e2FxSum('brg')) / 3 + rlModRng).toFixed(1); // + ⚔️ eq2 ระยะบีม (sync server hwRailRange)
     const railAtk   = Math.round((80 + (rlv-1)*30)*1.8);
     const charge      = Math.round(player.railgun_charge ?? 0);
     const chargeColor = charge >= 100 ? '#facc15' : '#38bdf8';
@@ -8698,6 +11420,7 @@ const xhrpg = (() => {
       ${_renderDronePanel(player)}
       ${_renderPriestPanel(player)}
       ${_renderArcherPanel(player)}
+      ${_renderKnightPanel(player)}
       <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:8px;margin-bottom:8px">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
           <span style="font-size:13px;color:#1e3a8a">${T('🤖 ไททัน Lv.{a}/100', {a:'<b>'+robotLv+'</b>'})} &nbsp; ⚡<b>${robotE}</b>/${robotEMax}</span>
@@ -8716,7 +11439,8 @@ const xhrpg = (() => {
           <span class="gun-icon">🪓</span>
           <div class="gun-info">
             <div class="gun-name">${T('ขวาน')} <span class="gun-lv">Lv.${alv}</span></div>
-            <div class="gun-sub">${T('ATK {a} | ระยะ {b}m | ไม่ใช้มีดสั้น', {a:(30+(alv-1)*10 + axModAtk)+axModTxt, b:axReach})}</div>
+            <div class="gun-sub">${T('ATK {a} | ระยะ {b}m | ไม่ใช้มีดสั้น', {a:(30+(alv-1)*10 + axModAtk + axAllStat)+axModTxt+axStatTxt, b:axReach})}</div>
+            <div class="gun-sub" style="color:#c2410c">${T('💥 ฟันวงกว้าง — โดนพร้อมกัน {n} ตัว ในระยะ {m}m', {n:AXE_AOE_N, m:AXE_AOE_M})}</div>
           </div>
           <div style="width:100%">${_upgBar("xhrpg.upgradeRobot('axe')", 'Lv.'+(alv+1), [{icon:'💰',need:acost,have:player.gold||0},{icon:'🪨',need:acostStone,have:player.stone||0}], alv>=100, 'MAX Lv.100')}</div>
         </div>
@@ -8827,14 +11551,7 @@ const xhrpg = (() => {
     }, 'json');
   }
 
-  function toggleCat() {
-    const cur = (player.cat_enabled ?? 1) ? 1 : 0;
-    $.post(baseUrl + 'xhrpg_upgrade.php', { line_uid: player.line_uid, action: 'toggle_cat', value: cur ? 0 : 1 }, d => {
-      if (d.error) return alert(d.error);
-      player = d.player;
-      renderRobot();
-    }, 'json');
-  }
+  function toggleCat() { /* 🐱 เนโกะเปิดตลอด — ปุ่มปิดถูกถอด (เจ้าของสั่ง 2026-07-23) · เก็บฟังก์ชันไว้กัน export พัง */ }
 
   function toggleDrone() {
     const cur = (player.drone_enabled ?? 1) ? 1 : 0;
@@ -8855,6 +11572,123 @@ const xhrpg = (() => {
   }
 
   // ⛪ ค่าอัพนักบวช (sync PHP xhrpg_priest_upgrade_cost): ไม้+สมุนไพร+Gold สูตรหลัก
+  // ⚔️ icon อัศวิน = crop เฟรมหน้า sprite จริง (knight_idle) · fallback ⚔️
+  function _knightIconHtml(D, op) {
+    const sh = SUM['knight_idle'];
+    if (sh && sh.complete && sh.naturalWidth && sh.naturalHeight) {
+      const frames = Math.max(1, Math.round(sh.naturalWidth / sh.naturalHeight));
+      return `<div style="width:${D}px;height:${D}px;flex:none;background:url('${sh.src}') 0 0/${frames * D}px ${D}px no-repeat;image-rendering:pixelated${op ? ';opacity:' + op : ''}"></div>`;
+    }
+    return `<span style="font-size:${Math.round(D * 0.8)}px">⚔️</span>`;
+  }
+  function _renderKnightPanel(p) {
+    const _nowS = Math.floor(Date.now() / 1000);
+    const knExp = parseInt(p.knight_expires) || 0;
+    if (knExp <= _nowS) return ''; // ยังไม่เช่า/หมดอายุ — ร้านอยู่หน้า PREMIUM
+    const knLv = Math.max(1, parseInt(p.knight_lv) || 1);
+    const daysLeft = Math.ceil((knExp - _nowS) / 86400);
+    const cost = knightUpgCost(knLv);
+    const _sv = k => Math.round((20 + (knLv - 1) * (k === 'def' ? 2 : 3)) * 3.0); // ×3.0 ค่าเท่านักบวช (มิเรอร์ idle_logic อัศวิน · เจ้าของสั่ง 2026-07-22 เดิม ×1.5)
+    const _aura = knLv * 100 + _modTotalAtk() + (_cardCB().atk || 0); // 💠 DMG = Lv×100 + ⚔️ ค่ากลาง (sync server)
+    return `<div style="border:1.5px solid #38bdf855;border-radius:10px;padding:10px;margin-bottom:8px;background:#0ea5e908">
+      <div style="font-size:10px;color:#0284c7;font-weight:600;margin-bottom:5px;letter-spacing:.5px">⭐ PREMIUM</div>
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px">
+        <div style="display:flex;gap:6px;align-items:center">
+          ${_knightIconHtml(28)}
+          <div>
+            <div style="font-size:13px;font-weight:500">${T('อัศวิน')} Lv.${knLv}</div>
+            <div style="font-size:10px;color:#64748b">${T('สายบุก — วิ่งประชิดมอน ดึงมากองให้ Hero ถล่ม')}</div>
+          </div>
+        </div>
+        <div style="font-size:11px;color:${daysLeft <= 2 ? '#dc2626' : '#16a34a'}">${T('หมด {a} วัน', {a: daysLeft})}</div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-bottom:6px">
+        <div style="background:#fff;border-left:3px solid #38bdf8;border-radius:0 6px 6px 0;padding:4px 8px;font-size:10.5px;color:#334155">💠 Frost Aura ${Math.round((10 + 0.1 * ((parseInt(player.knight_lv) || 1) - 1)) * 10) / 10}m <b style="float:right;color:#0284c7">${_aura.toLocaleString()}</b></div>
+        <div style="background:#fff;border-left:3px solid #16a34a;border-radius:0 6px 6px 0;padding:4px 8px;font-size:10.5px;color:#334155">🧲 ${T('ดึงมอนทุก 5 วิ')} <b style="float:right;color:#16a34a">12</b></div>
+        <div style="background:#fff;border-left:3px solid #7dd3fc;border-radius:0 6px 6px 0;padding:4px 8px;font-size:10.5px;color:#334155">🛡️ DEF 30s <b style="float:right;color:#38bdf8">+${_sv('def')}</b></div>
+        <div style="background:#fff;border-left:3px solid #0ea5e9;border-radius:0 6px 6px 0;padding:4px 8px;font-size:10.5px;color:#334155">🔰 ${T('เกราะ')} <b style="float:right;color:#0ea5e9">+${_sv('armor')}</b></div>
+      </div>
+      <div style="margin-bottom:5px">${_gunToggleBtn('ใช้งาน', (p.knight_on ?? 1) ? 1 : 0, "xhrpg.toggleKnight()")}</div>
+      ${_upgBar("xhrpg.knightUp()", 'Lv.'+(knLv+1), [{icon:'⚙️',need:cost.iron,have:p.iron||0},{icon:'🟫',need:cost.copper,have:p.copper||0},{icon:'💰',need:cost.gold,have:p.gold||0}], knLv>=100, 'MAX Lv.100')}
+    </div>`;
+  }
+  // 🔘 เปิด/ปิดผู้ติดตาม (เจ้าของสั่ง 2026-07-29) — ค่าเริ่มต้นเปิด · มิเรอร์ toggleArcher ทุกจุด
+  function togglePriest() {
+    $.post(baseUrl + 'xhrpg_upgrade.php', { line_uid: player.line_uid, action: 'priest_toggle' }, d => {
+      if (d.error) return alert(d.error);
+      player = d.player; renderRobot();
+    }, 'json');
+  }
+  function toggleKnight() {
+    $.post(baseUrl + 'xhrpg_upgrade.php', { line_uid: player.line_uid, action: 'knight_toggle' }, d => {
+      if (d.error) return alert(d.error);
+      player = d.player; renderRobot();
+    }, 'json');
+  }
+  function knightUpgCost(lv) {
+    const t = lv + 1, m = _upgCostMult(t), r = Math.ceil(tierRes(t) * m);
+    return { iron: r, copper: r, gold: Math.ceil(tierGold(t) * m) };
+  }
+  // ══ 🎟️ รับโค้ด — ช่องเดียวรับได้ 2 แบบ (เจ้าของสั่ง 2026-07-26) ═══════════════════════════════
+  //   RGK-XXXXX-XXXXX      → xhrpg_migrate.php  (โค้ดย้ายจากเกมเดิม · P เข้าทันที)
+  //   RGV-XXXX-XXXX-XXXX   → xhrpg_voucher.php  (บัตรของขวัญ · P เข้าผ่าน channel ~1 วิ)
+  //   ⚠️ ฝั่ง server ไม่แตะเลย — client แค่ดูคำนำหน้าแล้วเลือกปลายทางให้ถูก
+  const _rdKind = c => /^RGK-/.test(c) ? 'migrate' : (/^RGV-/.test(c) ? 'voucher' : '');
+  // การ์ดผลลัพธ์ — ต้องเห็นชัดว่า "ได้รับกี่ P" (เจ้าของสั่ง · เดิมขึ้นแค่บรรทัดใน log ที่เลื่อนหายง่าย)
+  //   pending=true (บัตรของขวัญ) → บอกว่าแต้มเข้าในไม่กี่วินาที · pending=false (โค้ดเกมเดิม) → เข้าแล้ว
+  function _rdOk(pts, pending) {
+    document.getElementById('rd-ok')?.remove();
+    const ov = document.createElement('div'); ov.id = 'rd-ok';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.72);z-index:10020;display:flex;align-items:center;justify-content:center;padding:16px';
+    ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+    ov.innerHTML = `<div style="background:#fff;border-radius:16px;max-width:320px;width:100%;padding:22px 18px 16px;text-align:center;box-shadow:0 12px 40px rgba(2,8,23,.5)">
+        <div style="font-size:46px;line-height:1">🎉</div>
+        <div style="font-size:21px;font-weight:800;color:#15803d;margin-top:8px">${T('ได้รับ {n} P แล้ว!', { n: (pts | 0).toLocaleString() })}</div>
+        <div style="font-size:11.5px;color:#64748b;margin-top:8px;line-height:1.55">${pending ? T('แต้มจะเข้ากระเป๋าภายในไม่กี่วินาที') : T('แต้มเข้ากระเป๋าเรียบร้อยแล้ว')}</div>
+        <button onclick="document.getElementById('rd-ok').remove()" style="margin-top:14px;width:100%;padding:9px 0;border:none;border-radius:10px;background:#16a34a;color:#fff;font-size:13px;font-weight:800;cursor:pointer">${T('ตกลง')}</button>
+      </div>`;
+    document.body.appendChild(ov);
+  }
+  // ยิงโค้ดไปปลายทางที่ถูกต้อง · cb(ok) ให้ผู้เรียกเคลียร์ช่องกรอกเอง
+  function _rdSubmit(raw, cb) {
+    const code = String(raw || '').trim().toUpperCase();
+    if (!code) { if (cb) cb(false); return; }
+    const kind = _rdKind(code);
+    if (!kind) { alert(T('รูปแบบโค้ดไม่ถูกต้อง — ต้องขึ้นต้นด้วย RGK- หรือ RGV-')); if (cb) cb(false); return; }
+    const url = kind === 'migrate' ? 'xhrpg_migrate.php' : 'xhrpg_voucher.php';
+    const body = kind === 'migrate'
+      ? { line_uid: player.line_uid, session_token: sessionToken || '', lang: LANG(), action: 'redeem', code: code }
+      : { line_uid: player.line_uid, session_token: sessionToken || '', lang: LANG(), action: 'redeem', code: code };
+    $.post(baseUrl + url, body)
+      .done(res => {
+        let d; try { d = typeof res === 'string' ? JSON.parse(res) : res; } catch (e) { d = null; }
+        if (!d || !d.ok) { alert((d && d.error) || T('โหลดไม่สำเร็จ')); if (cb) cb(false); return; }
+        if (kind === 'migrate') {          // P เข้า blob ทันที (server คืน player มาแล้ว)
+          if (d.player) player = d.player;
+          updateHUD();
+          _rdOk(d.pts | 0, false);
+        } else {                            // บัตรของขวัญ — P มาทาง channel poll ถัดไป
+          _rdOk(d.face | 0, true);
+        }
+        addLog([{ type: 'levelup', msg: d.msg || '' }]);
+        if (cb) cb(true);
+      })
+      .fail(() => { alert(T('โหลดไม่สำเร็จ')); if (cb) cb(false); });
+  }
+  function migrateRedeem() { // ปุ่ม 🎟️ CODE หัวหน้า Premium — รับทั้งโค้ดเกมเดิมและบัตรของขวัญ
+    if (!player) return;
+    const code = window.prompt(T('ใส่โค้ดที่ได้รับ (RGK-XXXXX-XXXXX หรือ RGV-XXXX-XXXX-XXXX)'));
+    if (code === null) return;             // กด Cancel = เงียบ (ไม่ใช่โค้ดว่าง)
+    _rdSubmit(code, null);
+  }
+  function knightUp() {
+    $.post(baseUrl + 'xhrpg_upgrade.php', { line_uid: player.line_uid, action: 'knight_up', lang: LANG() }, d => {
+      if (d.error) return alert(d.error);
+      player = d.player;
+      renderRobot();
+      addLog([{type:'levelup', msg: d.msg}]);
+    }, 'json');
+  }
   function priestUpgCost(lv) {
     const t = lv + 1, m = _upgCostMult(t), r = Math.ceil(tierRes(t) * m);
     return { wood: r, herb: r, gold: Math.ceil(tierGold(t) * m) };
@@ -8933,26 +11767,28 @@ const xhrpg = (() => {
     const items = [
       { key:'offline',        icon:'🌙', name:'PREMIUM OFFLINE 24H REWARD', desc:T('ฟาร์มออฟไลน์สะสมได้สูงสุด 24 ชม. (ปกติ 8 ชม.) + โบนัส +35% EXP/Gold/แร่ 5 ชนิด บวกเพิ่มจากรางวัลออฟไลน์'), field:'premium_offline_expires', price:99, color:'#4f46e5' }, // ⭐ ไอเทมแรกของร้าน (คำขอเจ้าของ)
       { key:'exp',            icon:'⚡',  name:'Premium EXP +35%',  desc:T('รับ EXP เพิ่ม 35% ทุกการเอาชนะมอนสเตอร์'),           field:'premium_exp_expires',   price:35, color:'#7c3aed' },
-      { key:'drop',           icon:'💎',  name:'PREMIUM DROP +100%', desc:T('ดรอปของหายาก ×2 — การ์ด/ไข่/โมดูล/เพชร/กล่อง/ของ MVP · ออนไลน์+ออฟไลน์ (ไม่รวมแร่/พืช/ยา)'), field:'premium_drop_expires', price:199, color:'#0891b2' },
+      { key:'drop',           icon:'💎',  name:'PREMIUM DROP +100%', desc:T('ดรอปของหายาก ×2 — การ์ด/ไข่/โมดูล/เพชร/กล่อง/ของ MVP · ออนไลน์+ออฟไลน์ (ไม่รวมแร่/พืช/ยา)'), field:'premium_drop_expires', price:199, color:'#0891b2', off:1 }, // ⛔ ปิดขาย 2026-07-28 — ซ่อนการ์ดจากคนที่ไม่มีของ · คนที่ยังไม่หมดอายุเห็นเวลาคงเหลือแต่ปุ่มเป็น "ปิดขายแล้ว" (server กันซ้ำที่ PREMIUM_ITEMS disabled)
       { key:'gold',           icon:'💰',  name:'Premium Gold +35%', desc:T('รับ Gold เพิ่ม 35% ทุกการเอาชนะมอนสเตอร์'),          field:'premium_gold_expires',  price:35, color:'#b45309' },
       { key:'miner',          icon:'⛏️', name:'Premium Miner',      desc:T('สุ่มได้แร่ 1-3 ชิ้น (ไม้/หิน/เหล็ก/ทองแดง/พืช) ทุกการเอาชนะมอน + ปลดเหมือง #4 ที่ยานบิน'), field:'premium_miner_expires', price:69, color:'#0369a1' },
-      { key:'drone_delivery', icon:'🚁',  name:'Premium Delivery',         desc:T('ส่งมีดสั้น+ยาถึงตัวโดยไม่ต้องวาร์ปกลับยานบิน | อัพเกรดได้ Lv.1-30'), field:'drone_expires', price:49, color:'#7c3aed' },
+      { key:'drone_delivery', icon:'🚁',  name:'Premium Delivery',         desc:T('ส่งมีดสั้น+ยาถึงตัวโดยไม่ต้องวาร์ปกลับยานบิน | อัพเกรดได้ Lv.1-30'), field:'drone_expires', price:49, color:'#7c3aed', off:1 }, // ⛔ ปิดขาย 2026-07-17 — ซ่อนจากคนไม่มีของ · คนยังไม่หมดอายุเห็นเวลาคงเหลือแต่ต่อไม่ได้
       { key:'robot_railgun',  icon:'⚡',  name:'Premium Titan Beam',   desc:T('ไททันยิง Premium Titan Beam | ชาร์จ 5s/นัด | อัพเกรดได้ Lv.1-100'), field:'robot_railgun_expires', price:39, color:'#b45309', offAtk:1 },
       { key:'orion_gun',      icon:_ICO_CANNON(20), name:'Premium Orion Gun', desc:T('ปลดล็อก Auto Cannon ยานบิน — ปืนกลหนัก AOE ยิงชุดละ 3 นัดติด | DMG 1.25× Rail Gun | CD 5s | อัพเกรดได้ Lv.1-100'), field:'orion_gun_expires', price:79, color:'#ea580c', offAtk:1 },
       { key:'priest',         icon:'⛪', name:'Premium Priest', desc:T('นักบวชเดินตาม — ทุกวินาที เลือกสกิลตามที่พร่อง (Heal ก่อน): 💚Heal HP / 💧Heal MP / 🛡️บัฟ DEF 30s (เรา+หุ่น+สัตว์เลี้ยง) / 🔰ฟื้นเกราะ / ⚡เติมพลังหุ่น / 🧱บัฟ MAX เกราะ | อัพเกรดได้ Lv.1-100'), field:'priest_expires', price:149, color:'#7c3aed', offAtk:1 },
       { key:'archer',         icon:'🏹', name:'Premium Elf Legolas Archer', desc:T('นักธนูเดินตาม — ยิงธนูใส่มอนทุกวินาที · DMG = Premium Titan Beam · 💥 ธนูระเบิดทุก 3 นัด DMG×3 AOE | ระยะ 150m +0.25m/Lv | อัพเกรดได้ Lv.1-100'), field:'archer_expires', price:149, color:'#16a34a', offAtk:1 },
+      { key:'knight',         icon:'⚔️', name:'Premium Skeleton Knight', desc:T('อัศวินสาย TANK — บุกประชิดมอน · 🧲 ดึงมอน 12 ตัวมากองทุก 5 วิ · 💠 Frost Aura 30m ทุกวินาที · 🛡️ บัฟ DEF + 🔰 เสริมเกราะให้ Hero (ค่าเท่านักบวช ซ้อนกันได้) | อัพเกรดได้ Lv.1-100 (⚙️เหล็ก+🟫ทองแดง+💰G)'), field:'knight_expires', price:149, color:'#0284c7', offAtk:1 },
     ];
     const cards = items.map(it => {
       const exp = fmtExpiry(player[it.field] || 0);
       const active = !!exp;
-      const canBuy = pts >= it.price;
+      if (it.off && !active) return ''; // ⛔ ปิดขาย + ไม่มีของ → ไม่โชว์การ์ดเลย
+      const canBuy = pts >= it.price && !it.off;
       const activeHtml = active ? `
         <div style="margin-top:8px;padding-top:8px;border-top:1px solid ${it.color}33">
           <div style="font-size:12px;color:${it.color};font-weight:600">${T('✅ กำลังใช้งาน')}</div>
           <div style="font-size:13px;color:#374151;margin-top:2px">${T('หมดอายุ {a}', {a: exp.date})}</div>
           <div style="font-size:11px;color:#4b5563">${exp.remain}</div>
         </div>` : '';
-      const btnLabel = active ? T('+ ต่อเวลา 10 วัน ({a} P)', {a: it.price}) : T('ซื้อ 10 วัน ({a} P)', {a: it.price});
+      const btnLabel = it.off ? T('⛔ ปิดขายแล้ว') : (active ? T('+ ต่อเวลา 10 วัน ({a} P)', {a: it.price}) : T('ซื้อ 10 วัน ({a} P)', {a: it.price}));
       return `<div style="background:#fff;border:1px solid ${active?it.color+'66':'#94a3b8'};border-radius:12px;padding:12px 14px;margin-bottom:10px;${active?'background:'+it.color+'0a':''}">
         <!-- แถวหัว: icon + ชื่อ + ป้ายราคา · desc ย้ายลงมาข้างล่าง = ได้ความกว้างเต็มการ์ด
              (เดิม desc อยู่ในแถวเดียวกับป้ายราคา white-space:nowrap → บนมือถือคอลัมน์เหลือแคบมาก ข้อความตกบรรทัดละคำ) -->
@@ -9037,55 +11873,112 @@ const xhrpg = (() => {
         <div style="height:56px;display:flex;align-items:center;justify-content:center">${o.img}</div>
         <div style="height:17px;font-size:11.5px;font-weight:600;color:#1e293b;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${o.name}</div>
         <div style="height:16px;font-size:10.5px;font-weight:600;margin:2px 0;display:flex;align-items:center;justify-content:center">${o.priceHtml}</div>
-        <div style="height:28px;margin-bottom:4px;display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:0 3px;line-height:1.15;overflow:hidden">${o.bonusHtml || ''}</div>
         <div style="margin-top:auto">${o.mainBtn}</div>
-        <div style="height:25px;margin-top:3px">${o.rerollBtn || ''}</div>
       </div>`;
-    const skinCards = SKIN_DEFS.map(sk => {
+    // ── 🎯 แถบ STAT กลาง (นอกการ์ด) — ค่าเดียวต่อผู้เล่น ไม่ผูกกับตัวสกิน · ดู docs/skin-lv-design.md ──
+    //    🎯 SKIN LV: เพดาน = ยอดสะสม P ของสกินทุกใบในหมวดนั้น → ซื้อใบไหนก็ดันเลเวลเสมอ
+    //    ค่าที่โชว์ = max(ค่าที่เลือกไว้, เพดานปัจจุบัน) — เลเวลขึ้นแล้ว STAT ขยับเอง ไม่ต้องจ่ายซ้ำ (มิเรอร์ server)
+    const _statBar = (roll, ceil, fn, accent, price, xp) => {
+      let cur;
+      const _eff = roll ? Math.max(roll.v | 0, ceil | 0) : 0;   // ค่าจริงที่ได้รับ (ขยับตามเลเวลอัตโนมัติ)
+      if (roll) {
+        const t = _skinTier(_eff);
+        cur = `<span style="font-size:12.5px;font-weight:800;color:${t.c};background:${t.bg};border-radius:6px;padding:2px 9px;${t.glow?'box-shadow:0 0 6px #eab308;':''}">+${_eff} ${roll.label}</span>`;
+      } else {
+        cur = `<span style="font-size:11px;color:#94a3b8">${T('ยังไม่มี')}</span>`;
+      }
+      const _lbl = (price | 0) > 0 ? T('🎯 เลือก STAT {a}P', {a: price | 0}) : T('🎯 เลือก STAT (ครั้งแรกฟรี)');
+      const act = ceil > 0
+        ? `<button onclick="xhrpg.${fn}()" style="padding:4px 11px;border-radius:8px;border:1px solid #f59e0b;background:${(price|0) > 0 ? '#fffbeb' : '#dcfce7'};color:${(price|0) > 0 ? '#b45309' : '#15803d'};font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap">${_lbl}</button>`
+        : `<span style="font-size:10px;color:#94a3b8">${T('ต้องมีสกินอย่างน้อย 1 ตัวก่อน')}</span>`;
+      // 🆙 แถบเลเวล: LV ปัจจุบัน + หลอดความคืบหน้าไปขั้นถัดไป (คิดจากช่วงระหว่าง 2 ขั้น ไม่ใช่จาก 0)
+      const _xp = xp | 0, _lv = _skinLv(_xp), _nx = _skinNextRow(_xp);
+      const _cy = SKIN_LV_TABLE.filter(r => _xp >= r[1]).pop() || SKIN_LV_TABLE[0];
+      const _pct = _nx ? Math.max(2, Math.min(100, Math.round((_xp - _cy[1]) / (_nx[1] - _cy[1]) * 100))) : 100;
+      const lvBar = `<div style="width:100%;margin-top:5px">
+          <div style="display:flex;align-items:center;gap:6px;font-size:10px;color:#475569;margin-bottom:3px">
+            <b style="color:${accent};font-size:10.5px">SKIN LV ${_lv}</b>
+            <span>${T('สะสม {a} P', {a: _xp.toLocaleString()})}</span>
+            <span style="flex:1"></span>
+            <span>${_nx ? T('อีก {a} P → LV {b} (+{c})', {a: (_nx[1] - _xp).toLocaleString(), b: _nx[0], c: _nx[2]}) : T('เต็มขั้นสูงสุด')}</span>
+          </div>
+          <div style="height:5px;border-radius:99px;background:#e2e8f0;overflow:hidden"><div style="height:100%;width:${_pct}%;background:${accent}"></div></div>
+        </div>`;
+      return `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;border:1px dashed ${accent}66;border-radius:9px;padding:6px 9px;margin-bottom:9px;background:#ffffffcc">
+          <span style="font-size:11px;font-weight:800;color:${accent}">${T('🎯 STAT ติดตัว')}</span>${cur}
+          <span style="font-size:10px;color:#6b7280">${T('เพดาน +{a}', {a: ceil})}</span>
+          <span style="flex:1;min-width:4px"></span>${act}${lvBar}
+        </div>`;
+    };
+    // ── 🗂️ ตัวช่วยร้าน 2 ชั้น (ใช้ร่วมทั้ง 3 ร้าน: ไททัน / ฮีโร่ / สัตว์เลี้ยง) ──
+    //    การ์ดกลุ่มใช้รูป "ตัวที่แพงสุดในกลุ่ม" คิดสดจาก price → เพิ่มสกินแพงกว่าแล้วรูปเปลี่ยนเอง ไม่ต้องแก้มือ
+    const _grpOf = (x, groups) => x.g || groups[0].key;   // ของเดิมไม่มี field g → ตกกลุ่มแรก
+    const _grpBar = (kind, gname, accent) => `<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+        <button onclick="xhrpg.skinGrpBack('${kind}')" style="border:1px solid ${accent}55;background:#fff;color:${accent};border-radius:8px;padding:3px 11px;font-size:11px;font-weight:700;cursor:pointer">← ${T('กลับ')}</button>
+        <span style="font-size:12.5px;font-weight:800;color:${accent};letter-spacing:.6px">${_escHtml(gname)}</span>
+      </div>`;
+    // 🆓 การ์ดตัวฟรี — ใช้ "โครงเดียวกับการ์ดกลุ่ม" เพื่อวางเรียงแถวเดียวกันได้ (เจ้าของสั่ง 2026-07-28 "ที่ว่างเหลือเยอะ")
+    //    ⚠️ ไม่ใส่ onclick ที่กล่อง (ต่างจากการ์ดกลุ่ม) — กดกลุ่ม = แค่เปลี่ยนหน้า แต่กดตัวฟรี = **เปลี่ยนสกินจริง**
+    //       ถ้าทั้งกล่องกดได้ นิ้วโดนตอนเลื่อนจอ = สกินหลุดโดยไม่ตั้งใจ → ให้กดที่ปุ่มเท่านั้น
+    const _grpFreeCard = (name, img, isOn, useBtnHtml, accent) => `
+      <div style="background:#fff;border:1.5px solid ${isOn ? '#16a34a' : '#e2e8f0'};border-radius:11px;padding:9px 10px;display:flex;gap:10px;align-items:center">
+        <div style="flex:none;width:56px;height:56px;display:flex;align-items:center;justify-content:center">${img}</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:12.5px;font-weight:800;color:#1e293b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${name}${isOn ? ' <span style="color:#16a34a">✓</span>' : ''}</div>
+          <div style="font-size:10px;font-weight:700;color:#16a34a;margin:2px 0 4px">${T('ฟรี')}</div>
+          ${isOn ? `<div style="font-size:10px;color:#94a3b8">${T('✓ ใช้อยู่')}</div>` : useBtnHtml}
+        </div>
+      </div>`;
+    const _grpCards = (kind, groups, list, ownedArr, curKey, imgOf, accent, freeCard) =>
+      `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(158px,1fr));gap:8px">` + (freeCard || '') + groups.map(g => {
+        const mem = list.filter(x => _grpOf(x, groups) === g.key);
+        if (!mem.length) return '';
+        const top  = mem.reduce((a, b) => ((b.price | 0) > (a.price | 0) ? b : a), mem[0]);
+        const own  = mem.filter(x => ownedArr.indexOf(x.key) >= 0).length;
+        const here = mem.some(x => x.key === curKey);   // สกินที่สวมอยู่อยู่ในกลุ่มนี้ → ติดขอบเขียว หาเจอทันที
+        const lo = Math.min(...mem.map(x => x.price | 0)), hi = Math.max(...mem.map(x => x.price | 0));
+        return `<div onclick="xhrpg.skinGrpOpen('${kind}','${g.key}')" style="cursor:pointer;background:#fff;border:1.5px solid ${here ? '#16a34a' : '#e2e8f0'};border-radius:11px;padding:9px 10px;display:flex;gap:10px;align-items:center">
+          <div style="flex:none;width:56px;height:56px;display:flex;align-items:center;justify-content:center">${imgOf(top)}</div>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:12.5px;font-weight:800;color:#1e293b;letter-spacing:.4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_escHtml(g.name)}${here ? ' <span style="color:#16a34a">✓</span>' : ''}</div>
+            <div style="font-size:10px;color:#64748b;margin-top:2px">${T('{n} ตัว', { n: mem.length })} · ${T('มี {a}/{b}', { a: own, b: mem.length })}</div>
+            <div style="font-size:10px;font-weight:700;color:${accent};margin-top:1px">🅿️ ${lo === hi ? lo.toLocaleString() : lo.toLocaleString() + ' - ' + hi.toLocaleString()} P</div>
+          </div>
+          <div style="flex:none;color:#cbd5e1;font-size:16px">›</div>
+        </div>`;
+      }).join('') + `</div>`;
+
+    // 🤖 ไททัน: ตัดสกินปิดขายที่ยังไม่มีออกก่อน แล้วค่อยนับกลุ่ม/วาดการ์ด (ไม่งั้นตัวเลข "มี x/y" เพี้ยน)
+    const _robotList = SKIN_DEFS.filter(sk => !(sk.disabled && _ownedSkins.indexOf(sk.key) < 0));
+    const _robotImgOf = sk => `<img src="${baseUrl}assets/hero/skins/robot_${sk.key}_prev.png" onerror="this.style.visibility='hidden'" style="width:56px;height:56px;image-rendering:pixelated;object-fit:contain">`;
+    const skinCards = (_skinGrp.robot ? _robotList.filter(sk => _grpOf(sk, SKIN_GROUP_DEFS.robot) === _skinGrp.robot) : []).map(sk => {
       const owned    = _ownedSkins.indexOf(sk.key) >= 0;
-      if (sk.disabled && !owned) return ''; // ปิดการขาย → ซ่อนการ์ดจากคนที่ยังไม่มี (เจ้าของเดิมยังเห็น/ใช้/รีโรลได้)
       const equipped = curSkin === sk.key;
       const canBuy   = pts >= sk.price;
       let btn;
       if (equipped)   btn = _skinOnBtn;
       else if (owned) btn = _skinUseBtn(sk.key);
       else            btn = `<button onclick="xhrpg.buySkin('${sk.key}')" ${canBuy?'':'disabled'} style="${_skinBtnCss}background:${canBuy?'#7c3aed':'#d1d5db'};color:#fff;cursor:${canBuy?'pointer':'default'}">${T('ซื้อ P{a}', {a: sk.price})}</button>`;
-      // ยังไม่ซื้อ = โชว์ว่าจะได้สุ่มโบนัส · ซื้อแล้ว = ป้าย roll สีตามระดับ
-      const _roll = owned ? _skinRollOf(sk.key) : null;
-      let bonusHtml = '';
-      if (_roll) {
-        const t = _skinTier(_roll.v);
-        const bestTxt = _roll.b > _roll.v ? ` <span style="font-size:8.5px;color:#94a3b8">${T('(สูงสุด +{a})', {a: _roll.b})}</span>` : '';
-        bonusHtml = `<span style="font-size:10px;font-weight:700;color:${t.c};background:${t.bg};border-radius:5px;padding:1px 7px;${t.glow?'box-shadow:0 0 6px #eab308;':''}">+${_roll.v} ${_roll.label}</span>${bestTxt}`;
-      } else if (!owned) {
-        bonusHtml = `<span style="font-size:9.5px;color:#b45309">${T('🎲 สุ่ม stat +1~{a}', {a: _skinMaxStat(sk.price)})}</span>`;
-      }
-      const rerollBtn = owned
-        ? `<button onclick="xhrpg.rerollSkin('${sk.key}')" style="width:100%;padding:3px 2px;border-radius:7px;border:1px solid #f59e0b;background:#fffbeb;color:#b45309;font-size:10px;font-weight:600;cursor:pointer">${T('🎯 เลือก STAT {a}P', {a: SKIN_REROLL_PRICE})}</button>`
-        : '';
+      // ⚖️ ไม่มีป้ายโบนัส/ปุ่มรีโรลในการ์ดแล้ว — STAT เป็นค่ากลางต่อผู้เล่น ย้ายไปแถบ _statBar ด้านบน (เจ้าของสั่ง 2026-07-28)
+      //    และไม่มีป้าย "สุ่ม stat" — ผู้เล่นเลือก STAT เองได้ค่าเต็มเพดาน ไม่ได้สุ่ม (compliance loot box 2026-07-27)
       return _skinCard({
         equipped,
-        img: `<img src="${assetsBaseUrl}assets/hero/skins/robot_${sk.key}_prev.png" onerror="this.style.visibility='hidden'" style="width:56px;height:56px;image-rendering:pixelated;object-fit:contain">`,
+        img: _robotImgOf(sk),
         name: T(sk.name),
         priceHtml: `<span style="color:#7c3aed">🅿️ ${sk.price} P</span>`,
-        bonusHtml, mainBtn: btn, rerollBtn,
+        mainBtn: btn,
       });
     }).join('');
-    const defaultSkinCard = _skinCard({
-      equipped: curSkin === '',
-      img: `<img src="${assetsBaseUrl}assets/hero/skins/robot_bob_prev.png" onerror="this.style.visibility='hidden'" style="width:56px;height:56px;image-rendering:pixelated;object-fit:contain">`, // preview default หุ่น (ขยาย+ยืนติดล่าง กรอบเดียวกับ Rex/Tank/Titan)
-      name: 'Bob',
-      priceHtml: `<span style="color:#16a34a">${T('ฟรี')}</span>`,
-      bonusHtml: `<span style="font-size:9.5px;color:#cbd5e1">${T('ไม่มีโบนัส')}</span>`,
-      mainBtn: curSkin === '' ? _skinOnBtn : _skinUseBtn(''),
-      rerollBtn: '',
-    });
     const skinShopHtml = `
       <div style="border:1.5px solid #ec489944;border-radius:10px;padding:10px;margin-bottom:10px;background:#ec48990a">
-        <div style="font-size:13px;font-weight:600;color:#db2777;margin-bottom:8px">${T('🎨 สกินไททัน')} <span style="font-size:10px;color:#6b7280;font-weight:400">${T('ซื้อครั้งเดียว ใช้ได้ตลอด · 🎯 เลือก STAT เอง (STR/AGI/VIT/DEX/INT/LUK) ได้ค่า MAX เต็มเพดาน — มีผลเฉพาะตอนสวม · <b style="color:{c}">ยิ่ง P สูง STAT MAX ยิ่งสูง (+5 ทุก 1000 P)</b> · เลือกใหม่ได้ {a}P', {c: '#db2777', a: SKIN_REROLL_PRICE})}</span></div>
-        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:7px">
-          ${defaultSkinCard}${skinCards}
-        </div>
+        <div style="font-size:13px;font-weight:600;color:#db2777;margin-bottom:8px">${T('🎨 สกินไททัน')} <span style="font-size:10px;color:#6b7280;font-weight:400">${T('ซื้อครั้งเดียว ใช้ได้ตลอด · 🎯 STAT เป็นค่ากลางติดตัว ใส่สกินตัวไหนก็ได้เท่ากัน · <b style="color:{c}">SKIN LV ขึ้นตามยอดสะสม P ของสกินทุกใบในหมวดนี้</b> · เลือกใหม่ได้ {a}P', {c: '#db2777', a: SKIN_REROLL_PRICE})}</span></div>
+        ${_statBar(_skinRollOf(''), _skinCap(player.robot_skins, SKIN_DEFS, player.robot_skin_stats), 'rerollSkin', '#db2777', _pickPriceOf(player.robot_skin_stats), _skinXp(player.robot_skins, SKIN_DEFS, player.robot_skin_stats))}
+        ${_skinGrp.robot
+          ? _grpBar('robot', (SKIN_GROUP_DEFS.robot.find(g => g.key === _skinGrp.robot) || {}).name || '', '#db2777')
+              + `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:7px">${skinCards}</div>`
+          : _grpCards('robot', SKIN_GROUP_DEFS.robot, _robotList, _ownedSkins, curSkin, _robotImgOf, '#db2777',
+              _grpFreeCard('Bob', `<img src="${baseUrl}assets/hero/skins/robot_bob_prev.png" onerror="this.style.visibility='hidden'" style="width:56px;height:56px;image-rendering:pixelated;object-fit:contain">`,
+                           curSkin === '', _skinUseBtn(''), '#db2777'))}
       </div>`;
 
     // ── 🗡️ สกินฮีโร่ (Swordsman lvl2-9) — mirror สกินไททัน · default นักรบฝึกหัด ฟรี · ดู docs/hero-skin-spec.md ──
@@ -9100,7 +11993,8 @@ const xhrpg = (() => {
       if (sheet && sheet.naturalWidth) { cols = Math.max(1, Math.round(sheet.naturalWidth / 64)); rows = Math.max(1, Math.round(sheet.naturalHeight / 64)); }
       return `<div style="width:${box}px;height:${box}px;background-image:url('${url}');background-repeat:no-repeat;background-position:0 0;background-size:${cols * box}px ${rows * box}px;image-rendering:pixelated"></div>`;
     };
-    const heroCards = HERO_SKIN_DEFS.map(hk => {
+    const _heroImgOf = hk => _heroImg(SUM['hs_' + hk.key + '_idle'], baseUrl + 'assets/hero/thrower/skins/' + hk.key + '_idle.png', 52);
+    const heroCards = (_skinGrp.hero ? HERO_SKIN_DEFS.filter(hk => _grpOf(hk, SKIN_GROUP_DEFS.hero) === _skinGrp.hero) : []).map(hk => {
       const owned    = _ownedHeroes.indexOf(hk.key) >= 0;
       const equipped = curHero === hk.key;
       const canBuy   = pts >= hk.price;
@@ -9108,33 +12002,19 @@ const xhrpg = (() => {
       if (equipped)   btn = _skinOnBtn;
       else if (owned) btn = _heroUseBtn(hk.key);
       else            btn = `<button onclick="xhrpg.buyHeroSkin('${hk.key}')" ${canBuy?'':'disabled'} style="${_skinBtnCss}background:${canBuy?'#7c3aed':'#d1d5db'};color:#fff;cursor:${canBuy?'pointer':'default'}">${T('ซื้อ P{a}', {a: hk.price})}</button>`;
-      const _roll = owned ? _heroRollOf(hk.key) : null;
-      let bonusHtml = '';
-      if (_roll) {
-        const t = _skinTier(_roll.v);
-        const bestTxt = _roll.b > _roll.v ? ` <span style="font-size:8.5px;color:#94a3b8">${T('(สูงสุด +{a})', {a: _roll.b})}</span>` : '';
-        bonusHtml = `<span style="font-size:10px;font-weight:700;color:${t.c};background:${t.bg};border-radius:5px;padding:1px 7px;${t.glow?'box-shadow:0 0 6px #eab308;':''}">+${_roll.v} ${_roll.label}</span>${bestTxt}`;
-      } else if (!owned) bonusHtml = `<span style="font-size:9.5px;color:#b45309">${T('🎲 สุ่ม stat +1~{a}', {a: _skinMaxStat(hk.price)})}</span>`;
-      const rerollBtn = owned
-        ? `<button onclick="xhrpg.rerollHeroSkin('${hk.key}')" style="width:100%;padding:3px 2px;border-radius:7px;border:1px solid #f59e0b;background:#fffbeb;color:#b45309;font-size:10px;font-weight:600;cursor:pointer">${T('🎯 เลือก STAT {a}P', {a: SKIN_REROLL_PRICE})}</button>`
-        : '';
-      return _skinCard({ equipped, img: _heroImg(SUM['hs_' + hk.key + '_idle'], assetsBaseUrl + 'assets/hero/thrower/skins/' + hk.key + '_idle.png', 52), name: T(hk.name), priceHtml: `<span style="color:#7c3aed">🅿️ ${hk.price} P</span>`, bonusHtml, mainBtn: btn, rerollBtn });
+      // ⚖️ STAT ย้ายไปแถบกลางด้านบนแล้ว (ดูคอมเมนต์สกินหุ่น)
+      return _skinCard({ equipped, img: _heroImgOf(hk), name: T(hk.name), priceHtml: `<span style="color:#7c3aed">🅿️ ${hk.price} P</span>`, mainBtn: btn });
     }).join('');
-    const defaultHeroCard = _skinCard({
-      equipped: curHero === '',
-      img: _heroImg(SUM['th_idle'], assetsBaseUrl + 'assets/hero/thrower/th_idle.png', 52),
-      name: T('นักรบฝึกหัด'),
-      priceHtml: `<span style="color:#16a34a">${T('ฟรี')}</span>`,
-      bonusHtml: `<span style="font-size:9.5px;color:#cbd5e1">${T('ไม่มีโบนัส')}</span>`,
-      mainBtn: curHero === '' ? _skinOnBtn : _heroUseBtn(''),
-      rerollBtn: '',
-    });
     const heroShopHtml = `
       <div style="border:1.5px solid #6366f144;border-radius:10px;padding:10px;margin-bottom:10px;background:#6366f10a">
-        <div style="font-size:13px;font-weight:600;color:#4f46e5;margin-bottom:8px">${T('🗡️ สกินฮีโร่')} <span style="font-size:10px;color:#6b7280;font-weight:400">${T('ซื้อครั้งเดียว ใช้ได้ตลอด · 🎯 เลือก STAT เอง (STR/AGI/VIT/DEX/INT/LUK) ได้ค่า MAX เต็มเพดาน — มีผลเฉพาะตอนสวม · <b style="color:{c}">ยิ่ง P สูง STAT MAX ยิ่งสูง (+5 ทุก 1000 P)</b> · เลือกใหม่ได้ {a}P', {c: '#4f46e5', a: SKIN_REROLL_PRICE})}</span></div>
-        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:7px">
-          ${defaultHeroCard}${heroCards}
-        </div>
+        <div style="font-size:13px;font-weight:600;color:#4f46e5;margin-bottom:8px">${T('🗡️ สกินฮีโร่')} <span style="font-size:10px;color:#6b7280;font-weight:400">${T('ซื้อครั้งเดียว ใช้ได้ตลอด · 🎯 STAT เป็นค่ากลางติดตัว ใส่สกินตัวไหนก็ได้เท่ากัน · <b style="color:{c}">SKIN LV ขึ้นตามยอดสะสม P ของสกินทุกใบในหมวดนี้</b> · เลือกใหม่ได้ {a}P', {c: '#4f46e5', a: SKIN_REROLL_PRICE})}</span></div>
+        ${_statBar(_heroRollOf(''), _skinCap(player.hero_skins, HERO_SKIN_DEFS, player.hero_skin_stats), 'rerollHeroSkin', '#4f46e5', _pickPriceOf(player.hero_skin_stats), _skinXp(player.hero_skins, HERO_SKIN_DEFS, player.hero_skin_stats))}
+        ${_skinGrp.hero
+          ? _grpBar('hero', (SKIN_GROUP_DEFS.hero.find(g => g.key === _skinGrp.hero) || {}).name || '', '#4f46e5')
+              + `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:7px">${heroCards}</div>`
+          : _grpCards('hero', SKIN_GROUP_DEFS.hero, HERO_SKIN_DEFS, _ownedHeroes, curHero, _heroImgOf, '#4f46e5',
+              _grpFreeCard(T('นักรบฝึกหัด'), _heroImg(SUM['th_idle'], baseUrl + 'assets/hero/thrower/th_idle.png', 52),
+                           curHero === '', _heroUseBtn(''), '#4f46e5'))}
       </div>`;
 
     // ── 🐾 สัตว์เลี้ยง (สกินหมาที่วิ่งตาม) — mirror สกินไททัน · default ส้มจี๊ด ฟรี ──
@@ -9144,7 +12024,8 @@ const xhrpg = (() => {
     const curPet    = player.pet_skin || '';
     const _petUseBtn = (key) => `<button onclick="xhrpg.setPetSkin('${key}')" style="${_skinBtnCss}background:#0ea5e9;color:#fff;cursor:pointer">${_useLbl}</button>`;
     const _petImg    = (key) => `<div style="${_petFrame0Style(key, 48)};border-radius:6px"></div>`; // เฟรมแรกของ walk sheet (เต็มกล่อง · ทนขนาดเฟรม)
-    const petCards = PET_SKIN_DEFS.map(pk => {
+    const _petImgOf = pk => _petImg(pk.key);
+    const petCards = (_skinGrp.pet ? PET_SKIN_DEFS.filter(pk => _grpOf(pk, SKIN_GROUP_DEFS.pet) === _skinGrp.pet) : []).map(pk => {
       const owned    = _ownedPets.indexOf(pk.key) >= 0;
       const equipped = curPet === pk.key;
       const canBuy   = pts >= pk.price;
@@ -9152,60 +12033,76 @@ const xhrpg = (() => {
       if (equipped)   btn = _skinOnBtn;
       else if (owned) btn = _petUseBtn(pk.key);
       else            btn = `<button onclick="xhrpg.buyPetSkin('${pk.key}')" ${canBuy?'':'disabled'} style="${_skinBtnCss}background:${canBuy?'#7c3aed':'#d1d5db'};color:#fff;cursor:${canBuy?'pointer':'default'}">${T('ซื้อ P{a}', {a: pk.price})}</button>`;
-      const _roll = owned ? _petRollOf(pk.key) : null;
-      let bonusHtml = '';
-      if (_roll) {
-        const t = _skinTier(_roll.v);
-        const bestTxt = _roll.b > _roll.v ? ` <span style="font-size:8.5px;color:#94a3b8">${T('(สูงสุด +{a})', {a: _roll.b})}</span>` : '';
-        bonusHtml = `<span style="font-size:10px;font-weight:700;color:${t.c};background:${t.bg};border-radius:5px;padding:1px 7px;${t.glow?'box-shadow:0 0 6px #eab308;':''}">+${_roll.v} ${_roll.label}</span>${bestTxt}`;
-      } else if (!owned) bonusHtml = `<span style="font-size:9.5px;color:#b45309">${T('🎲 สุ่ม stat +1~{a}', {a: _skinMaxStat(pk.price)})}</span>`;
-      const rerollBtn = owned
-        ? `<button onclick="xhrpg.rerollPetSkin('${pk.key}')" style="width:100%;padding:3px 2px;border-radius:7px;border:1px solid #f59e0b;background:#fffbeb;color:#b45309;font-size:10px;font-weight:600;cursor:pointer">${T('🎯 เลือก STAT {a}P', {a: SKIN_REROLL_PRICE})}</button>`
-        : '';
-      return _skinCard({ equipped, img: _petImg(pk.key), name: T(pk.name), priceHtml: `<span style="color:#7c3aed">🅿️ ${pk.price} P</span>`, bonusHtml, mainBtn: btn, rerollBtn });
+      // ⚖️ STAT ย้ายไปแถบกลางด้านบนแล้ว (ดูคอมเมนต์สกินหุ่น)
+      return _skinCard({ equipped, img: _petImg(pk.key), name: T(pk.name), priceHtml: `<span style="color:#7c3aed">🅿️ ${pk.price} P</span>`, mainBtn: btn });
     }).join('');
-    const defaultPetCard = _skinCard({
-      equipped: curPet === '',
-      img: '<div style="' + _frame0Style(SUM['dog_walk'], assetsBaseUrl + 'assets/hero/dog_walk.png', 48) + ';border-radius:6px"></div>',
-      name: T('ส้มจี๊ด'),
-      priceHtml: `<span style="color:#16a34a">${T('ฟรี')}</span>`,
-      bonusHtml: `<span style="font-size:9.5px;color:#cbd5e1">${T('ไม่มีโบนัส')}</span>`,
-      mainBtn: curPet === '' ? _skinOnBtn : _petUseBtn(''),
-      rerollBtn: '',
-    });
     const petShopHtml = `
       <div style="border:1.5px solid #f59e0b44;border-radius:10px;padding:10px;margin-bottom:10px;background:#f59e0b0a">
-        <div style="font-size:13px;font-weight:600;color:#b45309;margin-bottom:8px">${T('🐾 ผู้ติดตาม (คู่หูวิ่งตาม)')} <span style="font-size:10px;color:#6b7280;font-weight:400">${T('ซื้อครั้งเดียว ใช้ได้ตลอด · 🎯 เลือก STAT เอง ได้ค่า MAX เต็มเพดาน ติดตัว — มีผลเฉพาะตอนสวม · <b style="color:{c}">ยิ่ง P สูง STAT MAX ยิ่งสูง (+5 ทุก 1000 P)</b> · เลือกใหม่ได้ {a}P', {c: '#b45309', a: SKIN_REROLL_PRICE})}</span></div>
-        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:7px">
-          ${defaultPetCard}${petCards}
-        </div>
+        <div style="font-size:13px;font-weight:600;color:#b45309;margin-bottom:8px">${T('🐾 ผู้ติดตาม (คู่หูวิ่งตาม)')} <span style="font-size:10px;color:#6b7280;font-weight:400">${T('ซื้อครั้งเดียว ใช้ได้ตลอด · 🎯 STAT เป็นค่ากลางติดตัว ใส่สกินตัวไหนก็ได้เท่ากัน · <b style="color:{c}">SKIN LV ขึ้นตามยอดสะสม P ของสกินทุกใบในหมวดนี้</b> · เลือกใหม่ได้ {a}P', {c: '#b45309', a: SKIN_REROLL_PRICE})}</span></div>
+        ${_statBar(_petRollOf(''), _skinCap(player.pet_skins, PET_SKIN_DEFS, player.pet_skin_stats), 'rerollPetSkin', '#b45309', _pickPriceOf(player.pet_skin_stats), _skinXp(player.pet_skins, PET_SKIN_DEFS, player.pet_skin_stats))}
+        ${_skinGrp.pet
+          ? _grpBar('pet', (SKIN_GROUP_DEFS.pet.find(g => g.key === _skinGrp.pet) || {}).name || '', '#b45309')
+              + `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:7px">${petCards}</div>`
+          : _grpCards('pet', SKIN_GROUP_DEFS.pet, PET_SKIN_DEFS, _ownedPets, curPet, _petImgOf, '#b45309',
+              _grpFreeCard(T('ส้มจี๊ด'), '<div style="' + _frame0Style(SUM['dog_walk'], baseUrl + 'assets/hero/dog_walk.png', 48) + ';border-radius:6px"></div>',
+                           curPet === '', _petUseBtn(''), '#b45309'))}
       </div>`;
+
+    // 💸 ส่วนลดรายวัน — quote จาก server เท่านั้น (ห้ามคิดวันเอง กัน timezone เพี้ยน) · cache 60 วิ
+    if (!window._tuQuote || Date.now() - (window._tuQuoteAt || 0) > 60000) {
+      window._tuQuoteAt = Date.now(); // กันยิงซ้ำระหว่างรอ
+      $.post(baseUrl + 'xhrpg_stripe_topup.php', { action: 'quote' }, d => {
+        if (d && d.ok) { window._tuQuote = d; if (openPanel === 'premium') renderPremium(); }
+      }, 'json').fail(() => {});
+    }
+    const _tuQ = window._tuQuote, _tuPct = _tuQ ? (_tuQ.pct | 0) : 0;
+    const _tuFinal = (pkg, cur) => { // ราคา final จาก server (minor units → หน่วยหลัก) · ไม่มี quote = null (โชว์ราคาเต็ม)
+      if (!_tuQ) return null;
+      const row = (_tuQ.packages || []).find(x => x.pkg === pkg);
+      const pr = row && row.prices && row.prices[cur];
+      return pr ? pr.final / 100 : null;
+    };
 
     // 🎁 โปรเติมครั้งแรกของเดือน ×1.5 — ถามสิทธิครั้งแรกที่เปิด panel แล้ว re-render (webhook เป็นคนให้จริง client แค่โชว์ป้าย)
     if (_topupPromo === -1) {
       _topupPromo = -2; // กันยิงซ้ำระหว่างรอ
       $.post(baseUrl + 'xhrpg_topup_promo.php', { line_uid: player.line_uid }, d => {
         _topupPromo = (d && d.ok) ? (d.promo ? 1 : 0) : -3; // -3 = เช็คไม่ได้ (ไม่โชว์ป้าย)
+        _promoInfo  = (d && d.ok && d.mult) ? d : null;     // server เก่ายังไม่ส่ง mult → null แล้วใช้ค่า default ×1.5 (พฤติกรรมเดิม)
         if (openPanel === 'premium') renderPremium();
       }, 'json').fail(() => { _topupPromo = -3; });
     }
     const _promoOn = _topupPromo === 1;
+    const _pmM   = _promoOn ? (((_promoInfo && _promoInfo.mult) || 150) / 100) : 1;  // 1.5 / 1.3 / 1.1
+    const _pmTxt = _pmM.toFixed(_pmM * 10 % 10 === 0 ? 0 : 1);                       // '1.5' ไม่ใช่ '1.50'
+    const _pmGet = n => Math.round(n * _pmM);                                        // P ที่ได้จริง — สูตรเดียวกับ server (round)
     const _cur = LCUR(); // 🌐 สกุลเงินตามภาษาปัจจุบัน (LANGS table) — ข้อความใช้ T() ทั้งหมด
     const _ptPks = [ // ⚠️ ต้อง sync กับ STRIPE_PACKAGES ใน xhrpg_stripe_config.php (บนเซิร์ฟเวอร์ — ไม่อยู่ใน repo) ไม่งั้นกดซื้อ = invalid package / amount mismatch
       // 💵 USD ถูกกว่า THB ≥10% ที่เรต ฿33.3/$ (10 ก.ค. 2026) — p20 ติดขั้นต่ำ Stripe 50¢ เลยเป็น .51
-      {pkg:'p20',    thb:19,   usd:0.51,   pts:20},
-      {pkg:'p50',    thb:49,   usd:1.29,   pts:50},
-      {pkg:'p110',   thb:99,   usd:2.59,   pts:110,   bonus:'+10%'},
-      {pkg:'p230',   thb:199,  usd:5.29,   pts:230,   bonus:'+15%'},
-      {pkg:'p360',   thb:299,  usd:7.99,   pts:360,   bonus:'+20%'},
-      {pkg:'p650',   thb:499,  usd:13.39,  pts:650,   bonus:'+30%', hot:1},            // hot = สีส้ม+🔥 (ครึ่งแถว คู่กับ 360)
-      {pkg:'p1500',  thb:1000, usd:26.99,  pts:1500,  bonus:'+50%'},
-      {pkg:'p3500',  thb:2000, usd:53.99,  pts:3500,  bonus:'+75%'},
-      {pkg:'p5500',  thb:3000, usd:80.99,  pts:5500,  bonus:'+83%', hot:1, wide:1},    // wide = เต็มแถว (ปิดท้ายกริดพอดี)
-      {pkg:'p10000', thb:5000, usd:134.99, pts:10000, bonus:'+100%', best:1},
+      // 💸 2026-07-17 เจ้าของสั่งลดราคา −30% ทุกแพ็กยกเว้น p20 (P เท่าเดิม · ส่วนลดรายวันซ้อนต่อได้)
+      // 🏷️ 2026-07-18 ตัดชิป % โบนัสออก (ผู้เล่นงงว่า +47% คืออะไร) — ความคุ้มสื่อผ่านป้าย 🔥/BEST พอ
+      {pkg:'p20',    thb:19,   usd:0.51,  pts:20},
+      {pkg:'p50',    thb:34,   usd:0.89,  pts:50},
+      {pkg:'p110',   thb:69,   usd:1.79,  pts:110},
+      {pkg:'p230',   thb:139,  usd:3.69,  pts:230},
+      {pkg:'p360',   thb:209,  usd:5.59,  pts:360},
+      {pkg:'p650',   thb:349,  usd:9.29,  pts:650,   hot:1},             // hot = สีส้ม+🔥 (ครึ่งแถว คู่กับ 360)
+      {pkg:'p1500',  thb:700,  usd:18.89, pts:1500},
+      {pkg:'p3500',  thb:1400, usd:37.79, pts:3500},
+      {pkg:'p5500',  thb:2100, usd:56.69, pts:5500,  hot:1, wide:1},    // wide = เต็มแถว (ปิดท้ายกริดพอดี)
+      {pkg:'p10000', thb:3500, usd:94.49, pts:10000, best:1},
     ];
     const _ptBest = _ptPks.find(p=>p.best), _ptRest = _ptPks.filter(p=>!p.best);
-    const _ptPrice = p => CUR_FMT[_cur]((p[_cur] ?? p.usd));                        // ป้ายราคาตามสกุล (แพ็กไม่มีสกุลนั้น → usd)
+    // 💸 มีส่วนลดวันนี้ → ขีดฆ่าราคาเต็ม + โชว์ราคา final จาก server (ยอดที่ Stripe จะเก็บจริง)
+    //    ซ้อน 2 บรรทัดในป้ายเดียว (ขีดฆ่าเล็กบน · ราคาจริงล่าง) — ป้ายไม่กว้างขึ้น จอเล็กไม่ล้น (feedback เจ้าของ)
+    const _ptPrice = p => {
+      const base = (p[_cur] ?? p.usd);
+      if (_tuPct > 0) {
+        const f = _tuFinal(p.pkg, _cur);
+        if (f != null && f < base) return `<span style="display:inline-flex;flex-direction:column;align-items:center;line-height:1.12"><s style="opacity:.65;font-size:.7em;font-weight:600">${CUR_FMT[_cur](base)}</s><span>${CUR_FMT[_cur](f)}</span></span>`;
+      }
+      return CUR_FMT[_cur](base);
+    };
     const _ptPerP  = CUR_PERP[_cur]((_ptBest[_cur] ?? _ptBest.usd) / _ptBest.pts);  // ราคา/P แพ็กคุ้มสุด
     const topupHtml = `
       <style>
@@ -9234,6 +12131,16 @@ const xhrpg = (() => {
         .pt-mini.hot .pr{background:#f59e0b}
         .pt-mini.hot .bo{color:#a85908}
         .pt-pay{font-size:9.5px;color:#475569;background:#fff;border:1px solid #e2e8f0;border-radius:99px;padding:2px 9px}
+        /* 📱 จอแคบ (iPhone SE/mini ฯลฯ) — ย่อทั้งชุดให้การ์ด 2 คอลัมน์ไม่ล้น (feedback เจ้าของ 2026-07-17) */
+        @media (max-width:400px){
+          .pt-mini{padding:6px 6px;gap:4px}
+          .pt-mini .l .n{font-size:13px}
+          .pt-mini .l .bo{font-size:7.5px}
+          .pt-mini .pr{font-size:10px;padding:3px 6px}
+          .pt-feat .amt .n{font-size:21px}
+          .pt-fbuy{font-size:11.5px;padding:6px 9px}
+          .pt-bpct{font-size:10px;padding:2px 6px}
+        }
       </style>
       <div style="border:1.5px solid #7c3aed44;border-radius:12px;padding:8px;margin-bottom:9px;background:linear-gradient(180deg,#7c3aed0d,#7c3aed04)">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:7px">
@@ -9243,10 +12150,13 @@ const xhrpg = (() => {
             <button onclick="xhrpg.toggleLang()" style="font-size:12px;font-weight:800;color:#7c3aed;background:#fff;border:1.5px solid #7c3aed66;border-radius:99px;padding:5px 14px;cursor:pointer;font-family:inherit;box-shadow:0 2px 6px -3px rgba(124,58,237,.4)">🌐 ${(LANGS[LANG()]||{}).name||LANG()}</button>
           </span>
         </div>
+        ${_tuPct > 0 ? `<div style="background:${_tuPct >= 25 ? 'linear-gradient(90deg,#b45309,#dc2626)' : _tuPct >= 15 ? '#7c3aed' : '#0284c7'};border-radius:9px;padding:6px 10px;margin-bottom:7px;color:#fff;box-shadow:0 4px 12px -6px rgba(0,0,0,.35)">
+          <div style="font-size:12px;font-weight:800">🔥 ${T('วันนี้ลด {a}% ทุกแพ็ก!', {a: _tuPct})} <span style="font-weight:400;font-size:9px;opacity:.92">· ${_tuQ.reason === 'eom' ? T('โปรวันสิ้นเดือน') : _tuQ.reason === 'dd' ? T('โปร {a}.{a}', {a: _tuQ.dd | 0}) : _tuQ.reason === 'wknd' ? T('โปรศุกร์–อาทิตย์') : T('ดีลประจำวัน')} · ${T('ถึงเที่ยงคืนนี้')}</span></div>
+        </div>` : ''}
         ${_promoOn ? `<div style="background:linear-gradient(90deg,#f59e0b,#ef4444);border-radius:9px;padding:7px 10px;margin-bottom:7px;color:#fff;box-shadow:0 4px 12px -6px rgba(239,68,68,.55)">
-          <div style="font-size:12px;font-weight:800">🎁 ${T('PROMOTION — เติมครั้งแรกของเดือน รับ P ×1.5!')}</div>
-          <div style="font-size:9px;opacity:.92;margin-top:1px">${T('แพคไหนก็ได้ รับไปเลย 1.5 เท่า · เดือนละ 1 ครั้ง · ขึ้นเดือนใหม่รับสิทธิอีกครั้ง')}</div>
-        </div>` : _topupPromo === 0 ? `<div style="background:#f1f5f9;border:1px dashed #cbd5e1;border-radius:9px;padding:5px 10px;margin-bottom:7px;font-size:9.5px;color:#64748b">🎁 ${T('โปร ×1.5 เดือนนี้ใช้สิทธิแล้ว — ขึ้นเดือนใหม่รับสิทธิอีกครั้ง')}</div>` : ''}
+          <div style="font-size:12px;font-weight:800">${T('🎁 โบนัสเติมเงินรอบนี้ — ครั้งที่ 1 ×1.5 · ครั้งที่ 2 ×1.3 · ครั้งที่ 3 ×1.1')}</div>
+          <div style="font-size:9px;opacity:.92;margin-top:1px">${T('เติมครั้งต่อไปได้ ×{m} · เหลือสิทธิ์โบนัสอีก {n} ครั้ง', { m: _pmTxt, n: (_promoInfo ? (_promoInfo.left | 0) : 1) })}</div>
+        </div>` : _topupPromo === 0 ? `<div style="background:#f1f5f9;border:1px dashed #cbd5e1;border-radius:9px;padding:5px 10px;margin-bottom:7px;font-size:9.5px;color:#64748b">🎁 ${T('ใช้สิทธิ์โบนัสครบแล้ว — รับสิทธิ์ใหม่ {d}', { d: _escHtml((_promoInfo && _promoInfo.next_reset) || '') })}</div>` : ''}
         <div style="display:flex;justify-content:center;align-items:center;flex-wrap:wrap;gap:4px;margin-bottom:8px">
           <span class="pt-pay" style="display:inline-flex;align-items:center;gap:4px;padding:2px 6px">
             <svg width="23" height="8" viewBox="0 0 50 16" style="display:block"><text x="0" y="13" font-family="Arial,Helvetica,sans-serif" font-weight="800" font-style="italic" font-size="15" fill="#1A1F71">VISA</text></svg>
@@ -9266,22 +12176,32 @@ const xhrpg = (() => {
           </span>`}
         </div>
         <button class="pt-feat" onclick="xhrpg.stripeTopup('${_ptBest.pkg}')">
-          <div class="r1"><span class="pt-tagbest">👑 ${T('คุ้มสุด')}</span><span class="pt-bpct pt-num">${_ptBest.bonus}</span></div>
+          <div class="r1"><span class="pt-tagbest">👑 ${T('คุ้มสุด')}</span></div>
           <div class="r2">
-            <div class="amt"><div><span class="n pt-num">${_ptBest.pts.toLocaleString()}</span><span class="u">P</span></div><div class="base pt-num">${_promoOn?`<b style="color:#fde047">🎁 ${T('รับจริง {n} P (×1.5)',{n:Math.round(_ptBest.pts*1.5).toLocaleString()})}</b>`:`${_ptPerP} / P · ${T('ถูกที่สุด')}`}</div></div>
+            <div class="amt"><div><span class="n pt-num">${_ptBest.pts.toLocaleString()}</span><span class="u">P</span></div><div class="base pt-num">${_promoOn?`<b style="color:#fde047">🎁 ${T('รับ {n} P (×{m})',{n:_pmGet(_ptBest.pts).toLocaleString(), m:_pmTxt})}</b>`:`${_ptPerP} / P · ${T('ถูกที่สุด')}`}</div></div>
             <div class="pt-fbuy pt-num">${_ptPrice(_ptBest)}</div>
           </div>
         </button>
         <div class="pt-grid">
           ${_ptRest.map(p=>`<button class="pt-mini${p.hot?' hot':''}"${p.wide?' style="grid-column:1/-1"':''} onclick="xhrpg.stripeTopup('${p.pkg}')">
-            <div class="l"><span class="n pt-num">${p.pts.toLocaleString()}</span><span class="u"> P</span>${_promoOn?`<span class="bo" style="color:#dc2626">🎁 ${T('รับ')} ${Math.round(p.pts*1.5).toLocaleString()} P</span>`:p.bonus?`<span class="bo">${p.hot?'🔥 '+T('ขายดี')+' ':''}${p.bonus}</span>`:''}</div>
+            <div class="l"><span class="n pt-num">${p.pts.toLocaleString()}</span><span class="u"> P</span>${_promoOn?`<span class="bo" style="color:#dc2626">🎁 ${T('รับ {n} P (×{m})',{n:_pmGet(p.pts).toLocaleString(), m:_pmTxt})}</span>`:p.hot?`<span class="bo">🔥 ${T('ขายดี')}</span>`:''}</div>
             <div class="pr pt-num">${_ptPrice(p)}</div>
           </button>`).join('')}
         </div>
-        ${LANG() !== 'th' ? `<button onclick="xhrpg.openReportAdmin()" style="width:100%;margin-top:8px;background:#fff;border:1.5px dashed #94a3b8;border-radius:10px;padding:8px;font-size:11px;font-weight:700;color:#475569;cursor:pointer;font-family:inherit">📩 Payment problem? Contact Admin</button>` : ''}
+        ${_codaOn() ? `<div style="display:flex;align-items:center;gap:6px;margin:9px 0 7px"><span style="flex:1;height:1px;background:#e2e8f0"></span><span style="font-size:9.5px;color:#94a3b8;font-weight:700">${T('หรือจ่ายด้วยช่องทางท้องถิ่น')}</span><span style="flex:1;height:1px;background:#e2e8f0"></span></div>
+        <button onclick="xhrpg.openCodashop()" style="width:100%;display:flex;align-items:center;justify-content:center;gap:7px;background:linear-gradient(120deg,#059669,#10b981);border:none;border-radius:11px;padding:11px;font-size:12.5px;font-weight:800;color:#fff;cursor:pointer;font-family:inherit;box-shadow:0 8px 18px -12px rgba(5,150,105,.9)">🏪 ${T('จ่ายด้วย MoMo / ZaloPay / โอนธนาคาร (Codashop)')}</button>` : ''}
+        ${LANG() !== 'th' ? `<button onclick="xhrpg.openReportAdmin()" style="width:100%;margin-top:8px;background:#fff;border:1.5px dashed #94a3b8;border-radius:10px;padding:8px;font-size:11px;font-weight:700;color:#475569;cursor:pointer;font-family:inherit">📩 ${T('มีปัญหาการชำระเงิน? ติดต่อแอดมิน')}</button>` : ''}
       </div>`;
 
     el.innerHTML = `
+      <div onclick="xhrpg.openVoucherPanel()" style="margin:12px 12px 0;background:linear-gradient(120deg,#6d28d9,#a16207);border-radius:12px;padding:11px 13px;display:flex;align-items:center;gap:10px;cursor:pointer;box-shadow:0 8px 18px -12px rgba(109,40,217,.9)">
+        <span style="font-size:24px;flex:none">🎟️</span>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13.5px;font-weight:800;color:#fff">${T('P Gift Voucher')}</div>
+          <div style="font-size:10.5px;color:#f5d0fe;line-height:1.45">${T('ซื้อ P เป็นบัตรของขวัญ — แจกเพื่อนหรือส่งต่อได้')}</div>
+        </div>
+        <span style="flex:none;font-size:11px;font-weight:800;color:#fff;background:rgba(255,255,255,.2);border-radius:8px;padding:5px 10px">${T('เปิดดู')} ›</span>
+      </div>
       <div style="padding:12px 12px 0;display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
         <span style="font-size:13px;color:#4b5563">${T('P Point คงเหลือ')}</span>
         <div style="display:flex;align-items:center;gap:8px">
@@ -9295,7 +12215,8 @@ const xhrpg = (() => {
       <div style="padding:0 12px 12px">${topupHtml}${cards}${heroShopHtml}${skinShopHtml}${petShopHtml}${resetCard}${ragResetCard}</div>
       <div style="text-align:center;font-size:12px;color:#4b5563;padding-bottom:14px">${T('ซื้อสะสมได้ — บวกเวลาต่อจากที่เหลืออยู่')}</div>`;
   }
-  let _topupPromo = -1; // 🎁 สิทธิโปรเติมครั้งแรกของเดือน: -1=ยังไม่เช็ค · -2=กำลังเช็ค · 1=มีสิทธิ ×1.5 · 0=ใช้แล้ว · -3=เช็คไม่ได้
+  let _topupPromo = -1; // 🎁 บันไดโบนัส: -1=ยังไม่เช็ค · -2=กำลังเช็ค · 1=ยังมีสิทธิ์ · 0=ใช้ครบ · -3=เช็คไม่ได้
+  let _promoInfo = null; // {mult,used,left,next_reset} จาก server — ตัวเลขทั้งหมดมาจาก server ห้าม client คำนวณเอง
   // ── 🌐 i18n รากฐานทั้งระบบ (parameterized หลายภาษา) ─────────────────────────
   // ⚙️ เพิ่มภาษาใหม่ = เพิ่มแถวใน LANGS + dict ใน I18N (คีย์=ข้อความไทย) + แถวใน REGION_LANG — ไม่ต้องแตะ logic
   // ลำดับตัดสิน: 1.ผู้เล่นเลือกเอง (localStorage) > 2.ประเทศจาก Cloudflare (poll region) > 3.ภาษา browser > 4.ไทย
@@ -9303,7 +12224,8 @@ const xhrpg = (() => {
   const I18N = {
     en: {
       // เมนูล่าง
-      'อาวุธ':'Weapons', 'ไอเทม':'Items', 'STAT ทักษะ':'Stats/Skills', 'ผู้ติดตาม':'Followers', 'ยานบิน':'Airship',
+      '🛡️ Equipment': '🛡️ Equipment',
+      'อาวุธ':'Weapons', 'Equipment': 'Equipment', 'ไอเทม':'Items', 'STAT ทักษะ':'Stats/Skills', 'ผู้ติดตาม':'Followers', 'ยานบิน':'Airship',
       'การ์ด':'Cards', 'ตลาด':'Market', 'สัตว์เลี้ยง':'Pets', 'อันดับ':'Ranking',
       // หัว popup
       '🐾 สัตว์เลี้ยง':'🐾 Pets', '🎴 สมุดสะสมการ์ด':'🎴 Card Collection', '⚔ อาวุธ':'⚔ Weapons', '🎒 ไอเทม':'🎒 Items',
@@ -9312,20 +12234,40 @@ const xhrpg = (() => {
       // ปุ่ม HUD/แถบบน
       '📖 บันทึก':'📖 Log', '🗺️ แผนที่':'🗺️ Map', 'รัศมีสำรวจ':'Explore radius', '⬅ ออกจากเกม':'⬅ Log out',
       'เข้าสู่ระบบด้วย':'Sign in with', 'บันทึก':'Save', 'ชื่อในเกม (2–16 ตัว)':'In-game name (2–16 chars)',
-      '🗺️ เลือกจุดหมาย':'🗺️ Select destination', 'ออนไลน์':'Online', 'เสียง':'Sound', 'เกราะ':'Armor',
+      '🗺️ เลือกจุดหมาย':'🗺️ Select destination', 'ออนไลน์':'Online', 'เสียง':'Sound', 'เกราะ':'Shield',
       'อันดับผู้เล่น(แท็บ)':'🏆 Players',
       // หน้าเติมเงิน
-      'เติม P Points':'Top up P Points', '🎁 แอดมินเติมให้':'🎁 Granted by admin', 'โบนัสสูงสุด +100%':'Bonus up to +100%', 'เลือกภาษา':'Select Language',
+      'เติม P Points':'Top up P Points', '🎁 แอดมินเติมให้':'🎁 Granted by admin', '🎁 โค้ดย้ายเกมเดิม':'🎁 Migrated from old game', 'โบนัสสูงสุด +100%':'Bonus up to +100%', 'เลือกภาษา':'Select Language',
+      '🎁 ของขวัญจากแอดมิน (แจกทุกคน)':'🎁 Gift from the admin (all players)', '🎁 ของขวัญผู้เล่นใหม่':'🎁 New player gift',
+      '⚙️ ปรับยอดโดยแอดมิน':'⚙️ Adjusted by admin',
+      '🎟️ รับจากบัตรของขวัญ':'🎟️ Claimed from a gift voucher',
       'กล่องสุ่มโมดูล':'Module Box', 'กล่องสุ่มการ์ด':'Card Box', // ชื่อของใน listing ตลาด (item_name จาก DB — แปลตอนแสดง)
       'มีด':'Sword', 'ไททัน':'Titan', 'ธนูไททัน':'Titan Bow', 'ป้อม':'Turret', // ป้ายอาวุธเดี่ยว (โมดูล offline reward/คลังเต็ม — server ส่งไทย)
       'PROMOTION — เติมครั้งแรกของเดือน รับ P ×1.5!':'PROMOTION — First top-up of the month: P ×1.5!',
+      '🎁 โบนัสเติมเงินรอบนี้ — ครั้งที่ 1 ×1.5 · ครั้งที่ 2 ×1.3 · ครั้งที่ 3 ×1.1':'🎁 Bonus this cycle — 1st ×1.5 · 2nd ×1.3 · 3rd ×1.1',
+      'เติมครั้งต่อไปได้ ×{m} · เหลือสิทธิ์โบนัสอีก {n} ครั้ง':'Next top-up gets ×{m} · {n} bonus left',
+      'ใช้สิทธิ์โบนัสครบแล้ว — รับสิทธิ์ใหม่ {d}':'All bonuses used — resets {d}',
+      'รับ {n} P (×{m})':'Get {n} P (×{m})',
       'แพคไหนก็ได้ รับไปเลย 1.5 เท่า · เดือนละ 1 ครั้ง · ขึ้นเดือนใหม่รับสิทธิอีกครั้ง':'Any package · ×1.5 P · once a month · resets every month',
       'โปร ×1.5 เดือนนี้ใช้สิทธิแล้ว — ขึ้นเดือนใหม่รับสิทธิอีกครั้ง':'×1.5 promo used this month — available again next month',
       'คุ้มสุด':'BEST VALUE', 'รับจริง {n} P (×1.5)':'Get {n} P (×1.5)', 'ถูกที่สุด':'best rate', 'ขายดี':'Popular', 'รับ':'Get',
       'เกิดข้อผิดพลาด: ':'Error: ', 'ไม่สามารถเชื่อมต่อ Stripe ได้':'Could not connect to Stripe',
+      // 🇻🇳 Coda / Codashop (จ่ายช่องทางท้องถิ่น)
+      'หรือจ่ายด้วยช่องทางท้องถิ่น':'or pay with a local method',
+      'จ่ายด้วย MoMo / ZaloPay / โอนธนาคาร (Codashop)':'Pay with MoMo / ZaloPay / bank (Codashop)',
+      'เติมผ่าน Codashop':'Top up via Codashop',
+      'จ่ายด้วย MoMo · ZaloPay · โอนธนาคาร — ไม่ต้องมีบัตร':'Pay with MoMo · ZaloPay · bank transfer — no card needed',
+      'รหัสเติมเงินของคุณ (Payment Code)':'Your Payment Code',
+      'คัดลอก':'Copy', 'คัดลอกแล้ว':'Copied',
+      'นำรหัสนี้ไปกรอกบน Codashop เพื่อระบุตัวละครของคุณ':'Enter this code on Codashop to identify your character',
+      'คัดลอกรหัสด้านบน':'Copy the code above',
+      'เปิด Codashop แล้วเลือกเกม Ragnalok Origin':'Open Codashop and choose Ragnalok Origin',
+      'วางรหัส → เลือกแพ็ก → จ่ายด้วยช่องทางท้องถิ่น':'Paste the code → pick a pack → pay with a local method',
+      'P เข้าเกมอัตโนมัติภายในไม่กี่นาที':'P is credited automatically within minutes',
+      'เปิด Codashop':'Open Codashop', 'โหลดรหัสไม่สำเร็จ':'Could not load code',
       // ชื่อโซน/แมพ (HUD)
       '🌿 ทุ่งกลาง':'🌿 Central Field', '🌲 ป่ารอบนอก':'🌲 Outer Forest', '⛰️ เชิงเขา':'⛰️ Foothills', '🏔️ แดนไกล':'🏔️ Far Reaches', '🌋 สุดขอบแดน':'🌋 World\'s Edge',
-      '🏜️ ทะเลทรายนิรันดร์':'🏜️ Eternal Desert', '❄️ ดินแดนเยือกแข็ง':'❄️ Frozen Land',
+      '🏜️ ทะเลทรายนิรันดร์':'🏜️ Eternal Desert', '❄️ ดินแดนเยือกแข็ง':'❄️ Frozen Land', '🌊 ดินแดนใต้ทะเลลึก':'🌊 Deep Seabed', 'ดินแดนใต้ทะเลลึก':'Deep Seabed', 'ซากปลาวาฬยักษ์':'Giant Whale Carcass',
       // แผง STAT
       'ทักษะ':'Skills', 'ใส่แต้มทั้งหมด {n} pt ลง {s}?':'Put all {n} pts into {s}?',
       'ค่าที่ได้รับจากสเตตัส (รวมอุปกรณ์/โมดูล)':'Effects from stats (incl. equipment/modules)',
@@ -9348,6 +12290,19 @@ const xhrpg = (() => {
       'มีดขว้าง':'Knives', 'ความอึด':'Toughness', 'ดาบ':'Sword', 'ป้อมปืน':'Turrets',
       // 📊 ค่ากลางระบบ (STAT page ด้านล่าง)
       'ค่ากลางระบบ (ใช้ร่วมทุกอาวุธ)':'Central system values (shared by all weapons)',
+      'อัศวิน':'Knight', 'สายบุก — วิ่งประชิดมอน ดึงมากองให้ Hero ถล่ม':'Vanguard — charges monsters and piles them up for your Hero', 'ดึงมอนทุก 5 วิ':'Pulls monsters every 5s',
+      'ใส่โค้ดจากเกมเดิม (รูปแบบ RGK-XXXXX-XXXXX)':'Enter your code from the old game (format RGK-XXXXX-XXXXX)',
+      'ใส่โค้ดที่ได้รับ (RGK-XXXXX-XXXXX หรือ RGV-XXXX-XXXX-XXXX)':'Enter your code (RGK-XXXXX-XXXXX or RGV-XXXX-XXXX-XXXX)',
+      'รูปแบบโค้ดไม่ถูกต้อง — ต้องขึ้นต้นด้วย RGK- หรือ RGV-':'That code format is not valid — it must start with RGK- or RGV-',
+      'ได้รับ {n} P แล้ว!':'You received {n} P!', 'แต้มจะเข้ากระเป๋าภายในไม่กี่วินาที':'The points land in your wallet within a few seconds',
+      'แต้มเข้ากระเป๋าเรียบร้อยแล้ว':'The points are already in your wallet', 'ตกลง':'OK',
+      'อัศวินสาย TANK — บุกประชิดมอน · 🧲 ดึงมอน 12 ตัวมากองทุก 5 วิ · 💠 Frost Aura 30m ทุกวินาที · 🛡️ บัฟ DEF + 🔰 เสริมเกราะให้ Hero (ค่าเท่านักบวช ซ้อนกันได้) | อัพเกรดได้ Lv.1-100 (⚙️เหล็ก+🟫ทองแดง+💰G)':'TANK knight — charges into monsters · 🧲 pulls 12 monsters into a pile every 5s · 💠 Frost Aura 30m every second · 🛡️ DEF buff + 🔰 armor restore for your Hero (same values as Priest, stacks) | Upgradeable Lv.1-100 (⚙️iron+🟫copper+💰G)',
+      '✨ ของวิเศษ = สกิน · การ์ด · ของสะสม — 🛡️ Option = จากของสวมใส่ที่ใส่อยู่':'✨ Bonus = skins · cards · collectibles — 🛡️ Option = from worn Equipment',
+      'โบนัส % รวม (Ragnalok · Option)':'Total % bonuses (Ragnalok · Option)',
+      '% คูณท้ายสุด · แต้ม Ragnalok + Option ของสวมใส่ บวกกัน · EXP/GOLD/DROP มาจาก Option เท่านั้น':'Final multiplier % · Ragnalok points + Equipment options stack · EXP/GOLD/DROP come from options only',
+      'โบนัสทรัพยากรต่อดรอป':'Resource bonus per drop',
+      'ได้กี่ชิ้นทุกครั้งที่แร่/พืชดรอป = 1 + สมบัติ + Option ของสวมใส่ · มอน Lv สูงได้เพิ่ม':'Amount per resource/herb drop = 1 + treasure + Equipment options · higher-Lv monsters give more',
+      'ขอบม่วง = มี Option ของสวมใส่ช่วย · LUK สูงมีโอกาสสุ่มได้เพิ่มอีก':'Purple border = boosted by Equipment options · high LUK has a chance for extra',
       'บวกเท่ากันไม่ว่าถืออาวุธอะไร · ATK พื้นฐานของอาวุธแต่ละชนิดดูในเมนูอาวุธ':'Same regardless of weapon · each weapon\'s base ATK is in the weapon menu',
       'ATK (โมดูล)':'ATK (modules)', 'CRIT (คริ ×2)':'CRIT (×2 dmg)', 'โมดูลทุกอาวุธ':'all-weapon modules', 'จาก {a}':'from {a}',
       // 📊 แผงช่วยเหลือ STAT (STAT_HELP · name + desc หลายบรรทัด · สูตรคงเดิม)
@@ -9381,8 +12336,7 @@ const xhrpg = (() => {
       'มีด 3 เล่มวิถีโค้งม่วง · ใช้มีด 3':'3 knives in purple arcs · uses 3 knives',
       'ดึงครึ่งระยะ · รวม MVP':'Pulls half the distance · incl. MVP',
       'มอนตีเรา/ไททัน/สัตว์เลี้ยง = สะท้อนใส่มอนใกล้สุด · ไม่ใช้ MP':'Hits on you/titan/pet reflect onto nearest monster · no MP',
-      'สะสม ATK มอนที่ตีทีมเรา 5 วิ + VIT×5 → ระเบิดใส่เป้าเดี่ยว':'Stores monster ATK hitting your team for 5s + VIT×5 → burst on a single target',
-      'ฟันดาบ 2 ครั้ง':'Slashes twice', '≤3 เป้า':'≤3 targets',
+      'ฟันดาบ 2 ครั้ง':'Slashes twice', '≤6 เป้า':'≤6 targets',
       'ฟันไขว้กางเขน เป้าเดี่ยว':'Cross slash, single target', 'ฟันไขว้ X เป้าเดี่ยว':'X slash, single target',
       'ป้อมฐาน 20 · +3 ATK/INT':'Turret base 20 · +3 ATK/INT', 'ปัก 2 ป้อม':'Deploys 2 turrets',
       'DMG = ATK ป้อม ×{b} ทุกวิ · ค่าปัก +20 MP/ต้น · ป้อมคู่ได้ทั้งคู่':'DMG = turret ATK ×{b} every sec · deploy cost +20 MP each · works on both twin turrets',
@@ -9395,7 +12349,6 @@ const xhrpg = (() => {
       'DMG รวม ×{a}':'Total DMG ×{a}', 'HP สูงสุด +{a}':'Max HP +{a}',
       'เกราะ +{a} · ♻️+{b}/s':'Armor +{a} · ♻️+{b}/s', 'ฟื้น +{a} HP/s':'Regen +{a} HP/s',
       'ระยะดึง {a}m':'Pull range {a}m', 'สะท้อน {a}% ATK มอน + VIT×2':'Reflect {a}% monster ATK + VIT×2',
-      'ระเบิด = ATK สะสม 5 วิ + VIT×5':'Burst = 5s stored ATK + VIT×5',
       'ATK ดาบ +{a}':'Sword ATK +{a}', 'ATK ×{a}/หมัด':'ATK ×{a}/hit', 'ATK ×{a}/เป้า':'ATK ×{a}/target',
       'DMG = ATK ดาบ ×{a}':'DMG = sword ATK ×{a}', 'ป้อม +{a} ATK':'Turret +{a} ATK', 'ป้อมอยู่ {a}s':'Turret lasts {a}s',
       '2 ป้อม · ระยะ +{a}m':'2 turrets · range +{a}m',
@@ -9406,7 +12359,7 @@ const xhrpg = (() => {
       'ร่างกายแกร่ง (Passive)':'Tough Body (Passive)', 'เพิ่มเกราะ (Passive)':'Armor Up (Passive)',
       'ฟื้น HP (Passive)':'HP Regen (Passive)', 'ดึงมอน (Action)':'Monster Pull (Action)',
       'เพิ่ม ATK มีด(สั้นยาว) ถาวร +5 ต่อ Lv.\nLv1 = +5 … Lv10 = +50 ATK':'Permanently adds knife ATK (dagger/long) +5 per Lv.\nLv1 = +5 … Lv10 = +50 ATK',
-      'Chain Lightning ⚡ ชิ่ง 3 เป้า · ต้องการ ขว้างจุดตาย Lv.5 — MP 10 CD 5s\nDMG = ATK มีด(สั้นยาว) ×2.1 ถึง ×3.0 ตาม Lv.':'Chain Lightning ⚡ chains 3 targets · requires Deadly Throw Lv.5 — MP 10 CD 5s\nDMG = knife ATK (dagger/long) ×2.1 to ×3.0 by Lv.',
+      'Chain Lightning ⚡ ชิ่ง 3 เป้า · ต้องการ ขว้างจุดตาย Lv.5 — MP 10 CD 3s\nDMG = ATK มีด(สั้นยาว) ×2.1 ถึง ×3.0 ตาม Lv.':'Chain Lightning ⚡ chains 3 targets · requires Deadly Throw Lv.5 — MP 10 CD 3s\nDMG = knife ATK (dagger/long) ×2.1 to ×3.0 by Lv.',
       'อัพแล้วได้เลย ไม่ต้องกด ไม่ใช้ MP\nHP สูงสุด +30 ต่อ Lv. (Lv.10 = +300 HP)':'Takes effect instantly, no button, no MP\nMax HP +30 per Lv. (Lv.10 = +300 HP)',
       'ต้องการ ร่างกายแกร่ง Lv.3\nPassive บวกติดตัว: เกราะสูงสุด +5/Lv + ♻️ ฟื้นเกราะ +1/Lv ต่อวินาที (ไม่ใช้ MP)':'Requires Tough Body Lv.3\nPermanent passive: max armor +5/Lv + ♻️ armor regen +1/Lv per second (no MP)',
       'ต้องการ ร่างกายแกร่ง Lv.5\nPassive บวกติดตัว: ฟื้น HP +1/Lv ต่อวินาที (บวกกับ regen ปกติ ไม่ใช้ MP)':'Requires Tough Body Lv.5\nPermanent passive: HP regen +1/Lv per second (stacks with normal regen, no MP)',
@@ -9419,6 +12372,128 @@ const xhrpg = (() => {
       'วัสดุเคลือบ ดาบ':'Coating: Sword', 'วัสดุเคลือบ ป้อมปืน':'Coating: Turret',
       'ATK {a} | ระยะ {b}m | 🎒 {c} นัด':'ATK {a} | Range {b}m | 🎒 {c} ammo',
       'ระยะ {a}m (อัตโนมัติ)':'Range {a}m (auto)', '(+{a} โมดูล)':'(+{a} modules)', '💨 หลบ +20%':'💨 Dodge +20%',
+      'ยังไม่ได้ตั้ง':'Not placed',
+      'ตั้ง/ย้ายป้อม':'Place / move turret',
+      'อัพเกรดป้อม':'Upgrade turret',
+      'เลเวลป้อมเกินเลเวลกิลไม่ได้':'Turret level cannot exceed guild level',
+      'ซื้อป้อมใหม่':'Buy a new turret',
+      'ช่องป้อมเต็ม — อัพเลเวลกิลเพื่อปลดเพิ่ม':'All turret slots used — level up the guild to unlock more',
+      'หอโจมตีกิล':'Guild Turret',
+      'กองทุน':'Fund',
+      'ป้อมยิงมอนในโซนที่ตั้ง แล้วแบ่ง EXP · G · ของดรอป ให้สมาชิกทุกคนชั่วโมงละรอบ (รับได้แม้ออฟไลน์)':'Turrets shoot monsters in their zone, then split EXP · G · drops among all members once per hour (you get your share even offline)',
+      'ยังไม่มีป้อม — รวมเงินในกองทุนแล้วให้หัวหน้ากดซื้อ':'No turret yet — pool gold in the fund, then the leader can buy one',
+      'เติมกองทุนป้อมกี่ G? (ขั้นต่ำ 1,000)':'How much G to add to the turret fund? (min 1,000)',
+      'ยอดไม่ถูกต้อง':'Invalid amount',
+      'ซื้อป้อมใหม่ด้วยกองทุน {n} G?':'Buy a new turret for {n} G from the fund?',
+      'อัพป้อม #{i} เป็น Lv.{lv} ด้วยกองทุน {n} G?':'Upgrade turret #{i} to Lv.{lv} for {n} G from the fund?',
+      'ยังไม่มีแผนที่ที่ตั้งป้อมได้':'No maps available for turrets yet',
+      'แผนที่':'Map',
+      'โซน':'Zone',
+      'โซน {n}':'Zone {n}',
+      'ย้ายฟรี ไม่มีคูลดาวน์ · มีผลกับรอบแบ่งรางวัลถัดไป':'Moving is free with no cooldown · takes effect next reward round',
+      'ตั้งป้อมที่นี่':'Place turret here',
+      '(+{a} STAT)':'(+{a} STAT)', '💥 ฟันวงกว้าง — โดนพร้อมกัน {n} ตัว ในระยะ {m}m':'💥 Cleave — hits up to {n} monsters within {m}m',
+      'ป้อมถัดไป':'Next turret',
+      'โบนัส Premium ออฟไลน์ 24 ชม.':'Premium Offline 24h bonus',
+      'บอทออกล่าแล้ว — รายงานแรกกำลังมา...':'The bot is out hunting — first report coming up...',
+      'ออฟไลน์ มอนิเตอร์':'Offline Monitor',
+      'บอทออกล่าแล้ว — รายงานแรกในราว 1 นาที':'The bot is out hunting — first report in about a minute',
+      'โบนัสเพิ่มเติม':'Extra bonus',
+      'เก็บกวาดอีก {n} ตัว':'Cleared {n} more monsters',
+      'บอทกำลังออกล่า...':'The bot is out hunting...',
+      'จอเฝ้าบอท':'Bot Monitor',
+      'กำลังฟาร์ม':'farming',
+      'ฟาร์ม':'Farming',
+      'รอบนี้สะสม (ประมาณ)':'This session (est.)',
+      'ยืนยันแล้ว':'Confirmed',
+      'ยืนยันยอดเข้ากระเป๋าแล้ว':'Rewards credited to your bag',
+      'sync ยอดจริงอีก {t}':'real sync in {t}',
+      'เปิดมาแล้ว {t}':'running for {t}',
+      'กลับเข้าเกม':'Back to game',
+      'ยังไม่ได้เลือกโซนฟาร์ม — บอทยังไม่เริ่มตี':'No farm zone selected — the bot has not started',
+      'เรตเท่าตอนออนไลน์ทุกอย่าง · ปิดจอไปก็ฟาร์มต่อ แค่ไม่เห็นสดๆ':'Exactly the same rates as being online · closing the screen keeps farming, you just do not see it live',
+      'เปิดจอเฝ้าบอท (ดูบอทตีสดๆ)':'Open Bot Monitor (watch the bot fight)',
+      'ได้การ์ด {n} ใบ':'Got {n} cards',
+      'ได้ไข่ {n} ฟอง':'Got {n} eggs',
+      'ได้โมดูล {n} ชิ้น':'Got {n} modules',
+      'รอบล่าสุด':'Last round',
+      'ฆ่า {n} ตัว':'{n} kills',
+      
+      'ของ {n} ชิ้น':'{n} items',
+      'ประวัติแบ่งรางวัลป้อม':'Turret payout history',
+      'ยังไม่มีรอบแบ่งรางวัล — ตั้งป้อมแล้วรอครบชั่วโมง':'No payout round yet — place a turret and wait for the hour',
+      'ยอดที่แต่ละคนได้รับต่อรอบ (20 รอบล่าสุด · ทุกคนในกิลเห็นเหมือนกัน)':'What each member received per round (last 20 rounds · everyone in the guild sees the same)',
+      'ยังเล่นอยู่ไหม? แตะเพื่อเล่นต่อ':'Still playing? Tap to continue',
+      'เช็คอินรายชั่วโมง — แตะเพื่อเล่นต่อ':'Hourly check-in — tap to keep playing',
+      'กิล':'Guild', 'แชทกิล':'Guild Chat', 'คุยในกิล':'Guild Chat',
+      'ต้องอยู่ในกิลก่อนจึงจะคุยในแชทกิลได้':'You need to join a guild before you can use guild chat',
+      'เปิดเมนูกิล':'Open guild menu',
+      // 🆕 Release Note (ย่อทั้งหมด 2026-07-27 — เจ้าของสั่ง "บอกกว้างๆ แค่เพิ่มระบบอะไรพอ" หลังผู้เล่นตำหนิว่ายาว/ลงลึกเกิน)
+      // 🛸🌌 ยาน Orion บุกอวกาศ
+      'บุกอวกาศ':'Space Raid',
+      'วงโคจรดวงจันทร์':'Lunar Orbit', 'แถบดาวเคราะห์น้อย':'Asteroid Belt', 'ห้วงอวกาศลึก':'Deep Space',
+      'ยานกำลังเดินทาง':'Your ship is on its way',
+      'เร่งเวลา':'Rush', '{a} ชม.':'{a}h', 'ยาน Lv.{n}':'Ship Lv.{n}',
+      'ส่งได้วันละ 1 เที่ยว — เลือกภารกิจเดียว':'One trip per day — pick one mission',
+      'วันนี้ส่งยานไปแล้ว':'Ship already sent today',
+      'ใช้ P เร่งให้กลับทันที — 1P ต่อ 1 ชม.':'Rush it home with P — 1P per hour left',
+      'โอกาสสำเร็จ {n}% — พลาดได้แร่ธรรมดา (🪨🔩🟤) กลับมาแทน':'{n}% success — a miss brings back ordinary ore (🪨🔩🟤) instead',
+      'ได้แร่อวกาศไปอัพเลเวลกิล':'Brings back space ore for guild levels',
+      'ยานยังบินตามและช่วยยิงตามปกติระหว่างทำภารกิจ':'The ship keeps flying with you and firing as usual during the mission',
+      'รีเซ็ตเที่ยงคืน — พรุ่งนี้ส่งได้อีก 1 เที่ยว':'Resets at midnight — you can send again tomorrow',
+      'ยานกลับจากภารกิจแล้ว':'Your ship is back from its mission',
+      '🛸🌌 เพิ่มระบบยานบุกอวกาศ':'Added the Orion Space Raid',
+      '🪨 แร่อวกาศใช้อัพเลเวลกิลเกิน Lv.20':'Space ore now required for guild levels past 20',
+      '🕳️ เปิดระบบดันกิล':'Added the Guild Dungeon',
+      '💬 เพิ่มระบบแชทกิล':'Added Guild Chat',
+      '🏰🔫 ป้อมกิลแสดงบนแผนที่แล้ว':'Guild turrets now show on the map',
+      '🎖️⭐ เปิดระบบระดับความชำนาญ':'Added the Mastery Level system',
+      'ปรับสมดุลอัตราดรอปของมอนปกติ':'Balance pass on normal-monster drop rates',
+      'ปรับปรุงระบบตรวจจับการพักจอ':'Improved AFK detection',
+      '🤖 เพิ่มออฟไลน์ มอนิเตอร์ — ดูบอทออกล่าแบบสดๆ':'Added Offline Monitor — watch your bot hunt live',
+      'บอทออฟไลน์ทำงานเร็วขึ้น':'The offline bot works faster',
+      '🏰🔫 เปิดระบบหอโจมตีกิล':'Added the Guild Turret system',
+      '🪓 ปรับปรุงขวานไททัน':'Titan Axe improved',
+      '👑 ปรับระบบแต้มสะสม VIP':'Reworked VIP points',
+      '🎟️ เปิดระบบบัตรของขวัญ P':'Added P Gift Vouchers',
+      'ปรับค่าบัตรดันท้าบอส':'Adjusted Boss Arena ticket costs',
+      '🎁 ผู้เล่นใหม่รับ P เริ่มต้นเมื่อสมัคร':'New players get starter P on sign-up',
+      'เพิ่มหน้ารายละเอียดกิล':'Added a guild details page',
+      '🏯 เปิดระบบปราสาทกิล':'Added Guild Castles',
+      'ปรับสมดุลอัตราดรอปหลายรายการ':'Balance pass on several drop rates',
+      'เพิ่มตารางอัตราดรอปและหน้าอัปเดตล่าสุดในคู่มือ':'Added the drop-rate table and a Latest Updates page to the guide',
+      '🏰 เปิดระบบกิล':'Added the Guild system',
+      'เพิ่มตรากิลออกแบบเอง และแท็บอันดับกิล':'Added custom guild emblems and a guild ranking tab',
+      'ระดับความชำนาญ':'Mastery Level',
+      'ปลดระดับความชำนาญ':'Unlock mastery level',
+      'ปลดระดับความชำนาญ ไม่สำเร็จ':'Could not unlock the mastery level',
+      'สกิลสายนี้อัพได้ถึง Lv.{a}':'This tree goes up to Lv.{a}',
+      'อัพสกิลอย่างน้อย 1 ระดับก่อน จึงจะเริ่มสะสม EXP สาย':'Level up at least 1 skill to start earning tree EXP',
+      'EXP สาย':'Tree EXP',
+      'แบ่งจากมอนตาย {a}%':'{a}% share from kills',
+      'EXP สายเต็มแล้ว':'Tree EXP full',
+      'EXP สายยังไม่เต็ม':'Tree EXP not full yet',
+      'กดค้างเพื่อกลับเข้าเกม':'Hold to return to the game',
+      'อัพป้อมนี้':'Upgrade this turret',
+      'พออัพแล้ว!':'enough to upgrade!',
+      'รอหัวหน้ากิลกดอัพ':'waiting for the leader to upgrade',
+      'ปลด Lv.{n}':'Unlock Lv.{n}',
+      'พอสร้างแล้ว!':'ready to build!',
+      'พร้อมสร้าง!':'Ready!',
+      'รอสร้าง':'Empty',
+      'แตะช่องเพื่อบริจาค / สร้าง / จัดการป้อม':'Tap a slot to donate / build / manage',
+      'บริจาคเข้ากองทุน':'Donate to the fund',
+      'ทุกคนช่วยได้':'anyone can help',
+      'อัพเกรด':'Upgrade',
+      'อัพเกรด/ย้าย = หัวหน้ากิลเท่านั้น':'Upgrading / moving = guild leader only',
+      'สร้างป้อม':'Build turret',
+      'ขาดอีก {n} G':'need {n} G more',
+      'รอหัวหน้ากิลกดสร้าง':'Waiting for the leader to build',
+      'สร้างป้อมช่องที่ {k}':'Build turret in slot {k}',
+      'ช่องที่ {k} ยังไม่ปลด':'Slot {k} is locked',
+      'ปลดเมื่อกิลถึง Lv.{n}':'Unlocks at guild Lv.{n}',
+      'ตอนนี้กิล Lv.{n}':'guild is Lv.{n} now',
+      'ปลดเพิ่ม 1 ช่องทุกเลเวลกิล 10 (สูงสุด 10 ป้อม)':'+1 slot every 10 guild levels (max 10 turrets)',
       'ใช้งาน':'Active', 'เติมอัตโนมัติ':'Auto refill',
       // เกราะ
       'ความชำนาญ เกราะ':'Armor Mastery', '🛡️ รับดาเมจก่อน HP':'🛡️ Absorbs damage before HP',
@@ -9479,11 +12554,9 @@ const xhrpg = (() => {
       'เลือกแล้ว {a} ชิ้น (แตะเพื่อเลือก)':'Selected {a} (tap to select)', '☐ ล้าง':'☐ Clear', '☑ ทั้งหมด':'☑ All',
       'ยกเลิก':'Cancel', '🗑️ ทำลายที่เลือก ({a})':'🗑️ Destroy selected ({a})',
       'คลังโมดูล {a}/30 (แตะติดตั้ง)':'Module inventory {a}/30 (tap to equip)', '🗑️ จัดการ':'🗑️ Manage',
-      '♻️ ทำลายแล้ว <b>{a} เพชรที่ตีบวก + 🎴 การ์ดที่เสียบ คืนเข้าคลังทั้งหมด</b>':'♻️ Destroying refunds <b>{a} enhancement gems + 🎴 socketed cards back to your inventory</b>',
       '(ยอดที่จะได้คืนแสดงตอนกดยืนยัน)':'(refund amounts are shown at confirmation)',
       'ดูการ์ดในโมดูล ({a} ใบ)':'View cards in this module ({a})',
       'ยืนยันทำลาย {a} ชิ้น?':'Destroy {a} item(s)?',
-      'ทำลายแล้วกู้คืนไม่ได้ (เพชรที่ตีบวก + การ์ดที่เสียบ คืนเข้าคลัง)':'Cannot be undone (enhancement gems + socketed cards are refunded)',
       'ทำลายเลย':'Destroy', '💎 คืนเพชร':'💎 Gem refund', '🎴 คืนการ์ด {a} ใบเข้าคลัง':'🎴 Returns {a} card(s) to inventory',
       'ทำลายโมดูลระดับนี้ (เฉพาะที่ตีบวก +0) ทั้งหมด?\nการ์ดที่เสียบอยู่จะถูกคืนเข้าคลัง':'Destroy all modules of this rarity (+0 only)?\nSocketed cards will be returned to your inventory',
       'ติดตั้งไม่ได้':'Could not equip', 'ถอดไม่ได้':'Could not remove', 'ตีบวกไม่ได้':'Could not enhance', 'ทำลายไม่ได้':'Could not destroy',
@@ -9495,7 +12568,7 @@ const xhrpg = (() => {
       '🗑️ คลังเต็ม 30 → ทำลาย <b>{a} [{b}]</b> (ชิ้นต่ำสุด) แทน':'🗑️ Inventory full (30) → destroyed the lowest piece <b>{a} [{b}]</b> instead',
       '💠 {a} รู · เพิ่ม [{b}]':'💠 {a} socket(s) · adds [{b}]', 'รับแล้ว ✅':'Got it ✅',
       // การ์ดในรูโมดูล
-      'ถอด {a} G':'Unsocket {a} G', 'ถอดการ์ด (เลือกจ่าย G ตามระดับ / 19 P)':'Unsocket card (pay G by rarity / 19 P)',
+      'ถอด {a} G':'Unsocket {a} G', 'ถอดการ์ด (เลือกจ่าย G ตามระดับ / 5 P)':'Unsocket card (pay G by rarity / 5 P)',
       'เสียบการ์ด':'Socket a card', '🎴 รู {a}/{b}':'🎴 Sockets {a}/{b}',
       '— ไม่มีการ์ดในคลัง —':'— no cards in inventory —', '🎴 เลือกการ์ดเสียบ':'🎴 Pick a card to socket', '(เสียบถาวร)':'(permanent)',
       'ถอดการ์ดออกจากรู':'Unsocket this card', 'การ์ดกลับเข้าคลัง · เลือกวิธีจ่าย':'Card returns to inventory · choose payment',
@@ -9526,7 +12599,211 @@ const xhrpg = (() => {
       'ของวิเศษ ชิ้นส่วนไททัน':'Titan Parts', 'ของวิเศษ ชิ้นส่วนยานบิน':'Airship Parts',
       'ยังไม่ค้นพบ':'Not discovered',
       // กล่องสุ่มการ์ด
+      // 🧰 กล่องสุ่มไข่
+      '🧰 กล่องสุ่มไข่':'🧰 Egg Box',
+      '🧰 กล่องสุ่มไข่ ระดับ {a} (Lv.{b}-{c})':'🧰 Egg Box Tier {a} (Lv.{b}-{c})',
+      '✅ เข้าสมุดไข่แล้ว — ฟักที่เมนู 🐾 สัตว์เลี้ยง':'✅ Added to your egg book — hatch it in the 🐾 Pet menu',
+      '🎉 แจ็คพอต 1%! ไข่ ⭐MVP เข้าสมุดแล้ว':'🎉 Jackpot 1%! ⭐MVP egg added to your book',
+      'เปิดสุ่ม<b>ไข่มอน 1 ฟอง</b>ตามช่วงเลเวลของกล่อง · โอกาสเป็นไข่ <b style="color:#dc2626">⭐MVP 1%</b> · ไข่เข้าสมุด — ฟักที่เมนู 🐾 สัตว์เลี้ยง':'Opens <b>1 random monster egg</b> within the box\'s level range · <b style="color:#dc2626">1% chance of an ⭐MVP egg</b> · goes into your book — hatch it in the 🐾 Pet menu',
+      // 🧰 กล่องสุ่มไข่ — ตลาด
+      'กล่องไข่ Lv.{a}-{b}':'Egg Box Lv.{a}-{b}',
+      'สุ่มไข่มอน Lv.{a}-{b} · ⭐MVP 1%':'Random monster egg Lv.{a}-{b} · ⭐MVP 1%',
+      // 👑 ระบบ VIP
+      '👑 VIP สูงสุดแล้ว — ขอบคุณที่สนับสนุนเกม!':'👑 Max VIP — thank you for supporting the game!',
+      'ระดับถัดไป: VIP {a}':'Next rank: VIP {a}',
+      'ยอดซื้อ P สะสมทั้งหมด (เลื่อนระดับอัตโนมัติ · สิทธิ์ถาวร)':'Total P purchased (ranks up automatically · benefits are permanent)',
+      'P สะสม':'Total P',
+      'กล่อง G':'G boxes',
+      'กล่อง P':'P boxes',
+      '🛒 ซื้อกล่องสุ่มรายวันได้ที่หน้า 🎒 ไอเทม — แถบใต้แผงกล่องการ์ด/กล่องไข่ · โควตาการ์ดกับไข่แยกกัน (G/P ก็แยกกัน) · +EXP/+DROP มีผลตลอดทั้งออนไลน์และออฟไลน์':'🛒 Buy daily boxes on the 🎒 Items page — the bar under the Card Box / Egg Box panels · card and egg quotas are separate (G and P too) · +EXP/+DROP applies online and offline',
+      'สุ่มกล่องระดับ 1-{a} (ตามเลเวลของคุณ)':'Random box tier 1-{a} (based on your level)',
+      'หมดแล้ว':'Sold out',
+      'เหลือ {a}/{b}':'{a}/{b} left',
+      'ซื้อไม่ได้':'Purchase failed',
+      // 👑 ประวัติใช้ P — ร้าน VIP
+      'ซื้อกล่องการ์ด (ร้าน VIP)':'Bought Card Box (VIP shop)',
+      'ซื้อกล่องไข่ (ร้าน VIP)':'Bought Egg Box (VIP shop)',
+    '⚠️ กติกาดันบอส (แจ้งครั้งแรกครั้งเดียว)\n\n🎫 ระบบหักค่าบัตรทันทีที่กดเข้าดวล\n💀 ถ้าแพ้ / หมดเวลา 10 นาที / หนีออก — จะไม่ได้ G หรือ P คืน\n✅ แพ้ไม่เสียสิทธิ์รางวัลรายวัน (สิทธิ์นับเฉพาะตอนชนะ)\n\nยืนยันเข้าดวล {n} Lv.{lv} — ค่าบัตร {c}?':'⚠️ Boss Arena rules (shown once)\n\n🎫 The ticket fee is charged the moment you enter\n💀 If you lose / time out (10 min) / flee — your G or P will NOT be refunded\n✅ Losing does not use up your daily reward slots (only wins count)\n\nEnter the duel vs {n} Lv.{lv} — ticket {c}?',
+      'กล้องเล็งมีดสั้น':'Dagger Scope',
+      'กล้องส่องไกล':'Spyglass',
+      'แมกกาซีนขยาย':'Extended Magazine',
+      // 💸 ส่วนลดเติมเงินรายวัน
+      'วันนี้ลด {a}% ทุกแพ็ก!':'{a}% off every pack today!',
+      'โปรวันสิ้นเดือน':'End-of-month sale',
+      'โปร {a}.{a}':'{a}.{a} sale',
+      'โปรศุกร์–อาทิตย์':'Fri–Sun sale',
+      'ดีลประจำวัน':'Daily deal',
+      'ถึงเที่ยงคืนนี้':'ends midnight tonight',
+      // 📩 ฟอร์มติดต่อแอดมิน (หน้าเติมเงิน)
+      'มีปัญหาการชำระเงิน? ติดต่อแอดมิน':'Payment problem? Contact Admin',
+      'ติดต่อแอดมิน':'Contact Admin',
+      'อธิบายปัญหาของคุณ (การชำระเงิน ของหาย บั๊ก) — ชื่อตัวละครแนบไปให้อัตโนมัติ':'Describe your problem (payment, missing items, bugs). Your character name is attached automatically.',
+      'พิมพ์ข้อความ... (สูงสุด 300 ตัวอักษร)':'Type your message... (max 300 characters)',
+      'เราจะแก้ไขให้ภายใน 24 ชม.':'We\'ll resolve your issue within 24 hours',
+      'ส่งข้อความแล้ว!':'Message sent!',
+      'แอดมินจะตรวจสอบและแก้ไขให้ภายใน 24 ชม. ขอบคุณครับ!':'Our admin will review and resolve your issue within 24 hours. Thank you!',
+      'ส่งไม่สำเร็จ — ลองใหม่อีกครั้ง':'Failed to send — please try again',
+      'เชื่อมต่อไม่ได้ — ลองใหม่อีกครั้ง':'Connection failed — please try again',
+    'บัตร 1,000G × Lv บอส · รางวัลฟรีทุกวัน (สิทธิ์เพิ่มตามระดับ VIP) · แพ้ไม่นับสิทธิ์':'Ticket 1,000G × boss Lv · daily free rewards (more slots per VIP rank) · losses don\'t count',
+      // ✖️10 เปิดกล่องทีละ 10 (popup ตาราง)
+      'ได้การ์ด {a} ใบเข้าสมุดแล้ว':'Got {a} cards — added to your card book',
+      'ได้ไข่ {a} ฟองเข้าสมุดแล้ว — ฟักที่เมนู 🐾 สัตว์เลี้ยง':'Got {a} eggs — hatch them in the 🐾 Pets menu',
+      '🎉 แจ็คพอต! ⭐MVP ×{a}':'🎉 Jackpot! ⭐MVP ×{a}',
+      '⛔ ปิดขายแล้ว':'⛔ No longer for sale',
+      '{a}% · ครบรอบใน {b}s':'{a}% · full cycle in {b}s',
+      'ยังไม่เปิด':'Not open yet',
+      // 🎁 แผงโบนัสรับรางวัล (Stats & Skills)
+      '🎁 โบนัสรับรางวัล (PREMIUM · VIP)':'🎁 Reward bonuses (PREMIUM · VIP)',
+      'บวกอัตโนมัติทุกการกำจัดมอน · ออนไลน์+ออฟไลน์':'Applied automatically on every monster kill · online + offline',
+      'โบนัส EXP':'EXP bonus',
+      'โบนัสดรอปของหายาก':'Rare drop bonus',
+      'โบนัส G':'Gold bonus',
+      'บวกกัน':'added together',
+      'คูณกัน':'multiplied',
+      'PREMIUM เท่านั้น':'PREMIUM only',
+      'การ์ด/ไข่/โมดูล/เพชร/กล่อง/ของ MVP — ไม่รวมแร่/พืช/ยา':'Cards/eggs/modules/diamonds/boxes/MVP loot — excludes resources/herbs/potions',
+      'แสดงใน Log: บรรทัดปกติ = ฐาน · บรรทัด 🅿️ = โบนัส':'In the Log: normal line = base · 🅿️ line = this bonus',
+      // 🏡 บ้านของฉัน (map 5 · Phase A)
+      'บ้านของฉัน':'My Home',
+      'ออกจากบ้าน':'Leave home',
+      '↩️ ออกจากบ้านแล้ว':'↩️ Left home', '↩️ ออกจากปราสาทแล้ว':'↩️ Left the castle',
+      '🏡 กลับถึงบ้านแล้ว — พักผ่อนตามสบาย':'🏡 Welcome home — relax and enjoy',
+      // 🏡 บ้านของฉัน Phase B (home_lv/แปลง)
+      'อัพเกรดบ้าน':'Upgrade home',
+      'แปลงปลูกเปิดแล้ว {a}/6':'Plots unlocked: {a}/6',
+      'แปลงถัดไปปลดที่บ้าน Lv.{a}':'Next plot unlocks at home Lv.{a}',
+      'อัพเกรดเป็น Lv.{a}':'Upgrade to Lv.{a}',
+      'เรทปกติ ×10 · ใช้ทุกทรัพยากร':'standard rate ×10 · uses all resources',
+      'อัพได้สูงสุด Lv.{a} ที่ผู้เล่น Lv.{b}':'Max Lv.{a} at player Lv.{b}',
+      // 🌱 บ้านของฉัน Phase C (เมล็ด/ฟาร์ม)
+      'องุ่นป่า':'Wild Grape',
+      'ถั่วเลื้อย':'Climbing Bean',
+      'พริกแดง':'Red Chili',
+      'กะหล่ำปลี':'Cabbage',
+      'ดอกมันเทศ':'Sweet Potato Bloom',
+      'ใบหยก':'Jade Leaf',
+      'ว่านหนาม':'Thorn Aloe',
+      'ข้าวสาลี':'Wheat',
+      'แอปเปิล':'Apple',
+      'เลมอน':'Lemon',
+      'เชอร์รี่':'Cherry',
+      'มะพร้าว':'Coconut',
+      'เกรดทอง':'Gold grade',
+      'ชิ้น':'pc',
+      'ฟาร์มของฉัน':'My Farm',
+      'ปลูกแล้ว {a}/{b} หลุม':'{a}/{b} holes planted',
+      'ต้นถัดไปสุกใน {a} นาที':'next ripens in {a} min',
+      'เก็บเกี่ยว+ขาย ({a} หลุมสุก)':'Harvest + sell ({a} ripe)',
+      'ยังไม่มีเมล็ด — เมล็ดดรอปจากการล่ามอนสเตอร์ (ทุกระดับ)':'No seeds yet — seeds drop while hunting monsters (all levels)',
+      '🌱 เมล็ดพืช':'🌱 Seeds',
+      'รวม {a} เมล็ด':'{a} seeds total',
+      'เมล็ดดรอปจากการล่ามอนสเตอร์ทุกระดับ · เอาไปปลูกที่ 🏡 บ้านของฉัน (ปุ่มบ้านซ้ายจอ) — สุกแล้วเก็บขายได้ G':'Seeds drop while hunting monsters at every level · plant them at 🏡 My Home (house button, left side) — harvest ripe crops to sell for G',
+      // 👀 เยี่ยมบ้านเพื่อน (Phase D)
+      'เยี่ยมบ้าน':'Visit home',
+      'บ้านของ {a}':'{a}\'s Home',
+      'ของสะสมหายาก':'Rare collectibles',
+      'แปลงปลูก':'Plots',
+      'ดูอย่างเดียว — ของในบ้านเป็นของเจ้าของบ้าน':'View only — everything here belongs to the owner',
+      // 🏡👥 เยี่ยมบ้านเพื่อน (เดินเข้าไปได้ · 2026-07-23)
+      'เข้าไปเดินในบ้าน':'Walk inside', '🏡 เข้าเยี่ยมบ้านเพื่อนแล้ว — ดูอย่างเดียว':'🏡 Visiting a friend\'s home — view only',
+      'ไม่พบบ้านของผู้เล่นคนนี้':'Could not find this player\'s home', 'ออก':'Leave',
+      '🏡 กำลังเยี่ยมบ้านเพื่อน — จัดการได้เฉพาะบ้านตัวเอง':'🏡 Visiting a friend\'s home — you can only manage your own',
+      'กำลังเยี่ยมบ้านของ {a}':'Visiting {a}\'s home', 'เข้าบ้านไม่ได้ขณะอยู่ในสนามประลอง':'Cannot enter a home while in the Colosseum',
       '🎁 กล่องสุ่มการ์ด':'🎁 Card Boxes', 'ระดับ {a}':'Tier {a}',
+      // ── 🎰 สุ่มโชค G ──
+      'สุ่มโชค G':'G Lucky Draw', 'ลุ้นแจ็คพอตสูงสุด ×6 ทุกครั้งที่สุ่ม!':'Jackpot up to ×6 on every draw!',
+      'รางวัลฐานของคุณ (Lv.{a})':'Your base reward (Lv.{a})', 'ขึ้นไป':'or more', '💥 แจ็คพอต ×2 – ×6 มีทุกรอบ':'💥 ×2 – ×6 jackpot possible every draw',
+      'วันนี้เหลือ {a}/{b} ครั้ง':'{a}/{b} draws left today', 'ครั้งถัดไป: {a}':'Next: {a}', 'ฟรี!':'Free!',
+      '🎲 สุ่มเลย — ฟรี 1 ครั้งแรก!':'🎲 Draw now — first one free!', '🎲 สุ่ม ({a} P)':'🎲 Draw ({a} P)',
+      'สิทธิ์วันนี้หมดแล้ว — พรุ่งนี้มาใหม่':'No draws left today — come back tomorrow', 'รีเซ็ตสิทธิ์ทุกวัน 00:00':'Resets daily at 00:00', 'P ไม่พอ':'Not enough P',
+      '🔒 ปลดล็อกที่ Lv.{n} ขึ้นไป':'🔒 Unlocks at Lv.{n}', 'เล่นถึง Lv.{n} ก่อนจึงจะสุ่มได้ (ตอนนี้ Lv.{a})':'Reach Lv.{n} to use the draw (you are Lv.{a})',
+      'ทำลายอัตโนมัติ':'Auto-destroy',
+      '▾ อีก {n} ชิ้น':'▾ {n} more', '▴ ย่อ':'▴ Collapse',
+      // ── 🔰 Shield rebrand (ระบบเกราะเดิม → โล่) ──
+      'โล่':'Shield', 'วัสดุเคลือบ โล่':'Shield Coating', 'โมดูลโล่':'Shield Modules', '🔰 โมดูลโล่':'🔰 Shield Modules', 'แกนโล่':'Shield Core',
+      // ── 🛡️ Equipment (eq2) — ของสวมใส่ D2 ──
+      'หมวกเกราะ':'Helmet', 'ชุดเกราะ':'Armor', 'รองเท้าเกราะ':'Boots', 'สร้อยพลัง':'Amulet', 'แหวนพลัง':'Ring', 'ของสวมใส่':'Gear',
+      'ของสวมใส่ดรอปจากมอนและบอส — T สูงยิ่งหายาก':'Gear drops from monsters and bosses — higher T is rarer',
+      'สวมใส่อยู่':'Equipped', 'กระเป๋า':'Bag', 'ใหม่':'New',
+      'ยังไม่มีของ — ล่ามอนและบอสเพื่อเก็บของสวมใส่!':'No items yet — hunt monsters and bosses to collect gear!',
+      'ขาย/แลกได้ที่ 🏪 ตลาด (หมวด Equipment) และเทรด 1-1 · กระเป๋าเต็มของใหม่จะทับชิ้น T ต่ำสุดอัตโนมัติ':'Sell/trade at the 🏪 Market (Equipment tab) and 1-1 Trade · when the bag is full, new items auto-replace the lowest-T piece',
+      'สวมใส่':'Equip', 'ทำลายทิ้งถาวร?':'Destroy permanently?', 'ถอดออก':'Unequip', 'แหวนเต็มทั้งคู่ — เลือกช่อง':'Both ring slots full — pick one',
+      // ⚒️ ตีบวกของสวมใส่ (2026-07-23)
+      'ตีบวกสูงสุดแล้ว':'Fully enhanced', 'โอกาสสำเร็จ {r}%':'{r}% success chance', 'ล้มเหลว −1 ขั้น (ไม่คืนของ)':'On failure −1 level (no refund)',
+      'ตีบวก → +{n} · โอกาสสำเร็จ {r}%\nถ้าล้มเหลวจะลด 1 ขั้น และไม่คืนเพชร/ทอง':'Enhance → +{n} · {r}% success chance\nOn failure it drops 1 level and gems/gold are not refunded',
+      'ระยะมีดสั้น +{v}m':'Dagger range +{v}m', 'ระยะมีดยาว +{v}m':'Long Knife range +{v}m', 'ความจุมีดสั้น +{v}':'Dagger capacity +{v}',
+      'ธนูไททัน ATK +{v}':'Titan Bow ATK +{v}', 'ขวานไททัน ATK +{v}':'Titan Axe ATK +{v}', 'ระยะ Titan Beam +{v}m':'Titan Beam range +{v}m',
+      'DMG Railgun ยานบิน +{v}':'Airship Railgun DMG +{v}', 'ระยะ Railgun ยานบิน +{v}m':'Airship Railgun range +{v}m', 'ความเร็วเดิน +{v}%':'Move speed +{v}%',
+      '🪵 ไม้ดรอป +{v}':'🪵 Wood drop +{v}', '🪨 หินดรอป +{v}':'🪨 Stone drop +{v}', '⚙️ เหล็กดรอป +{v}':'⚙️ Iron drop +{v}', '🟫 ทองแดงดรอป +{v}':'🟫 Copper drop +{v}', '🌿 สมุนไพรดรอป +{v}':'🌿 Herb drop +{v}',
+      'ทีมงานเกม':'Game staff',
+      'ผู้เล่นตัวแทนประเทศ':'Country Lead player',
+      'กล่อง G/P':'G/P boxes',
+      '🏟️ ดันบอส: ครั้งฟรี (จ่าย G) + ครั้งจ่าย P ต่อวัน':'🏟️ Boss Arena: free entries (pay G) + P entries per day',
+      'ของโบราณ':'Ancient Relics',
+      // 🌐 GMC แปลภาษาแชท
+      'แปลข้อความนี้':'Translate this message',
+      'ตอบหลายภาษา':'Reply in multiple languages',
+      'ยังไม่ตั้งค่า API แปลภาษา':'Translation API not configured yet',
+      'แปลถี่เกินไป — รอสักครู่':'Translating too often — wait a moment',
+      'แปลไม่สำเร็จ — ลองใหม่':'Translation failed — try again',
+      'ค่าดำเนินการแลกเปลี่ยน 1-1':'1-on-1 trade fee',
+      'ตลาด·เทรด':'Market·Trade',
+      // 🤝 แลกเปลี่ยน 1-1
+      '🤝 แลกเปลี่ยน':'🤝 Trade',
+      'ไม่พบผู้เล่นออนไลน์ชื่อนี้':'No online player with that name',
+      'พิมพ์ชื่ออย่างน้อย 2 ตัวอักษร':'Type at least 2 characters',
+      'เชิญ':'Invite',
+      'รอ {a} ตอบรับ...':'Waiting for {a} to respond...',
+      'คำเชิญหมดอายุใน 60 วินาที — ไม่ตอบ = คืน P อัตโนมัติ':'Invite expires in 60s — no answer = P refunded automatically',
+      'แลกกับ {a}':'Trading with {a}',
+      'ของเขา':'Their offer',
+      'ปลดล็อก/แก้ไข':'Unlock / edit',
+      'เลือกของแล้วกดล็อกข้อเสนอ':'Pick items then lock your offer',
+      'รออีกฝ่ายล็อกข้อเสนอ...':'Waiting for the other side to lock...',
+      'รออีกฝ่ายยืนยัน...':'Waiting for the other side to confirm...',
+      'ตรวจสอบของทั้งสองฝั่ง แล้วกดยืนยันแลก':'Check both offers, then press Confirm',
+      'ยืนยันแลก':'Confirm trade',
+      'ยกเลิกการแลกเปลี่ยน':'Cancel trade',
+      'ถ้าฝ่ายใดแก้ข้อเสนอ ทั้งสองฝ่ายต้องยืนยันใหม่':'If either side edits the offer, both must confirm again',
+      'แลกเปลี่ยนสำเร็จ!':'Trade complete!',
+      'การแลกเปลี่ยนถูกยกเลิก':'Trade cancelled',
+      'ของเข้ากระเป๋าภายในไม่กี่วินาที (ดูใน Log)':'Items arrive in your bag within seconds (see Log)',
+      'ของทั้งหมดคืนเข้ากระเป๋าแล้ว':'Everything has been returned to your bag',
+      'แลกเปลี่ยน 1-1':'1-on-1 Trade',
+      'ค้นหาผู้เล่นที่ออนไลน์อยู่ แล้วส่งคำเชิญแลกเปลี่ยน — ฝ่ายละ 1 ไอเทม + เงิน':'Search an online player and send a trade invite — each side: 1 item + gold',
+      'ค่าดำเนินการ {n} P (ฝ่ายเชิญ · หักเมื่อแลกสำเร็จเท่านั้น)':'Fee {n} P (initiator · charged only when the trade completes)',
+      '🔍 พิมพ์ชื่อผู้เล่น...':'🔍 Type a player name...',
+      'ประวัติแลกเปลี่ยน':'Trade history',
+      'ยังไม่มีประวัติแลกเปลี่ยน':'No trade history yet',
+      'ให้':'Gave',
+      'ได้รับ':'Received',
+      'ยกเลิก/หมดอายุ — ไม่มีการแลก':'Cancelled/expired — nothing was traded',
+      '{a} อยากแลกเปลี่ยนไอเทมกับคุณ':'{a} wants to trade items with you',
+      'คำเชิญหมดอายุใน 60 วินาที':'Invite expires in 60 seconds',
+      'ยอมรับ':'Accept',
+      'ปฏิเสธ':'Decline',
+      'ไม่มีของหมวดนี้':'No items in this category',
+      'ใส่ไอเทม 1 ชนิด (เลือกจำนวนได้) และ/หรือเงิน — ล็อกแล้วของถูกกันไว้จนจบดีล':'Put in 1 item type (choose quantity) and/or gold — locked items are held until the deal ends',
+      'ล็อกข้อเสนอ':'Lock offer',
+      'ใส่ไอเทมหรือเงินอย่างน้อย 1 อย่าง':'Put in at least an item or gold',
+      '(ยังไม่ใส่อะไร)':'(nothing yet)',
+      // 🧟 อีเวนต์มอนสเตอร์บุกทะเลทราย
+      'ซอมบี้เดินดิน':'Shambling Zombie',
+      'ซอมบี้นักรบ':'Zombie Warrior',
+      'ซอมบี้หัวหน้าฝูง':'Horde Leader Zombie',
+      'มอนสเตอร์บุก! ปกป้องต้นไม้ใหญ่':'Invasion! Protect the Great Tree',
+      'มอนสเตอร์บุกทะเลทราย! ไปช่วยป้องกันต้นไม้ใหญ่':'Desert invasion! Help defend the Great Tree',
+      '🏜️ ไปป้องกัน!':'🏜️ Go defend!',
+      'ป้องกันสำเร็จ!':'Defense successful!',
+      'ต้นไม้ใหญ่รอดแล้ว — ผู้เล่นออนไลน์ทุกคนรับ 💎 เพชรฟ้า 1 เม็ด':'The Great Tree survived — all online players receive 1 💎 Blue Diamond',
+      'ต้นไม้ใหญ่ถูกทำลาย...':'The Great Tree was destroyed...',
+      'ฝูงซอมบี้ชนะครั้งนี้ — ไว้ล้างแค้นรอบหน้า!':'The zombie horde won this time — get revenge next round!',
+      'ฝูงซอมบี้กำลังจะบุกทะเลทราย! เตรียมป้องกันต้นไม้ใหญ่':'Zombie horde is about to invade the desert! Get ready to defend the Great Tree',
+      '🛸 WARP ไปต้นไม้':'🛸 WARP to the tree',
+      'ขายผักสำเร็จ!':'Produce sold!',
+      'เก็บเกี่ยว {n} หลุม · ผลผลิต {q} ชิ้น':'Harvested {n} holes · {q} produce',
+      'ไข่{a}':'{a} Egg', 'สัตว์เลี้ยง Lv.{a} · ค่าฟัก {b} G':'Pet Lv.{a} · hatch cost {b} G',
+      'การ์ด · +{a} {b}':'Card · +{a} {b}', 'ดาเมจ ×{a}':'Damage ×{a}',
       'เปิดสุ่ม<b>การ์ดมอน 1 ใบ</b>ตามช่วงเลเวลของกล่อง · โอกาสเป็นการ์ด <b style="color:#dc2626">⭐MVP 1%</b> · การ์ดเข้าสมุดทันที':'Opens <b>1 random monster card</b> within the box\'s level range · <b style="color:#dc2626">1% chance of an ⭐MVP card</b> · goes straight into your collection',
       '🎁 กล่องสุ่มการ์ด ระดับ {a} (Lv.{b}-{c})':'🎁 Card Box Tier {a} (Lv.{b}-{c})',
       'การ์ด {a}':'{a} Card', '(คอมแบต)':'(combat)',
@@ -9559,6 +12836,11 @@ const xhrpg = (() => {
       'เริ่มที่ Lv(UP) 1 · เดินตามคุณบนแผนที่':'Starts at Lv(UP) 1 · follows you on the map', ' (ตัวใหญ่!)':' (extra big!)',
       '🐣 ฟักเลย':'🐣 Hatch!', 'ฟักไข่':'Hatch',
       // ── 💬 แชท (renderChat/chatSend · index.php ปุ่ม+แผง) ──
+      // ── 📦 แท็บ DROP (renderLogPanel · DROP_CAT) · 'กล่องโมดูล'/'กล่องการ์ด' ใช้ที่ PHP ด้วย (local_name) ──
+      'ของที่ได้รับ':'Drops', 'บันทึกเหตุการณ์':'Event Log', 'กล่อง':'Box', 'ของ MVP':'MVP item',
+      'ซื้อจากตลาด':'Market buy', 'ดันบอส':'Boss run', 'อื่นๆ':'Other',
+      'กล่องโมดูล':'Module Box', 'กล่องการ์ด':'Card Box',
+      'ยังไม่ได้ของหายากใน 7 วันนี้ — ออกไปล่ามอนกันเถอะ!':'No rare drops in the last 7 days — go hunt some monsters!',
       // ── ⚔️ กล่องโบนัสอาวุธ Premium ในป๊อปอัพรางวัลออฟไลน์ ──
       'โบนัสอาวุธ Premium':'Premium weapon bonus',
       'รางวัลออฟไลน์ +10%':'Offline reward +10%',
@@ -9569,12 +12851,29 @@ const xhrpg = (() => {
       'อยู่ล่างสุดของหน้า 🌟 PREMIUM':'At the bottom of the 🌟 PREMIUM page',
       'แชท':'Chat', 'แชทรวม':'Global', 'แชทส่วนตัว':'Private', 'ฉัน':'Me',
       '💌 แชทส่วนตัว':'💌 Private chat', 'พิมพ์ข้อความ...':'Type a message...', 'ส่ง':'Send',
+      // 📎 รูปแชท
+      'รูปหมดอายุแล้ว':'Image expired', 'รายงานรูป':'Report image', 'รายงานแล้ว':'Reported',
+      'รูปใหญ่เกิน 3MB':'Image over 3MB', 'รับเฉพาะ JPG / PNG / WebP':'Only JPG / PNG / WebP',
+      '⏳ กำลังอัปรูป...':'⏳ Uploading...', '📎 แนบรูปแล้ว — กดส่ง':'📎 Image attached — press Send',
+      'อัปรูปไม่สำเร็จ':'Upload failed', '🚩 รายงานรูปแล้ว — ทีมงานจะตรวจสอบ':'🚩 Image reported — staff will review',
       'ยังไม่มีข้อความ — ทักทายกันได้เลย':'No messages yet — say hi!',
       'ยังไม่มีแชทส่วนตัว — กดที่ชื่อคนในแท็บ 🌐 รวม เพื่อเริ่มคุย':'No private chats yet — tap a name in the 🌐 Global tab to start',
       'เก็บสัตว์เลี้ยงเข้าไข่? เสีย 10,000 G\nLv(UP) จะรีเซ็ตเป็น 1 · การ์ดที่เสียบคืนเข้าคลังฟรี · ไข่กลับเข้าสมุด':'Recall your pet into its egg? Costs 10,000 G\nLv(UP) resets to 1 · socketed cards return to inventory for free · the egg goes back to the book',
       'ถอดการ์ดออกจากสัตว์เลี้ยง? เสีย {a} G — การ์ดกลับเข้าคลัง\n(เก็บเข้าไข่ = การ์ดคืนทั้งหมดฟรี)':'Unsocket this card from your pet? Costs {a} G — the card returns to inventory\n(recalling into the egg returns all cards for free)',
       '🎴 เลือกการ์ดเสียบสัตว์เลี้ยง':'🎴 Pick a card for your pet',
       'เสียบถาวร (ถอดเสีย {a} G · เก็บเข้าไข่คืนฟรี) · stat มีผลกับผู้เล่นเหมือนการ์ดในโมดูล':'Permanent socket (unsocket costs {a} G · free on egg recall) · stats apply to you like module cards',
+      'เสียบถาวร (ถอด Lv×{g} G หรือ {p} P · เก็บเข้าไข่คืนฟรี) · stat มีผลกับผู้เล่นเหมือนการ์ดในโมดูล':'Permanent socket (unsocket costs Lv×{g} G or {p} P · free on egg recall) · stats apply to you like module cards',
+      'ถอดการ์ด (เลือกจ่าย G ตาม Lv / {p} P)':'Unsocket card (pay G by Lv / {p} P)', '({i} Lv.{a})':'({i} Lv.{a})',
+      '♻️ รีเซ็ต':'♻️ Reset', 'รีเซ็ตแต้มอัพเกรด':'Reset upgrade points', 'รีเซ็ตแต้มอัพ (เลือกจ่าย G ตาม Lv / {p} P)':'Reset upgrade points (pay G by Lv / {p} P)',
+      // 🌐 tooltip ปุ่ม toolbar/HUD (title index.php)
+      'เลือกโซนฟาร์มตอนออฟไลน์ (8 ชม.)':'Pick offline farm zones (8 hrs)', 'เปลี่ยนภาษา / Switch language':'Switch language', 'วาร์ปกลางแผนที่':'Warp to map center',
+      'คู่มือการเล่น':'Game guide', 'เปิด/ปิดเสียง':'Toggle sound', 'เปิด/ปิด บันทึกลอย':'Toggle floating log', 'เปิดบันทึกเหตุการณ์':'Open event log', 'เปลี่ยนแผนที่':'Change map',
+      'ท้าดวลผู้เล่นในแผนที่':'Challenge players on the map', 'ดันท้าบอส 1-1':'Boss challenge 1-on-1', 'รัศมีสำรวจ (คลิกเปลี่ยน 100→150→200→300)':'Explore radius (click: 100→150→200→300)',
+      'แลกโค้ดจากเกมเดิม (VIP → P)':'Redeem old-game code (VIP → P)', 'ยกเลิกรูป':'Cancel image', 'อีโมจิ':'Emoji', 'แนบรูป':'Attach image',
+      'คืนแต้มทั้งหมด {n} แต้ม · เลือกวิธีจ่าย':'Refund all {n} points · choose payment', 'ยังไม่ได้ลงแต้ม — ไม่ต้องรีเซ็ต':'No points spent — nothing to reset',
+      // 🌐 ป้ายรายการประวัติ P (item_name — แปลสดตามภาษา)
+      'ถอดการ์ดจากโมดูล':'Unsocket card from module', 'ถอดการ์ดจากสัตว์เลี้ยง':'Unsocket card from pet', 'ถอดการ์ดจากสัตว์เทพ':'Unsocket card from divine pet',
+      'รีเซ็ตแต้มสัตว์เลี้ยง':'Reset pet points', 'รีเซ็ตแต้มสัตว์เทพ':'Reset divine pet points',
       'ดำเนินการไม่สำเร็จ':'Action failed', 'เชื่อมต่อไม่ได้ ลองใหม่อีกครั้ง':'Connection failed — try again',
       // คู่มือไอเทม (ITEM_HELP)
       'ยาฟื้นฟู T1-T6':'Potions T1-T6', 'เปิด/ปิดรายระดับ':'Per-tier On/Off', 'AUTO และ Threshold':'AUTO and Threshold',
@@ -9651,9 +12950,10 @@ const xhrpg = (() => {
       // แผงผู้ติดตาม (renderRobot + cat/drone/pet panels)
       'ผู้ติดตาม เดินตามและโจมตีมอนอัตโนมัติ':'Followers walk with you and attack monsters automatically',
       '🐾 คู่หูวิ่งตาม':'🐾 Companion', '✓ สวมอยู่':'✓ Equipped',
-      '🐱 กำลังวิ่ง...':'🐱 Running...', '⏳ {a} นาที':'⏳ {a} min', '✅ พร้อม':'✅ Ready',
+      '🐱 กำลังวิ่ง...':'🐱 Running...', '⏳ {a} นาที':'⏳ {a} min', '✅ พร้อม':'✅ Ready', 'ทำงานอัตโนมัติ':'Auto',
       '✅ ใช้งาน':'✅ Active', '⏸ ปิด':'⏸ Off',
-      'เนโกะ Lv.{a}':'Neko Lv.{a}', 'แบก {a} นัด · ยา 5 ขวด (มีดสั้น+ยาว)':'Carries {a} ammo · 5 potions (dagger+long)',
+      'เนโกะ Lv.{a}':'Neko Lv.{a}', 'แบก {a} นัด · ยา {b} ขวด (มีดสั้น+ยาว)':'Carries {a} ammo · {b} potions (dagger+long)',
+      '🐱 ขนกระสุน/ยาจากคลังมาเติมให้อัตโนมัติ · ต้องมีของในคลังก่อน':'🐱 Auto-delivers ammo/potions from storage · stock them first',
       'ส่งมีดสั้น+ยาถึงตัว ไม่ต้องวาร์ปยานบิน':'Delivers daggers + potions to you, no airship warp needed',
       '🔓 ซื้อ Premium 49P / 10 วัน':'🔓 Buy Premium 49P / 10 days', '🔓 ซื้อ Premium 39P / 10 วัน':'🔓 Buy Premium 39P / 10 days',
       '🚁 กำลังบิน...':'🚁 Flying...', '⏳ Cooldown {a} นาที':'⏳ Cooldown {a} min',
@@ -9677,11 +12977,11 @@ const xhrpg = (() => {
       'เต็ม':'Full', 'ปิดผลิต':'Production off', 'คลังเต็ม':'Stock full', 'รอบล่าสุด: {a}':'Last cycle: {a}',
       '🔒 ปลดล็อกยาน Lv.20':'🔒 Unlocks at ship Lv.20',
       'ยิงสนับสนุน AOE อัตโนมัติ — อัพยาน Orion ถึง Lv.20 เพื่อเปิดใช้งาน (อีก {a} Lv.)':'Automatic AOE fire support — upgrade the Orion ship to Lv.20 to enable ({a} Lv. to go)',
-      'ยิงสนับสนุนอัตโนมัติ · ระยะ 300m · CD 15s · ใช้ 20⚡/นัด':'Automatic fire support · range 300m · CD 15s · 20⚡/shot',
+      'ยิงสนับสนุนอัตโนมัติ · ระยะ {r}m · CD 15s · ใช้ 20⚡/นัด':'Automatic fire support · range {r}m · CD 15s · 20⚡/shot',
       '🔒 ต้องมี Premium Orion Gun':'🔒 Requires Premium Orion Gun',
       'ปืนกลหนัก AOE ยิงชุดละ 3 นัดติด · DMG 1.25× Rail Gun · CD 5s — ปลดล็อกในร้าน Premium (10 วัน)':'Heavy AOE gatling, 3-round burst · DMG 1.25x Rail Gun · CD 5s — unlock in Premium shop (10 days)',
       'DMG {a}/ชุด · ⏳ {b} วัน':'DMG {a}/burst · ⏳ {b} days',
-      'ปืนกลหนัก AOE — ยิงชุดละ 3 นัดติด · ระยะ 300m · AOE {a}m · CD 5s · 5⚡/ชุด':'Heavy AOE gatling — 3-round burst · range 300m · AOE {a}m · CD 5s · 5⚡/burst',
+      'ปืนกลหนัก 3 นัดติด · ระยะ {r}m · CD 5s · 5⚡/ชุด':'Heavy gatling · 3-round burst · range {r}m · CD 5s · 5⚡/burst',
       '🔥 เผาไม้':'🔥 Wood burning', '⚡/เผา':'⚡/burn', 'ใช้ 🪵{a}/เผา':'Uses 🪵{a}/burn', 'ปิดอยู่':'Off',
       '🛸 ยาน +☀️':'🛸 Ship +☀️', '/นาที':'/min', 'ยาน {a}':'Ship {a}',
       '⚡ พลังงานเหลือ/นาที':'⚡ Net energy/min', 'ผลิต +{a}':'Produces +{a}',
@@ -9816,8 +13116,7 @@ const xhrpg = (() => {
       'Reset ไม่สำเร็จ':'Reset failed', '❌ Reset ล้มเหลว (HTTP {a}) — แจ้งแอดมิน':'❌ Reset failed (HTTP {a}) — contact admin',
       // ร้านสกิน (renderPremium skin shops)
       'ใช้งาน(ปุ่มสวม)':'Use', '✓ ใช้อยู่':'✓ In use', 'ซื้อ P{a}':'Buy P{a}',
-      '(สูงสุด +{a})':'(max +{a})', '🎲 สุ่ม stat +1~{a}':'🎲 Random stat +1~{a}', '🎲 สุ่มใหม่ {a}P':'🎲 Reroll {a}P',
-      '🎨 สกินไททัน':'🎨 Titan Skins', '🗡️ สกินฮีโร่':'🗡️ Hero Skins', '🐾 ผู้ติดตาม (คู่หูวิ่งตาม)':'🐾 Companions (running buddy)',
+      '(สูงสุด +{a})':'(max +{a})',       '🎨 สกินไททัน':'🎨 Titan Skins', '🗡️ สกินฮีโร่':'🗡️ Hero Skins', '🐾 ผู้ติดตาม (คู่หูวิ่งตาม)':'🐾 Companions (running buddy)',
       'ซื้อครั้งเดียว ใช้ได้ตลอด · 🎯 เลือก STAT เอง (STR/AGI/VIT/DEX/INT/LUK) ได้ค่า MAX เต็มเพดาน — มีผลเฉพาะตอนสวม · <b style="color:{c}">ยิ่ง P สูง STAT MAX ยิ่งสูง (+5 ทุก 1000 P)</b> · เลือกใหม่ได้ {a}P':'One-time purchase, yours forever · 🎯 choose your STAT (STR/AGI/VIT/DEX/INT/LUK) at full MAX — active only while worn · <b style="color:{c}">higher P = higher STAT MAX (+5 per 1000 P)</b> · re-choose for {a}P',
       'ซื้อครั้งเดียว ใช้ได้ตลอด · 🎯 เลือก STAT เอง ได้ค่า MAX เต็มเพดาน ติดตัว — มีผลเฉพาะตอนสวม · <b style="color:{c}">ยิ่ง P สูง STAT MAX ยิ่งสูง (+5 ทุก 1000 P)</b> · เลือกใหม่ได้ {a}P':'One-time purchase, yours forever · 🎯 choose your STAT at full MAX — active only while worn · <b style="color:{c}">higher P = higher STAT MAX (+5 per 1000 P)</b> · re-choose for {a}P',
       'นักรบฝึกหัด':'Trainee Warrior', 'ส้มจี๊ด':'Somjeed', 'ฟรี':'Free', 'ไม่มีโบนัส':'No bonus',
@@ -9880,7 +13179,7 @@ const xhrpg = (() => {
       // ตลาด (renderMarket/_mkt*)
       '🔍 ค้นหา...':'🔍 Search...', '🏷️ + วางขาย':'🏷️ + Sell', '🛒 ซื้อ':'🛒 Buy', '📦 ของฉัน':'📦 Mine', '🧾 ประวัติ':'🧾 History',
       'ทั้งหมด':'All', '🗃️ ของวิเศษ':'🗃️ Collectibles', '🔧 โมดูล':'🔧 Modules', '🎁 กล่อง/ไข่':'🎁 Boxes/Eggs',
-      'ทรัพยากร':'Resources', '💎 เพชร':'💎 Gems', '🔫 กระสุน':'🔫 Ammo',
+      'ทรัพยากร':'Resources', '💎 เพชร':'💎 Gems', '🪨 แร่อวกาศ':'🪨 Space Ore', '🔫 กระสุน':'🔫 Ammo',
       '🗃️ ของวิเศษ ชิ้นส่วนไททัน':'🗃️ Titan Parts', '🗃️ ของวิเศษ ชิ้นส่วนอาวุธ':'🗃️ Weapon Parts',
       '🗃️ ของวิเศษ ชิ้นส่วนยานบิน':'🗃️ Airship Parts', '🗃️ ของวิเศษ ชิ้นส่วนสเตตัส':'🗃️ Stat Parts',
       '🎴 การ์ดมอน':'🎴 Monster Cards',
@@ -9968,8 +13267,276 @@ const xhrpg = (() => {
       '⚔️ PVP อิสระ · {a} คนในสนาม':'⚔️ Free-for-all PVP · {a} in arena',
       '🏛️ {a} คน':'🏛️ {a} players',
       '🏛️ อันดับสังหารวันนี้ — รีเซ็ตเที่ยงคืน':"🏛️ Today's kill ranking — resets at midnight",
+      'ปล้นบ้านเพื่อน':'Raid friend homes', 'ปล้นบ้านคนอื่น':'Raid a home', 'ปล้นบ้านล่าสุด':'Recent raids', 'ยามเฝ้าบ้าน':'Home guards', 'เอาไข่มอนมาเฝ้า กันคนปล้น':'Place monster eggs to guard against raids', 'ถอดคืนสมุดไข่':'Return to egg book', 'เลือกไข่วางเป็นยาม':'Pick an egg to guard', 'ช่องยามเต็มแล้ว ({n} ช่อง) — อัพบ้านเพื่อปลดช่องเพิ่ม':'Guard slots full ({n}) — upgrade home for more', 'ไม่มีไข่ใบนี้ในสมุด':'No such egg in book', '🛡️ วางยามเฝ้าบ้านแล้ว ({a}/{b} ช่อง)':'🛡️ Guard placed ({a}/{b})', '↩️ ถอดยามคืนสมุดไข่แล้ว':'↩️ Guard returned to egg book', 'ยังไม่มีไข่ในสมุด — ล่ามอนเก็บไข่ก่อน':'No eggs yet — hunt monsters for eggs first',
+      'ประวัติปล้น':'Raid history', 'โดนปล้น':'Raided', 'ไปปล้น':'My raids', 'ยังไม่มีประวัติปล้น':'No raid history yet', 'โควตาปล้นวันนี้ {a}/{b}':'Raids today {a}/{b}', 'โควตาคุณหมด':'Your quota is used up', 'ติดโล่คุ้มกัน':'Shield active', 'ปล้นวันนี้แล้ว':'Raided today', 'บ้านนี้เต็มโควตา':'Home at daily limit', 'พร้อมเก็บ':'ready', 'กำลังโต':'growing', 'บุกปล้น':'Raid', 'บุกปล้นบ้าน {a}? (ใช้โควตา 1 ครั้ง · ต้องผ่านยาม+ดวลเจ้าของ)':'Raid {a}? (uses 1 quota · must beat guards + owner)', 'ปล้นไม่ได้: ':'Cannot raid: ', '🏴‍☠️ บุกเข้าบ้านเป้าหมาย...':'🏴‍☠️ Breaking into target home...', 'ยังไม่มีบ้านที่ปลูกผักให้ปล้นตอนนี้':'No homes with crops to raid right now', 'โหลดไม่สำเร็จ':'Load failed',
+      '⚔️ ปล้นบ้าน {a}':'⚔️ raided {a}', '🛡️ แพ้ยามบ้าน {a}':'🛡️ lost to guards of {a}', '⚔️ แพ้ร่างเงา {a}':'⚔️ lost to shadow of {a}', '⌛ หมดเวลาบ้าน {a}':'⌛ timed out at {a}',
+      'เอา {a} มาเฝ้าบ้าน? (ถอดออกภายหลัง = ไข่หายถาวร)':'Place {a} as guard? (removing later = egg lost forever)', '⚠️ ถอดยามตัวนี้? ไข่จะหายถาวร (กู้คืนไม่ได้)':'⚠️ Remove this guard? The egg is lost forever (irreversible)', 'ถอด (ไข่หายถาวร)':'Remove (egg lost forever)', 'เอาไข่มอนมาเฝ้า กันคนปล้น (ถอด=ไข่หายถาวร)':'Place monster eggs to guard (remove = egg lost forever)', '⚠️ วางแล้วถอด = ไข่หายถาวร':'⚠️ Placed then removed = egg lost forever', 'ระบบยังไม่พร้อม — แจ้งแอดมิน':'System not ready — contact admin',
+      'ประมูลรายวัน':'Daily auction', 'รอบวันนี้':"Today's round", 'ผลรอบก่อน':'Past results',
+      '🔨 ปิดประมูลในอีก {a}':'🔨 Auction closes in {a}', '⏰ ปิดประมูลในอีก 1 นาที!':'⏰ Auction closes in 1 minute!',
+      '🔕 ปิดแถบเตือนใกล้ปิดประมูลแล้ว (ป้ายบนปุ่มยังอยู่)':'🔕 Closing-soon alerts turned off (the button badge stays)', '🔔 เปิดแถบเตือนใกล้ปิดประมูลแล้ว':'🔔 Closing-soon alerts turned on',
+      '⏳ ปิดประมูลใน {a} (21:30 น.)':'⏳ Closes in {a} (21:30)', '⏳ รอบใหม่เริ่มใน {a} (12:00 น.)':'⏳ Next round in {a} (12:00)',
+      'ยังไม่ถึงเวลาประมูล — รอบใหม่เปิด 12:00 ปิด 21:30 เวลาไทย':'Auction closed — opens 12:00, closes 21:30 (Thai time)',
+      'ดูผลรอบล่าสุดได้ที่แท็บ "ผลรอบก่อน"':'See the latest results in the "Past results" tab',
+      'ประมูลด้วยแต้ม P':'Bid with P points', 'ประมูลด้วยเงิน G':'Bid with G gold',
+      'ราคานำ {a}':'Leading bid {a}', 'ยังไม่มีผู้บิด · เริ่ม {a}':'No bids yet · starts at {a}', 'คุณนำอยู่':'You lead',
+      'ประวัติบิด':'Bid history', 'ไม่มีของประมูลวันนี้':'No auction items today',
+      'ยืนยันบิด {a}? ({b})':'Confirm bid {a}? ({b})', '(คุณนำอยู่ — จ่ายเพิ่มเฉพาะส่วนต่าง {a})':'(You lead — pay only the difference {a})',
+      'ราคาขยับแล้ว — ดูราคาล่าสุดก่อนบิดอีกครั้ง':'Price moved — check the latest price before bidding again',
+      'ประวัติบิด (โปร่งใสทุกรายการ)':'Bid history (fully transparent)', 'ยังไม่มีผู้บิดช่องนี้':'No bids on this slot yet',
+      'ราคาปิดย้อนหลังของการ์ดใบนี้':'Past closing prices for this card', 'คืนแล้ว':'refunded',
+      'ยังไม่มีผลรอบก่อน':'No past results yet', 'ไม่มีผู้บิด':'no bids',
+      '🔨 ประมูลรายวันเปิดแล้ว! บิดได้ถึง 21:30 น.':'🔨 Daily auction is open! Bid until 21:30',
+      '🔨 ประมูลจะปิดใน 30 นาที (21:30) — รีบบิดก่อนหมดเวลา!':'🔨 Auction closes in 30 minutes (21:30) — last chance to bid!',
+      'คืนเงินประมูล (ถูกแซง)':'Auction refund (outbid)', 'บิดประมูล':'Auction bid', 'เสียบโมดูลได้':'Socketable in modules', 'ราคานำ':'Leading bid', 'ราคาเริ่ม':'Starting price', 'เปิดบิดที่ {a}':'Open bidding at {a}', 'แซง':'Outbid',
+      'ป่ามังกรโบราณ':'Ancient Dragon Forest', '🐉 ป่ามังกรโบราณ':'🐉 Ancient Dragon Forest',
+      'ซากมังกรโบราณ':'Ancient Dragon Remains', 'มังกรเพลิงโบราณ':'Ancient Flame Dragon', 'มังกรทองคำ':'Golden Dragon', 'มังกรโลหิต':'Blood Dragon',
+      '🏴‍☠️ ปล้นสำเร็จ! ได้ {g} G จากบ้าน {n}':'🏴‍☠️ Raid success! Got {g} G from {n}', '🛡️ แพ้ยามบ้าน {n} — ปล้นล้มเหลว':'🛡️ Lost to {n}\'s guards — raid failed', '⚔️ แพ้ร่างเงา {n} — ปล้นล้มเหลว':'⚔️ Lost to {n}\'s shadow — raid failed', '⌛ หมดเวลาปล้นบ้าน {n}':'⌛ Ran out of time raiding {n}',
+      '🏴‍☠️ {n} ปล้นบ้านคุณ! เสีย {g} G':'🏴‍☠️ {n} raided your home! Lost {g} G', '🛡️ ป้องกันบ้านสำเร็จ! {n} บุกแต่พ่ายแพ้':'🛡️ Home defended! {n} attacked but lost', '🏴‍☠️ สรุป: โดนปล้น {a} ครั้ง เสียรวม {g} G · 🛡️ กันได้ {b} ครั้ง':'🏴‍☠️ Summary: raided {a}× lost {g} G · 🛡️ defended {b}×',
+      '🏴‍☠️ บุกบ้าน {n}! ยาม {c} ตัวขวางทาง — กำจัดให้หมด!':'🏴‍☠️ Raiding {n}! {c} guards block you — clear them!', '🏴‍☠️ บุกบ้าน {n}! ไม่มียามเฝ้า — เผชิญหน้าเจ้าของบ้าน!':'🏴‍☠️ Raiding {n}! No guards — face the owner!', '⚔️ ร่างเงาของ {n} ออกมาปกป้องบ้าน! (DMG ÷30)':'⚔️ {n}\'s shadow defends the home! (DMG ÷30)', '🛡️💥 กำจัดยามครบแล้ว!':'🛡️💥 All guards cleared!', 'ยามล้มแล้ว!':'Guard down!', '🏴‍☠️ ปล้นไม่สำเร็จ — บ้านเป้าหมายไม่มีผักแล้ว':'🏴‍☠️ Raid failed — target home has no crops', '(🏴‍☠️ ถูกปล้นไป -{g} G)':'(🏴‍☠️ robbed -{g} G)', 'บ้านเป้าหมายไม่มีผักให้ปล้น':'Target home has no crops', '🛡️ บ้านนี้ติดโล่คุ้มกันอยู่ — เพิ่งโดนปล้นไป':'🛡️ This home is shielded — just got raided', 'บ้านนี้โดนปล้นครบโควตาวันนี้แล้ว':'This home hit its daily raid limit', 'วันนี้ปล้นบ้านนี้ไปแล้ว — พรุ่งนี้มาใหม่':'Already raided this home today', 'โควตาปล้นวันนี้หมดแล้ว ({a} ครั้ง)':'Daily raid quota used up ({a})', 'ปล้นไม่ได้ขณะอยู่ในสนามประลอง':'Cannot raid while in the Colosseum', 'กำลังต่อสู้อย่างอื่นอยู่ — จบก่อนแล้วค่อยปล้น':'Busy in another fight — finish first',
       'วันนี้ยังไม่มีการต่อสู้ในสนาม':'No battles in the arena today yet',
       'ประลอง(แท็บ)':'Arena',
+      // 🆕 Release Note + 📊 บทอัตราดรอปในคู่มือ (2026-07-26)
+      // 🏯 ปราสาทกิล (docs/guild-castle-design.md)
+      'ปราสาทกิล':'Guild Castle', 'เยือนปราสาท':'Visit castle', 'ออกจากปราสาท':'Leave castle',
+      'รายชื่อสมาชิก':'Member list', 'และอีก {n} คน':'and {n} more',
+      '🏯 ปราสาทนี้ไม่มีอยู่แล้ว — พากลับออกมา':'🏯 This castle no longer exists — you were sent back',
+      'เข้าปราสาทไม่ได้ขณะอยู่ในสนามประลอง':'You cannot enter a castle while in the Colosseum',
+      'ปล้นไม่ได้ขณะอยู่ในปราสาทกิล':'You cannot raid while inside a guild castle',
+      // 🕳️ ดันกิล (docs/guild-dungeon-design.md)
+      'ดันกิล':'Guild Dungeon', 'เข้าดัน':'Enter dungeon', 'ออกจากดัน':'Leave dungeon',
+      'ปลดดันกิลที่กิล Lv {n}':'Unlocks at guild Lv {n}',
+      'มอนรอบนี้':'Monsters this round', 'มอน Lv 1-{n}':'Monsters Lv 1-{n}',
+      'รอบถัดไป':'Next round', 'มอนเหลือ {n} ตัว':'{n} monsters left',
+      'เคลียร์รอบนี้หมดแล้ว':'This round is cleared', 'บอสยังอยู่':'Boss still alive',
+      '🕳️ เข้าดันกิลแล้ว — ลุยให้สุด!':'🕳️ Entered the guild dungeon — go all out!',
+      '↩️ ออกจากดันแล้ว':'↩️ Left the guild dungeon',
+      'รวมทั้งหมด': 'Total',
+      'ของสะสมทั้งหมด': 'Collection total',
+      'โมดูลที่ติดตั้ง': 'Modules installed',
+      'ปรับปรุงสกิลแทงรอบตัว': 'Improved the Spin Attack skill',
+      'ดูของสะสมของผู้เล่นได้ละเอียดขึ้น': 'More detail when viewing another player collection',
+      'ยิ่งระดับ VIP สูง ยิ่งเปิดจอทิ้งไว้ได้นานขึ้น — สูงสุด {n} นาที ที่ VIP {v}': 'The higher your VIP tier, the longer you can stay on screen — up to {n} minutes at VIP {v}',
+      'ปรับเวลาเปิดหน้าจอของ VIP แต่ละระดับ': 'Retuned idle screen time for each VIP tier',
+      'สมุดสะสมการ์ดและไข่ ดูเป็นรายตัวได้แล้ว': 'Card and egg albums now show every monster',
+      'ดูโมดูลที่ผู้เล่นอื่นติดตั้งได้จากหน้าอันดับ': 'See other players installed modules from the leaderboard',
+      'ค่าดำเนินการ': 'Trade fee',
+      'ฐาน': 'Base',
+      'ถึงเพดานสูงสุดแล้ว': 'Maximum reached',
+      'ผู้เริ่มเทรดเป็นผู้จ่าย · ยกเลิกหรือหมดเวลา = คืนเต็มจำนวน': 'The player who started the trade pays - cancel or timeout refunds it in full',
+      'ยืนยันแลกเปลี่ยน — ค่าดำเนินการ {n} P จะถูกหักจาก P ของคุณเมื่อแลกสำเร็จ': 'Confirm trade - a {n} P fee will be deducted from your P when the trade completes',
+      'การ์ด/ไข่': 'Cards / Eggs',
+      'การ์ด/ไข่ MVP': 'MVP Cards / Eggs',
+      'ปรับค่าดำเนินการแลกเปลี่ยน 1-1 ตามมูลค่าของ': 'Trade fees now scale with item value',
+      'ยังไม่มี': 'Not owned',
+      '{n} ตัว': '{n} skins',
+      'มี {a}/{b}': 'Owned {a}/{b}',
+      'ร้านสกินจัดเป็นกลุ่ม หาง่ายขึ้น': 'Skin shops now grouped for easier browsing',
+      'เปิดขายสกินไททันที่เคยปิดไปกลับมา': 'Previously retired Titan skins are on sale again',
+      'ต้องมีสกินอย่างน้อย 1 ตัวก่อน': 'You need at least 1 skin first',
+      'สกินไททัน': 'Titan Skin',
+      'สกินฮีโร่': 'Hero Skin',
+      '🎯 STAT ติดตัว': '🎯 Account STAT',
+      'เพดาน +{a}': 'cap +{a}',
+      'STAT จากสกินเป็นค่ากลาง ใส่สกินตัวไหนก็ได้เท่ากัน': 'Skin STAT is now account-wide — the same with any skin',
+      'สมุดสะสมในหน้าอันดับแสดงการ์ด/ไข่ MVP ด้วย': 'The collection book on the ranking page now shows MVP cards and eggs too',
+      'กำลังตั้งค่า': 'Applying',
+      '✨ เต็มเพดานสูงสุด!': '✨ Maximum cap!',
+      '🎯 ตั้ง STAT ใหม่แล้ว': '🎯 STAT updated',
+      'นักสู้เพลิง': 'Flame Fighter',
+      'นักดวลซากุระ': 'Sakura Duelist',
+      'โรนินเหล็ก': 'Steel Ronin',
+      'ดาบเลือด': 'Crimson Blade',
+      'นินจาเงา': 'Shadow Shinobi',
+      'นักบวชน้ำแข็ง': 'Frost Priestess',
+      'อัศวินเขี้ยว': 'Beastfang Knight',
+      'ซามูไรพเนจร': 'Ronin Samurai',
+      'นักรบดาบคู่': 'Berserker Twin',
+      'นักฆ่าคลุมหัว': 'Hooded Assassin',
+      'นักเวทแมวราตรี': 'Nightcat Enchantress',
+      'จิ้งจอกคลั่ง': 'Ninetail Berserker',
+      'สกินฮีโร่กลุ่มใหม่ SHINOBI เปิดขาย 12 ตัว': 'New SHINOBI hero skin group — 12 characters on sale',
+      '🎯 เลือก STAT (ครั้งแรกฟรี)': '🎯 Pick STAT (first one free)',
+      'ได้ +{a} เต็มเพดาน · ครั้งนี้ฟรี': '+{a} at full cap · free this time',
+      'ซื้อสกินไม่ต้องเลือก STAT แล้ว — เลือกที่แถบในร้าน ครั้งแรกฟรี': 'Buying a skin no longer asks for a STAT — pick it in the shop bar, first pick free',
+      'แก้แผง STAT ไม่โชว์โบนัสจากสกิน (ตีจริงได้อยู่แล้ว แค่เลขไม่ขึ้น)': 'Fixed the STAT panel not showing skin bonuses (combat already used them, only the number was missing)',
+      'เลิกยิงเม็ดกลมส้มมั่วเวลาแหล่งโจมตีไม่มีเอฟเฟกต์ของตัวเอง': 'No more stray orange balls when an attack source has no effect of its own',
+      'อัศวินบุกใส่ MVP ก่อนเสมอ ถ้ามี MVP อยู่ในระยะ': 'The Knight now charges MVP monsters first whenever an MVP is in range',
+      'ต้องหัวหน้ากิล Lv.{a}+': 'needs guild leader Lv.{a}+',
+      'หัวหน้ากิล Lv.{a} ยังตั้งป้อมในแผนที่นี้ไม่ได้เลย': 'Guild leader Lv.{a} cannot place a turret on this map yet',
+      'ตั้งได้เฉพาะโซนที่มอนตัวแรก Lv ต่ำกว่าหัวหน้ากิล · ย้ายฟรี ไม่มีคูลดาวน์ · มีผลกับรอบแบ่งรางวัลถัดไป': 'Only zones whose first monster Lv is below the guild leader · free to move, no cooldown · applies from the next payout round',
+      'ป้อมกิลตั้งได้เฉพาะโซนที่มอนตัวแรกอ่อนกว่าหัวหน้ากิล': 'Guild turrets can only be placed in zones whose first monster is weaker than the guild leader',
+      'รายชื่อสมาชิกกิลแสดงป้าย GM/CL/ธง/VIP ครบเหมือนบนแผนที่': 'Guild member list now shows the full GM/CL/flag/VIP badges like on the map',
+      'แก้ป้าย VIP ค้างที่ VIP10 สำหรับคนระดับ 11-15': 'Fixed the VIP badge being stuck at VIP10 for tiers 11-15',
+      'บัมเบิ้ล': 'Bumble',
+      'หนามเตย': 'Spike',
+      'สลัก': 'Slug',
+      'ก้ามปู': 'Pincer',
+      'ฟ้าคราม': 'Azure',
+      'กระดองเขียว': 'Greenshell',
+      'ขนเขียว': 'Green Fluff',
+      'ขนส้ม': 'Orange Fluff',
+      'ปีกม่วง': 'Violet Wing',
+      'ปีกน้ำตาล': 'Umber Wing',
+      'เขาทอง': 'Gold Horn',
+      'ขนแดง': 'Red Mane',
+      'ฟันเขียว': 'Green Fang',
+      'คู่หูกลุ่มใหม่ MONSTER เปิดขาย 13 ตัว (กลุ่มเดิมเปลี่ยนชื่อเป็น ANIMAL)': 'New MONSTER buddy group on sale with 13 characters (the old group is now called ANIMAL)',
+      'เพิ่มระบบยานบุกอวกาศ': 'Added the space raid airship system',
+      'แร่อวกาศใช้อัพเลเวลกิลเกิน Lv.20': 'Space ore is used to raise guild level past Lv.20',
+      'เปิดระบบดันกิล': 'Guild dungeon is now open',
+      'เพิ่มระบบแชทกิล': 'Added guild chat',
+      'ป้อมกิลแสดงบนแผนที่แล้ว': 'Guild turrets now appear on the map',
+      'เปิดระบบระดับความชำนาญ': 'Mastery levels are now open',
+      'เพิ่มออฟไลน์ มอนิเตอร์ — ดูบอทออกล่าแบบสดๆ': 'Added the Offline Monitor — watch your bot hunt live',
+      'เปิดระบบหอโจมตีกิล': 'Guild attack turrets are now open',
+      'ปรับปรุงขวานไททัน': 'Improved the Titan axe',
+      'ปรับระบบแต้มสะสม VIP': 'Reworked how VIP points accumulate',
+      'เปิดระบบบัตรของขวัญ P': 'P gift vouchers are now open',
+      'เปิดระบบปราสาทกิล': 'The guild castle is now open',
+      'เปิดระบบกิล': 'The guild system is now open',
+      'บันทึกอัปเดตแปลครบทุกภาษาแล้ว (ย้อนหลังทุกเวอร์ชัน)': 'Patch notes are now fully translated in every language, all the way back',
+      'หน้ารางวัลออฟไลน์ กดย้อนดูอัปเดตเวอร์ชันเก่าได้แล้ว': 'The offline reward screen can now page back through older update notes',
+      'ปิดขายกล่องสุ่มการ์ด/ไข่ชั่วคราว (กล่องจากบอส MVP ยังได้ตามปกติ)': 'Card and Egg gacha boxes are no longer sold for now (boxes from MVP bosses still drop as usual)',
+      'ปรับดันท้าบอส — ลดสิทธิ์รายวันลง (ดูตารางในหน้า VIP) · ค่าบัตร G ขึ้นเท่าตัว · ค่าบัตร P คิดตาม Lv บอส': 'Boss Arena reworked — fewer daily tries (see the table on the VIP page), G ticket cost doubled and the P ticket now scales with the boss level',
+      'ดันท้าบอส — ย้อนไปตีบอสเลเวลต่ำได้ครบทุกตัวถึง Lv.1 (เดิมตัวเตี้ยหายจากรายการ)': 'Boss Arena — every lower-level boss is listed again, all the way down to Lv.1 (low-level ones used to drop off the list)',
+      'ซื้อครั้งเดียว ใช้ได้ตลอด · 🎯 STAT เป็นค่ากลางติดตัว ใส่สกินตัวไหนก็ได้เท่ากัน · <b style="color:{c}">SKIN LV ขึ้นตามยอดสะสม P ของสกินทุกใบในหมวดนี้</b> · เลือกใหม่ได้ {a}P': 'One-time purchase, yours forever · 🎯 your STAT is account-wide — the same no matter which skin you wear · <b style="color:{c}">SKIN LV rises with the total P you have spent on every skin in this category</b> · re-choose for {a}P',
+      '🎯 SKIN LV ขึ้นเป็น {b} — เพดาน STAT เป็น +{a} (กดเลือก STAT ที่แถบด้านบนเพื่อใช้สิทธิ์)': '🎯 SKIN LV rises to {b} — STAT cap becomes +{a} (tap Choose STAT in the bar above to claim it)',
+      '🎯 สะสมเป็น {a} P — อีก {b} P ถึง SKIN LV {c} (เพดานตอนนี้ +{d})': '🎯 Total becomes {a} P — {b} P more to SKIN LV {c} (cap now +{d})',
+      '🎯 เพดาน STAT เต็มขั้นสูงสุดแล้ว +{a}': '🎯 STAT cap is already at the highest tier +{a}',
+      'สะสม {a} P': '{a} P total',
+      'อีก {a} P → LV {b} (+{c})': '{a} P more → LV {b} (+{c})',
+      'เต็มขั้นสูงสุด': 'Max tier',
+      'ระบบ SKIN LV — สกินทุกใบที่ซื้อสะสมรวมกันเป็นเลเวล ดันเพดาน STAT ขึ้นถึง +50': 'SKIN LV system — every skin you buy adds up into a level that raises your STAT cap up to +50',
+      'ปรับสมดุลอัตราดรอปกล่องสุ่มทุกชนิด (โมดูล/การ์ด/ไข่)': 'Balance pass on all random-box drop rates (module / card / egg)',
+      'ได้โมดูล {a} ชิ้น': 'Got {a} modules',
+      '⚙️ ติดตั้งอัตโนมัติ {a} ชิ้น': '⚙️ {a} auto-equipped',
+      'มอนสเตอร์มีพลังป้องกันแล้ว — ยิ่งเลเวลสูงยิ่งลดดาเมจที่รับ (ดาเมจของคุณไม่ได้ลดลง)': 'Monsters now have DEF — higher level monsters take less damage (your own damage has not been nerfed)',
+      'ทำลายแล้วกู้คืนไม่ได้ · ค่าตีบวกไม่คืน': 'Destroyed permanently · only enhancement gems are refunded (gold is not)',
+      'ปรับอัตราดรอปเพชรฟ้า/เพชรแดงขึ้น': 'Blue and red gem drop rates increased',
+      'อีเวนต์คูณ EXP/DROP พิเศษสำหรับผู้เล่นใหม่ (แอดมินตั้งเพดานเลเวลได้)': 'Special EXP/DROP multiplier events for new players (admins can set the level cap)',
+      'อีเวนต์คูณ G (ทอง) — แอดมินตั้งคูณทองจากการฆ่ามอนได้แล้ว': 'Gold (G) multiplier events — admins can now boost gold earned from monster kills',
+      'ปรับสมดุลอัตราดรอปของสวมใส่จากบอส MVP': 'Rebalanced equipment drop rates from MVP bosses',
+      'โบนัสเติมเงินแบบใหม่ — รอบละ 3 สิทธิ์ ×1.5 → ×1.3 → ×1.1 (เดิมรอบละ 1 สิทธิ์)': 'New top-up bonus — 3 uses per cycle: ×1.5 → ×1.3 → ×1.1 (was 1 per cycle)',
+      'แร่หายากเพิ่มเป็น 6 ชนิด — 3 ชนิดใหม่ขุดเจอตอนเก็บเกี่ยวผักที่บ้าน': 'Rare ore expanded to 6 types — 3 new ones are found while harvesting crops at home',
+      'อีเวนต์มีชื่อแล้ว — โชว์บนหน้าจอ เช่น WEEKEND · EXP ×2 · DROP ×2 · G ×1.5': 'Events now have names shown on screen, e.g. WEEKEND · EXP ×2 · DROP ×2 · G ×1.5',
+      'ฮีโร่หันหน้าเข้าหาเป้าที่กำลังโจมตีแม่นขึ้น (เดิมบางจังหวะหันคนละทาง)': 'The hero now faces the monster it is attacking more accurately (it sometimes faced the wrong way)',
+      'อัปเดตล่าสุด':'Latest updates', 'อัตราดรอป':'Drop rates', 'อัปเดตใหม่':'New update',
+      // 🎲 บทเปิดเผยอัตราการสุ่ม (2026-07-27 — ข้อกำหนด compliance ของผู้ให้บริการชำระเงิน KR/JP/TW)
+      'เพิ่มบทอัตราการสุ่มในคู่มือ':'Added a Random rates chapter to the guide',
+      'อัตราการสุ่ม':'Random rates',
+      // 🏅 อวดของในหน้าอันดับ (2026-07-28)
+      'ดูของที่สะสม':'View collection', 'ของหายาก':'Rare finds', 'ชิ้นส่วนไททัน':'Titan parts',
+      'ยังไม่ได้สวมใส่อะไรเลย':'Nothing equipped yet', '{n} ชนิด':'{n} kinds', 
+      'ปรับหน้าอันดับใหม่ + ดูของที่สะสมของผู้เล่นได้':'Reworked the leaderboard and added a collection viewer',
+      'ปรับชื่อเรียกและหน้าตาระดับความชำนาญ':'Renamed and tidied up the Mastery Level screen',
+      // 🎖️⭐ ระดับความชำนาญ — 5 ดาว (2026-07-28)
+      'ครบทุกดาวแล้ว — สูงสุดของสายนี้':'All stars earned — the maximum for this path',
+      'ดาวถัดไป ⭐{a} · ตอนนี้สกิลสายนี้อัพได้ถึง Lv.{b}':'Next star ⭐{a} · skills on this path currently cap at Lv.{b}',
+      'ปลดดาวที่ {n}':'Unlock star {n}',
+      'ระเบิด = สะสม ×{a} + VIT×{b}':'Blast = stored ×{a} + VIT×{b}',
+      'สะสม ATK มอนที่ตีทีมเรา 5 วิ → ระเบิดใส่เป้าเดี่ยว':'Stores the ATK monsters deal to your team for 5s, then blasts one target',
+      'ขยายระดับความชำนาญ เป็น 5 ดาว':'Mastery levels now go up to 5 stars',
+      'เปิดระดับ VIP 11-15':'Opened VIP levels 11-15',
+      // 👑😴 สิทธิ์ VIP เปิดหน้าจอได้นานขึ้น (2026-07-28)
+      'เปิดจอ':'Idle limit', 'นาที':'min', '{n} นาที':'{n} min',
+      'เปิดหน้าจอได้นานขึ้น':'Stay on screen longer',
+      'เปิดจอทิ้งไว้ได้':'Screen can stay on',
+      'ระดับของคุณตอนนี้: เปิดจอทิ้งไว้ได้ {n} นาที ก่อนเข้าโหมดพักจอ':'Your current level: you can leave the screen on for {n} minutes before AFK mode kicks in',
+            'เปิดเกมทิ้งไว้โดยไม่แตะจอนานเกินนี้ ระบบจะพาเข้าโหมดพักจอ (บอทออกล่าให้ต่อ)':'Leave the game open without touching the screen for longer than this and it switches to AFK mode (the bot keeps hunting for you)',
+      'สิทธิ์ VIP: เปิดหน้าจอได้นานขึ้น':'VIP perk: stay on screen longer',
+      'รางวัลที่ได้ = เลเวลผู้เล่น × {b} G × ตัวคูณที่ทอยได้':'Reward = your level × {b} G × the multiplier you roll',
+      'เล่นได้วันละ {n} ครั้ง · ครั้งแรกของวันฟรี ครั้งต่อไปจ่ายด้วย P':'Up to {n} rolls per day · the first roll each day is free, the rest cost P',
+      'กล่องสุ่มการ์ดและไข่':'Card and egg boxes',
+      'มอนทุกตัวในช่วงเลเวลของกล่องมีโอกาสเท่ากันหมด (100% หารด้วยจำนวนมอนในช่วงนั้น)':'Every monster in the box level range has an equal chance (100% divided by the number of monsters in that range)',
+      'กล่องระดับ 1 = Lv.1-10 · ระดับ 2 = Lv.11-20 · ไล่ขึ้นไปจนระดับ 8 = Lv.71-80':'Box tier 1 = Lv.1-10 · tier 2 = Lv.11-20 · and so on up to tier 8 = Lv.71-80',
+      'ได้จาก MVP หรือซื้อที่ร้าน VIP ในเมนูไอเทม':'Dropped by MVPs or bought at the VIP shop in the Item menu',
+      'ระดับความหายากของโมดูลที่ได้ = ระดับกล่อง + 1 เสมอ (แน่นอน 100% ไม่สุ่ม)':'The rarity of the module you get is always the box tier + 1 (fixed 100%, not random)',
+      'สุ่มเฉพาะชนิดอาวุธ · ช่องติดตั้ง · STAT ที่ติดมา — ทุกแบบมีโอกาสเท่ากัน':'Only the weapon type, slot and attached STAT are random — every combination is equally likely',
+      'ตีเป็นระดับ':'Target level', 'โอกาสสำเร็จ':'Success rate',
+      'ใช้อัตราเดียวกันทั้งโมดูลและของสวมใส่':'The same rates apply to both modules and equipment',
+      'ล้มเหลวแล้วระดับลดลง 1 ขั้น · ค่าใช้จ่ายหักทุกครั้งไม่คืน':'On failure the level drops by 1 · the cost is always spent and never refunded',
+      'ภารกิจอวกาศ':'Space mission', 'ผลภารกิจ':'Outcome', 'สำเร็จ':'Success', 'ล้มเหลว':'Failure',
+      'สำเร็จได้แร่อวกาศตามระดับภารกิจ · ล้มเหลวได้แร่ธรรมดากลับมาแทน':'Success grants space ore based on the mission tier · failure returns ordinary ore instead',
+      'สกินสุ่มค่าไหม':'Are skin stats random?',
+      'ไม่สุ่ม — ผู้เล่นเลือก STAT เองและได้ค่าสูงสุดของสกินนั้นเสมอ (100%)':'Not random — you pick the STAT yourself and always get the maximum value for that skin (100%)',
+      'ดูทั้งหมดที่คู่มือ → อัปเดตล่าสุด':'See everything in the Guide → Latest updates',
+      'ตัวคูณอัตราดรอป':'Drop rate multipliers', 'ทรัพยากรและสมุนไพร':'Resources and herbs',
+      'การ์ดและไข่สัตว์เลี้ยง':'Cards and pet eggs', 'ของสวมใส่ (Equipment)':'Equipment',
+      'MVP ดรอปอะไรบ้าง':'What MVPs drop', 'ออฟไลน์ต่างจากออนไลน์ยังไง':'How offline differs from online',
+      'ตัวคูณ':'Multiplier', 'เพิ่มขึ้น':'Bonus', 'ระดับ':'Tier', 'PREMIUM DROP':'PREMIUM DROP', 'อีเวนต์':'Event',
+      'ตามที่ประกาศ':'as announced', 'ตามค่าที่ติดมา':'as rolled on the item',
+      'ตัวคูณทั้งหมดรวมกันก่อน แล้วคูณกับตัวคูณอีเวนต์อีกที':'All multipliers add up first, then the event multiplier is applied on top',
+      'ไม่มีผลกับ: ทรัพยากร · สมุนไพร · ยา · ของที่การันตีจาก MVP':'No effect on: resources · herbs · potions · guaranteed MVP rewards',
+      'ชนิดของ':'Item', 'โอกาสต่อการฆ่า 1 ตัว':'Chance per kill', 'สูงกว่าอย่างอื่น 2 เท่า':'twice the others',
+      'ค่าในตารางคือตอน LUK 5 · เพิ่มขึ้นตาม LUK จนถึงเพดาน {n}%':'Values shown are at LUK 5 · they rise with LUK up to a {n}% cap',
+      'LUK ยังช่วยให้ได้จำนวนต่อครั้งมากขึ้น และเลเวลมอนยิ่งสูงยิ่งได้เพิ่ม':'LUK also increases the amount per drop, and higher monster levels give more',
+      'มอนปกติ':'Normal monster', 'การันตี 100%':'100% guaranteed',
+      'เพชรฟ้าเริ่มดรอปจากมอน Lv.{a} ขึ้นไป · เพชรแดง Lv.{b} ขึ้นไป':'Blue gems drop from Lv.{a} monsters and up · red gems from Lv.{b} and up',
+      'เพชรแดงจาก MVP ต้องเป็น MVP ที่เลเวลสูงกว่า {n}':'Red gems from MVPs require an MVP above Lv.{n}',
+      'ยิ่งเลเวลมอนสูง โอกาสยิ่งลดลงทีละน้อยจนถึงค่าในคอลัมน์ขวา':'The higher the monster level, the lower the chance, down to the value in the right column',
+      'เมล็ดพืช':'Seeds', 'เท่ากันทุกเลเวลมอน':'the same at every monster level', 'ช่วงเลเวลมอน':'Monster level',
+      'ยิ่งเลเวลมอนสูง ระดับโมดูลที่ได้ยิ่งสูงตาม · MVP ให้ระดับสูงกว่ามอนปกติ 1 ขั้นเสมอ':'Higher monster levels give higher module grades · MVPs always give one grade above normal monsters',
+      'ทอยไล่จากระดับสูงลงมา ได้มากสุด 1 ชิ้นต่อการฆ่า 1 ตัว':'Rolled from the highest tier down — at most 1 piece per kill',
+      'T6 หลุดจาก MVP เท่านั้น':'T6 drops from MVPs only',
+      'กล่องสุ่ม':'Loot boxes', 'ของล้ำค่าและอุปกรณ์':'Treasures and gear', 'โอกาส':'Chance',
+      'ทอยแยกกันทุกชนิด — ดวงดีได้พร้อมกันหลายอย่างจาก MVP ตัวเดียว':'Every type is rolled separately — with luck one MVP can give several at once',
+      'กล่องเปิดที่เมนูไอเทม · กล่องการ์ด/ไข่ให้ของตามช่วงเลเวลของกล่องนั้น':'Open boxes from the Items menu · card and egg boxes give items from that box\'s level range',
+      'เทียบกับออนไลน์':'Compared to online', 'เท่าออนไลน์':'same as online', 'ไม่ได้จากออฟไลน์':'not available',
+      'ตอนออฟไลน์ไม่เจอ MVP จึงไม่มีกล่องสุ่มและของการันตีจาก MVP':'You never meet MVPs while offline, so there are no loot boxes or guaranteed MVP rewards',
+      'เลือกโซนฟาร์มได้สูงสุด 3 โซน · สะสมรางวัลได้นานสุด 8 ชั่วโมง':'Pick up to 3 farming zones · rewards accumulate for up to 8 hours',
+      // 🏰 กิล (docs/guild-design.md)
+      'กิล':'Guild', 'กิลของฉัน':'My Guild', 'ค้นหากิล':'Find Guild', 'อันดับกิล':'Guild Ranking',
+      'ตั้งกิลใหม่':'Create a guild', 'ตั้งกิล':'Create guild', 'ชื่อกิล (2-12 ตัวอักษร)':'Guild name (2-12 chars)',
+      'เลือกตรากิล':'Choose your emblem', 'รูปโล่':'Shape', 'สีพื้น':'Color', 'สัญลักษณ์':'Icon', 'บันทึกตรากิล':'Save emblem',
+      'ยังไม่มีกิล? หากิลเข้าได้ที่แท็บ "ค้นหากิล"':'No guild yet? Find one in the "Find Guild" tab',
+      'ยืนยันตั้งกิล "{a}"? (100,000 G)':'Create guild "{a}"? (100,000 G)',
+      'เพิ่งออกจากกิล — เข้ากิลใหม่ได้ในอีก {n} ชม.':'You recently left a guild — you can join a new one in {n} h',
+      'ความคืบหน้าเลเวลกิล':'Guild level progress', 'ยังไม่มีประกาศ':'No notice yet',
+      'แต้มสะสมจากการเติมและการใช้ P (เลื่อนระดับอัตโนมัติ · สิทธิ์ถาวร)':'Points from both topping up and spending P (rank up automatically · permanent perks)',
+      'จากการเติม':'From top-ups', 'จากการใช้':'From spending',
+      'P Gift Voucher':'P Gift Voucher', 'ซื้อ P เป็นบัตรของขวัญ — แจกเพื่อนหรือส่งต่อได้':'Turn P into a gift voucher — give it away or pass it on', 'เปิดดู':'Open',
+      'มีโค้ด? กรอกที่นี่เพื่อรับ P':'Got a code? Enter it here to claim your P', 'รับ P':'Claim P', 'ซื้อบัตร':'Buy voucher', 'บัตรของฉัน':'My vouchers',
+      'P ของฉัน':'Your P', 'จ่าย':'Pay', '⚠️ ซื้อแล้วคืนไม่ได้ · มีค่าออกบัตรรวมอยู่ในราคาแล้ว':'⚠️ Purchases cannot be refunded · the issuing fee is already included in the price',
+      'ซื้อแล้ว':'Bought', 'ยังไม่ใช้':'Unused', 'ใช้แล้ว':'Used', 'มูลค่าค้างในมือ':'Unused value on hand', 'ทุกราคา':'All values',
+      'ค้นหาโค้ด...':'Search code...', 'ซื้อเมื่อ':'Bought', 'ใช้โดย':'Used by', 'คัดลอกโค้ด':'Copy code',
+      'ไม่พบบัตรตามที่กรอง':'No vouchers match those filters', 'ยังไม่มีบัตร — ซื้อได้ที่แท็บ 🛒':'No vouchers yet — buy one on the 🛒 tab',
+      'แสดง {n} ใบล่าสุด (ยอดสรุปด้านบนนับครบทุกใบ)':'Showing the {n} most recent — the totals above count every voucher',
+      'ซื้อบัตร {f} P ราคา {c} P?':'Buy a {f} P voucher for {c} P?', '⚠️ ซื้อแล้วคืนไม่ได้':'⚠️ Purchases cannot be refunded',
+      'ได้บัตร {f} P แล้ว!':'Your {f} P voucher is ready!', 'ส่งโค้ดนี้ให้เพื่อนเพื่อรับ P — เก็บเป็นความลับ ใครมีโค้ดก็ใช้ได้':'Send this code to a friend so they can claim the P — keep it private, anyone with the code can use it',
+      '🎉 รับ {n} P จากบัตรของขวัญแล้ว!':'🎉 You received {n} P from a gift voucher!',
+      'รายละเอียดกิล':'Guild details', 'หัวหน้ากิล':'Leader', 'เลเวลกิล':'Guild level', 'ระดับปราสาท':'Castle tier', 'เลเวลเฉลี่ย':'Average level', 'เลเวลสูงสุด':'Highest level',
+      'บริจาค G ให้กิล':'Donate G to the guild', 'ยอดบริจาคของฉัน':'my total', 'ยอดบริจาค':'donated', 'ระบุเอง':'Custom',
+      'ระบุจำนวน G ที่จะบริจาค (ขั้นต่ำ 1,000)':'Enter the amount of G to donate (min 1,000)', 'บริจาคขั้นต่ำ {n} G':'Minimum donation is {n} G',
+      'ยืนยันบริจาค {a} G ให้กิล?':'Donate {a} G to the guild?',
+      'หัวหน้า':'Leader', 'รองหัวหน้า':'Officer', 'สมาชิก':'Members',
+      'เตะ':'Kick', 'เลื่อนเป็นรอง':'Promote to officer', 'ปลดจากรอง':'Demote to member', 'โอนหัวหน้า':'Transfer leadership',
+      'แก้ตรา':'Emblem', 'แก้ประกาศ':'Notice', 'ยุบกิล':'Disband', 'ออกจากกิล':'Leave guild', 'บันทึกกิล':'Guild log', 'ยังไม่มีบันทึก':'No log entries yet',
+      'พิมพ์ประกาศกิล (ไม่เกิน 200 ตัวอักษร)':'Type the guild notice (200 chars max)',
+      'ยืนยันออกจากกิล? (เข้ากิลใหม่ได้ในอีก 24 ชม.)':'Leave the guild? (24 h cooldown before joining another)',
+      'ยืนยันเตะ {a} ออกจากกิล?':'Kick {a} from the guild?',
+      'ยืนยันโอนตำแหน่งหัวหน้าให้ {a}? — ย้อนกลับเองไม่ได้':'Transfer leadership to {a}? — cannot be undone by you',
+      'ยืนยันยุบกิล {a}? สมาชิกทั้งหมดจะหลุดจากกิล — ย้อนกลับไม่ได้!':'Disband guild {a}? All members will be removed — irreversible!',
+      'แน่ใจจริงๆ? เงินบริจาคทั้งหมดจะหายไปพร้อมกิล':'Are you really sure? All donated G disappears with the guild',
+      'ยืนยันเข้ากิล {a}?':'Join guild {a}?', 'เข้ากิล':'Join',
+      'ค้นหาชื่อกิล...':'Search guild name...', 'ไม่พบกิล':'No guilds found', 'ยังไม่มีกิลในระบบ — ตั้งกิลแรกเลย!':'No guilds yet — create the first one!',
+      'ชื่อกิลต้องยาว 2-12 ตัวอักษร':'Guild name must be 2-12 characters',
+      'เข้ากิล(log)':'Joined', 'เตะสมาชิก':'Kicked member', 'บริจาค':'Donation', 'กิลเลเวลอัพ':'Guild level up',
+      'เลื่อนตำแหน่ง':'Promoted', 'ปลดตำแหน่ง':'Demoted', 'เปลี่ยนตรา':'Emblem changed', 'ตั้งประกาศ':'Notice set', 'กลับ':'Back',
+      // 🪨 แร่อวกาศ (docs/guild-ore-upgrade-design.md) — หน้า ITEM + ตลาด/เทรด + แถบบริจาคหน้ากิล
+      'แร่อวกาศ':'Space Ore', 'แร่จันทรา':'Lunar Ore', 'เศษดาวตก':'Meteor Shard', 'ผลึกเนบิวลา':'Nebula Crystal', '🪨 แร่หายาก':'🪨 Rare Ore', '🛸 สายอวกาศ':'🛸 Space', '🌾 สายพื้นดิน':'🌾 Earth',
+      'หินหยก':'Jade Stone', 'อำพันโบราณ':'Ancient Amber', 'ผลึกน้ำค้าง':'Dew Crystal',
+      'ขุดเจอระหว่างเก็บเกี่ยวผัก — บ้านยิ่งเลเวลสูง ยิ่งมีโอกาสเจอ · ขายตลาดกลางและเทรด 1-1 ได้':'Found while harvesting crops — higher house level, better odds · sellable on the market and in 1-1 trades',
+      'ขุดเจอตอนเก็บเกี่ยวผัก':'Found while harvesting crops',
+      '⛏️ ขุดเจอ {n} ×{q}':'⛏️ Found {n} ×{q}',
+      'ใช้บริจาคอัพเลเวลกิล':'Donate to level up your guild', 'รวม {a} ก้อน':'{a} total',
+      'ใช้บริจาคอัพเลเวลกิลที่แผง 🏰 กิล · ขายตลาดกลางและเทรด 1-1 ได้':'Donate it in the 🏰 Guild panel to level up your guild · also sellable on the market and in 1-1 trades',
+      '🪨 แร่อวกาศ — จะเพิ่มเข้าคลังของคุณ':'🪨 Space ore — will be added to your stock',
+      'แร่อวกาศอัพเลเวลกิล':'Space ore for guild level up', 'ที่ฉันมี':'You have', 'บริจาคแร่':'Donate ore',
+      'ต้องครบทั้ง G และแร่ กิลจึงขึ้นเลเวล · บริจาคแล้วคืนไม่ได้':'The guild levels up only when both G and ore are complete · donations cannot be refunded',
+      'คุณยังไม่มีแร่ชนิดนี้ — ส่งยานบุกอวกาศไปหาก่อน':'You have none of this ore yet — send the airship on a space raid first',
+      'บริจาค {a} กี่ก้อน? (มีอยู่ {n})':'How many {a} do you want to donate? (you have {n})',
+      'จำนวนไม่ถูกต้อง':'Invalid amount',
+      'ยืนยันบริจาค {a} ×{n} ให้กิล? — บริจาคแล้วคืนไม่ได้':'Donate {a} ×{n} to the guild? — donations cannot be refunded',
       // ชื่อแผนที่/โซน (XHRPG_SPOTS ทั้ง 3 แมพ — dropdown เลือกโซน/แผงออฟไลน์/ป้ายโซนบนแผนที่/log เดินทาง)
       'ป่าสนตะวันออก':'East Pine Forest', 'หุบเขาลึกลับ':'Mystic Valley', 'รังสไลม์เหนือ':'North Slime Nest',
       'ทุ่งสไลม์ตะวันตก':'West Slime Field', 'ป่ามืดมน':'Dark Forest',
@@ -9977,9 +13544,11 @@ const xhrpg = (() => {
       'ถ้ำกิ้งก่าใต้':'South Lizard Cave', 'ค่ายหมาป่าเหนือ':'North Wolf Camp', 'แอ่งสไลม์อสูร':'Demon Slime Basin',
       'ต้นไม้น้ำแข็ง':'Frost Tree', 'สุสานโบราณ':'Ancient Graveyard', 'พื้นที่รกร้าง':'Desolate Wastes',
       '📍 อยู่ที่นี่':'📍 You are here', '🔒 ต้องถึง Lv.{a}':'🔒 Requires Lv.{a}', 'พร้อมวาร์ป · Lv.{a}+':'Ready to warp · Lv.{a}+',
+      'ยังไม่มีมอนในโซนนี้':'No monsters in this zone yet',
       'แผนที่ {a}':'Map {a}', '🗺️ วาร์ปไป {a}!':'🗺️ Warped to {a}!',
       'วาร์ปไม่สำเร็จ: ตอบกลับผิดรูปแบบ':'Warp failed: malformed response',
       'ต้องถึง Lv.{a} ก่อนวาร์ป':'Requires Lv.{a} to warp', 'ต้องถึง Lv.{a}':'Requires Lv.{a}',
+      'แมพนี้สำหรับผู้เล่นใหม่ Lv. ไม่เกิน {n}':'This map is for new players Lv.{n} and below', '🌿 ทุ่งกลาง (ผู้เล่นใหม่)':'🌿 Central Field (Newbie)', '🏜️ ทะเลทราย (ผู้เล่นใหม่)':'🏜️ Desert (Newbie)', 'ทุ่งกลาง (ผู้เล่นใหม่)':'Central Field (Newbie)', 'ทะเลทราย (ผู้เล่นใหม่)':'Desert (Newbie)', '🌱 ผู้เล่นใหม่ · Lv. ≤{a}':'🌱 Newbie · Lv. ≤{a}', '🔒 เกิน Lv.{a} แล้ว':'🔒 Above Lv.{a}', '🎓 จบการเป็นผู้เล่นใหม่! ยินดีต้อนรับสู่โลกกว้าง':'🎓 Newbie graduation! Welcome to the wider world', '🎓 จบการเป็นผู้เล่นใหม่!':'🎓 Newbie graduation!', '❄️ ดินแดนเยือกแข็ง (ผู้เล่นใหม่)':'❄️ Frozen Land (Newbie)', 'ดินแดนเยือกแข็ง (ผู้เล่นใหม่)':'Frozen Land (Newbie)',
       'วาร์ปไม่สำเร็จ: ':'Warp failed: ',
       '❌ วาร์ปไม่สำเร็จ (เชื่อมต่อไม่ได้ HTTP {a})':'❌ Warp failed (connection failed, HTTP {a})',
       // เดินทาง/บอส/อื่นๆ
@@ -10117,14 +13686,15 @@ const xhrpg = (() => {
       'เห็นยานบินเพื่อนบนแผนที่เป็นยานลำเล็กสีจาง พร้อมชื่อเจ้าของ':'Friends\' airships appear on the map as small faded ships with the owner\'s name.',
       'ตลาด (Market)':'Market',
       'วางขาย':'Listing Items',
-      'เลือกของจากกระเป๋า ตั้งราคา/ชิ้น วางขายได้สูงสุด 5 รายการพร้อมกัน ของจะถูกดึงออกจากกระเป๋าทันที':'Pick an item from your bag and set a price per piece. Up to 5 listings at once; listed items leave your bag immediately.',
+      'เลือกของจากกระเป๋า ตั้งราคา/ชิ้น วางขายได้สูงสุด 10 รายการพร้อมกัน (VIP +1 ช่อง/ระดับ) ของจะถูกดึงออกจากกระเป๋าทันที':'Pick an item from your bag and set a price per piece. Up to 10 listings at once (VIP: +1 slot per level); listed items leave your bag immediately.',
+      'ช่องขาย':'Slots',
       'ซื้อของ':'Buying',
       'ดูรายการของที่ผู้เล่นอื่นวางขาย กรองตามหมวดหรือค้นหาชื่อ Badge "ใหม่ ✨" = ของที่คุณยังไม่มี':'Browse listings from other players; filter by category or search by name. A "New ✨" badge = an item you don\'t own yet.',
       'ของฉัน':'My Listings',
       'ดูรายการที่ตัวเองวางขายอยู่ กด "ยกเลิก" เพื่อดึงของกลับ':'View your own active listings. Press "Cancel" to take an item back.',
       'บันทึกทุก transaction ทั้งซื้อและขาย กรองดูแต่ละประเภทได้ แสดง Gold +/- ของแต่ละรายการ':'Records every transaction, both buys and sells. Filter by type; shows the Gold +/- of each entry.',
       'ค่า Fee':'Fees',
-      'ผู้ขายถูกหัก 5% ของราคาขาย เป็นค่าธรรมเนียมตลาด':'Sellers pay a 5% market fee on the sale price.',
+      'ผู้ขายถูกหัก 10% ของราคาขาย เป็นค่าธรรมเนียมตลาด':'Sellers pay a 10% market fee on the sale price.',
       'อายุ Listing':'Listing Lifetime',
       'ของที่วางขายจะหมดอายุใน 24 ชั่วโมง หากไม่มีคนซื้อต้อง cancel เพื่อรับของคืน':'Listings expire after 24 hours. If nothing sells, cancel the listing to get the item back.',
       'EXP ที่ได้จากการต่อสู้เพิ่มขึ้น เหมาะช่วงที่อยากเลเวลขึ้นเร็ว':'Increases EXP earned from combat — great when you want to level fast.',
@@ -10186,6 +13756,37 @@ const xhrpg = (() => {
       'แวมไพร์หนุ่ม':'Young Vampire', 'แวมไพร์อาวุโส':'Elder Vampire', 'ลอร์ดแวมไพร์':'Vampire Lord',
       'โครงกระดูกทหาร':'Skeleton Soldier', 'โครงกระดูกอัศวิน':'Skeleton Knight', 'ขุนพลกระดูก':'Bone General',
       'ปีศาจน้อย':'Lesser Demon', 'ปีศาจสงคราม':'War Demon', 'จอมมารอสูร':'Demon Overlord',
+      // 🌊 ใต้ทะเลลึก (map 6) มอน Lv56-69
+      'แมงกะพรุนเรืองแสง':'Glowing Jellyfish', 'แมงกะพรุนพิษ':'Venom Jellyfish', 'ราชาแมงกะพรุน':'Jellyfish King',
+      'ปูหินยักษ์':'Giant Rock Crab', 'ปูเกราะเหล็ก':'Iron-Shell Crab', 'เม่นทะเลหนามพิษ':'Venom Sea Urchin',
+      'ปลาปะการังพิษ':'Toxic Coral Fish', 'ปลาสิงโตทะเล':'Lionfish', 'ปลาปีศาจใต้สมุทร':'Deep-Sea Devilfish',
+      'ฉลามหิวโหย':'Ravenous Shark', 'ฉลามหัวค้อน':'Hammerhead Shark', 'เจ้าสมุทรใต้ทะเลลึก':'Abyssal Sea Lord',
+      // 🌊 ใต้ทะเลลึก โซน 1-3 (ซากปลาวาฬยักษ์ = โซนกลาง อยู่บรรทัดชื่อแมพด้านบน)
+      'หินใต้น้ำ':'Underwater Rocks', 'ปะการังลึกลับ':'Mysterious Coral', 'ลานกว้างใต้น้ำ':'Undersea Plaza',
+      // 🏺 สัตว์เทพ (Divine Pet · Anubis)
+      'สัตว์เทพ':'Divine Beast', 'เทพอียิปต์':'Egyptian God',
+      '⚔️ จู่โจมมอนอัตโนมัติ':'⚔️ Auto-attacks monsters',
+      '⚡ Chain Lightning กระจาย {n} ตัว · 🎴 ใส่การ์ดได้ {s} ช่อง':'⚡ Chain Lightning hits up to {n} targets · 🎴 {s} card slots',
+      '🥚⭐ ไข่ MVP Lv.1-{a} (ทุกชนิด · ชนิดละ {c})':'🥚⭐ MVP eggs Lv.1-{a} (every species · {c} each)',
+      'ชนิด':'species', 'ขาด:':'Missing:',
+      '🏺⚡ ปลุก Anubis!':'🏺⚡ Awaken Anubis!', '🔒 สะสมไข่ให้ครบเพื่อปลุก':'🔒 Collect all the eggs to awaken',
+      'ระดับ MVP Lv.60':'MVP Lv.60 class', 'สลบ — พักฟื้น':'Fainted — recovering',
+      'เกณฑ์ = ผู้เล่น ×10':'Requirement = player ×10',
+      'ทุกจังหวะ · กระจาย {n} ตัว':'Every tick · chains to {n} targets',
+      'DMG สายฟ้า':'Lightning DMG', 'โบนัส Lv':'Lv bonus', '+{a} ATK/แต้ม':'+{a} ATK/pt', '+{a} HP · +2 DEF/แต้ม':'+{a} HP · +2 DEF/pt',
+      // 🏺🎴 การ์ด 3 เทพ (2026-07-23)
+      'สมุดการ์ด':'Card Book', 'การ์ด 3 เทพ':'Divine Cards', 'การ์ดเทพ Anubis':'Anubis Divine Card', 'ถือครอง {n}/{m}':'Owned {n}/{m}',
+      '⚔️ ATK ทุกแหล่ง +{p}% ต่อใบ (ติดตัวถาวร)':'⚔️ +{p}% ATK from every source, per card (permanent)',
+      'ผูกกับตัวผู้เล่น — ขาย/เทรด/ลงตลาดไม่ได้':'Bound to you — cannot be sold, traded, or listed',
+      'พลังโจมตีรวมตอนนี้':'Current total ATK bonus', '🎴⭐ การ์ด MVP Lv.1-{a} (ทุกชนิด · ชนิดละ {c})':'🎴⭐ MVP cards Lv.1-{a} (every species · {c} each)',
+      '✅ เต็มเพดานแล้ว ({m} ใบ)':'✅ Maxed out ({m} cards)', '🏺🎴 แลกการ์ดเทพ Anubis':'🏺🎴 Exchange for an Anubis Divine Card',
+      '🔒 สะสมการ์ด MVP ให้ครบเพื่อแลก':'🔒 Collect all MVP cards to exchange',
+      'แลกการ์ดเทพ Anubis? จะใช้การ์ด ⭐MVP ทุกชนิด Lv.1-{a} ชนิดละ {c} ใบ (ใช้แล้วหายถาวร)':'Exchange for an Anubis Divine Card? This consumes {c} ⭐MVP cards of every species Lv.1-{a} (permanently)',
+      'แลกไม่สำเร็จ':'Exchange failed', '❌ แลกไม่สำเร็จ (เชื่อมต่อ server ไม่ได้)':'❌ Exchange failed (cannot reach server)',
+      'แต้มอัพคงเหลือ {n} (ได้ 1 แต้ม/Lv)':'{n} upgrade points left (1 per Lv)',
+      '✓ เปิดใช้งานอยู่ — กดเพื่อปิด':'✓ Active — tap to disable',
+      'ปิดอยู่ — กดเพื่อเปิดใช้งาน':'Disabled — tap to enable',
+      '🎴 เลือกการ์ดให้ Anubis':'🎴 Pick a card for Anubis', 'ยังไม่มีการ์ดในคลัง':'No cards in storage yet',
     },
     // 🌐 ภาษาที่ 3+ ไม่ฝังตรงนี้ (บวมไฟล์ +100KB/ภาษา) — lazy-load จาก js/lang/xhrpg_lang_{code}.js ผ่าน _ensureLangLoaded()
   };
@@ -10222,6 +13823,9 @@ const xhrpg = (() => {
   const CUR_FMT  = { thb: v => v.toLocaleString() + ' ฿', usd: v => '$' + v.toFixed(2),  jpy: v => '¥' + v.toLocaleString() }; // ป้ายราคาเต็ม
   const CUR_PERP = { thb: v => '฿' + v.toFixed(2),        usd: v => '$' + v.toFixed(3),  jpy: v => '¥' + v.toFixed(1) };        // ราคาต่อ 1 P
   let _svRegion = '';                                              // จาก server poll: รหัสประเทศ (หรือ th|intl รุ่นเก่า) · '' = ยังไม่รู้
+  let _svGm = false;                                               // 🛡️ ตัวเองเป็น GM ไหม (จาก server poll d.gm) — วาดป้ายน้ำเงินหน้าธงตัวเอง
+  let _svGmc = false;                                              // 🌐 ตัวเองเป็น GMC ไหม (จาก server poll d.gmc) — เปิดปุ่มแปล 🌐 + แถบตอบหลายภาษาในแชท
+  let _svCl = false;                                               // 💠 ตัวเองเป็น CL (Country Lead) ไหม (จาก server poll d.cl) — ป้ายฟ้าหน้าธงตัวเอง
   let _langOv   = (()=>{ try { return localStorage.getItem('xhrpg_lang') || ''; } catch(e){ return ''; } })(); // ''=auto
   let _langPromptPending = false; // จะเด้ง picker ตอน login แรก — popup เนื้อเรื่อง/onboarding รอต่อคิวหลัง picker ปิด
   let _afterLangPickCb   = null;  // callback ยิงครั้งเดียวตอน picker ปิด (เลือกภาษา หรือแตะพื้นหลัง)
@@ -10241,6 +13845,15 @@ const xhrpg = (() => {
     let out = LANG() === 'th' ? s : ((I18N[LANG()] || I18N.en)[s] ?? s); // dict ยังไม่โหลด/โหลดพลาด → fallback English (ไม่ใช่ไทย — คนต่างชาติอ่าน EN ออกมากกว่า)
     if (p) for (const k in p) out = out.split('{' + k + '}').join(p[k]);
     return out;
+  };
+  // 🆕 แปลบรรทัด Release Note — ดิกเก็บคีย์ "ไม่มีอีโมจินำหน้า" แต่ item เก็บพร้อมอีโมจิ
+  //    เดิมส่งทั้งก้อนเข้า T() เลยหาคีย์ไม่เจอ → ผู้เล่นต่างชาติเห็นไทยทุกบรรทัดมาตลอด (เจ้าของแจ้ง 2026-07-28)
+  //    แยกอีโมจิออกก่อนแปลแล้วต่อกลับ — แก้ที่นี่ที่เดียว ครอบทุกเวอร์ชันย้อนหลัง
+  //    ⚠️ แยกเฉพาะเมื่อคำแรกเป็นอีโมจิล้วน (ไม่มีอักษรไทย/ละติน/ตัวเลข) — บรรทัดที่ไม่มีอีโมจิยังแปลทั้งก้อนตามเดิม
+  const _rnT = (t) => {
+    const s = String(t == null ? '' : t);
+    const m = s.match(/^(\S+)\s+([\s\S]+)$/);
+    return (m && !/[A-Za-z฀-๿0-9]/.test(m[1])) ? m[1] + ' ' + T(m[2]) : T(s);
   };
   // 🌐 popup เลือกภาษา — list ทุกภาษาใน LANGS (เพิ่มภาษา = โผล่ใน popup เอง) · ติ๊ก ✓ ภาษาปัจจุบัน · แตะนอกกล่อง = ปิด
   function openLangPicker() {
@@ -10273,8 +13886,11 @@ const xhrpg = (() => {
     document.documentElement.lang = LANG();
     const lb = document.getElementById('lang-toggle'); if (lb) lb.textContent = (LANGS[LANG()] || {}).short || LANG().toUpperCase(); // ปุ่มเล็ก 26×26 เหนือ 🏠 — โชว์ภาษาปัจจุบัน (กดแล้วเปิด popup เลือก)
     // เมนูล่าง 10 ปุ่ม (ตามลำดับ DOM)
-    const _menu = ['อาวุธ','ไอเทม','STAT ทักษะ','ผู้ติดตาม','ยานบิน','การ์ด','ตลาด','สัตว์เลี้ยง','อันดับ','PREMIUM'];
+    const _menu = ['อาวุธ','Equipment','STAT ทักษะ','ผู้ติดตาม','ยานบิน','การ์ด','ตลาด·เทรด','สัตว์เลี้ยง','ไอเทม','PREMIUM']; // 🛡️ Equipment สลับที่กับไอเทม (เจ้าของสั่ง 2026-07-19) · อันดับอยู่ปุ่มกลม 🏆 ซ้ายบน
+    //    ⚠️ 'Equipment' เป็นคีย์แปลจริง (เดิมคิดว่า latin ไม่ต้องแปล → zh/ja เห็นอังกฤษคำเดียวกลางแถว · แก้ 2026-07-29)
     document.querySelectorAll('.menu-icon-label').forEach((el, i) => { if (_menu[i]) el.textContent = T(_menu[i]); });
+    // 🌐 tooltip (title) — index.php ตั้ง title ไทย hardcode ไม่ผ่าน render loop → เก็บต้นฉบับครั้งแรกใน dataset.ti0 แล้วแปลตามภาษา (self-heal ตอนสลับ)
+    document.querySelectorAll('[title]').forEach(el => { const t0 = ('ti0' in el.dataset) ? el.dataset.ti0 : (el.dataset.ti0 = el.getAttribute('title') || ''); if (t0) el.setAttribute('title', T(t0)); });
     // หัว popup (แทนเฉพาะ text node แรก — คงปุ่ม ? help ไว้)
     const _titles = { 'panel-pet':'🐾 สัตว์เลี้ยง', 'panel-card':'🎴 สมุดสะสมการ์ด', 'panel-gun':'⚔ อาวุธ', 'panel-item':'🎒 ไอเทม',
       'panel-robot':'🐱 ผู้ติดตาม', 'panel-house':'🛸 ยานบิน', 'panel-rank':'🏆 อันดับผู้เล่น', 'panel-log':'📜 บันทึกเหตุการณ์',
@@ -10334,19 +13950,34 @@ const xhrpg = (() => {
     box.style.display = 'block';
     btn.textContent = T('▲ ปิด');
     box.innerHTML = '<div style="color:#4b5563;text-align:center;padding:8px">' + T('กำลังโหลด...') + '</div>';
-    $.post(baseUrl + 'xhrpg_phistory.php', { line_uid: player.line_uid }, d => {
+    $.post(baseUrl + 'xhrpg_phistory.php', { line_uid: player.line_uid, session_token: sessionToken || '' }, d => {
       if (!d.ok || !d.history) { box.innerHTML = '<div style="color:#ef4444;text-align:center">' + T('โหลดไม่ได้') + '</div>'; return; }
       const months = LANG() === 'th' ? TH_MONTHS : EN_MONTHS; // 🌐 เดือนตามภาษา
       const fmtDate = s => { const dt = new Date(s); return `${dt.getDate()} ${months[dt.getMonth()]} ${dt.getHours()}:${String(dt.getMinutes()).padStart(2,'0')}`; };
       const rows = d.history.map(t => {
         const isTopup = t.type === 'topup';
+        const isRefund = t.type === 'spend' && (+t.points < 0); // 🔨 คืนเงินประมูล (ถูกแซง) — แถว spend ที่ points ติดลบ = เงินคืน แสดงเขียว + (fix 2026-07-25 เดิมโชว์ −-5 P)
+        // ⚙️ แอดมิน "หัก" แต้ม (แถว topup ที่ points ติดลบ) — ต้องโชว์ −แดง (เคสจริง 2026-07-26: หัก −15000 แต่ขึ้น +15000 เขียว เจ้าของงงว่าแต้มมาจากไหน)
+        const _phDeduct = isTopup && (+t.points < 0);
+        const isCredit = (isTopup && !_phDeduct) || t.type === 'migrate' || isRefund; // 🎁 ย้ายเกม/เงินคืน = +P (เขียว) เหมือนเติม
+        // 🌐 รายการใช้ P: แปลสดตามภาษาปัจจุบันจาก item_name (คีย์ไทยตายตัว) ก่อน — ถ้าไม่มีในดิกจึงใช้ local_name (แช่แข็งตอนบันทึก) กันรายการเก่าโชว์คีย์ดิบ
+        const _phTr = T(t.item_name || '');
+        const _phSpend = (_phTr && _phTr !== (t.item_name || '')) ? _phTr : (t.local_name || t.item_name || '');
+        // 🎁 แถวแจกฟรี (ไม่ใช่เงินจริง) — admin=แจกรายคน · admin_all=แจกทุกคน · newbie=ของขวัญสมัครใหม่ · ทั้ง 3 ไม่โชว์จำนวนเงิน
+        const _phGift = isTopup && (t.item === 'admin' || t.item === 'admin_all' || t.item === 'newbie' || t.item === 'voucher');
+        const _phTopupLbl = t.item === 'admin_all' ? T('🎁 ของขวัญจากแอดมิน (แจกทุกคน)')
+                          : t.item === 'newbie'    ? T('🎁 ของขวัญผู้เล่นใหม่')
+                          : t.item === 'voucher'   ? T('🎟️ รับจากบัตรของขวัญ')
+                          : _phDeduct              ? T('⚙️ ปรับยอดโดยแอดมิน')
+                          : t.item === 'admin'     ? T('🎁 แอดมินเติมให้') : T('เติม P Points');
+        const _phLbl = t.type === 'migrate' ? T('🎁 โค้ดย้ายเกมเดิม') : (isTopup ? _phTopupLbl : _phSpend);
         return `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #e9d5ff">
-          <div style="width:26px;height:26px;border-radius:50%;background:${isTopup?'#dcfce7':'#fee2e2'};display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0">${isTopup?'↓':'↑'}</div>
+          <div style="width:26px;height:26px;border-radius:50%;background:${isCredit?'#dcfce7':'#fee2e2'};display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0">${isCredit?'↓':'↑'}</div>
           <div style="flex:1;min-width:0">
-            <div style="font-size:12px;font-weight:500;color:#1e293b">${isTopup?(t.item==='admin'?T('🎁 แอดมินเติมให้'):T('เติม P Points')):t.item_name}${(isTopup && +t.promo15)?' <span style="font-size:9px;font-weight:800;color:#fff;background:linear-gradient(90deg,#f59e0b,#ef4444);padding:1px 5px;border-radius:5px">🎁 ×1.5</span>':''}</div>
-            <div style="font-size:11px;color:#4b5563">${(isTopup && t.item!=='admin')?((t.currency==='usd'?'$'+(+t.amount_thb).toFixed(2):t.amount_thb+' ฿')+' · '):''} ${fmtDate(t.created_at)}</div>
+            <div style="font-size:12px;font-weight:500;color:#1e293b">${_phLbl}${(isTopup && +t.promo15)?' <span style="font-size:9px;font-weight:800;color:#fff;background:linear-gradient(90deg,#f59e0b,#ef4444);padding:1px 5px;border-radius:5px">🎁 ×'+((+t.promo_mult || 150)/100)+'</span>':''}</div>
+            <div style="font-size:11px;color:#4b5563">${(isTopup && !_phGift)?((t.currency==='usd'?'$'+(+t.amount_thb).toFixed(2):t.amount_thb+' ฿')+' · '):''} ${fmtDate(t.created_at)}</div>
           </div>
-          <div style="font-size:13px;font-weight:600;color:${isTopup?'#16a34a':'#dc2626'}">${isTopup?'+':'−'}${t.points} P</div>
+          <div style="font-size:13px;font-weight:600;color:${isCredit?'#16a34a':'#dc2626'}">${isCredit?'+':'−'}${Math.abs(+t.points)} P</div>
         </div>`;
       }).join('');
       box.innerHTML = `
@@ -10370,7 +14001,7 @@ const xhrpg = (() => {
   }
 
   // 📩 แจ้งปัญหาถึง Admin (โชว์เฉพาะภาษา ≠ ไทยที่หน้าชำระเงิน) — ข้อความ ≤300 ตัว · ตอบกลับใน 24 ชม.
-  //    ฟีเจอร์ inter-only → สตริง EN ตรงๆ ไม่ผ่าน dict (ถ้าอนาคตเปิดฝั่งไทยค่อยย้ายเข้า T())
+  //    2026-07-17: ย้ายเข้า T() ครบ (เดิม EN hardcode — เจ้าของเจอ EN ตอนเปิด JP) · คีย์ไทยตามมาตรฐาน dict
   function openReportAdmin() {
     if (!player || player.line_uid === 'demo') return;
     document.getElementById('report-admin-ov')?.remove();
@@ -10378,17 +14009,17 @@ const xhrpg = (() => {
     ov.id = 'report-admin-ov';
     ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:99999;display:flex;align-items:center;justify-content:center;padding:18px';
     ov.innerHTML = `<div style="background:#fff;border-radius:14px;padding:16px;width:100%;max-width:320px;box-shadow:0 20px 50px rgba(0,0,0,.4)">
-      <div style="font-size:14px;font-weight:800;color:#1e293b;margin-bottom:4px">📩 Contact Admin</div>
-      <div style="font-size:11px;color:#64748b;margin-bottom:10px">Describe your problem (payment, missing items, bugs). Your character name is attached automatically.</div>
-      <textarea id="report-admin-msg" maxlength="300" rows="4" placeholder="Type your message... (max 300 characters)"
+      <div style="font-size:14px;font-weight:800;color:#1e293b;margin-bottom:4px">📩 ${T('ติดต่อแอดมิน')}</div>
+      <div style="font-size:11px;color:#64748b;margin-bottom:10px">${T('อธิบายปัญหาของคุณ (การชำระเงิน ของหาย บั๊ก) — ชื่อตัวละครแนบไปให้อัตโนมัติ')}</div>
+      <textarea id="report-admin-msg" maxlength="300" rows="4" placeholder="${T('พิมพ์ข้อความ... (สูงสุด 300 ตัวอักษร)')}"
         style="width:100%;box-sizing:border-box;background:#f8fafc;border:1px solid #cbd5e1;border-radius:9px;padding:9px;font-size:13px;font-family:inherit;outline:none;resize:none"></textarea>
       <div style="display:flex;justify-content:space-between;align-items:center;margin:6px 0 10px">
         <span style="font-size:10px;color:#94a3b8" id="report-admin-cnt">0/300</span>
-        <span style="font-size:10px;font-weight:700;color:#0e7490">⏱ We'll resolve your issue within 24 hours</span>
+        <span style="font-size:10px;font-weight:700;color:#0e7490">⏱ ${T('เราจะแก้ไขให้ภายใน 24 ชม.')}</span>
       </div>
       <div style="display:flex;gap:8px">
-        <button id="report-admin-cancel" style="flex:1;padding:9px;border-radius:9px;border:1px solid #94a3b8;background:#f9fafb;font-size:13px;cursor:pointer;font-family:inherit">Cancel</button>
-        <button id="report-admin-send" style="flex:1;padding:9px;border-radius:9px;border:none;background:#0ea5e9;color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">Send</button>
+        <button id="report-admin-cancel" style="flex:1;padding:9px;border-radius:9px;border:1px solid #94a3b8;background:#f9fafb;font-size:13px;cursor:pointer;font-family:inherit">${T('ยกเลิก')}</button>
+        <button id="report-admin-send" style="flex:1;padding:9px;border-radius:9px;border:none;background:#0ea5e9;color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">${T('ส่ง')}</button>
       </div>
     </div>`;
     ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
@@ -10404,22 +14035,74 @@ const xhrpg = (() => {
         if (d && d.ok) {
           ov.querySelector('div').innerHTML = `<div style="text-align:center;padding:10px 4px">
             <div style="font-size:34px">✅</div>
-            <div style="font-size:14px;font-weight:800;color:#16a34a;margin:6px 0 4px">Message sent!</div>
-            <div style="font-size:12px;color:#475569;line-height:1.5">Our admin will review and resolve your issue<br><b>within 24 hours</b>. Thank you!</div>
+            <div style="font-size:14px;font-weight:800;color:#16a34a;margin:6px 0 4px">${T('ส่งข้อความแล้ว!')}</div>
+            <div style="font-size:12px;color:#475569;line-height:1.5">${T('แอดมินจะตรวจสอบและแก้ไขให้ภายใน 24 ชม. ขอบคุณครับ!')}</div>
             <button onclick="document.getElementById('report-admin-ov').remove()" style="margin-top:12px;width:100%;padding:9px;border-radius:9px;border:none;background:#16a34a;color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">OK</button>
           </div>`;
-        } else { btn.disabled = false; btn.textContent = 'Send'; alert((d && d.error) || 'Failed to send — please try again'); }
-      }, 'json').fail(() => { const b = ov.querySelector('#report-admin-send'); if (b) { b.disabled = false; b.textContent = 'Send'; } alert('Connection failed — please try again'); });
+        } else { btn.disabled = false; btn.textContent = T('ส่ง'); alert((d && d.error) || T('ส่งไม่สำเร็จ — ลองใหม่อีกครั้ง')); }
+      }, 'json').fail(() => { const b = ov.querySelector('#report-admin-send'); if (b) { b.disabled = false; b.textContent = T('ส่ง'); } alert(T('เชื่อมต่อไม่ได้ — ลองใหม่อีกครั้ง')); });
     };
   }
 
   function stripeTopup(pkg) {
     if (!player) return;
     const _cur = LCUR(); // สกุลตามภาษาปัจจุบัน (LANGS table — server validate + เลือกวิธีจ่ายเอง)
-    $.post(baseUrl + 'xhrpg_stripe_topup.php', { line_uid: player.line_uid, package: pkg, cur: _cur }, d => {
+    $.post(baseUrl + 'xhrpg_stripe_topup.php', { line_uid: player.line_uid, package: pkg, cur: _cur, session_token: sessionToken || '' }, d => {
       if (!d.ok) return alert(T('เกิดข้อผิดพลาด: ') + d.error);
       window.location.href = d.url; // redirect ไป Stripe Checkout
     }, 'json').fail(() => alert(T('ไม่สามารถเชื่อมต่อ Stripe ได้')));
+  }
+
+  // ── 🇻🇳 Coda / Codashop: จ่ายด้วยช่องทางท้องถิ่น (MoMo/ZaloPay/bank) สำหรับประเทศที่คนส่วนใหญ่ไม่มีบัตร ──
+  //    บัตร → Stripe เหมือนเดิม · โลคอล → Codashop (ผู้เล่นกรอก Payment Code แล้วจ่ายบน codashop.com)
+  //    ⚠️ _CODA_ENABLED = false จนกว่า Coda จะอนุมัติ (Under Review→Verified) + ได้ URL หน้าร้าน · แล้วค่อยเปิด
+  const _CODA_ENABLED   = false;
+  const _CODA_SHOP_URL  = '';                 // URL หน้าร้าน Codashop ของ Ragnalok Origin (Coda ให้ตอน live)
+  const _CODA_COUNTRIES = { VN: 1 };          // ประเทศที่เปิด Coda (เริ่ม VN — เพิ่มได้ทีหลัง)
+  const _codaOn = () => _CODA_ENABLED && !!_CODA_COUNTRIES[_myCC()]; // โชว์ปุ่ม Coda เฉพาะประเทศที่เปิด
+  function openCodashop() {
+    if (!player || !player.line_uid) return;
+    document.getElementById('codashop-ov')?.remove();
+    const ov = document.createElement('div');
+    ov.id = 'codashop-ov';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:99999;display:flex;align-items:center;justify-content:center;padding:18px';
+    ov.innerHTML = `<div style="background:#fff;border-radius:16px;padding:18px;width:100%;max-width:340px;box-shadow:0 20px 50px rgba(0,0,0,.4)">
+      <div style="font-size:15px;font-weight:800;color:#1e293b;margin-bottom:2px">🏪 ${T('เติมผ่าน Codashop')}</div>
+      <div style="font-size:11px;color:#64748b;margin-bottom:12px">${T('จ่ายด้วย MoMo · ZaloPay · โอนธนาคาร — ไม่ต้องมีบัตร')}</div>
+      <div style="font-size:11px;font-weight:700;color:#475569;margin-bottom:5px">${T('รหัสเติมเงินของคุณ (Payment Code)')}</div>
+      <div style="display:flex;align-items:center;gap:8px;background:#f1f5f9;border:1.5px dashed #94a3b8;border-radius:10px;padding:11px 12px;margin-bottom:4px">
+        <span id="coda-code-txt" style="flex:1;font-size:18px;font-weight:800;letter-spacing:.08em;color:#4338ca;font-family:monospace">${T('กำลังโหลด...')}</span>
+        <button id="coda-copy-btn" style="flex:0 0 auto;font-size:11px;font-weight:700;color:#4338ca;background:#e0e7ff;border:none;border-radius:8px;padding:7px 10px;cursor:pointer;font-family:inherit">📋 ${T('คัดลอก')}</button>
+      </div>
+      <div style="font-size:10px;color:#94a3b8;margin-bottom:12px">${T('นำรหัสนี้ไปกรอกบน Codashop เพื่อระบุตัวละครของคุณ')}</div>
+      <ol style="font-size:11.5px;color:#475569;line-height:1.75;padding-left:18px;margin:0 0 14px">
+        <li>${T('คัดลอกรหัสด้านบน')}</li>
+        <li>${T('เปิด Codashop แล้วเลือกเกม Ragnalok Origin')}</li>
+        <li>${T('วางรหัส → เลือกแพ็ก → จ่ายด้วยช่องทางท้องถิ่น')}</li>
+        <li>${T('P เข้าเกมอัตโนมัติภายในไม่กี่นาที')}</li>
+      </ol>
+      <div style="display:flex;gap:8px">
+        <button id="coda-close-btn" style="flex:0 0 auto;padding:11px 16px;border-radius:10px;border:1px solid #cbd5e1;background:#f8fafc;font-size:13px;cursor:pointer;font-family:inherit">${T('ปิด')}</button>
+        <a href="${_CODA_SHOP_URL || '#'}"${_CODA_SHOP_URL ? ' target="_blank" rel="noopener"' : ''} style="flex:1;text-align:center;padding:11px;border-radius:10px;background:#4f46e5;color:#fff;font-size:13px;font-weight:800;text-decoration:none;font-family:inherit">${T('เปิด Codashop')} →</a>
+      </div>
+    </div>`;
+    ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+    document.body.appendChild(ov);
+    ov.querySelector('#coda-close-btn').onclick = () => ov.remove();
+    // ดึง/สร้าง Payment Code (server-side · session-checked) — โชว์ผ่าน textContent (กัน XSS)
+    $.post(baseUrl + 'xhrpg_coda_paycode.php', { line_uid: player.line_uid, session_token: sessionToken || '' }, d => {
+      const txt = document.getElementById('coda-code-txt'); if (!txt) return;
+      if (d && d.ok) { txt.textContent = d.pretty || d.code; txt.dataset.raw = d.code || ''; }
+      else txt.textContent = T('โหลดรหัสไม่สำเร็จ');
+    }, 'json').fail(() => { const t = document.getElementById('coda-code-txt'); if (t) t.textContent = T('เชื่อมต่อไม่ได้'); });
+    // คัดลอกรหัสดิบ (ไม่มี dash) — Codashop รับได้ทั้งมี/ไม่มี dash (server normalize)
+    const cp = ov.querySelector('#coda-copy-btn');
+    cp.onclick = () => {
+      const raw = (document.getElementById('coda-code-txt').dataset.raw) || '';
+      if (!raw) return;
+      const done = () => { cp.textContent = '✓ ' + T('คัดลอกแล้ว'); setTimeout(() => { cp.textContent = '📋 ' + T('คัดลอก'); }, 1500); };
+      if (navigator.clipboard) navigator.clipboard.writeText(raw).then(done).catch(() => {}); else done();
+    };
   }
 
   function confirmStatReset() {
@@ -10542,55 +14225,78 @@ const xhrpg = (() => {
     const box = document.createElement('div');
     box.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9999;display:flex;align-items:center;justify-content:center';
     box.innerHTML = `<div style="background:#fff;border-radius:16px;padding:20px 18px;max-width:280px;width:90%;text-align:center">
-      <img src="${assetsBaseUrl}assets/hero/skins/robot_${sk.key}_prev.png" onerror="this.style.display='none'" style="width:72px;height:72px;image-rendering:pixelated;object-fit:contain;margin-bottom:4px">
+      <img src="${baseUrl}assets/hero/skins/robot_${sk.key}_prev.png" onerror="this.style.display='none'" style="width:72px;height:72px;image-rendering:pixelated;object-fit:contain;margin-bottom:4px">
       <div style="font-size:16px;font-weight:700;color:#111;margin-bottom:6px">${T('🎨 สกิน {a}', {a: T(sk.name)})}</div>
       <div style="font-size:13px;color:#4b5563;margin-bottom:4px">${T('ซื้อครั้งเดียว ใช้ได้ตลอด — สวมให้ทันทีหลังซื้อ')}</div>
-      <div style="font-size:12px;color:#b45309;margin-bottom:4px">${T('🎯 เลือก STAT เอง ได้ +{a} เต็มเพดาน · เลือกใหม่ได้ {b}P/ครั้ง', {a: _skinMaxStat(sk.price), b: SKIN_REROLL_PRICE})}</div>
+      ${_buyCeilNote(_skinCap(player.robot_skins, SKIN_DEFS, player.robot_skin_stats), sk.price, _skinXp(player.robot_skins, SKIN_DEFS, player.robot_skin_stats))}
       <div style="font-size:14px;color:#7c3aed;font-weight:600;margin-bottom:8px">${T('ใช้ {a} P Point', {a: sk.price})}</div>
-      <div style="font-size:11.5px;color:#6b7280;margin-bottom:6px">${T('แตะ STAT เพื่อยืนยันซื้อ')}</div>
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:0 0 12px">${_statPickBtnsHtml()}</div>
-      <button id="sk-cancel" style="width:100%;padding:9px;border-radius:8px;border:1px solid #94a3b8;background:#f9fafb;font-size:14px;cursor:pointer">${T('ยกเลิก')}</button>
+      ${_buyBtnsHtml('sk')}
     </div>`;
     document.body.appendChild(box);
     box.querySelector('#sk-cancel').onclick = () => box.remove();
-    box.querySelectorAll('[data-stat]').forEach(btn => btn.onclick = () => {
-      const stat = btn.getAttribute('data-stat');
+    box.querySelector('#sk-go').onclick = () => {
       box.remove();
-      $.post(baseUrl + 'xhrpg_premium.php', { line_uid: player.line_uid, lang: LANG(), action: 'buy_skin', skin: key, stat: stat })
+      $.post(baseUrl + 'xhrpg_premium.php', { line_uid: player.line_uid, lang: LANG(), action: 'buy_skin', skin: key })
         .done(res => {
           let d; try { d = typeof res === 'string' ? JSON.parse(res) : res; } catch(e) { addLog([{type:'dead', msg:T('❌ อ่านผลไม่ได้ (server ตอบผิดรูปแบบ)')}]); return; }
-          if (d.ok) { player = d.player; if (d.roll) _skinDiceReveal(d.roll); addLog([{type:'levelup', msg: d.msg || T('🎨 ได้สกิน {a} แล้ว — สวมให้ทันที!', {a: T(sk.name)})}]); try { renderPremium(); } catch(e) {} }
+          if (d.ok) { player = d.player; addLog([{type:'levelup', msg: d.msg || T('🎨 ได้สกิน {a} แล้ว — สวมให้ทันที!', {a: T(sk.name)})}]); try { renderPremium(); } catch(e) {} }
           else addLog([{type:'dead', msg: d.error || T('ซื้อสกินไม่สำเร็จ')}]);
         })
         .fail(() => addLog([{type:'dead', msg:T('❌ ซื้อสกินไม่สำเร็จ (เชื่อมต่อ server ไม่ได้)')}]));
-    });
+    };
   }
 
-  // ── 🎲 popup ลูกเต๋าหมุน ~1 วิ แล้วเผยผล roll (สีตามระดับ · 9-10 มี effect) ──
+  // ── 🎯 popup ยืนยันผล STAT (~1 วิ) — สีตามขั้นเพดาน · เต็มเพดานสุด (+25) มี effect ──
+  //    ⚠️ ห้ามใช้ลูกเต๋า/คำว่า "สุ่ม" ที่นี่ (เจ้าของสั่ง 2026-07-28 "กลัวเค้างง")
+  //       ผู้เล่นเลือก STAT เองและได้ค่าเต็มเพดานเสมอ — ไม่มีการสุ่มมานานแล้ว ภาพลูกเต๋าสื่อผิดความจริง
   function _skinDiceReveal(roll) {
     const label = SKIN_STAT_LABEL[roll.s] || roll.s;
     const t = _skinTier(+roll.v);
     const ov = document.createElement('div');
     ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:10000;display:flex;align-items:center;justify-content:center';
     ov.innerHTML = `<div id="skd-box" style="background:#fff;border-radius:16px;padding:26px 34px;text-align:center;min-width:190px">
-      <div id="skd-dice" style="font-size:44px;line-height:1">🎲</div>
-      <div id="skd-txt" style="font-size:14px;color:#6b7280;margin-top:8px">${T('กำลังสุ่ม...')}</div>
+      <div id="skd-dice" style="font-size:44px;line-height:1;transition:opacity .18s">🎯</div>
+      <div id="skd-txt" style="font-size:14px;color:#6b7280;margin-top:8px">${T('กำลังตั้งค่า')}</div>
     </div>`;
     document.body.appendChild(ov);
-    const faces = ['⚀','⚁','⚂','⚃','⚄','⚅'];
     const de = ov.querySelector('#skd-dice');
-    const spin = setInterval(() => { de.textContent = faces[Math.floor(Math.random() * 6)]; }, 80);
+    const tx0 = ov.querySelector('#skd-txt');
+    let _dot = 0;
+    const spin = setInterval(() => {   // จุดไล่ + เป้ากระพริบ = "กำลังทำงาน" ไม่สื่อว่ากำลังเสี่ยงดวง
+      _dot = (_dot + 1) % 4;
+      de.style.opacity = (_dot % 2) ? '0.5' : '1';
+      tx0.textContent = T('กำลังตั้งค่า') + ' ' + '.'.repeat(_dot);
+    }, 210);
     setTimeout(() => {
       clearInterval(spin);
-      de.textContent = '🎲';
+      de.style.opacity = '1';
+      de.textContent = '🎯';
       const tx = ov.querySelector('#skd-txt');
       tx.innerHTML = `<span style="font-size:24px;font-weight:800;color:${t.c};background:${t.bg};border-radius:9px;padding:3px 14px;display:inline-block;${t.glow?'box-shadow:0 0 14px #eab308;':''}">+${roll.v} ${label}</span>
-        ${+roll.v >= 9 ? '<div style="font-size:12px;color:#b45309;font-weight:700;margin-top:6px">' + T('✨ ระดับตำนาน!') + '</div>' : ''}`;
-      if (+roll.v >= 9) sfxSkill(); // เสียงเฉลิมฉลอง (ถ้าเปิดเสียง)
+        ${t.glow ? '<div style="font-size:12px;color:#b45309;font-weight:700;margin-top:6px">' + T('✨ เต็มเพดานสูงสุด!') + '</div>' : ''}`;
+      if (t.glow) sfxSkill(); // เสียงเฉลิมฉลองเฉพาะเพดานสูงสุด (ถ้าเปิดเสียง)
       setTimeout(() => ov.remove(), 2200);
     }, 1000);
     ov.onclick = () => ov.remove(); // แตะเพื่อข้าม
   }
+
+  // ── 🛒 popup ซื้อสกิน: ไม่ถาม STAT อีกแล้ว (เจ้าของสั่ง 2026-07-28) ──
+  //    STAT เป็นค่ากลางต่อผู้เล่น เลือกที่แถบ 🎯 ในร้าน — ถามตอนซื้อทำให้เข้าใจผิดว่า STAT ผูกกับตัวที่ซื้อ
+  //    🎯 SKIN LV: ทุกใบสะสมเป็น EXP ของหมวด → ซื้อใบไหนก็ดันเลเวลเสมอ (ต่างจากเดิมที่ยึดใบแพงสุดใบเดียว)
+  const _buyCeilNote = (curCeil, price, xp) => {
+    const nxp = (xp | 0) + (price | 0);
+    const nc  = Math.max(curCeil, _skinStatForXp(nxp));
+    const nl  = _skinLv(nxp), need = _skinNextRow(nxp);
+    return nc > curCeil
+      ? `<div style="font-size:12px;color:#b45309;font-weight:600;margin-bottom:4px">${T('🎯 SKIN LV ขึ้นเป็น {b} — เพดาน STAT เป็น +{a} (กดเลือก STAT ที่แถบด้านบนเพื่อใช้สิทธิ์)', {a: nc, b: nl})}</div>`
+      : `<div style="font-size:12px;color:#6b7280;margin-bottom:4px">${need
+          ? T('🎯 สะสมเป็น {a} P — อีก {b} P ถึง SKIN LV {c} (เพดานตอนนี้ +{d})', {a: nxp.toLocaleString(), b: (need[1] - nxp).toLocaleString(), c: need[0], d: curCeil})
+          : T('🎯 เพดาน STAT เต็มขั้นสูงสุดแล้ว +{a}', {a: curCeil})}</div>`;
+  };
+  const _buyBtnsHtml = (id) => `<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:10px 0 0">
+      <button id="${id}-cancel" style="padding:9px;border-radius:8px;border:1px solid #94a3b8;background:#f9fafb;font-size:14px;cursor:pointer">${T('ยกเลิก')}</button>
+      <button id="${id}-go" style="padding:9px;border-radius:8px;border:none;background:#7c3aed;color:#fff;font-size:14px;font-weight:700;cursor:pointer">${T('ยืนยัน')}</button>
+    </div>`;
 
   // 6 ปุ่มเลือก STAT (grid 3×2 — 'intel' โชว์เป็น INT) สำหรับ picker เลือกสเตตัสสกิน/สัตว์เลี้ยง
   function _statPickBtnsHtml() {
@@ -10601,17 +14307,19 @@ const xhrpg = (() => {
   // ── 🎯 เลือก stat สกิน (19P) — เลือก STAT เอง ได้ค่าเต็มเพดานเสมอ ──
   function rerollSkin(key) {
     if (!player || player.line_uid === 'demo') return;
-    const sk = SKIN_DEFS.find(s => s.key === key);
-    if (!sk) return;
+    // 🎯 ไม่อิงสกินตัวใดแล้ว — เพดานจากสกินไททันแพงสุดที่เคยซื้อ (docs/skin-stat-decouple.md)
+    const _ceil = _skinCap(player.robot_skins, SKIN_DEFS, player.robot_skin_stats);
+    const _price = _pickPriceOf(player.robot_skin_stats);
+    if (_ceil <= 0) { addLog([{ type: 'dead', msg: T('ต้องมีสกินอย่างน้อย 1 ตัวก่อน') }]); return; }
     const cur = _skinRollOf(key);
     const curTxt = cur ? `+${cur.v} ${cur.label}` : '—';
     const ct = cur ? _skinTier(cur.v) : { c:'#6b7280', bg:'#f1f5f9' };
     const box = document.createElement('div');
     box.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9999;display:flex;align-items:center;justify-content:center';
     box.innerHTML = `<div style="background:#fff;border-radius:16px;padding:20px 18px;max-width:280px;width:90%;text-align:center">
-      <div style="font-size:16px;font-weight:700;color:#111;margin-bottom:8px">${T('🎯 เลือก STAT — {a}', {a: T(sk.name)})}</div>
+      <div style="font-size:16px;font-weight:700;color:#111;margin-bottom:8px">${T('🎯 เลือก STAT — {a}', {a: T('สกินไททัน')})}</div>
       <div style="font-size:12.5px;color:#4b5563;margin-bottom:6px">${T('ของเดิม {a} <b style="color:#dc2626">จะหายถาวร</b>', {a: `<span style="font-weight:700;color:${ct.c};background:${ct.bg};border-radius:5px;padding:1px 8px">${curTxt}</span>`})}</div>
-      <div style="font-size:12px;color:#7c3aed;font-weight:600;margin-bottom:4px">${T('ได้ +{a} เต็มเพดาน · ราคา {b} P', {a: _skinMaxStat(sk.price), b: SKIN_REROLL_PRICE})}</div>
+      <div style="font-size:12px;color:#7c3aed;font-weight:600;margin-bottom:4px">${_price > 0 ? T('ได้ +{a} เต็มเพดาน · ราคา {b} P', {a: _ceil, b: _price}) : T('ได้ +{a} เต็มเพดาน · ครั้งนี้ฟรี', {a: _ceil})}</div>
       <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:10px 0 12px">${_statPickBtnsHtml()}</div>
       <button id="skr-cancel" style="width:100%;padding:9px;border-radius:8px;border:1px solid #94a3b8;background:#f9fafb;font-size:14px;cursor:pointer">${T('ยกเลิก')}</button>
     </div>`;
@@ -10620,10 +14328,10 @@ const xhrpg = (() => {
     box.querySelectorAll('[data-stat]').forEach(btn => btn.onclick = () => {
       const stat = btn.getAttribute('data-stat');
       box.remove();
-      $.post(baseUrl + 'xhrpg_premium.php', { line_uid: player.line_uid, lang: LANG(), action: 'reroll_skin', skin: key, stat: stat })
+      $.post(baseUrl + 'xhrpg_premium.php', { line_uid: player.line_uid, lang: LANG(), action: 'reroll_skin', stat: stat })
         .done(res => {
           let d; try { d = typeof res === 'string' ? JSON.parse(res) : res; } catch(e) { addLog([{type:'dead', msg:T('❌ อ่านผลไม่ได้ (server ตอบผิดรูปแบบ)')}]); return; }
-          if (d.ok) { player = d.player; if (d.roll) _skinDiceReveal(d.roll); addLog([{type:'levelup', msg: d.msg || T('🎲 รีโรลสกินแล้ว')}]); try { renderPremium(); } catch(e) {} }
+          if (d.ok) { player = d.player; if (d.roll) _skinDiceReveal(d.roll); addLog([{type:'levelup', msg: d.msg || T('🎯 ตั้ง STAT ใหม่แล้ว')}]); try { renderPremium(); } catch(e) {} }
           else addLog([{type:'dead', msg: d.error || T('รีโรลไม่สำเร็จ')}]);
         })
         .fail(() => addLog([{type:'dead', msg:T('❌ รีโรลไม่สำเร็จ (เชื่อมต่อ server ไม่ได้)')}]));
@@ -10649,7 +14357,7 @@ const xhrpg = (() => {
       const sheet = SUM['hs_' + hk.key + '_idle'];
       let cols = 12, rows = 4;
       if (sheet && sheet.naturalWidth) { cols = Math.max(1, Math.round(sheet.naturalWidth / 64)); rows = Math.max(1, Math.round(sheet.naturalHeight / 64)); }
-      return `width:72px;height:72px;background-image:url('${assetsBaseUrl}assets/hero/thrower/skins/${hk.key}_idle.png');background-repeat:no-repeat;background-position:0 0;background-size:${cols * 72}px ${rows * 72}px;image-rendering:pixelated`;
+      return `width:72px;height:72px;background-image:url('${baseUrl}assets/hero/thrower/skins/${hk.key}_idle.png');background-repeat:no-repeat;background-position:0 0;background-size:${cols * 72}px ${rows * 72}px;image-rendering:pixelated`;
     })();
     const box = document.createElement('div');
     box.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9999;display:flex;align-items:center;justify-content:center';
@@ -10657,40 +14365,39 @@ const xhrpg = (() => {
       <div style="${_pv};margin:0 auto 4px"></div>
       <div style="font-size:16px;font-weight:700;color:#111;margin-bottom:6px">${T('🗡️ สกินฮีโร่ {a}', {a: T(hk.name)})}</div>
       <div style="font-size:13px;color:#4b5563;margin-bottom:4px">${T('ซื้อครั้งเดียว ใช้ได้ตลอด — สวมให้ทันทีหลังซื้อ')}</div>
-      <div style="font-size:12px;color:#b45309;margin-bottom:4px">${T('🎯 เลือก STAT เอง ได้ +{a} เต็มเพดาน · เลือกใหม่ได้ {b}P/ครั้ง', {a: _skinMaxStat(hk.price), b: SKIN_REROLL_PRICE})}</div>
+      ${_buyCeilNote(_skinCap(player.hero_skins, HERO_SKIN_DEFS, player.hero_skin_stats), hk.price, _skinXp(player.hero_skins, HERO_SKIN_DEFS, player.hero_skin_stats))}
       <div style="font-size:14px;color:#7c3aed;font-weight:600;margin-bottom:8px">${T('ใช้ {a} P Point', {a: hk.price})}</div>
-      <div style="font-size:11.5px;color:#6b7280;margin-bottom:6px">${T('แตะ STAT เพื่อยืนยันซื้อ')}</div>
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:0 0 12px">${_statPickBtnsHtml()}</div>
-      <button id="hsk-cancel" style="width:100%;padding:9px;border-radius:8px;border:1px solid #94a3b8;background:#f9fafb;font-size:14px;cursor:pointer">${T('ยกเลิก')}</button>
+      ${_buyBtnsHtml('hsk')}
     </div>`;
     document.body.appendChild(box);
     box.querySelector('#hsk-cancel').onclick = () => box.remove();
-    box.querySelectorAll('[data-stat]').forEach(btn => btn.onclick = () => {
-      const stat = btn.getAttribute('data-stat');
+    box.querySelector('#hsk-go').onclick = () => {
       box.remove();
-      $.post(baseUrl + 'xhrpg_premium.php', { line_uid: player.line_uid, lang: LANG(), action: 'buy_hero_skin', skin: key, stat: stat })
+      $.post(baseUrl + 'xhrpg_premium.php', { line_uid: player.line_uid, lang: LANG(), action: 'buy_hero_skin', skin: key })
         .done(res => {
           let d; try { d = typeof res === 'string' ? JSON.parse(res) : res; } catch(e) { addLog([{type:'dead', msg:T('❌ อ่านผลไม่ได้ (server ตอบผิดรูปแบบ)')}]); return; }
-          if (d.ok) { player = d.player; if (d.roll) _skinDiceReveal(d.roll); addLog([{type:'levelup', msg: d.msg || T('🗡️ ได้สกินฮีโร่ {a} แล้ว — สวมให้ทันที!', {a: T(hk.name)})}]); try { renderPremium(); } catch(e) {} }
+          if (d.ok) { player = d.player; addLog([{type:'levelup', msg: d.msg || T('🗡️ ได้สกินฮีโร่ {a} แล้ว — สวมให้ทันที!', {a: T(hk.name)})}]); try { renderPremium(); } catch(e) {} }
           else addLog([{type:'dead', msg: d.error || T('ซื้อสกินไม่สำเร็จ')}]);
         })
         .fail(() => addLog([{type:'dead', msg:T('❌ ซื้อสกินฮีโร่ไม่สำเร็จ (เชื่อมต่อ server ไม่ได้)')}]));
-    });
+    };
   }
 
   function rerollHeroSkin(key) {
     if (!player || player.line_uid === 'demo') return;
-    const hk = HERO_SKIN_DEFS.find(h => h.key === key);
-    if (!hk) return;
+    // 🎯 เพดานจากสกินฮีโร่แพงสุดที่เคยซื้อ (ดู rerollSkin)
+    const _ceil = _skinCap(player.hero_skins, HERO_SKIN_DEFS, player.hero_skin_stats);
+    const _price = _pickPriceOf(player.hero_skin_stats);
+    if (_ceil <= 0) { addLog([{ type: 'dead', msg: T('ต้องมีสกินอย่างน้อย 1 ตัวก่อน') }]); return; }
     const cur = _heroRollOf(key);
     const curTxt = cur ? `+${cur.v} ${cur.label}` : '—';
     const ct = cur ? _skinTier(cur.v) : { c:'#6b7280', bg:'#f1f5f9' };
     const box = document.createElement('div');
     box.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9999;display:flex;align-items:center;justify-content:center';
     box.innerHTML = `<div style="background:#fff;border-radius:16px;padding:20px 18px;max-width:280px;width:90%;text-align:center">
-      <div style="font-size:16px;font-weight:700;color:#111;margin-bottom:8px">${T('🎯 เลือก STAT — {a}', {a: T(hk.name)})}</div>
+      <div style="font-size:16px;font-weight:700;color:#111;margin-bottom:8px">${T('🎯 เลือก STAT — {a}', {a: T('สกินฮีโร่')})}</div>
       <div style="font-size:12.5px;color:#4b5563;margin-bottom:6px">${T('ของเดิม {a} <b style="color:#dc2626">จะหายถาวร</b>', {a: `<span style="font-weight:700;color:${ct.c};background:${ct.bg};border-radius:5px;padding:1px 8px">${curTxt}</span>`})}</div>
-      <div style="font-size:12px;color:#7c3aed;font-weight:600;margin-bottom:4px">${T('ได้ +{a} เต็มเพดาน · ราคา {b} P', {a: _skinMaxStat(hk.price), b: SKIN_REROLL_PRICE})}</div>
+      <div style="font-size:12px;color:#7c3aed;font-weight:600;margin-bottom:4px">${_price > 0 ? T('ได้ +{a} เต็มเพดาน · ราคา {b} P', {a: _ceil, b: _price}) : T('ได้ +{a} เต็มเพดาน · ครั้งนี้ฟรี', {a: _ceil})}</div>
       <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:10px 0 12px">${_statPickBtnsHtml()}</div>
       <button id="hskr-cancel" style="width:100%;padding:9px;border-radius:8px;border:1px solid #94a3b8;background:#f9fafb;font-size:14px;cursor:pointer">${T('ยกเลิก')}</button>
     </div>`;
@@ -10699,10 +14406,10 @@ const xhrpg = (() => {
     box.querySelectorAll('[data-stat]').forEach(btn => btn.onclick = () => {
       const stat = btn.getAttribute('data-stat');
       box.remove();
-      $.post(baseUrl + 'xhrpg_premium.php', { line_uid: player.line_uid, lang: LANG(), action: 'reroll_hero_skin', skin: key, stat: stat })
+      $.post(baseUrl + 'xhrpg_premium.php', { line_uid: player.line_uid, lang: LANG(), action: 'reroll_hero_skin', stat: stat })
         .done(res => {
           let d; try { d = typeof res === 'string' ? JSON.parse(res) : res; } catch(e) { addLog([{type:'dead', msg:T('❌ อ่านผลไม่ได้ (server ตอบผิดรูปแบบ)')}]); return; }
-          if (d.ok) { player = d.player; if (d.roll) _skinDiceReveal(d.roll); addLog([{type:'levelup', msg: d.msg || T('🎲 รีโรลสกินฮีโร่แล้ว')}]); try { renderPremium(); } catch(e) {} }
+          if (d.ok) { player = d.player; if (d.roll) _skinDiceReveal(d.roll); addLog([{type:'levelup', msg: d.msg || T('🎯 ตั้ง STAT ใหม่แล้ว')}]); try { renderPremium(); } catch(e) {} }
           else addLog([{type:'dead', msg: d.error || T('รีโรลไม่สำเร็จ')}]);
         })
         .fail(() => addLog([{type:'dead', msg:T('❌ รีโรลสกินฮีโร่ไม่สำเร็จ (เชื่อมต่อ server ไม่ได้)')}]));
@@ -10730,39 +14437,38 @@ const xhrpg = (() => {
       <div style="${_petFrame0Style(pk.key, 64)};margin:0 auto 4px"></div>
       <div style="font-size:16px;font-weight:700;color:#111;margin-bottom:6px">🐾 ${T(pk.name)}</div>
       <div style="font-size:13px;color:#4b5563;margin-bottom:4px">${T('คู่หูวิ่งตาม — ซื้อครั้งเดียว ใช้ได้ตลอด · สวมให้ทันที')}</div>
-      <div style="font-size:12px;color:#b45309;margin-bottom:4px">${T('🎯 เลือก STAT เอง ได้ +{a} เต็มเพดาน · เลือกใหม่ได้ {b}P/ครั้ง', {a: _skinMaxStat(pk.price), b: SKIN_REROLL_PRICE})}</div>
+      ${_buyCeilNote(_skinCap(player.pet_skins, PET_SKIN_DEFS, player.pet_skin_stats), pk.price, _skinXp(player.pet_skins, PET_SKIN_DEFS, player.pet_skin_stats))}
       <div style="font-size:14px;color:#7c3aed;font-weight:600;margin-bottom:8px">${T('ใช้ {a} P Point', {a: pk.price})}</div>
-      <div style="font-size:11.5px;color:#6b7280;margin-bottom:6px">${T('แตะ STAT เพื่อยืนยันซื้อ')}</div>
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:0 0 12px">${_statPickBtnsHtml()}</div>
-      <button id="pk-cancel" style="width:100%;padding:9px;border-radius:8px;border:1px solid #94a3b8;background:#f9fafb;font-size:14px;cursor:pointer">${T('ยกเลิก')}</button>
+      ${_buyBtnsHtml('pk')}
     </div>`;
     document.body.appendChild(box);
     box.querySelector('#pk-cancel').onclick = () => box.remove();
-    box.querySelectorAll('[data-stat]').forEach(btn => btn.onclick = () => {
-      const stat = btn.getAttribute('data-stat');
+    box.querySelector('#pk-go').onclick = () => {
       box.remove();
-      $.post(baseUrl + 'xhrpg_premium.php', { line_uid: player.line_uid, lang: LANG(), action: 'buy_pet_skin', skin: key, stat: stat })
+      $.post(baseUrl + 'xhrpg_premium.php', { line_uid: player.line_uid, lang: LANG(), action: 'buy_pet_skin', skin: key })
         .done(res => {
           let d; try { d = typeof res === 'string' ? JSON.parse(res) : res; } catch(e) { addLog([{type:'dead', msg:T('❌ อ่านผลไม่ได้ (server ตอบผิดรูปแบบ)')}]); return; }
-          if (d.ok) { player = d.player; if (d.roll) _skinDiceReveal(d.roll); addLog([{type:'levelup', msg: d.msg || T('🐾 รับเลี้ยง {a} แล้ว!', {a: T(pk.name)})}]); try { renderPremium(); } catch(e) {} }
+          if (d.ok) { player = d.player; addLog([{type:'levelup', msg: d.msg || T('🐾 รับเลี้ยง {a} แล้ว!', {a: T(pk.name)})}]); try { renderPremium(); } catch(e) {} }
           else addLog([{type:'dead', msg: d.error || T('รับเลี้ยงไม่สำเร็จ')}]);
         })
         .fail(() => addLog([{type:'dead', msg:T('❌ รับเลี้ยงไม่สำเร็จ (เชื่อมต่อ server ไม่ได้)')}]));
-    });
+    };
   }
   function rerollPetSkin(key) {
     if (!player || player.line_uid === 'demo') return;
-    const pk = PET_SKIN_DEFS.find(p => p.key === key);
-    if (!pk) return;
+    // 🎯 เพดานจากสัตว์เลี้ยงแพงสุดที่เคยซื้อ (ดู rerollSkin)
+    const _ceil = _skinCap(player.pet_skins, PET_SKIN_DEFS, player.pet_skin_stats);
+    const _price = _pickPriceOf(player.pet_skin_stats);
+    if (_ceil <= 0) { addLog([{ type: 'dead', msg: T('ต้องมีสกินอย่างน้อย 1 ตัวก่อน') }]); return; }
     const cur = _petRollOf(key);
     const curTxt = cur ? `+${cur.v} ${cur.label}` : '—';
     const ct = cur ? _skinTier(cur.v) : { c:'#6b7280', bg:'#f1f5f9' };
     const box = document.createElement('div');
     box.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9999;display:flex;align-items:center;justify-content:center';
     box.innerHTML = `<div style="background:#fff;border-radius:16px;padding:20px 18px;max-width:280px;width:90%;text-align:center">
-      <div style="font-size:16px;font-weight:700;color:#111;margin-bottom:8px">${T('🎯 เลือก STAT — {a}', {a: T(pk.name)})}</div>
+      <div style="font-size:16px;font-weight:700;color:#111;margin-bottom:8px">${T('🎯 เลือก STAT — {a}', {a: T('สัตว์เลี้ยง')})}</div>
       <div style="font-size:12.5px;color:#4b5563;margin-bottom:6px">${T('ของเดิม {a} <b style="color:#dc2626">จะหายถาวร</b>', {a: `<span style="font-weight:700;color:${ct.c};background:${ct.bg};border-radius:5px;padding:1px 8px">${curTxt}</span>`})}</div>
-      <div style="font-size:12px;color:#7c3aed;font-weight:600;margin-bottom:4px">${T('ได้ +{a} เต็มเพดาน · ราคา {b} P', {a: _skinMaxStat(pk.price), b: SKIN_REROLL_PRICE})}</div>
+      <div style="font-size:12px;color:#7c3aed;font-weight:600;margin-bottom:4px">${_price > 0 ? T('ได้ +{a} เต็มเพดาน · ราคา {b} P', {a: _ceil, b: _price}) : T('ได้ +{a} เต็มเพดาน · ครั้งนี้ฟรี', {a: _ceil})}</div>
       <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:10px 0 12px">${_statPickBtnsHtml()}</div>
       <button id="pkr-cancel" style="width:100%;padding:9px;border-radius:8px;border:1px solid #94a3b8;background:#f9fafb;font-size:14px;cursor:pointer">${T('ยกเลิก')}</button>
     </div>`;
@@ -10771,10 +14477,10 @@ const xhrpg = (() => {
     box.querySelectorAll('[data-stat]').forEach(btn => btn.onclick = () => {
       const stat = btn.getAttribute('data-stat');
       box.remove();
-      $.post(baseUrl + 'xhrpg_premium.php', { line_uid: player.line_uid, lang: LANG(), action: 'reroll_pet_skin', skin: key, stat: stat })
+      $.post(baseUrl + 'xhrpg_premium.php', { line_uid: player.line_uid, lang: LANG(), action: 'reroll_pet_skin', stat: stat })
         .done(res => {
           let d; try { d = typeof res === 'string' ? JSON.parse(res) : res; } catch(e) { addLog([{type:'dead', msg:T('❌ อ่านผลไม่ได้ (server ตอบผิดรูปแบบ)')}]); return; }
-          if (d.ok) { player = d.player; if (d.roll) _skinDiceReveal(d.roll); addLog([{type:'levelup', msg: d.msg || T('🎲 รีโรลสัตว์เลี้ยงแล้ว')}]); try { renderPremium(); } catch(e) {} }
+          if (d.ok) { player = d.player; if (d.roll) _skinDiceReveal(d.roll); addLog([{type:'levelup', msg: d.msg || T('🎯 ตั้ง STAT ใหม่แล้ว')}]); try { renderPremium(); } catch(e) {} }
           else addLog([{type:'dead', msg: d.error || T('รีโรลไม่สำเร็จ')}]);
         })
         .fail(() => addLog([{type:'dead', msg:T('❌ รีโรลสัตว์เลี้ยงไม่สำเร็จ (เชื่อมต่อ server ไม่ได้)')}]));
@@ -10811,7 +14517,7 @@ const xhrpg = (() => {
     if (name === 'market')  { mktMode='buy'; mktSellOpen=false; mktSellStep=1; mktBuyStep=1; mktSelItem=null; mktSelListing=null; mktSelGroup=null; mktBuyCat='all'; mktBuySearch=''; window._mktListingsCache=null; window._mktMyCache=null; renderMarket(); }
     if (name === 'guide')   renderGuide();
     if (name === 'chat')    { renderChat(); _chatBadgeUpd(); setTimeout(() => document.getElementById('chat-input')?.focus(), 60); }
-    if (name === 'log')     { const el = document.getElementById('event-log'); if (el) el.scrollTop = el.scrollHeight; } // เนื้อหา static (#event-log) — แค่เลื่อนลงล่างสุด
+    if (name === 'log')     renderLogPanel(); // 📦 แท็บ DROP (default) / 📜 บันทึกเหตุการณ์ — เดิมมีแค่ event-log เลื่อนลงล่าง
   }
   function closePanel() {
     if (openPanel) {
@@ -10820,6 +14526,7 @@ const xhrpg = (() => {
     }
     document.getElementById('panel-overlay').classList.remove('open');
     openPanel = null;
+    _skinGrpReset(); // 🗂️ ปิดแผง = ออกจากกลุ่มสกินที่เปิดค้าง (เปิดมาใหม่เริ่มที่หน้ารายการกลุ่มเสมอ)
   }
 
   let travelingToSpot = null; // { spotId, cx, cy, radius } — null = ไม่ได้เดินทาง
@@ -10924,24 +14631,421 @@ const xhrpg = (() => {
     closePanel();
   }
 
-  function warpHome() {
+  // 🏡 ปุ่มบ้านซ้ายจอ = toggle เข้า/ออกบ้านของฉัน (เจ้าของสั่ง 2026-07-18 — แทนวาร์ปกลางแผนที่เดิม · กลับกลางแมพใช้เมนูแผนที่)
+  function _homeBtnUpd() { // icon ปุ่มตามสถานะ: นอกบ้าน 🏡 = เข้า · ในบ้าน ↩️ = ออก + ปุ่ม ⬆️ แผงบ้าน (โผล่เฉพาะใน map 5)
+    const b = document.querySelector('.warp-btn');
+    if (b) {
+      // 🏯 ในปราสาทกิล ปุ่มนี้ = "ออกจากปราสาท" กลับแมพเก็บเลเวลที่จากมา (เจ้าของขอให้เหมือนปุ่มออกจากบ้าน)
+      // 🕳️ ในดันกิลก็เช่นกัน — ปุ่มเดียวกัน = "ออกจากดัน"
+      b.textContent = (currentMap === 5 || currentMap === 11 || currentMap === 12) ? '↩️' : '🏡';
+      b.title = currentMap === 11 ? T('ออกจากปราสาท') : currentMap === 12 ? T('ออกจากดัน') : (currentMap === 5 ? T('ออกจากบ้าน') : T('บ้านของฉัน'));
+      let up = document.getElementById('home-panel-btn');
+      if (currentMap === 5 && !up) {
+        b.insertAdjacentHTML('afterend', `<button id="home-panel-btn" class="zoom-btn" onclick="xhrpg.openHomePanel()" title="${T('อัพเกรดบ้าน')}">⬆️</button>`);
+      } else if (currentMap !== 5 && up) up.remove();
+    }
+    _castleBtnUpd();
+    _gdunBanner(); // 🕳️ แบนเนอร์ดันกิล — เกาะจุดเรียกเดียวกับปุ่มบ้าน (poll เปลี่ยนแมพ · warp · login · เข้า/ออกปราสาท/ดัน)
+  }
+  // 🏯 ปุ่มออกจากปราสาท + ปุ่มดูรายชื่อ — โผล่เฉพาะตอนอยู่ map 11 (มิเรอร์ปุ่มแผงบ้าน)
+  function _castleBtnUpd() {
+    const inCastle = currentMap === 11;
+    const mem = document.getElementById('castle-mem-btn');
+    const b = document.querySelector('.warp-btn');
+    // ปุ่มออกใช้ .warp-btn ตัวเดิม (สลับเป็น ↩️ ด้านบน) — ที่นี่เหลือแค่ปุ่มดูรายชื่อสมาชิก
+    if (inCastle && !mem && b) {
+      b.insertAdjacentHTML('afterend', `<button id="castle-mem-btn" class="zoom-btn" onclick="xhrpg._ctMemberList()" title="${T('รายชื่อสมาชิก')}" style="background:#1e3a8a;border-color:#60a5fa;color:#dbeafe">👥</button>`);
+    } else if (!inCastle && mem) mem.remove();
+  }
+  // ── 🏡 แผงบ้าน: ระดับ + แปลง + ค่าอัพเกรด (เรทกลาง ×10 ทุกทรัพยากร — mirror PHP xhrpg_home_upgrade_cost) ──
+  const HOME_PLOT_LV = [20, 40, 60, 80, 100];
+  function _homeUpCost(lv) {
+    const t = lv + 1, m = _upgCostMult(t), r = Math.ceil(tierRes(t) * m) * 10;
+    return { gold: Math.ceil(tierGold(t) * m) * 10, wood: r, stone: r, iron: r, copper: r, herb: r };
+  }
+  function openHomePanel() {
+    if (!player || document.getElementById('home-panel')) return;
+    // 🏡👥 อยู่บ้านเพื่อน = จัดการบ้านไม่ได้ (server gate อีกชั้นที่ upgrade.php) — บอกให้รู้แทนเปิดแผงเปล่า
+    if (_homeVisiting()) { addLog([{ type: 'dead', msg: T('🏡 กำลังเยี่ยมบ้านเพื่อน — จัดการได้เฉพาะบ้านตัวเอง') }]); return; }
+    const el = document.createElement('div');
+    el.id = 'home-panel';
+    el.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:9998;display:flex;align-items:center;justify-content:center;padding:16px';
+    el.addEventListener('click', e => { if (e.target === el) el.remove(); });
+    document.body.appendChild(el);
+    _homePanelBody();
+  }
+  function _homePanelBody() {
+    const el = document.getElementById('home-panel'); if (!el) return;
+    const lv = Math.max(1, player.home_lv | 0);
+    const plots = 1 + HOME_PLOT_LV.filter(q => lv >= q).length;
+    const nextQ = HOME_PLOT_LV.find(q => lv < q);
+    const cost = _homeUpCost(lv);
+    const capLv = (player.lv | 0) + 5;
+    const maxed = lv >= 100, capped = lv >= capLv;
+    const rows = [['gold','💰',player.gold|0],['wood','🪵',player.wood|0],['stone','🪨',player.stone|0],['iron','⚙️',player.iron|0],['copper','🟫',player.copper|0],['herb','🌿',player.herb|0]]
+      .map(([k, ic, have]) => { const ok = have >= cost[k];
+        return `<div style="display:flex;justify-content:space-between;font-size:12px;padding:2px 0"><span>${ic} ${cost[k].toLocaleString()}</span><span style="color:${ok?'#16a34a':'#dc2626'};font-variant-numeric:tabular-nums">${have.toLocaleString()}</span></div>`; }).join('');
+    const canUp = !maxed && !capped && [['gold'],['wood'],['stone'],['iron'],['copper'],['herb']].every(([k]) => (player[k]|0) >= cost[k]);
+    el.innerHTML = `<div style="background:#fff;border-radius:16px;max-width:320px;width:100%;max-height:90vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 12px 40px rgba(2,8,23,.4)">
+      <div style="background:#16a34a;padding:12px 16px;text-align:center;color:#fff;position:relative;flex:none">
+        <button onclick="document.getElementById('home-panel').remove()" style="position:absolute;top:9px;right:11px;width:28px;height:28px;border-radius:8px;border:none;background:rgba(0,0,0,.25);color:#fff;font-size:15px;cursor:pointer">✕</button>
+        <div style="font-size:24px;line-height:1">🏡</div>
+        <div style="font-size:15px;font-weight:700;margin-top:2px">${T('บ้านของฉัน')} Lv.${lv}</div>
+      </div>
+      <div style="padding:14px 16px 16px;overflow-y:auto;min-height:0;flex:1">
+        <div style="display:flex;gap:6px;margin-bottom:10px">
+          <button onclick="xhrpg.openRaidPanel()" style="flex:1;padding:10px;border:none;border-radius:10px;background:#7f1d1d;color:#fff;font-size:13px;font-weight:800;cursor:pointer">🏴‍☠️ ${T('ปล้นบ้านคนอื่น')}</button>
+          <button onclick="xhrpg.openRaidHist()" title="${T('ประวัติปล้น')}" style="flex:none;padding:10px 13px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;color:#475569;font-size:14px;font-weight:700;cursor:pointer">📜</button>
+        </div>
+        <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:10px;padding:8px 12px;font-size:12px;color:#166534;text-align:center">
+          🌱 ${T('แปลงปลูกเปิดแล้ว {a}/6', {a: plots})}${nextQ ? '<br><span style="font-size:10.5px;color:#4b5563">' + T('แปลงถัดไปปลดที่บ้าน Lv.{a}', {a: nextQ}) + '</span>' : ''}
+        </div>
+        ${maxed ? '' : `<div style="margin-top:10px;border:1px solid #e2e8f0;border-radius:10px;padding:9px 12px">
+          <div style="font-size:11.5px;font-weight:700;color:#334155;margin-bottom:4px">${T('อัพเกรดเป็น Lv.{a}', {a: lv + 1})} <span style="font-size:9.5px;color:#94a3b8;font-weight:400">(${T('เรทปกติ ×10 · ใช้ทุกทรัพยากร')})</span></div>
+          ${rows}
+        </div>`}
+        ${capped && !maxed ? `<div style="font-size:10.5px;color:#b45309;margin-top:6px;text-align:center">${T('อัพได้สูงสุด Lv.{a} ที่ผู้เล่น Lv.{b}', {a: capLv, b: player.lv | 0})}</div>` : ''}
+        <button onclick="xhrpg.homeUp()" ${canUp ? '' : 'disabled'} style="width:100%;margin-top:12px;padding:10px;border:none;border-radius:10px;background:${canUp ? '#16a34a' : '#d1d5db'};color:#fff;font-size:14px;font-weight:700;cursor:${canUp ? 'pointer' : 'default'}">${maxed ? 'MAX Lv.100' : '⬆️ ' + T('อัพเกรดบ้าน')}</button>
+        ${_homeFarmHtml(plots)}
+        ${_homeGuardHtml(lv)}
+      </div>
+    </div>`;
+  }
+  // ── 🏴‍☠️ ปล้นบ้าน: ฟีด/แผงเป้า/ประวัติ ──
+  const _RAID_RES = { win: ['💰', '#16a34a'], lose_guard: ['🛡️', '#dc2626'], lose_duel: ['⚔️', '#dc2626'], timeout: ['⌛', '#a16207'] };
+  function _raidPost(action, extra, cb) { $.post(baseUrl + 'xhrpg_raid.php', Object.assign({ line_uid: player.line_uid, action: action, lang: LANG(), session_token: sessionToken || '' }, extra || {})).done(res => { let d; try { d = typeof res === 'string' ? JSON.parse(res) : res; } catch (e) { return; } cb(d); }).fail(() => cb(null)); }
+  function _raidAgo(ts) { const s = Math.max(0, Math.floor(Date.now() / 1000) - Math.floor(new Date(ts.replace(' ', 'T') + 'Z').getTime() / 1000)); return s < 3600 ? Math.floor(s / 60) + 'm' : s < 86400 ? Math.floor(s / 3600) + 'h' : Math.floor(s / 86400) + 'd'; }
+  function _raidLine(r) { const [ic, c] = _RAID_RES[r.result] || ['·', '#64748b'];
+    const who = r.result === 'win' ? T('⚔️ ปล้นบ้าน {a}', { a: _flag(r.owner_cc) + _esc0(r.owner_name) }) : (r.result === 'lose_guard' ? T('🛡️ แพ้ยามบ้าน {a}', { a: _flag(r.owner_cc) + _esc0(r.owner_name) }) : r.result === 'lose_duel' ? T('⚔️ แพ้ร่างเงา {a}', { a: _flag(r.owner_cc) + _esc0(r.owner_name) }) : T('⌛ หมดเวลาบ้าน {a}', { a: _flag(r.owner_cc) + _esc0(r.owner_name) }));
+    return `<div style="display:flex;align-items:center;gap:6px;padding:4px 2px;border-bottom:1px solid #f1f5f9;font-size:10.5px"><span style="color:#94a3b8;flex:none">${_raidAgo(r.created_at)}</span><span style="flex:1;min-width:0;color:#334155">${_flag(r.raider_cc)}<b>${_esc0(r.raider_name)}</b> ${who}</span><span style="flex:none;font-weight:700;color:${c}">${ic}${r.result === 'win' ? ' +' + Number(r.gold).toLocaleString() : ''}</span></div>`;
+  }
+  function _esc0(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+  function _flag(cc) { return _ccFlag(cc); } // 🏴 ธงจริง SVG แทน [CC] text (เจ้าของขอ 2026-07-25) — ใช้ _ccFlag ชุดเดียวกับหน้าอันดับ/PVP (ธง SVG · นอกชุด = ป้ายรหัส · เพี้ยน = ว่าง)
+  function _loadRaidFeed() {
+    _raidPost('feed', {}, d => {
+      const box = document.getElementById('raid-feed-box'); if (!box || !d || !d.ok) return;
+      if (!d.feed || !d.feed.length) { box.innerHTML = ''; return; }
+      box.innerHTML = '<div style="text-align:center;font-size:10.5px;color:#7f1d1d;background:#fee2e2;border-radius:8px;padding:4px 8px;margin-bottom:6px;font-weight:700">🏴‍☠️ ' + T('ปล้นบ้านล่าสุด') + '</div>' +
+        d.feed.slice(0, 12).map(_raidLine).join('') + '<div style="height:10px"></div>';
+    });
+  }
+  function openRaidPanel() {
+    document.getElementById('raid-panel')?.remove();
+    const ov = document.createElement('div'); ov.id = 'raid-panel';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:10009;display:flex;align-items:center;justify-content:center;padding:16px';
+    ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+    ov.innerHTML = `<div style="background:#fff;border-radius:16px;max-width:340px;width:100%;max-height:85vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 12px 40px rgba(2,8,23,.45)">
+      <div style="background:#7f1d1d;padding:12px 16px;text-align:center;color:#fff;position:relative"><b style="font-size:15px">🏴‍☠️ ${T('ปล้นบ้านเพื่อน')}</b>
+        <button onclick="document.getElementById('raid-panel')?.remove()" style="position:absolute;top:8px;right:10px;width:28px;height:28px;border-radius:8px;border:none;background:rgba(255,255,255,.2);color:#fff;font-size:15px;cursor:pointer">✕</button>
+        <div id="raid-quota" style="font-size:11px;color:#fecaca;margin-top:2px">${T('กำลังโหลด...')}</div></div>
+      <div id="raid-list" style="overflow:auto;padding:10px 12px 14px"><div style="text-align:center;color:#a8a29e;padding:24px 0">${T('กำลังโหลด...')}</div></div>
+    </div>`;
+    document.body.appendChild(ov);
+    _raidPage = 0; // เปิดแผงใหม่ = หน้า 1 เสมอ
+    _raidFetchList();
+  }
+  let _raidPage = 0; // 📄 หน้าปัจจุบันรายชื่อปล้น (เรียงรวยสุดก่อน · 25/หน้า เท่าหน้า PVP)
+  function _raidFetchList() {
+    _raidPost('list', { page: _raidPage }, d => {
+      const list = document.getElementById('raid-list'), q = document.getElementById('raid-quota'); if (!list) return;
+      if (!d || !d.ok) { list.innerHTML = `<div style="text-align:center;color:#dc2626;padding:20px 8px;font-size:12px">${T('โหลดไม่สำเร็จ')}${d && d.error ? ' (' + d.error + ')' : ''}<br><span style="font-size:10px;color:#94a3b8">${T('ระบบยังไม่พร้อม — แจ้งแอดมิน')}</span></div>`; return; }
+      if (q) q.textContent = T('โควตาปล้นวันนี้ {a}/{b}', { a: d.q_used, b: d.q_max });
+      const full = d.q_used >= d.q_max;
+      const pg = d.page | 0, pgs = Math.max(1, d.pages | 0); _raidPage = pg; // server อาจปัดกลับหน้าสุดท้าย
+      if (!d.targets || !d.targets.length) { list.innerHTML = `<div style="text-align:center;color:#a8a29e;padding:24px 8px;font-size:12px">${T('ยังไม่มีบ้านที่ปลูกผักให้ปล้นตอนนี้')}</div>`; return; }
+      const pbtn = (dir, dis) => `<button onclick="xhrpg._raidPageGo(${dir})" ${dis ? 'disabled' : ''} style="width:36px;background:${dis ? '#f1f5f9' : '#b91c1c'};color:${dis ? '#cbd5e1' : '#fff'};border:none;border-radius:8px;padding:7px 0;font-size:13px;font-weight:800;cursor:${dis ? 'default' : 'pointer'}">${dir < 0 ? '◀' : '▶'}</button>`;
+      const pager = pgs > 1 ? `<div style="display:flex;align-items:center;gap:8px;margin-bottom:9px">${pbtn(-1, pg <= 0)}<div style="flex:1;text-align:center;font-size:11.5px;color:#64748b;font-weight:700">${T('หน้า {a}/{b}', { a: pg + 1, b: pgs })}</div>${pbtn(1, pg >= pgs - 1)}</div>` : '';
+      list.innerHTML = pager + d.targets.map(t => {
+        const money = '💰'.repeat(t.v);
+        const block = t.shield ? ['🛡️', T('ติดโล่คุ้มกัน')] : t.paired ? ['⛔', T('ปล้นวันนี้แล้ว')] : t.hit_full ? ['⛔', T('บ้านนี้เต็มโควตา')] : full ? ['🚫', T('โควตาคุณหมด')] : null;
+        return `<div style="border:1px solid #fecaca;border-radius:11px;padding:9px 11px;margin-bottom:8px;background:${block ? '#f8fafc' : '#fff'}">
+          <div style="display:flex;align-items:center;gap:6px">
+            <span style="flex:1;min-width:0;font-weight:700;color:#1e293b;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_flag(t.cc)}${_esc0(t.name)} <span style="font-size:10px;color:#94a3b8;font-weight:400">Lv.${t.lv}</span></span>
+            <span style="flex:none;font-size:11px">${money}</span>
+          </div>
+          <div style="font-size:10px;color:#64748b;margin-top:2px">🥬 ${T('พร้อมเก็บ')} ${t.ready} · 🌱 ${T('กำลังโต')} ${t.grow}${t.guards > 0 ? ` · 🛡️×${t.guards}` : ''}</div>
+          ${block ? `<div style="text-align:center;font-size:10.5px;color:#94a3b8;margin-top:5px">${block[0]} ${block[1]}</div>`
+            : `<button onclick="xhrpg.raidStart('${t.uid}','${_esc0(t.name).replace(/'/g, '')}')" style="width:100%;margin-top:6px;padding:7px;border:none;border-radius:8px;background:#b91c1c;color:#fff;font-size:12px;font-weight:700;cursor:pointer">⚔️ ${T('บุกปล้น')}</button>`}
+        </div>`;
+      }).join('');
+      list.scrollTop = 0; // เปลี่ยนหน้าแล้วเลื่อนกลับบนสุด
+    });
+  }
+  function _raidPageGo(dir) {
+    _raidPage = Math.max(0, _raidPage + dir);
+    const list = document.getElementById('raid-list');
+    if (list) list.innerHTML = `<div style="text-align:center;color:#a8a29e;padding:24px 0">${T('กำลังโหลด...')}</div>`;
+    _raidFetchList();
+  }
+  function raidStart(uid, name) {
+    if (!confirm(T('บุกปล้นบ้าน {a}? (ใช้โควตา 1 ครั้ง · ต้องผ่านยาม+ดวลเจ้าของ)', { a: name }))) return;
+    _raidPost('start', { target: uid }, d => {
+      if (!d) { addLog([{ type: 'dead', msg: T('❌ เชื่อมต่อไม่ได้') }]); return; }
+      if (!d.ok) { alert(T('ปล้นไม่ได้: ') + (d.error || '?')); return; }
+      document.getElementById('raid-panel')?.remove(); closePanel();
+      addLog([{ type: 'retreat', msg: T('🏴‍☠️ บุกเข้าบ้านเป้าหมาย...') }]);
+    });
+  }
+  function openRaidHist() {
+    document.getElementById('raid-hist')?.remove();
+    const ov = document.createElement('div'); ov.id = 'raid-hist';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:10009;display:flex;align-items:center;justify-content:center;padding:16px';
+    ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+    ov.innerHTML = `<div style="background:#fff;border-radius:16px;max-width:340px;width:100%;max-height:80vh;overflow:auto;padding:14px">
+      <div style="font-weight:800;font-size:14px;text-align:center;color:#7f1d1d;margin-bottom:10px">📜 ${T('ประวัติปล้น')}</div>
+      <div id="raid-hist-body" style="color:#a8a29e;text-align:center;padding:16px 0">${T('กำลังโหลด...')}</div>
+      <button onclick="document.getElementById('raid-hist')?.remove()" style="width:100%;margin-top:8px;padding:9px;border:none;border-radius:9px;background:#e2e8f0;color:#475569;font-weight:600;cursor:pointer">${T('ปิดหน้าต่าง')}</button></div>`;
+    document.body.appendChild(ov);
+    _raidPost('hist', {}, d => {
+      const b = document.getElementById('raid-hist-body'); if (!b || !d || !d.ok) return;
+      if (!d.hist || !d.hist.length) { b.innerHTML = `<div style="padding:14px 0">${T('ยังไม่มีประวัติปล้น')}</div>`; return; }
+      const robbed = d.hist.filter(r => r.owner_name !== undefined && r.raider_uid !== d.me);
+      const raided = d.hist.filter(r => r.raider_uid === d.me);
+      b.style.color = '#334155'; b.style.textAlign = 'left';
+      b.innerHTML = (robbed.length ? `<div style="font-size:11px;font-weight:800;color:#b91c1c;margin:2px 0 3px">🔻 ${T('โดนปล้น')}</div>` + robbed.map(_raidLine).join('') : '')
+        + (raided.length ? `<div style="font-size:11px;font-weight:800;color:#16a34a;margin:8px 0 3px">🔺 ${T('ไปปล้น')}</div>` + raided.map(_raidLine).join('') : '');
+    });
+  }
+
+  // ── 🏴‍☠️🛡️ การ์ดบ้าน: ช่องยามไข่ (docs/home-raid-design.md) ──
+  function _guardSlots(hlv) { return 3 + Math.floor(Math.max(1, hlv) / 10); }
+  function _homeGuardsArr() { const g = player && player.home_guards; return Array.isArray(g) ? g : (typeof g === 'string' ? (JSON.parse(g || '[]') || []) : []); }
+  function _homeGuardHtml(lv) {
+    const guards = _homeGuardsArr(), slots = _guardSlots(lv);
+    let cells = '';
+    for (let i = 0; i < slots; i++) {
+      const g = guards[i];
+      if (g && typeof g === 'object') {
+        const mm = monMasters[g.id] || {}, mvp = (g.mvp | 0) === 1, sb = _monSpriteBg(mm.lv || 1), D = 34;
+        const art = sb ? `<div style="width:${D}px;height:${D}px;background:url('${sb.url}') 0 0/${sb.cols * D}px ${sb.rows * D}px no-repeat;image-rendering:pixelated"></div>` : `<span style="font-size:20px">${mm.e || '👾'}</span>`;
+        cells += `<div onclick="xhrpg.guardRemove(${i})" title="${T('ถอด (ไข่หายถาวร)')}" style="position:relative;width:44px;height:44px;border:2px solid ${mvp ? '#dc2626' : '#f59e0b'};border-radius:10px;background:${mvp ? '#fef2f2' : '#fffbeb'};display:flex;align-items:center;justify-content:center;cursor:pointer">${art}${mvp ? '<span style="position:absolute;top:-6px;right:-5px;font-size:10px">⭐</span>' : ''}<span style="position:absolute;bottom:-6px;left:50%;transform:translateX(-50%);background:#0f172a;color:#fff;font-size:8px;border-radius:5px;padding:0 4px">✕</span></div>`;
+      } else {
+        cells += `<div onclick="xhrpg.guardPick()" style="width:44px;height:44px;border:2px dashed #cbd5e1;border-radius:10px;background:#f8fafc;display:flex;align-items:center;justify-content:center;font-size:18px;color:#cbd5e1;cursor:pointer">＋</div>`;
+      }
+    }
+    return `<div style="margin-top:10px;border:1px solid #fde68a;border-radius:12px;background:#fffdf5;padding:9px 11px">
+      <div style="font-size:12px;font-weight:800;color:#92400e;margin-bottom:6px">🛡️ ${T('ยามเฝ้าบ้าน')} <span style="font-size:10px;font-weight:400;color:#a8a29e">${guards.length}/${slots} · ${T('เอาไข่มอนมาเฝ้า กันคนปล้น (ถอด=ไข่หายถาวร)')}</span></div>
+      <div style="display:flex;flex-wrap:wrap;gap:7px">${cells}</div>
+    </div>`;
+  }
+  function guardRemove(idx) {
+    if (!confirm(T('⚠️ ถอดยามตัวนี้? ไข่จะหายถาวร (กู้คืนไม่ได้)'))) return;
+    $.post(baseUrl + 'xhrpg_upgrade.php', { line_uid: player.line_uid, action: 'guard_remove', idx: idx, lang: LANG() }).done(res => {
+      const d = typeof res === 'string' ? JSON.parse(res) : res;
+      if (d.ok) { player = d.player; addLog([{ type: 'default', msg: d.msg }]); _homePanelBody(); } else addLog([{ type: 'dead', msg: '❌ ' + (d.error || '?') }]);
+    });
+  }
+  function guardPick() { // picker ไข่ทั้งคลัง (โชว์เฉพาะที่มี)
+    document.getElementById('guard-pick')?.remove();
+    const eggs = _eggsArr(), rows = [];
+    Object.keys(eggs).forEach(id => {
+      const own = eggs[id] || {}, mm = monMasters[id] || {};
+      if ((own.n | 0) > 0) rows.push({ id: +id, mvp: 0, n: own.n | 0, mm });
+      if ((own.m | 0) > 0) rows.push({ id: +id, mvp: 1, n: own.m | 0, mm });
+    });
+    const ov = document.createElement('div'); ov.id = 'guard-pick';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.62);z-index:10010;display:flex;align-items:center;justify-content:center;padding:14px';
+    ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+    ov.innerHTML = `<div style="background:#fff;border-radius:16px;max-width:400px;width:100%;max-height:86vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 12px 40px rgba(2,8,23,.45)">
+      <div style="background:linear-gradient(135deg,#b45309,#92400e);padding:13px 16px;text-align:center;color:#fff;position:relative;flex:none">
+        <div style="font-size:15px;font-weight:800">🥚 ${T('เลือกไข่วางเป็นยาม')}</div>
+        <div style="font-size:10px;color:#fde68a;margin-top:1px">${T('⚠️ วางแล้วถอด = ไข่หายถาวร')}</div>
+        <button onclick="document.getElementById('guard-pick')?.remove()" style="position:absolute;top:9px;right:11px;width:30px;height:30px;border-radius:9px;border:none;background:rgba(255,255,255,.22);color:#fff;font-size:16px;cursor:pointer">✕</button>
+      </div>
+      <div style="overflow-y:auto;padding:12px;min-height:0;flex:1">
+      ${rows.length ? `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:9px">${rows.map(r => { const sb = _monSpriteBg(r.mm.lv || 1), D = 48;
+        const art = sb ? `<div style="width:${D}px;height:${D}px;margin:0 auto;background:url('${sb.url}') 0 0/${sb.cols * D}px ${sb.rows * D}px no-repeat;image-rendering:pixelated"></div>` : `<div style="font-size:34px;line-height:1.4">${r.mm.e || '👾'}</div>`;
+        return `<div onclick="xhrpg.guardSet(${r.id},${r.mvp})" style="position:relative;border:2px solid ${r.mvp ? '#dc2626' : '#fcd34d'};border-radius:12px;background:${r.mvp ? '#fef2f2' : '#fffbeb'};padding:9px 4px 8px;text-align:center;cursor:pointer">
+          ${r.mvp ? '<span style="position:absolute;top:4px;left:5px;font-size:8px;font-weight:800;color:#fff;background:#dc2626;padding:0 5px;border-radius:5px">MVP</span>' : ''}
+          <span style="position:absolute;top:4px;right:5px;font-size:8px;font-weight:700;color:#64748b;background:#eef2f7;padding:0 4px;border-radius:5px">Lv.${r.mm.lv || 1}</span>
+          <div style="height:50px;display:flex;align-items:center;justify-content:center;margin-top:6px">${art}</div>
+          <div style="font-size:10px;font-weight:600;color:${r.mvp ? '#b91c1c' : '#78716c'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px">${T(r.mm.n || '')}</div>
+          <div style="font-size:10px;font-weight:800;color:#7c3aed;margin-top:1px">×${r.n}</div>
+        </div>`; }).join('')}</div>` : `<div style="text-align:center;color:#a8a29e;font-size:12px;padding:30px 10px">${T('ยังไม่มีไข่ในสมุด — ล่ามอนเก็บไข่ก่อน')}</div>`}
+      </div>
+    </div>`;
+    document.body.appendChild(ov);
+  }
+  function guardSet(id, mvp) {
+    const nm = T((monMasters[id] || {}).n || '') + (mvp ? ' ⭐MVP' : '');
+    if (!confirm(T('เอา {a} มาเฝ้าบ้าน? (ถอดออกภายหลัง = ไข่หายถาวร)', { a: nm }))) return;
+    $.post(baseUrl + 'xhrpg_upgrade.php', { line_uid: player.line_uid, action: 'guard_set', mid: id, mvp: mvp, lang: LANG() }).done(res => {
+      const d = typeof res === 'string' ? JSON.parse(res) : res;
+      if (d.ok) { player = d.player; document.getElementById('guard-pick')?.remove(); addLog([{ type: 'default', msg: d.msg }]); _homePanelBody(); }
+      else addLog([{ type: 'dead', msg: '❌ ' + (d.error || '?') }]);
+    });
+  }
+
+  // ── 🌾 ส่วนฟาร์มในแผงบ้าน: สถานะแปลง + เก็บเกี่ยว + คลังเมล็ด (ปลูก ×1/ทั้งหมด) ──
+  function _homeFarmHtml(plots) {
+    const crops = _homeCropsArr(), nowS = Date.now() / 1000;
+    const holes = plots * 16, used = crops.filter(c => c.p < plots).length;
+    let ripe = 0, nextS = Infinity;
+    crops.forEach(c => { const left = seedGrowS(c.s) - (nowS - c.t); if (left <= 0) ripe++; else nextS = Math.min(nextS, left); });
+    const nextTxt = nextS === Infinity ? '' : ' · ' + T('ต้นถัดไปสุกใน {a} นาที', {a: Math.max(1, Math.ceil(nextS / 60))});
+    const seeds = _homeSeedsObj();
+    const ids = Object.keys(seeds).map(Number).filter(id => id >= 1 && id <= 24 && seeds[id] > 0).sort((a, b) => b - a); // T6→T1 (เจ้าของขอ 2026-07-18)
+    // ×จำนวน แยกออกจาก span ชื่อ (flex:none) — เดิมอยู่ท้ายชื่อใน span ellipsis ชื่อยาว (โดยเฉพาะ ⭐ทอง) ดัน ×N ตกขอบมองไม่เห็น
+    const seedRows = ids.map(id => `
+      <div style="display:flex;align-items:center;gap:5px;padding:3px 0;border-bottom:1px dashed #f1f5f9">
+        <span style="flex:none;font-size:8.5px;font-weight:800;color:#fff;background:${seedGold(id) ? '#b45309' : '#16a34a'};border-radius:4px;padding:1px 5px">T${seedTier(id)}</span>
+        <span style="flex:1;min-width:0;font-size:11px;color:#1e293b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">🌱 ${seedLabel(id)}</span>
+        <b style="flex:none;font-size:11px;color:#0f172a">×${seeds[id]}</b>
+        <span style="flex:none;font-size:9px;color:#64748b">${seedPrice(id).toLocaleString()}G</span>
+        <button onclick="xhrpg.homePlant(${id},0)" style="flex:none;font-size:10px;font-weight:700;border:none;border-radius:6px;background:#16a34a;color:#fff;padding:3px 7px;cursor:pointer">×1</button>
+        <button onclick="xhrpg.homePlant(${id},1)" style="flex:none;font-size:10px;font-weight:700;border:none;border-radius:6px;background:#0891b2;color:#fff;padding:3px 7px;cursor:pointer">${T('ทั้งหมด')}</button>
+      </div>`).join('');
+    return `<div style="margin-top:12px;border-top:2px solid #e2e8f0;padding-top:10px">
+      <div style="font-size:12px;font-weight:700;color:#166534;margin-bottom:5px">🌾 ${T('ฟาร์มของฉัน')} <span style="font-size:10px;color:#64748b;font-weight:400">${T('ปลูกแล้ว {a}/{b} หลุม', {a: used, b: holes})}${nextTxt}</span></div>
+      <button onclick="xhrpg.homeHarvest()" ${ripe > 0 ? '' : 'disabled'} style="width:100%;padding:9px;border:none;border-radius:9px;background:${ripe > 0 ? '#b45309' : '#e7e5e4'};color:${ripe > 0 ? '#fff' : '#a8a29e'};font-size:13px;font-weight:700;cursor:${ripe > 0 ? 'pointer' : 'default'}">🌾 ${T('เก็บเกี่ยว+ขาย ({a} หลุมสุก)', {a: ripe})}</button>
+      <div style="margin-top:7px;max-height:180px;overflow-y:auto">${seedRows || `<div style="font-size:10.5px;color:#94a3b8;text-align:center;padding:8px 0">${T('ยังไม่มีเมล็ด — เมล็ดดรอปจากการล่ามอนสเตอร์ (ทุกระดับ)')}</div>`}</div>
+    </div>`;
+  }
+  // ── 👀 เยี่ยมบ้านเพื่อน (read-only จากหน้าอันดับ · docs/home-design.md §8) — popup สรุป: แท่นสะสม + แปลงผักตามจริง ──
+  function homeVisit(uid) {
+    if (!player || !uid || document.getElementById('home-visit')) return;
+    $.post(baseUrl + 'xhrpg_home.php', { line_uid: player.line_uid, action: 'view', target: uid })
+      .done(res => {
+        let d; try { d = typeof res === 'string' ? JSON.parse(res) : res; } catch (e) { return; }
+        if (!d || !d.ok) { addLog([{ type: 'dead', msg: '❌ ' + ((d && d.error) || '?') }]); return; }
+        const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+        const peds = Array.from({ length: 6 }, (_, i) => {
+          const tm = TREASURE_MASTER.find(t => t.id === i + 1), own = (d.treasures || []).includes(i + 1);
+          return `<span title="${tm ? esc(T(tm.name)) : ''}" style="display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:8px;background:${own ? '#fffbeb' : '#f1f5f9'};border:1px solid ${own ? '#fbbf24' : '#e2e8f0'};font-size:16px;opacity:${own ? 1 : 0.4}">${own ? tm.icon : '❔'}</span>`;
+        }).join('');
+        const cropAt = {};
+        (d.crops || []).forEach(c => { cropAt[c.p * 16 + c.i] = c; });
+        const plotGrids = Array.from({ length: 6 }, (_, p) => {
+          const open = p < (d.plots | 0);
+          const cells = Array.from({ length: 16 }, (_, i) => {
+            const c = cropAt[p * 16 + i];
+            let inner = '';
+            if (c) inner = c.r ? `<img src="${baseUrl}assets/home/crop${seedSprite(c.s)}${seedGold(c.s) ? 'g' : ''}.png" style="max-width:14px;max-height:14px;image-rendering:pixelated">` : '🌱';
+            return `<span style="display:flex;align-items:center;justify-content:center;width:17px;height:17px;background:${c && c.r ? '#fef3c7' : '#8a6242'};border-radius:2px;font-size:9px" title="${c ? seedLabel(c.s) + (c.r ? ' ✅' : ' ' + c.f + '%') : ''}">${inner}</span>`;
+          }).join('');
+          return `<div style="border:1.5px solid ${open ? '#6e4c34' : '#e2e8f0'};border-radius:6px;padding:3px;background:${open ? '#6e4c34' : '#f8fafc'};opacity:${open ? 1 : 0.45};display:grid;grid-template-columns:repeat(4,17px);gap:2px;position:relative">${cells}${open ? '' : '<span style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:14px">🔒</span>'}</div>`;
+        }).join('');
+        const el = document.createElement('div');
+        el.id = 'home-visit';
+        el.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+        el.addEventListener('click', e => { if (e.target === el) el.remove(); });
+        el.innerHTML = `<div style="background:#fff;border-radius:16px;max-width:330px;width:100%;overflow:hidden;box-shadow:0 12px 40px rgba(2,8,23,.4)">
+          <div style="background:#16a34a;padding:12px 16px;text-align:center;color:#fff;position:relative">
+            <button onclick="document.getElementById('home-visit').remove()" style="position:absolute;top:9px;right:11px;width:28px;height:28px;border-radius:8px;border:none;background:rgba(0,0,0,.25);color:#fff;font-size:15px;cursor:pointer">✕</button>
+            <div style="font-size:24px;line-height:1">🏡</div>
+            <div style="font-size:14px;font-weight:700;margin-top:2px">${T('บ้านของ {a}', {a: esc(d.name)})}</div>
+            <div style="font-size:10.5px;opacity:.9">${T('บ้านของฉัน')} Lv.${d.home_lv | 0} · ${T('แปลงปลูกเปิดแล้ว {a}/6', {a: d.plots | 0})}</div>
+          </div>
+          <div style="padding:12px 14px 14px">
+            <!-- 🏆 ของสะสมหายาก (Rare collectibles) — ซ่อนชั่วคราว เจ้าของสั่ง 2026-07-22 (ผู้เล่นงง) · peds ยังคำนวณไว้ เปิดกลับได้ทันที -->
+            <div style="font-size:11px;font-weight:700;color:#166534;margin:0 0 4px">🌾 ${T('แปลงปลูก')}</div>
+            <div style="display:grid;grid-template-columns:repeat(3,auto);gap:7px;justify-content:center">${plotGrids}</div>
+            <button onclick="xhrpg.homeEnterFriend('${esc(uid)}')" style="width:100%;margin-top:11px;padding:11px 0;border-radius:10px;border:none;background:#16a34a;color:#fff;font-size:13px;font-weight:800;cursor:pointer;font-family:inherit">🚪 ${T('เข้าไปเดินในบ้าน')}</button>
+            <div style="font-size:9.5px;color:#94a3b8;text-align:center;margin-top:9px">${T('ดูอย่างเดียว — ของในบ้านเป็นของเจ้าของบ้าน')}</div>
+          </div>
+        </div>`;
+        document.body.appendChild(el);
+      });
+  }
+  let _homeFarmBusy = false;
+  function _homeFarmPost(data, cb) {
+    if (_homeFarmBusy || !player) return;
+    _homeFarmBusy = true;
+    $.post(baseUrl + 'xhrpg_upgrade.php', Object.assign({ line_uid: player.line_uid, lang: LANG() }, data))
+      .done(res => {
+        _homeFarmBusy = false;
+        let d = null;
+        try {
+          d = typeof res === 'string' ? JSON.parse(res) : res;
+          if (d.ok) { player = d.player; addLog([{ type: 'levelup', msg: d.msg }]); _homePanelBody(); updateHUD(); }
+          else addLog([{ type: 'dead', msg: '❌ ' + (d.error || '?') }]);
+        } catch (e) {}
+        if (cb) cb(d); // ส่ง response ให้ caller (popup ยอดขาย ฯลฯ)
+      }).fail(() => { _homeFarmBusy = false; });
+  }
+  function homePlant(seed, all) { _homeFarmPost({ action: 'home_plant', seed: seed, all: all ? 1 : 0 }); }
+  // 💰 popup แจ้งยอดเงินจากการขายผัก (เจ้าของขอ 2026-07-18) — server ส่ง hv:{n,q,g} มากับ response
+  function _homeSellPopup(hv) {
+    const ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:10006;display:flex;align-items:center;justify-content:center;padding:16px';
+    const box = document.createElement('div');
+    box.style.cssText = 'background:#fff;border-radius:16px;padding:20px 24px;max-width:300px;width:100%;text-align:center;box-shadow:0 12px 40px rgba(2,8,23,.4)';
+    box.innerHTML = '<div style="font-size:40px">💰</div>'
+      + '<div style="font-size:15px;font-weight:800;color:#166534;margin-top:4px">' + T('ขายผักสำเร็จ!') + '</div>'
+      + '<div style="font-size:26px;font-weight:800;color:#b45309;margin-top:6px">+' + (hv.g | 0).toLocaleString() + ' G</div>'
+      + '<div style="font-size:11px;color:#64748b;margin-top:4px">' + T('เก็บเกี่ยว {n} หลุม · ผลผลิต {q} ชิ้น', {n: hv.n | 0, q: hv.q | 0}) + '</div>';
+    const b = document.createElement('button');
+    b.textContent = 'OK';
+    b.style.cssText = 'margin-top:12px;background:#16a34a;color:#fff;border:0;border-radius:10px;padding:8px 30px;font-size:13px;font-weight:700;cursor:pointer';
+    b.onclick = () => ov.remove();
+    box.appendChild(b);
+    ov.appendChild(box);
+    ov.onclick = e => { if (e.target === ov) ov.remove(); };
+    document.body.appendChild(ov);
+  }
+  function homeHarvest() { _homeFarmPost({ action: 'home_harvest' }, d => { if (d && d.ok && d.hv) _homeSellPopup(d.hv); }); }
+  let _homeUpBusy = false;
+  function homeUp() {
+    if (_homeUpBusy || !player) return;
+    _homeUpBusy = true;
+    $.post(baseUrl + 'xhrpg_upgrade.php', { line_uid: player.line_uid, action: 'home_up', lang: LANG() })
+      .done(res => {
+        _homeUpBusy = false;
+        try {
+          const d = typeof res === 'string' ? JSON.parse(res) : res;
+          if (d.ok) { player = d.player; addLog([{ type: 'levelup', msg: d.msg }]); _homePanelBody(); updateHUD(); }
+          else addLog([{ type: 'dead', msg: '❌ ' + (d.error || '?') }]);
+        } catch (e) {}
+      }).fail(() => { _homeUpBusy = false; });
+  }
+  function _homeWarpApply(d, msg) { // ใช้ร่วมเข้า/ออก — mirror การ apply ของ warpToMap (snap + rebuild พื้น + รีเซ็ตโซน)
+    currentMap = d.map; player.map = d.map;
+    player.x = d.x; player.y = d.y; player.explore_cx = d.x; player.explore_cy = d.y;
+    delete smoothPos['player'];
+    currentSpotId = 0; travelingToSpot = null;
+    const _sel = document.getElementById('spot-select'); if (_sel) _sel.dataset.built = '';
+    _haveMon = false;
+    buildGround(); render(); updateHUD(); _homeBtnUpd();
+    addLog([{ type: 'retreat', msg }]);
+  }
+  // 🧭 วาร์ปกลางแผนที่ปัจจุบัน (พฤติกรรมปุ่ม 🏠 เดิมก่อนกลายเป็น toggle บ้าน — เจ้าของขอคืน 2026-07-18)
+  //    ไม่ส่ง tx/ty → server ใช้ spawn ของแมพ · ใน colosseum/บ้าน server ปัดเองพร้อม msg
+  function warpCenter() {
     if (!player) return;
-    // 🛸 ยาน Orion บินตามตัวแล้ว — Warp กลับยานบิน = วาร์ปกลางแผนที่ปัจจุบัน (ไม่ส่ง tx/ty → server ใช้ spawn ของ map)
     $.post(baseUrl + 'xhrpg_warp.php', { line_uid: player.line_uid })
       .done(res => {
         const d = typeof res === 'string' ? JSON.parse(res) : res;
-        if (d.ok) {
+        if (d && d.ok) {
           player.x = d.x; player.y = d.y;
           player.explore_cx = d.x; player.explore_cy = d.y;
-          delete smoothPos['player']; // วาร์ป = ตั้งใจย้ายตัวทันที → snap ตัว+กล้อง ไม่ให้ glide วิ่งไล่ข้ามแมป (ระยะ <260px เดิมจะไหลตาม ~1 วิ)
+          delete smoothPos['player']; // วาร์ป = snap ตัว+กล้องทันที
           render(); updateHUD();
-          addLog([{type:'retreat', msg: T('🛸 Warp กลางแผนที่!')}]);
-        }
+          addLog([{ type: 'retreat', msg: T('🛸 Warp กลางแผนที่!') }]); // key เดิม (แปลครบ 7 ภาษาแล้ว)
+        } else if (d && d.msg) addLog([{ type: 'dead', msg: '❌ ' + d.msg }]);
+      });
+  }
+  function warpHome() {
+    if (!player) return;
+    if (currentMap === 11) { castleExit(); return; } // 🏯 อยู่ปราสาทกิล → ปุ่มเดียวกันทำหน้าที่ "ออก" (มิเรอร์ปุ่มออกจากบ้าน)
+    if (currentMap === 12) { gdunExit(); return; }   // 🕳️ อยู่ดันกิล → ปุ่มเดียวกัน = ออกจากดัน
+    if (currentMap === 5) { // อยู่บ้าน → ออก กลับจุดเดิมก่อนเข้า (server จำ home_return)
+      $.post(baseUrl + 'xhrpg_warp.php', { line_uid: player.line_uid, home_exit: 1 })
+        .done(res => {
+          const d = typeof res === 'string' ? JSON.parse(res) : res;
+          if (d && d.ok) _homeWarpApply(d, T('↩️ ออกจากบ้านแล้ว'));
+        });
+      return;
+    }
+    $.post(baseUrl + 'xhrpg_warp.php', { line_uid: player.line_uid, target_map: 5 })
+      .done(res => {
+        const d = typeof res === 'string' ? JSON.parse(res) : res;
+        if (d && d.ok) _homeWarpApply(d, T('🏡 กลับถึงบ้านแล้ว — พักผ่อนตามสบาย'));
+        else if (d && d.msg) addLog([{ type: 'dead', msg: '❌ ' + d.msg }]);
       });
   }
 
   // ── เปลี่ยนแผนที่ (multi-map) ──────────────────────────────────────────────
-  const MAP_DEFS = [{id:1,name:'ทุ่งกลาง',emoji:'🌿',req:1},{id:2,name:'ทะเลทรายนิรันดร์',emoji:'🏜️',req:25},{id:3,name:'ดินแดนเยือกแข็ง',emoji:'❄️',req:40},{id:4,name:'สนามประลอง',emoji:'🏛️',req:20}];
+  const MAP_DEFS = [{id:7,name:'ทุ่งกลาง (ผู้เล่นใหม่)',emoji:'🌿',req:1,cap:49},{id:8,name:'ทะเลทราย (ผู้เล่นใหม่)',emoji:'🏜️',req:25,cap:49},{id:9,name:'ดินแดนเยือกแข็ง (ผู้เล่นใหม่)',emoji:'❄️',req:40,cap:49},{id:1,name:'ทุ่งกลาง',emoji:'🌿',req:1},{id:2,name:'ทะเลทรายนิรันดร์',emoji:'🏜️',req:25},{id:3,name:'ดินแดนเยือกแข็ง',emoji:'❄️',req:40},{id:6,name:'ดินแดนใต้ทะเลลึก',emoji:'🌊',req:55},{id:10,name:'ป่ามังกรโบราณ',emoji:'🐉',req:70},{id:4,name:'สนามประลอง',emoji:'🏛️',req:20},{id:5,name:'บ้านของฉัน',emoji:'🏡',req:1,hide:1},{id:11,name:'ปราสาทกิล',emoji:'🏯',req:1,hide:1},{id:12,name:'ดันกิล',emoji:'🕳️',req:1,hide:1}]; // 🕳️ map 12 = ดันกิล (hide — เข้าทางปุ่มในหน้ากิลเท่านั้น · docs/guild-dungeon-design.md) // 🌱 map7/8 = แมพผู้เล่นใหม่ (cap = เพดาน Lv · เข้าเกินไม่ได้) — วางหน้าสุดให้มือใหม่เห็นก่อน // ลำดับ = ลำดับในเมนูเปลี่ยนแผนที่: แมพเก็บเลเวล 1→2→3→6 · 🏛️ สนามประลองไว้ท้าย (แมพแยก PVP — เจ้าของสั่ง 2026-07-22) · 🏡 hide = ไม่โชว์ในเมนู (เข้าทางปุ่มบ้านซ้ายจอ) แต่ MAP_DEFS ต้องมีให้ icon แชท/ป้ายแมพ resolve ได้
   // ── 🏛️ สนามประลอง (map 4): จำนวนคนในสนาม + เกราะจุดเกิด + ป้ายมุมจอ ──
   let _colN = 0, _colShUntil = 0;
   function _colBadgeUpd() {
@@ -10954,6 +15058,109 @@ const xhrpg = (() => {
       (document.querySelector('.map-wrap') || document.body).appendChild(el); // ใต้ปุ่ม 🌙 OFFLINE (top:93+24+3)
     }
     el.textContent = T('🏛️ {a} คน', {a: _colN});
+  }
+  // ── 🧟 อีเวนต์มอนสเตอร์บุกทะเลทราย (docs/invasion-design.md) — server ส่ง d.inv ทุก poll ระหว่างอีเวนต์ ──
+  //    active: {hp,hp_max,ends,zn(เฉพาะ map2)} → แบนเนอร์ (map2 = แถบ HP ต้นไม้+นับถอยหลัง · แมพอื่น = ชวนไปช่วย+ปุ่มวาร์ป)
+  //    ended:  {win,t} → popup ผลครั้งเดียว (กันซ้ำด้วย t)
+  let _inv = null, _invSeenEnd = 0, _invTreeHitAt = 0, _invCd = null;
+  function _invUpd(v) {
+    if (v && v.st === 'pre') { // ⚠️ เตือนล่วงหน้า 5 นาที (รอบประจำวัน 20:30) — นับถอยหลังถึงเวลาเริ่ม
+      _inv = { st: 'pre', ends: Math.floor(Date.now() / 1000) + (v.in | 0) };
+      _invBannerUpd();
+      if (!_invCd) _invCd = setInterval(_invBannerUpd, 1000);
+      return;
+    }
+    if (v && v.st === 'active') {
+      if (_inv && v.hp < _inv.hp) { // HP ต้นไม้ลดระหว่าง poll → เขย่าต้นไม้ + เลขดาเมจลอย (เฉพาะบนแมพ 2)
+        _invTreeHitAt = Date.now();
+        if (currentMap === 2) spawnFloatText(SPAWN_X, SPAWN_Y - 130, '-' + (_inv.hp - v.hp).toLocaleString(), '#f87171', 13, {pop:1, life:900, rise:24});
+      }
+      _inv = v; _invBannerUpd();
+      if (!_invCd) _invCd = setInterval(_invBannerUpd, 1000); // นับถอยหลังเดินทุกวิ (poll มาแค่ ~1-3s)
+      return;
+    }
+    if (v && v.st === 'ended' && v.t && v.t !== _invSeenEnd) { _invSeenEnd = v.t; _invResultPopup(!!v.win); }
+    _inv = null; _invBannerUpd();
+    if (_invCd) { clearInterval(_invCd); _invCd = null; }
+  }
+  function _invBannerUpd() {
+    let el = document.getElementById('inv-banner');
+    if (!_inv) { if (el) el.remove(); return; }
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'inv-banner';
+      // 📌 เกาะกรอบเกม (ดู _floatMount) — เดิม fixed + 92vw ทะลุออกนอกจอเกมบนเดสก์ท็อป
+      _floatMount(el, 'top:8px;left:50%;transform:translateX(-50%);z-index:9500;background:rgba(30,8,8,0.9);border:1px solid #b91c1c;border-radius:12px;padding:6px 14px;color:#fecaca;font-size:12px;font-weight:700;text-align:center;box-shadow:0 4px 14px rgba(0,0,0,.5);min-width:min(250px,90%);max-width:94%;box-sizing:border-box');
+      el.dataset.mode = '';
+    }
+    const left = Math.max(0, (_inv.ends || 0) - Math.floor(Date.now() / 1000));
+    const tstr = Math.floor(left / 60) + ':' + ('0' + (left % 60)).slice(-2);
+    if (_inv.st === 'pre') { // ⚠️ ก่อนเริ่ม — เตือนทุกแมพ + ปุ่มไปรอที่ทะเลทราย (สีเหลืองเตือน ต่างจากสีแดงตอนบุกจริง)
+      if (el.dataset.mode !== 'pre') {
+        el.dataset.mode = 'pre';
+        el.style.borderColor = '#f59e0b'; el.style.color = '#fde68a';
+        el.innerHTML = '<div>⚠️ ' + T('ฝูงซอมบี้กำลังจะบุกทะเลทราย! เตรียมป้องกันต้นไม้ใหญ่') + ' · ⏳ <span id="inv-t"></span></div>';
+        if (currentMap !== 2) {
+          const b = document.createElement('button');
+          b.textContent = T('🏜️ ไปป้องกัน!');
+          b.style.cssText = 'margin-top:4px;background:#d97706;color:#fff;border:0;border-radius:8px;padding:4px 16px;font-size:12px;font-weight:700;cursor:pointer';
+          b.onclick = () => warpToMap(2);
+          el.appendChild(b);
+        }
+      }
+      const _t = document.getElementById('inv-t');
+      if (_t) _t.textContent = tstr;
+      return;
+    }
+    if (el.dataset.mode === 'pre') { el.style.borderColor = '#b91c1c'; el.style.color = '#fecaca'; } // กลับสีแดงตอนบุกจริง
+    if (currentMap === 2) {
+      if (el.dataset.mode !== 'm2') { // โครงสร้างสร้างครั้งเดียว — poll/วินาที อัปเดตเฉพาะตัวเลข (กัน rebuild ทับ)
+        el.dataset.mode = 'm2';
+        el.innerHTML = '<div><span>🧟 ' + T('มอนสเตอร์บุก! ปกป้องต้นไม้ใหญ่') + '</span> · ⏳ <span id="inv-t"></span> · 🧟 <span id="inv-z"></span></div>'
+          + '<div style="margin-top:4px;height:10px;border-radius:6px;background:#450a0a;overflow:hidden"><div id="inv-hpb" style="height:100%;width:100%;background:linear-gradient(90deg,#22c55e,#84cc16);transition:width .5s"></div></div>'
+          + '<div id="inv-hpn" style="font-size:10px;color:#fca5a5;margin-top:2px"></div>';
+        const b = document.createElement('button'); // 🛸 วาร์ปเข้ากลางแมพตรงต้นไม้ (in-map warp เดิม) — กดแล้วถึงหน้างานตีเลย (เจ้าของขอ 2026-07-18)
+        b.textContent = T('🛸 WARP ไปต้นไม้');
+        b.style.cssText = 'margin-top:5px;background:#dc2626;color:#fff;border:0;border-radius:8px;padding:4px 16px;font-size:12px;font-weight:700;cursor:pointer';
+        b.onclick = () => warpCenter();
+        el.appendChild(b);
+      }
+      const pct = Math.max(0, Math.min(100, _inv.hp / Math.max(1, _inv.hp_max) * 100));
+      const _t = document.getElementById('inv-t'), _z = document.getElementById('inv-z'), _b = document.getElementById('inv-hpb'), _n = document.getElementById('inv-hpn');
+      if (_t) _t.textContent = tstr;
+      if (_z) _z.textContent = (_inv.zn != null ? _inv.zn : '-');
+      if (_b) _b.style.width = pct.toFixed(1) + '%';
+      if (_n) _n.textContent = '🌳 ' + _inv.hp.toLocaleString() + ' / ' + _inv.hp_max.toLocaleString();
+    } else {
+      if (el.dataset.mode !== 'other') {
+        el.dataset.mode = 'other';
+        el.innerHTML = '<div>🧟 ' + T('มอนสเตอร์บุกทะเลทราย! ไปช่วยป้องกันต้นไม้ใหญ่') + ' · ⏳ <span id="inv-t"></span></div>';
+        const b = document.createElement('button');
+        b.textContent = T('🏜️ ไปป้องกัน!');
+        b.style.cssText = 'margin-top:4px;background:#dc2626;color:#fff;border:0;border-radius:8px;padding:4px 16px;font-size:12px;font-weight:700;cursor:pointer';
+        b.onclick = () => warpToMap(2);
+        el.appendChild(b);
+      }
+      const _t = document.getElementById('inv-t');
+      if (_t) _t.textContent = tstr;
+    }
+  }
+  function _invResultPopup(win) {
+    const ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.62);z-index:10005;display:flex;align-items:center;justify-content:center;padding:16px';
+    const box = document.createElement('div');
+    box.style.cssText = 'background:#0f172a;border:1px solid ' + (win ? '#16a34a' : '#b91c1c') + ';border-radius:16px;padding:22px 26px;max-width:330px;text-align:center';
+    box.innerHTML = win
+      ? '<div style="font-size:44px">🏆</div><div style="font-size:17px;font-weight:800;color:#4ade80;margin-top:6px">' + T('ป้องกันสำเร็จ!') + '</div><div style="font-size:12.5px;color:#e2e8f0;margin-top:6px;line-height:1.5">' + T('ต้นไม้ใหญ่รอดแล้ว — ผู้เล่นออนไลน์ทุกคนรับ 💎 เพชรฟ้า 1 เม็ด') + '</div>'
+      : '<div style="font-size:44px">💀</div><div style="font-size:17px;font-weight:800;color:#f87171;margin-top:6px">' + T('ต้นไม้ใหญ่ถูกทำลาย...') + '</div><div style="font-size:12.5px;color:#e2e8f0;margin-top:6px;line-height:1.5">' + T('ฝูงซอมบี้ชนะครั้งนี้ — ไว้ล้างแค้นรอบหน้า!') + '</div>';
+    const b = document.createElement('button');
+    b.textContent = 'OK';
+    b.style.cssText = 'margin-top:14px;background:#334155;color:#fff;border:0;border-radius:10px;padding:8px 28px;font-size:13px;font-weight:700;cursor:pointer';
+    b.onclick = () => ov.remove();
+    box.appendChild(b);
+    ov.appendChild(box);
+    ov.onclick = e => { if (e.target === ov) ov.remove(); };
+    document.body.appendChild(ov);
   }
   function warpToMap(mapId) {
     mapId = mapId|0;
@@ -10975,10 +15182,54 @@ const xhrpg = (() => {
           const nm = _md ? T(_md.name) : T('แผนที่ {a}', {a: mapId});
           addLog([{type:'retreat', msg: T('🗺️ วาร์ปไป {a}!', {a: nm})}]);
         } else if (d && d.error === 'level_locked') {
-          closeMapSelect(); alert(d.msg || T('ต้องถึง Lv.{a} ก่อนวาร์ป', {a: d.need || 25}));
+          closeMapSelect(); alert(T('ต้องถึง Lv.{a} ก่อนวาร์ป', {a: d.need || 25})); // ใช้คำแปลฝั่ง client เสมอ — เดิม d.msg (ไทยล้วนจาก server) ทับคำแปลจนต่างชาติเห็นไทย (บั๊กจริง 2026-07-18)
+        } else if (d && d.error === 'level_too_high') { // 🌱 แมพผู้เล่นใหม่ — Lv เกินเพดาน
+          closeMapSelect(); alert(T('แมพนี้สำหรับผู้เล่นใหม่ Lv. ไม่เกิน {n}', {n: d.cap || 35}));
         } else { closeMapSelect(); alert(T('วาร์ปไม่สำเร็จ: ') + ((d && d.error) || '?')); }
       })
       .fail(xhr => { closeMapSelect(); addLog([{type:'dead', msg: T('❌ วาร์ปไม่สำเร็จ (เชื่อมต่อไม่ได้ HTTP {a})', {a: (xhr && xhr.status)})}]); });
+  }
+  // 🏡👥 แบนเนอร์ "กำลังเยี่ยมบ้านของ X" + ปุ่มออก — สร้าง/ลบตาม _homeView (เรียกทุก poll)
+  //     ชื่อผ่าน textContent (กัน XSS — ชื่อผู้เล่นตั้งเองได้)
+  function _homeVisitBanner() {
+    const id = 'home-visit-banner';
+    let el = document.getElementById(id);
+    if (!_homeVisiting()) { if (el) el.remove(); return; }
+    if (!el) {
+      el = document.createElement('div');
+      el.id = id;
+      const txt = document.createElement('span'); txt.id = id + '-t';
+      const btn = document.createElement('button');
+      btn.textContent = '🚪 ' + T('ออก');
+      btn.style.cssText = 'border:none;background:#fff;color:#166534;border-radius:999px;padding:4px 11px;font-size:11px;font-weight:800;cursor:pointer;font-family:inherit';
+      btn.onclick = () => warpHome();
+      el.appendChild(txt); el.appendChild(btn);
+      _floatMount(el, 'top:8px;left:50%;transform:translateX(-50%);z-index:9990;display:flex;align-items:center;gap:8px;background:rgba(22,163,74,.94);color:#fff;border-radius:999px;padding:6px 8px 6px 14px;font-size:12px;font-weight:700;box-shadow:0 4px 14px rgba(2,8,23,.3);pointer-events:auto;max-width:94%;box-sizing:border-box'); // 📌 เกาะกรอบเกม
+    }
+    const t = document.getElementById(id + '-t');
+    if (t) t.textContent = '🏡 ' + T('กำลังเยี่ยมบ้านของ {a}', { a: String(_homeView.name || '?').slice(0, 16) });
+  }
+  // 🏡👥 เข้าไปเดินในบ้านเพื่อน — warp map 5 พร้อม home_uid (server ตั้ง home_in = instance ของเจ้าของ)
+  //     ทำอะไรกับบ้านไม่ได้ (server gate ด้วย home_in) · ออกด้วยปุ่มบ้านเดิม (home_exit)
+  function homeEnterFriend(uid) {
+    if (!player || !uid) return;
+    document.getElementById('home-visit')?.remove();
+    $.post(baseUrl + 'xhrpg_warp.php', { line_uid: player.line_uid, session_token: sessionToken || '', target_map: 5, home_uid: uid })
+      .done(res => {
+        let d; try { d = typeof res === 'string' ? JSON.parse(res) : res; } catch (e) { alert(T('วาร์ปไม่สำเร็จ: ตอบกลับผิดรูปแบบ')); return; }
+        if (d && d.ok) {
+          currentMap = d.map; player.map = d.map;
+          player.x = d.x; player.y = d.y; player.explore_cx = d.x; player.explore_cy = d.y;
+          delete smoothPos['player'];
+          currentSpotId = 0; travelingToSpot = null;
+          _haveMon = false;
+          buildGround(); render(); updateHUD();
+          addLog([{ type: 'retreat', msg: T('🏡 เข้าเยี่ยมบ้านเพื่อนแล้ว — ดูอย่างเดียว') }]);
+        } else if (d && d.error === 'in_colosseum') { alert(T('เข้าบ้านไม่ได้ขณะอยู่ในสนามประลอง'));
+        } else if (d && d.error === 'home_not_found') { alert(T('ไม่พบบ้านของผู้เล่นคนนี้'));
+        } else { alert(T('วาร์ปไม่สำเร็จ: ') + ((d && d.error) || '?')); }
+      })
+      .fail(xhr => addLog([{ type: 'dead', msg: T('❌ วาร์ปไม่สำเร็จ (เชื่อมต่อไม่ได้ HTTP {a})', {a: (xhr && xhr.status)}) }]));
   }
   function openMapSelect() {
     if (!player || document.getElementById('mapsel-ov')) return;
@@ -10987,11 +15238,17 @@ const xhrpg = (() => {
     ov.id = 'mapsel-ov';
     ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:99999;display:flex;align-items:center;justify-content:center';
     ov.onclick = (e) => { if (e.target === ov) closeMapSelect(); };
-    ov.innerHTML = '<div style="background:#fff;border-radius:14px;padding:16px;width:290px;max-width:90vw;box-shadow:0 8px 32px rgba(0,0,0,.35)">' +
-      '<div style="font-weight:800;font-size:15px;margin-bottom:12px;text-align:center;color:#334155">' + T('🗺️ เปลี่ยนแผนที่') + '</div>' +
-      MAP_DEFS.map(m => {
-        const isCur = m.id === cur, lock = lv < m.req && !isCur;
-        let sub = isCur ? T('📍 อยู่ที่นี่') : (lock ? T('🔒 ต้องถึง Lv.{a}', {a: m.req}) : T('พร้อมวาร์ป · Lv.{a}+', {a: m.req}));
+    // 📐 แมพเยอะขึ้น (10 รายการ) — การ์ดจำกัด 88vh · ลิสต์เลื่อนในตัว · หัวข้อ+ปุ่มปิดตรึง (เจ้าของแจ้งปุ่มปิดตกจอ 2026-07-25)
+    ov.innerHTML = '<div style="background:#fff;border-radius:14px;padding:14px 16px;width:290px;max-width:90vw;max-height:88vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,.35)">' +
+      '<div style="flex:none;font-weight:800;font-size:15px;margin-bottom:10px;text-align:center;color:#334155">' + T('🗺️ เปลี่ยนแผนที่') + '</div>' +
+      '<div style="flex:1;min-height:0;overflow-y:auto;margin:0 -4px;padding:0 4px">' +
+      MAP_DEFS.filter(m => !m.hide).map(m => { // 🏡 บ้านของฉัน (hide) ไม่อยู่ในเมนู — เข้าทางปุ่มบ้านซ้ายจอ
+        const isCur = m.id === cur;
+        const tooLow = lv < m.req, tooHigh = m.cap && lv > m.cap; // 🌱 map7/8 มีเพดาน Lv (cap) — เกินล็อก
+        const lock = (tooLow || tooHigh) && !isCur;
+        let sub = isCur ? T('📍 อยู่ที่นี่')
+          : m.cap ? (tooHigh ? T('🔒 เกิน Lv.{a} แล้ว', {a: m.cap}) : tooLow ? T('🔒 ต้องถึง Lv.{a}', {a: m.req}) : T('🌱 ผู้เล่นใหม่ · Lv. ≤{a}', {a: m.cap}))
+          : (tooLow ? T('🔒 ต้องถึง Lv.{a}', {a: m.req}) : T('พร้อมวาร์ป · Lv.{a}+', {a: m.req}));
         if (m.id === 4) sub += '<div style="font-size:10px;color:#b45309;font-weight:700;margin-top:1px">' + T('⚔️ PVP อิสระ · {a} คนในสนาม', {a: _colN}) + '</div>'; // 🏛️ จำนวนคนสดจาก poll ล่าสุด
         return '<button ' + ((isCur || lock) ? 'disabled ' : '') + 'onclick="xhrpg.warpToMap(' + m.id + ')" ' +
           'style="display:flex;align-items:center;gap:12px;width:100%;padding:11px;margin-bottom:8px;border-radius:10px;border:2px solid ' +
@@ -11003,7 +15260,8 @@ const xhrpg = (() => {
           (isCur ? '<span style="color:#16a34a;font-size:18px">✓</span>' : (lock ? '' : '<span style="color:#3b82f6;font-size:16px">➜</span>')) +
           '</button>';
       }).join('') +
-      '<button onclick="xhrpg.closeMapSelect()" style="width:100%;padding:9px;margin-top:2px;border:none;border-radius:10px;background:#e2e8f0;color:#475569;font-weight:600;cursor:pointer">' + (LANG() === 'th' ? 'ปิด' : T('ปิดหน้าต่าง')) + '</button>' +
+      '</div>' +
+      '<button onclick="xhrpg.closeMapSelect()" style="flex:none;width:100%;padding:9px;margin-top:8px;border:none;border-radius:10px;background:#e2e8f0;color:#475569;font-weight:600;cursor:pointer">' + (LANG() === 'th' ? 'ปิด' : T('ปิดหน้าต่าง')) + '</button>' +
       '</div>';
     document.body.appendChild(ov);
   }
@@ -11083,8 +15341,8 @@ const xhrpg = (() => {
 
   const DEMO_EMOJI = {'กระต่ายป่า':'🐰','งูพิษ':'🐍','หมูป่า':'🐗','หมาป่า':'🐺','หมีป่า':'🐻','ยักษ์หิน':'🗿','อัศวินมืด':'🗡️'};
   function createDemoMonsters() {
-    // มอนเยอะขึ้น (spec ×3) ให้จอคึกคัก
-    const spec3 = DEMO_MONSTERS_SPEC.concat(DEMO_MONSTERS_SPEC, DEMO_MONSTERS_SPEC);
+    // ⚡ เดโมเบา: spec ×1.5 (~16 ตัว) — เดิม ×3 (33 ตัว) มือถือหน่วงตั้งแต่หน้า login (เจ้าของรายงาน 2026-07-19)
+    const spec3 = DEMO_MONSTERS_SPEC.concat(DEMO_MONSTERS_SPEC.slice(0, 5));
     const list = spec3.map((spec, i) => {
       const ang = (i / spec3.length) * Math.PI * 2 + Math.random() * 0.5;
       const r   = 55 + Math.random() * 135; // 55-190px รอบ SPAWN (กล้องตามฮีโร่ + leash คุมฉากไว้แถว plaza)
@@ -11133,7 +15391,7 @@ const xhrpg = (() => {
   const DEMO_FAKE_NAMES = ['ShadowKnight','BladePro','Mage99','GodArcher','TreeKing','Thunder','DarkNinja','IronWizard','HeadHunter','ArcherZ','GoldShield','BowMaster']; // เดโม = ก่อน login = EN เสมอ (นโยบาย) — ชื่อปลอมเป็นอังกฤษ
 
   function createFakePlayers() {
-    const n = 10 + Math.floor(Math.random() * 5); // 10-14 คน (อลังการ)
+    const n = 5 + Math.floor(Math.random() * 3); // ⚡ เดโมเบา: 5-7 คน (เดิม 10-14 — AI+เลเซอร์ต่อคนกินเฟรมมือถือ)
     const names = DEMO_FAKE_NAMES.slice().sort(() => Math.random() - 0.5);
     const arr = [];
     for (let i = 0; i < n; i++) {
@@ -11171,7 +15429,7 @@ const xhrpg = (() => {
     }
     if (bestD > fp._range) { demostepToward(fp, target.x, target.y, fp._spd + 1.5); return; } // ไล่
     if (fp._cd > 0) { fp._cd--; return; }  // cooldown
-    fp._cd = 1;
+    fp._cd = 2; // ⚡ เดโมเบา: ยิงทุก 3 tick (เดิมทุก 2) — ลดจำนวนเลเซอร์/FX ค้างจอพร้อมกัน
     spawnBullet(fp.x, fp.y, target.x, target.y, fp._gun); // เลเซอร์
     target.hp -= (fp._gun === '🎯' ? 60 : 38);
     if (target.hp <= 0) {
@@ -11210,14 +15468,14 @@ const xhrpg = (() => {
     _pushMonGhost(m, _kp.x, _kp.y, true); // ศพค้าง — ชุดเดียวกับ kill จริง
     deathMarkers.push({ x: _kp.x, y: _kp.y, born: performance.now(), icon: icon || '⚔️' });
     if (lootPops.length < 24) lootPops.push({ x: _kp.x, y: _kp.y - 8, spr: 'prop_money', born: performance.now() }); // 💰 เด้งตอนฆ่า
-    if (groundLoot.length < 60 && Math.random() < 0.5) { // ของหล่นพื้นเป็นครั้งคราว (emoji สุ่มจากชุดจริง)
+    if (groundLoot.length < 30 && Math.random() < 0.5) { // ของหล่นพื้นเป็นครั้งคราว (⚡ เดโมเบา: cap 30 — เดิม 60 กองจนกินเฟรม)
       const ic = DEMO_DROP_ICONS[Math.floor(Math.random() * DEMO_DROP_ICONS.length)];
       groundLoot.push({ x: _kp.x + 6, y: _kp.y + 4, icon: ic, born: performance.now() });
     }
     const exp = m.base_exp || 10, gold = m.base_gold || 3;
     player.exp += exp; player.gold += gold;
-    const need = expNext(player.lv);
-    if (player.lv < MAX_LV && player.exp >= need) { // 🧢 cap Lv50 (demo)
+    const need = expNextHero(player.lv);
+    if (player.lv < MAX_LV && player.exp >= need) { // 🧢 cap Lv60 (demo · เส้นฮีโร่)
       player.exp -= need; player.lv++; player.hp_max += 10; player.hp = player.hp_max;
       addLog([{ type:'levelup', msg:`🎉 LEVEL UP! Lv.${player.lv - 1} → Lv.${player.lv} — Stat Point +1` }]); // เดโม = EN เสมอ
     }
@@ -11347,6 +15605,7 @@ const xhrpg = (() => {
     if (nearest && bestD <= RANGE) {
       targetMonsterId = nearest.id; // ล็อกเป้า → เส้นแดง + 🎯 + drawPlayer หันเข้าเป้า
       const mref = nearest, mid = nearest.id;
+      _pShotMid = nearest.id;
       _pShotAng = Math.atan2(nearest.y - player.y, nearest.x - player.x); // หันตามทิศนัดจริง (กันหันสวนเลเซอร์)
       _pShotUntil = now + 340 + 500;
       for (let i = 0; i < 3; i++) {
@@ -11425,7 +15684,7 @@ const xhrpg = (() => {
     for (const k in _monSeen) delete _monSeen[k];   // ล้างเวลาแรกเห็น — ฉากใหม่ fade-in ใหม่หมด
     monGhosts.length = 0;                           // ล้างศพค้างข้ามฉาก
     _dyingMons.length = 0;                          // ล้างมอนที่ค้างฉากตายข้ามฉาก
-    _interpMs = 1100; _lastSnapAt = 0;              // รีเซ็ตคาบ interpolation (เดโม tick 1.0s เป๊ะ / login ใหม่วัดใหม่)
+    _interpMs = 1350; _lastSnapAt = 0;              // รีเซ็ตคาบ interpolation (เดโม tick = POLL_MS เป๊ะ / login ใหม่วัดใหม่)
     monsters = createDemoMonsters();
     monsters.push({ // MVP ปลอมกลางจอ ให้ผู้เล่นปลอมรุมตี (id ไม่ซ้ำกับ MVP ใน createDemoMonsters)
       id: 9002, zone: 1, x: SPAWN_X + 70, y: SPAWN_Y - 55,
@@ -11465,10 +15724,11 @@ const xhrpg = (() => {
 
   // ── Init ──────────────────────────────────────────────────────────────────
   function init(p, url, token) {
-    console.log('xhrpg canvas build: premcard-layout-2026-07-17'); // 🏷️ ตรวจเวอร์ชัน JS ถึงเครื่องจริง (F12 → Console)
+    console.log('xhrpg canvas build: droptab-2026-07-17'); // 🏷️ ตรวจเวอร์ชัน JS ถึงเครื่องจริง (F12 → Console)
     player  = p;
     baseUrl = url;
     if (p && p.map != null) currentMap = _groundMap = (p.map | 0); // seed แผนที่จริงจากตัวละครก่อน bake พื้น — กัน buildGround สร้าง map1 แล้ว poll แรกค่อย rebuild (แวบไปทุ่งกลางก่อนโหลดทะเลทราย)
+    _homeBtnUpd(); // 🏡 icon ปุ่มบ้านตรงกับแมพตั้งแต่ login (ค้างอยู่ในบ้าน = โชว์ปุ่มออก)
     sessionToken = token || null;
     _pollStopped = false; // ล้าง flag จาก logout→demo บนหน้าเดิม — login ใหม่แล้ว poll ต้องเดินต่อ
     _syncSfxBtn(); _syncLockBtn(); applyMiniLogVis(); // ตั้งปุ่มเสียง/LOCK/mini-log ตามค่าที่บันทึกไว้
@@ -11607,7 +15867,7 @@ const xhrpg = (() => {
     $.post(baseUrl + 'xhrpg_pvp.php', Object.assign({ line_uid: player.line_uid, session_token: sessionToken || '' }, data))
       .done(res => cb && cb(res)).fail(() => cb && cb(null));
   }
-  // ── 🏟️ ดันท้าบอส (Boss Arena 1v1) — บัตร G เข้าดัน · ชนะปลด Skip · ฟรี 3/วัน เกินจ่าย P ──
+  // ── 🏟️ ดันท้าบอส (Boss Arena 1v1) — บัตร G เข้าดัน · ชนะปลด Skip · โควตาฟรี+P ตาม VIP (server เป็นคนคิด) ──
   let _arenaRes = null, _arenaPage = 0; // เก็บ info ล่าสุด + หน้าปัจจุบัน (แบ่งหน้า 15 ตัว)
   const _ARENA_PER_PAGE = 15;
   function _arenaPost(data, cb) {
@@ -11625,7 +15885,6 @@ const xhrpg = (() => {
         <button onclick="document.getElementById('arena-panel').remove()" aria-label="ปิด" style="position:absolute;top:9px;right:11px;width:28px;height:28px;border-radius:8px;border:none;background:rgba(0,0,0,.28);color:#fff;font-size:15px;line-height:1;cursor:pointer">✕</button>
         <div style="font-size:24px;line-height:1">🏟️</div>
         <div style="font-size:15px;font-weight:700;margin-top:2px">${T('ดันท้าบอส — 1 ต่อ 1')}</div>
-        <div style="font-size:10px;color:#fde68a;margin-top:1px">${T('บัตร 1,000G × Lv บอส · รางวัลฟรี 3 ครั้ง/วัน · แพ้ไม่นับสิทธิ์')}</div>
       </div>
       <div style="padding:12px 13px;overflow:auto;flex:1;min-height:0" id="arena-body">${T('⏳ กำลังโหลด...')}</div>
     </div>`;
@@ -11694,20 +15953,35 @@ const xhrpg = (() => {
     bd.innerHTML = head + lockRow + rows + pager;
   }
   const _arEsc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  // 🎨 สีชิปรางวัลตามชนิดของ (ดูจาก icon นำหน้า) — พื้นอ่อน/ตัวเข้มโทนเดียวกัน อ่านง่ายกว่าม่วงล้วน
+  function _arChipStyle(d) {
+    const c = String(d || '').charAt(0) === '🎁' || d.startsWith('🎁') ? ['#faf5ff', '#7c3aed'] // กล่องการ์ด
+      : d.startsWith('🧰') || d.startsWith('🪺') || d.startsWith('🥚') ? ['#f0fdf4', '#15803d'] // กล่องไข่/ไข่
+      : d.startsWith('💎') ? ['#eff6ff', '#1d4ed8'] : d.startsWith('🔴') ? ['#fef2f2', '#b91c1c'] // เพชร
+      : d.startsWith('📦') || d.startsWith('🔧') ? ['#fffbeb', '#b45309'] // กล่องโมดูล/โมดูล/ชิ้นส่วนอาวุธ
+      : d.startsWith('🎴') ? ['#fdf4ff', '#a21caf'] : ['#f8fafc', '#475569']; // การ์ด / ของวิเศษอื่น
+    return `background:${c[0]};color:${c[1]};border:1px solid ${c[1]}22`;
+  }
   // 🎁 popup รางวัล (ตอนชนะ/skip — server ยิง event arena_reward) — ชิปแปลผ่าน _mvpDropT เหมือนแท็บ MVP
   function _arenaRewardPopup(name, drops, runs) {
     const old = document.getElementById('arena-reward'); if (old) old.remove();
     const chips = (drops && drops.length)
-      ? drops.map(d => `<span style="background:#f3e8ff;color:#7c3aed;border-radius:6px;padding:3px 9px;font-size:11px;font-weight:600;white-space:nowrap">${_arEsc(_mvpDropT(d))}</span>`).join('')
+      ? drops.map(d => `<span style="${_arChipStyle(String(d || ''))};border-radius:8px;padding:4px 10px;font-size:11px;font-weight:600;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis">${_arEsc(_mvpDropT(d))}</span>`).join('')
       : `<span style="color:#94a3b8;font-size:11px">${T('(ไม่มีของดรอปรอบนี้ — ได้ EXP/G)')}</span>`;
     const el = document.createElement('div');
     el.id = 'arena-reward';
     el.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.65);z-index:10001;display:flex;align-items:center;justify-content:center;padding:20px';
-    el.innerHTML = `<div style="background:#fff;border-radius:16px;max-width:320px;width:100%;padding:16px;text-align:center;box-shadow:0 20px 50px rgba(0,0,0,.4)">
-      <div style="font-size:34px;line-height:1">🎁</div>
-      <div style="font-size:14px;font-weight:800;color:#1e293b;margin:6px 0 2px">${T('รางวัลจากบอส {n}', {n: T(name || '')})}${(runs || 1) > 1 ? ` <span style="color:#7c3aed">×${runs}</span>` : ''}</div>
-      <div style="display:flex;flex-wrap:wrap;gap:5px;justify-content:center;margin:10px 0 12px">${chips}</div>
-      <button onclick="document.getElementById('arena-reward').remove();xhrpg.openArenaPanel()" style="width:100%;background:#b45309;color:#fff;border:none;border-radius:9px;padding:9px;font-size:13px;font-weight:700;cursor:pointer">${T('เยี่ยม! ไปตีต่อ')}</button>
+    el.innerHTML = `<div style="background:#fff;border-radius:18px;max-width:330px;width:100%;overflow:hidden;text-align:center;box-shadow:0 20px 50px rgba(0,0,0,.45)">
+      <div style="background:#b45309;padding:16px 16px 12px;color:#fff;position:relative">
+        <div style="position:absolute;top:8px;left:14px;font-size:15px;opacity:.55">🏟️</div><div style="position:absolute;top:8px;right:14px;font-size:15px;opacity:.55">🏆</div>
+        <div style="font-size:38px;line-height:1;filter:drop-shadow(0 3px 6px rgba(0,0,0,.35))">🎁</div>
+        <div style="font-size:14.5px;font-weight:800;margin-top:6px">${T('รางวัลจากบอส {n}', {n: T(name || '')})}${(runs || 1) > 1 ? ` <span style="background:rgba(255,255,255,.25);border-radius:6px;padding:0 6px">×${runs}</span>` : ''}</div>
+        <div style="font-size:10px;color:#fde68a;margin-top:2px">${T('🏆 ชนะแล้ว — Skip บอสตัวนี้ได้ตลอด')}</div>
+      </div>
+      <div style="padding:12px 14px 14px">
+        <div style="display:flex;flex-wrap:wrap;gap:5px;justify-content:center;max-height:44vh;overflow-y:auto">${chips}</div>
+        <button onclick="document.getElementById('arena-reward').remove();xhrpg.openArenaPanel()" style="width:100%;margin-top:12px;background:#b45309;color:#fff;border:none;border-radius:10px;padding:10px;font-size:13px;font-weight:700;cursor:pointer;box-shadow:0 3px 0 #7c3a09">${T('เยี่ยม! ไปตีต่อ')}</button>
+      </div>
     </div>`;
     el.addEventListener('click', e => { if (e.target === el) el.remove(); });
     document.body.appendChild(el);
@@ -11743,20 +16017,13 @@ const xhrpg = (() => {
     if (t) t.remove();
     t = document.createElement('div');
     t.id = 'arena-toast';
-    t.style.cssText = 'position:fixed;top:16%;left:50%;transform:translateX(-50%);z-index:10005;background:rgba(153,27,27,.95);color:#fff;border:1px solid #f87171;border-radius:12px;padding:10px 18px;font-size:13px;font-weight:700;max-width:86vw;text-align:center;box-shadow:0 8px 24px rgba(0,0,0,.45);transition:opacity .4s;pointer-events:none';
     t.textContent = msg;
-    document.body.appendChild(t);
+    _floatMount(t, 'top:16%;left:50%;transform:translateX(-50%);z-index:10005;background:rgba(153,27,27,.95);color:#fff;border:1px solid #f87171;border-radius:12px;padding:10px 18px;font-size:13px;font-weight:700;max-width:88%;box-sizing:border-box;text-align:center;box-shadow:0 8px 24px rgba(0,0,0,.45);transition:opacity .4s;pointer-events:none'); // 📌 เกาะกรอบเกม
     setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 450); }, 3000);
   }
   function _arenaGo(mid, mode, pay, name, lv, g, pc, count) {
     count = (count === 5 && pay === 'p' && mode === 'skip') ? 5 : 1;
-    const price = pay === 'p' ? (pc * count) + ' P' + (count > 1 ? ' (×5)' : '') : g.toLocaleString() + ' G';
-    const q = mode === 'enter'
-      ? T('เข้าดันสู้ {n} Lv.{lv}?\n🎫 ค่าบัตร {c} (แพ้ไม่คืน ไม่นับสิทธิ์)', {n: T(name), lv: lv, c: price})
-      : (count > 1
-          ? T('⏩ Skip {n} ติดกัน 5 ครั้ง?\n🎫 รวม {c} (หยุดเองถ้าโควตา/P หมด)', {n: T(name), c: price})
-          : T('⏩ Skip รับรางวัล {n} ทันที?\n🎫 ค่าบัตร {c}', {n: T(name), c: price}));
-    if (!confirm(q)) return;
+    // ⚡ กดแล้ว process ทันที ไม่มี popup ยืนยัน (เจ้าของสั่ง 2026-07-18 — เดิมช้า) · endpoint หัก G/P + ปัดกรณีไม่พอ/โควตาเต็มเองอยู่แล้ว
     _arenaPost({ action: mode, mid: mid, pay: pay, count: count }, res => {
       if (!res) { addLog([{ type: 'default', msg: T('❌ เชื่อมต่อไม่ได้') }]); return; }
       addLog([{ type: 'default', msg: res.error ? '❌ ' + res.error : res.msg }]);
@@ -11764,7 +16031,7 @@ const xhrpg = (() => {
       if (!res.error) { const el2 = document.getElementById('arena-panel'); if (el2) el2.remove(); }
     });
   }
-  function openPvpPanel(tab) { if (!player || !player.line_uid) return; _pvpRenderShell(tab || 'duel'); }
+  function openPvpPanel(tab) { if (!player || !player.line_uid) return; _pvpPage = 0; _pvpRenderShell(tab || 'duel'); } // เปิดแผงใหม่ = กลับหน้า 1 เสมอ
   function _pvpClose() { const el = document.getElementById('pvp-panel'); if (el) el.remove(); }
   function _pvpTab(tab) { _pvpRenderShell(tab); }
   // 🌐 ธงชาติ SVG (regional-indicator emoji ไม่ render บน Windows — วาดเองกันทุกเครื่อง) · ISO2 → SVG · ไม่มีในชุด = ป้ายรหัส
@@ -11823,17 +16090,2097 @@ const xhrpg = (() => {
     im.style.cssText = `width:${Math.round((h || 9) * 16 / 11)}px;height:${h || 9}px;flex:none;border-radius:1px;image-rendering:pixelated`;
     return im;
   }
+  // 🏰 ป้ายชื่อสมาชิกกิล — ชุดเดียวกับหน้าอันดับ/แมพเป๊ะ: [GM][CL][ธง][VIPn] ชื่อ (เจ้าของสั่ง 2026-07-28)
+  //    ทนต่อ payload ที่ไม่มีฟิลด์: _roleChip/_vipChip คืน '' เมื่อค่าเป็น 0/undefined → ใช้กับลิสต์กิลอื่นได้ด้วย
+  //    ⚠️ ชื่อผู้เล่นต้องผ่าน _gdEsc เสมอ (ตั้งชื่อเองได้ = untrusted)
+  //    ⚠️ ต้องห่อชิปด้วย inline-flex — ชิป 3 ชนิดตั้ง vertical-align คนละค่า (GM/CL +1px · ธง SVG −1px · VIP +1px)
+  //       และสูงไม่เท่ากัน (ธง 10.3px · ชิป ~12px) → แถวที่มี/ไม่มี CL จะเหลื่อมกัน เห็นเป็น "ไอคอนกระโดด"
+  //       ใน flex ลูกจะไม่สน vertical-align ของตัวเอง แล้ว align-items:center จับกึ่งกลางให้เท่ากันทุกแถว
+  function _gdNameLbl(m) {
+    const chips = _roleChip(m.gm, m.cl) + (m.cc ? _ccFlag(m.cc) : '') + _vipChip(m.vip);
+    return (chips ? `<span style="display:inline-flex;align-items:center;vertical-align:middle">${chips}</span>` : '')
+         + `<span style="vertical-align:middle">${_gdEsc(m.nm)}</span>`;
+  }
+  // 👑 ชิป VIP (docs/vip-design.md) — ต่อจากธงชาติทุกจุด · vip 0 = ไม่แสดง
+  //    เวอร์ชัน HTML string (ใช้ใน template อันดับ/บอร์ด — vip ผ่าน |0 เป็น int เสมอ ปลอด XSS)
+  function _vipChip(vip, fs) {
+    vip = Math.min(VIP_MAX, vip | 0);   // ⚠️ VIP_MAX ไม่ใช่ 10 ตายตัว — ขยายเป็น 15 แล้ว (เคยค้างที่ 10 ทำให้ VIP11-15 โชว์ VIP10)
+    if (vip < 1) return '';
+    return `<span style="display:inline-block;background:#f59e0b;color:#fff;font-size:${(fs || 8) | 0}px;font-weight:800;letter-spacing:.2px;border-radius:3px;padding:0 3px;margin-right:3px;vertical-align:1px;line-height:1.5">VIP${vip}</span>`;
+  }
+  // 🛡️💠 ชิป Role — GM น้ำเงิน #2563eb · CL (Country Lead) ฟ้า #0ea5e9 — อักษรขาว นำหน้าธงชาติทุกจุด (แค่ป้าย ไม่มีสิทธิพิเศษ)
+  function _roleChipEl(txt, bg, fs) {
+    const s = document.createElement('span');
+    s.textContent = txt;
+    s.style.cssText = `flex:none;background:${bg};color:#fff;font-size:${(fs || 8) | 0}px;font-weight:800;border-radius:3px;padding:0 3px;line-height:1.5`;
+    return s;
+  }
+  function _gmChipEl(fs) { return _roleChipEl('GM', '#2563eb', fs); }
+  function _clChipEl(fs) { return _roleChipEl('CL', '#0ea5e9', fs); }
+  // เวอร์ชัน HTML string (template อันดับ/บอร์ด — ค่า gm/cl เป็น int จาก server ปลอด XSS)
+  function _roleChip(gm, cl, fs) {
+    const st = b => `display:inline-block;background:${b};color:#fff;font-size:${(fs || 8) | 0}px;font-weight:800;letter-spacing:.2px;border-radius:3px;padding:0 3px;margin-right:3px;vertical-align:1px;line-height:1.5`;
+    return (gm ? `<span style="${st('#2563eb')}">GM</span>` : '') + (cl ? `<span style="${st('#0ea5e9')}">CL</span>` : '');
+  }
+  //    เวอร์ชัน DOM element (แชท — โครง element-only เหมือน _flagEl · ห้าม innerHTML กับข้อความแชท)
+  function _vipChipEl(vip, fs) {
+    vip = Math.min(VIP_MAX, vip | 0);   // ⚠️ VIP_MAX ไม่ใช่ 10 ตายตัว — ขยายเป็น 15 แล้ว (เคยค้างที่ 10 ทำให้ VIP11-15 โชว์ VIP10)
+    if (vip < 1) return null;
+    const s = document.createElement('span');
+    s.textContent = 'VIP' + vip;
+    s.style.cssText = `flex:none;background:#f59e0b;color:#fff;font-size:${(fs || 8) | 0}px;font-weight:800;border-radius:3px;padding:0 3px;line-height:1.5`;
+    return s;
+  }
   // วาดธงหน้าชื่อบนแมพ — ชื่อ textAlign=center (ธงชิดซ้ายของบล็อกชื่อ) · ต้องเรียกหลัง set ctx.font (measureText ถูกต้อง)
-  function _drawNameFlag(name, cx, y, cc, scale) {
+  // 👑 vip ≥ 1 → ชิปทอง VIPn คั่นระหว่างธงกับชื่อ (ธงเขยิบซ้ายเท่าความกว้างชิป) — ลำดับซ้าย→ขวา: [ธง][VIPn] ชื่อ
+  function _drawNameFlag(name, cx, y, cc, scale, vip, gm, cl) {
     const img = _flagImg(cc);
-    if (!img || !img.complete || !img.naturalWidth) return;
+    const hasFlag = !!(img && img.complete && img.naturalWidth);
+    vip = Math.min(VIP_MAX, vip | 0);   // ⚠️ VIP_MAX ไม่ใช่ 10 ตายตัว — ขยายเป็น 15 แล้ว (เคยค้างที่ 10 ทำให้ VIP11-15 โชว์ VIP10)
+    if (!hasFlag && vip < 1 && !gm && !cl) return;
     const h = Math.max(6, Math.round(6 * scale)), w = Math.round(h * 16 / 11);
-    const tw = ctx.measureText(String(name == null ? '' : name).slice(0, 10)).width;
+    const tw = ctx.measureText(String(name == null ? '' : name).slice(0, 10)).width; // วัดด้วย font ชื่อ (ก่อนสลับ font ชิป)
     ctx.save();
     ctx.shadowBlur = 0; ctx.shadowColor = 'transparent'; ctx.imageSmoothingEnabled = false; ctx.globalAlpha = 1;
-    ctx.drawImage(img, cx - tw / 2 - w - 2 * scale, y - h * 0.92, w, h);
+    let chipW = 0;
+    if (vip >= 1) {
+      const t = 'VIP' + vip, fpx = Math.max(4.5, 4.5 * scale);
+      ctx.font = `800 ${fpx}px system-ui, sans-serif`;
+      chipW = ctx.measureText(t).width + 3 * scale;
+      const chX = cx - tw / 2 - 2 * scale - chipW, chY = y - h * 0.92;
+      ctx.fillStyle = '#f59e0b';
+      ctx.beginPath();
+      if (ctx.roundRect) ctx.roundRect(chX, chY, chipW, h, 2 * scale); else ctx.rect(chX, chY, chipW, h);
+      ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+      ctx.fillText(t, chX + 1.5 * scale, chY + h / 2 + 0.5);
+    }
+    const flagX = cx - tw / 2 - chipW - w - (chipW ? 3.5 : 2) * scale;
+    if (hasFlag) ctx.drawImage(img, flagX, y - h * 0.92, w, h);
+    // 🛡️💠 ป้าย role นำหน้าธง — ลำดับซ้าย→ขวา: [GM][CL][ธง][VIPn] ชื่อ (วาดจากขวาไปซ้าย: CL ก่อนแล้ว GM ต่อซ้าย)
+    let _edgeX = hasFlag ? flagX : cx - tw / 2 - chipW - (chipW ? 3.5 : 2) * scale;
+    for (const [_on, _txt, _bg] of [[cl, 'CL', '#0ea5e9'], [gm, 'GM', '#2563eb']]) {
+      if (!_on) continue;
+      const fpx = Math.max(4.5, 4.5 * scale);
+      ctx.font = `800 ${fpx}px system-ui, sans-serif`;
+      const gw = ctx.measureText(_txt).width + 3 * scale;
+      const gx = _edgeX - gw - 2 * scale;
+      const gy = y - h * 0.92;
+      ctx.fillStyle = _bg;
+      ctx.beginPath();
+      if (ctx.roundRect) ctx.roundRect(gx, gy, gw, h, 2 * scale); else ctx.rect(gx, gy, gw, h);
+      ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+      ctx.fillText(_txt, gx + 1.5 * scale, gy + h / 2 + 0.5);
+      _edgeX = gx;
+    }
     ctx.restore();
   }
+  // ═══ 🛡️ Equipment — ของสวมใส่ D2 (docs/equipment2-design.md · mirror ค่าคงที่ฝั่ง PHP XHRPG_EQ2_*) ═══
+  const EQ2_SLOTS   = ['head', 'body', 'foot', 'neck', 'ring1', 'ring2'];
+  const EQ2_KIND_TH = { head: 'หมวกเกราะ', body: 'ชุดเกราะ', foot: 'รองเท้าเกราะ', neck: 'สร้อยพลัง', ring: 'แหวนพลัง' };
+  const EQ2_KIND_EMO = { head: '🪖', body: '🥋', foot: '🥾', neck: '📿', ring: '💍' };
+  const EQ2_CAP = 100; // sync PHP XHRPG_EQ2_CAP (48→100 เจ้าของสั่ง 2026-07-19)
+  const EQ2_DEF     = [3, 6, 9, 12, 15, 18];
+  const EQ2_LVF     = 1.5; // 🔧 affix STAT/%/fx (sync PHP XHRPG_EQ2_LVF · แช่ค่าตอนดรอป)
+  const EQ2_DEF_LVF = 3.0; // 🛡️ DEF flat เท่านั้น (sync PHP XHRPG_EQ2_DEF_LVF · 1.5→3.0 · คิดสดตอนสวม)
+  const EQ2_PLUS_MAX = 15, EQ2_ENH_GOLD_X = 10; // ⚒️ ตีบวกของสวมใส่ (sync XHRPG_EQ2_PLUS_MAX / _ENH_GOLD_X)
+  // DEF จากตีบวก — เส้นเดียวกับโมดูล SHIELD (sync xhrpg_armor_module_def_one): +3/ขั้น(1-5) +4/ขั้น(6-10) +6/ขั้น(11-15)
+  function _eq2PlusDef(p) {
+    p = Math.max(0, Math.min(EQ2_PLUS_MAX, p | 0));
+    if (p <= 5)  return 3 * p;
+    if (p <= 10) return 15 + (p - 5) * 4;
+    return 35 + (p - 10) * 6;
+  }
+  // ค่าตีบวก (sync xhrpg_eq2_enhance_cost = โมดูล + ทอง ×10) · อัตราสำเร็จ sync xhrpg_module_enhance_rate
+  function _eq2EnhCost(to) {
+    return { blue: to, red: to >= 6 ? to - 5 : 0, green: to >= 12 ? to - 11 : 0, gold: Math.max(1, to) * 1000 * EQ2_ENH_GOLD_X };
+  }
+  function _eq2EnhRate(to) {
+    if (to <= 5)  return 1.0;
+    if (to === 6) return 0.9;
+    if (to <= 11) return (150 - to * 10) / 100;
+    return 0.3;
+  }
+  const _eq2PlusClr = p => p >= 11 ? '#7c3aed' : (p >= 6 ? '#0284c7' : '#16a34a'); // ป้าย +N: 1-5 เขียว · 6-10 ฟ้า · 11-15 ม่วง
+  const _eq2PlusTag = p => (p | 0) > 0 ? `<span style="font-size:9px;font-weight:800;color:#fff;background:${_eq2PlusClr(p|0)};padding:0 5px;border-radius:5px;margin-left:3px">+${p|0}</span>` : '';
+  const EQ2_TCOL    = ['white', 'green', 'blue', 'purple', 'gold', 'red']; // ชุดสี tier เดียวกับ RARITY_*
+  const EQ2_RAGK    = { rhp: 1, atk: 1, rdf: 1, exp: 1, gld: 1, drp: 1 }; // กลุ่ม % (หน่วย 0.01%)
+  // ป้าย option บนการ์ด — latin ล้วนไม่ต้องแปล ยกเว้นกลุ่มไทย (แปลผ่าน T · มี {v})
+  const EQ2_OPT_TXT = { str: 'STR +{v}', agi: 'AGI +{v}', dex: 'DEX +{v}', int: 'INT +{v}', vit: 'VIT +{v}', luk: 'LUK +{v}',
+    rhp: 'HP +{v}%', atk: 'ATK +{v}%', rdf: 'DEF +{v}%', exp: 'EXP +{v}%', gld: 'GOLD +{v}%', drp: 'DROP +{v}%',
+    prg: 'ระยะมีดสั้น +{v}m', srg: 'ระยะมีดยาว +{v}m', pam: 'ความจุมีดสั้น +{v}',
+    gat: 'ธนูไททัน ATK +{v}', xat: 'ขวานไททัน ATK +{v}', ene: 'Robot Energy +{v}', brg: 'ระยะ Titan Beam +{v}m',
+    hda: 'DMG Railgun ยานบิน +{v}', hrg: 'ระยะ Railgun ยานบิน +{v}m', spd: 'ความเร็วเดิน +{v}%',
+    wod: '🪵 ไม้ดรอป +{v}', stn: '🪨 หินดรอป +{v}', irn: '⚙️ เหล็กดรอป +{v}', cop: '🟫 ทองแดงดรอป +{v}', hrb: '🌿 สมุนไพรดรอป +{v}' };
+  const EQ2_OPT_SHORT = { str: 'STR', agi: 'AGI', dex: 'DEX', int: 'INT', vit: 'VIT', luk: 'LUK', rhp: 'HP%', atk: 'ATK%', rdf: 'DEF%', exp: 'EXP%', gld: 'GOLD%', drp: 'DROP%',
+    prg: 'P.RNG', srg: 'S.RNG', pam: 'AMMO', gat: 'ARM', xat: 'AXE', ene: 'ENERGY', brg: 'BEAM', hda: 'O.DMG', hrg: 'O.RNG', spd: 'SPD%', wod: '🪵', stn: '🪨', irn: '⚙️', cop: '🟫', hrb: '🌿' };
+  // 🎨 หมวดสีชิปโบนัส (ม็อค B 2026-07-24) — เดิมชิปแดงหมดทุกตัว อ่านแยกไม่ออกเวลามีหลายสิบชิ้น
+  const EQ2_OPT_CAT = { str:'s', agi:'s', dex:'s', int:'s', vit:'s', luk:'s',                            // s = STAT (เขียว)
+    rhp:'p', atk:'p', rdf:'p', exp:'p', gld:'p', drp:'p',                                                 // p = % รวม (ฟ้า)
+    prg:'w', srg:'w', pam:'w', gat:'w', xat:'w', ene:'w', brg:'w', hda:'w', hrg:'w', spd:'w',             // w = อาวุธ/เคลื่อนที่ (ส้ม)
+    wod:'r', stn:'r', irn:'r', cop:'r', hrb:'r' };                                                        // r = ทรัพยากร (น้ำตาล)
+  const EQ2_CAT_CLR = { s: ['#f0fdf4', '#15803d'], p: ['#eff6ff', '#1d4ed8'], w: ['#fef7ed', '#b45309'], r: ['#faf5f0', '#78716c'] };
+  const _eq2ChipClr = k => EQ2_CAT_CLR[EQ2_OPT_CAT[k] || 'r'] || EQ2_CAT_CLR.r;
+  const _eq2Worn = () => { const e = player && player.eq2; return (e && typeof e === 'object' && !Array.isArray(e)) ? e : (typeof e === 'string' ? (JSON.parse(e || '{}') || {}) : {}); };
+  const _eq2Inv  = () => { const e = player && player.eq2_inv; return Array.isArray(e) ? e : (typeof e === 'string' ? (JSON.parse(e || '[]') || []) : []); };
+  const _e2FxSum = key => { // ⚔️ มิเรอร์ xhrpg_eq2_fx (server) — รวม option fx ของที่สวมอยู่ตาม key ให้เลขแผง client ตรงกับของจริง
+    let s = 0; Object.values(_eq2Worn()).forEach(it => { if (it && Array.isArray(it.af)) it.af.forEach(a => { if (a && a[0] === key) s += (+a[1] || 0); }); });
+    return s;
+  };
+  const _eq2Kind = it => (it.s === 'ring1' || it.s === 'ring2') ? 'ring' : (it.s || 'head');
+  const _eq2Ico  = (it, sz) => `<img src="assets/eq2/eq2_${_eq2Kind(it)}_t${Math.max(1, Math.min(6, it.t | 0))}.png" style="width:${sz | 0}px;height:${sz | 0}px;image-rendering:pixelated;vertical-align:middle">`;
+  const _eq2Name = it => T(EQ2_KIND_TH[_eq2Kind(it)] || 'ของสวมใส่') + ' T' + (it.t | 0);
+  const _eq2OptLine  = (k, v) => { const p = EQ2_OPT_TXT[k]; return p ? T(p, { v: EQ2_RAGK[k] ? (v / 100) : v }) : k + ' +' + v; };
+  const _eq2OptShort = (k, v) => (EQ2_OPT_SHORT[k] || k.toUpperCase()) + '+' + (EQ2_RAGK[k] ? (v / 100) + '%' : v);
+  function _eq2BonusSum() { // mirror xhrpg_eq2_bonus — สรุปโบนัสของที่สวม 6 ช่อง
+    const out = { lines: [], def: 0 };
+    const agg = {};
+    EQ2_SLOTS.forEach(sl => {
+      const it = _eq2Worn()[sl];
+      if (!it || typeof it !== 'object') return;
+      // DEF = ฐาน Tier + Lv÷10×LVF ต่อชิ้น (sync xhrpg_eq2_bonus PHP · เจ้าของสั่ง 2026-07-22)
+      out.def += EQ2_DEF[Math.max(1, Math.min(6, it.t | 0)) - 1]
+               + Math.round(Math.floor(Math.max(1, Math.min(999, it.lv | 0)) / 10) * EQ2_DEF_LVF)
+               + _eq2PlusDef(it.p | 0); // ⚒️ ตีบวก (เส้นโมดูล SHIELD · sync xhrpg_armor_module_def_one)
+      (it.af || []).forEach(a => { agg[a[0]] = (agg[a[0]] || 0) + (+a[1] || 0); });
+    });
+    Object.keys(agg).forEach(k => out.lines.push({ k: k, s: _eq2OptShort(k, agg[k]) })); // เก็บ key ไว้ด้วย — ใช้เลือกสีชิปตามหมวด
+    return out;
+  }
+  function _eq2Post(data, cb) {
+    $.post(baseUrl + 'xhrpg_eq2.php', Object.assign({ line_uid: player.line_uid, lang: LANG(), session_token: sessionToken || '' }, data))
+      .done(res => { let d; try { d = typeof res === 'string' ? JSON.parse(res) : res; } catch (e) { return; } if (cb) cb(d); })
+      .fail(() => { if (cb) cb(null); });
+  }
+  function _eq2Act(action, extra) {
+    _eq2Post(Object.assign({ action: action }, extra || {}), d => {
+      if (!d) { _arenaToast(T('❌ เชื่อมต่อไม่ได้')); return; }
+      if (!d.ok) { addLog([{ type: 'dead', msg: d.error || '?' }]); _arenaToast('❌ ' + (d.error || '?')); return; } // เด้งกลางจอ — แผง Equipment บัง log (เพชร/ทองไม่พอ) มิเรอร์โมดูล
+      if (d.player) {
+        const prev = player;
+        player = d.player;
+        if (prev && prev._equipmentMaster) player._equipmentMaster = prev._equipmentMaster; // cache master ฝั่ง client
+        if (prev && prev._equipmentQty)    player._equipmentQty    = prev._equipmentQty;
+        if (prev && prev._equipmentBonus)  player._equipmentBonus  = prev._equipmentBonus;
+      }
+      if (d.msg) addLog([{ type: d.win === 0 ? 'dead' : 'levelup', msg: d.msg }]); // ตีบวกล้มเหลว (win=0) = log แดง · action อื่นไม่ส่ง win = เขียว
+      document.getElementById('eq2-card')?.remove();
+      _eq2Render(); updateHUD();
+    });
+  }
+  function _eq2Close() { document.getElementById('eq2-panel')?.remove(); document.getElementById('eq2-card')?.remove(); }
+  function _eq2Destroy(id) { _eq2ConfirmDestroy([String(id)], () => _eq2Act('destroy', { id: id })); }
+  // 💎 ❌ ทำลายของสวมใส่ **ไม่คืนเพชรค่าตีบวก** — กติกาเดียวกับโมดูล (เจ้าของเคาะ 2026-07-28 · sync server)
+  //    มิเรอร์ _modEnhRefund ที่คืน 0 เหมือนกัน · เก็บฟังก์ชันไว้ให้โครง popup เหมือนโมดูลเป๊ะ
+  function _eq2EnhRefund(plus) { return { blue: 0, red: 0, green: 0 }; }
+  // ⚠️ popup ยืนยันก่อนทำลาย — โครงเดียวกับ _showModuleDiscardDialog (เจ้าของสั่ง 2026-07-28 "ให้แจ้งแบบทำลาย Module")
+  //    เดิมใช้ confirm() ของเบราว์เซอร์ → บอกไม่ได้ว่าจะได้อะไรคืน · ตอนนี้พรีวิวเพชรก่อนกด
+  function _eq2ConfirmDestroy(ids, onOk) {
+    if (document.getElementById('eq2-destroy-overlay')) return;
+    const inv = _eq2Inv(), pick = ids.map(id => inv.find(it => String(it.id || '') === String(id))).filter(Boolean);
+    if (!pick.length) return;
+    // ⚠️ โครง HTML ต้องเหมือน _showModuleDiscardDialog "ทุกบรรทัด" (เจ้าของสั่ง 2026-07-28 "ขอ format แบบเดียวกับ module")
+    //    = รายการ + โน้ตคืนของ + คำเตือนแดง อยู่ในบล็อกข้อความเดียวกัน (จัดกลาง · คั่นด้วย <br>) ไม่ใช่กล่องแยก
+    let b = 0, r = 0, g = 0;
+    const rows = pick.slice(0, 10).map(it => {
+      const rf = _eq2EnhRefund(it.p || 0); b += rf.blue; r += rf.red; g += rf.green;
+      // ใช้ไอคอน pixel-art ตัวเดียวกับในแผง (_eq2Ico) — โมดูลใช้ emoji เพราะไม่มีรูปประจำชิ้น แต่ eq2 มี
+      return `${_eq2Ico(it, 16)} ${_escHtml(T(EQ2_KIND_TH[_eq2Kind(it)] || 'ของสวมใส่'))} T${it.t | 0} +${it.p | 0} <span style="color:#94a3b8">Lv.${it.lv | 0}</span>`;
+    }).join('<br>') + (pick.length > 10 ? `<br><span style="color:#94a3b8">+${pick.length - 10}…</span>` : '');
+    const gemNote = ''; // ❌ ไม่คืนค่าตีบวก — เหมือนโมดูล (ไม่ preview คืนเพชร)
+    const ov = document.createElement('div');
+    ov.id = 'eq2-destroy-overlay';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+    ov.innerHTML = `<div style="background:#fff;border-radius:14px;max-width:300px;width:100%;padding:16px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.4)">
+      <div style="font-size:26px">⚠️</div>
+      <div style="font-size:14px;font-weight:700;color:#111;margin-top:4px">${T('ยืนยันทำลาย {a} ชิ้น?', { a: pick.length })}</div>
+      <div style="font-size:11px;color:#4b5563;margin-top:6px;line-height:1.6">${rows}${gemNote}<br><span style="color:#dc2626">${T('ทำลายแล้วกู้คืนไม่ได้ · ค่าตีบวกไม่คืน')}</span></div>
+      <div style="display:flex;gap:6px;margin-top:14px">
+        <button class="eqd-cancel" style="flex:1;font-size:13px;padding:8px;border:1px solid #a8a29e;border-radius:8px;background:#fff;color:#57534e;cursor:pointer">${T('ยกเลิก')}</button>
+        <button class="eqd-ok" style="flex:1;font-size:13px;padding:8px;border:none;border-radius:8px;background:#dc2626;color:#fff;font-weight:600;cursor:pointer">${T('ทำลายเลย')}</button>
+      </div>
+    </div>`;
+    ov.querySelector('.eqd-cancel').addEventListener('click', () => ov.remove());
+    ov.querySelector('.eqd-ok').addEventListener('click', () => { ov.remove(); onOk(); });
+    document.body.appendChild(ov);
+  }
+  function openEq2Panel() {
+    if (!player || !player.line_uid || player.line_uid === 'demo') return;
+    _eq2Close();
+    const el = document.createElement('div');
+    el.id = 'eq2-panel';
+    el.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:9998;display:flex;align-items:center;justify-content:center;padding:14px';
+    el.innerHTML = `<div style="background:#fff;border-radius:16px;max-width:400px;width:100%;max-height:90vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 12px 40px rgba(2,8,23,.4)">
+      <div style="background:#7f1d1d;padding:10px 16px;text-align:center;position:relative;flex:none;color:#fff">
+        <button onclick="xhrpg._eq2Close()" aria-label="ปิด" style="position:absolute;top:8px;right:10px;width:28px;height:28px;border-radius:8px;border:none;background:rgba(0,0,0,.28);color:#fff;font-size:15px;line-height:1;cursor:pointer">✕</button>
+        <div style="font-size:22px;line-height:1">🛡️</div>
+        <div style="font-size:14px;font-weight:700;margin-top:2px">${T('Equipment')}</div>
+        <div style="font-size:9.5px;color:#fecaca;margin-top:1px">${T('ของสวมใส่ดรอปจากมอนและบอส — T สูงยิ่งหายาก')}</div>
+      </div>
+      <div id="eq2-body" style="padding:10px 12px;overflow:auto;flex:1;min-height:0"></div>
+    </div>`;
+    el.addEventListener('click', e => { if (e.target === el) _eq2Close(); });
+    document.body.appendChild(el);
+    _eq2Render(); // วาดจากค่าที่มีก่อน (อาจ stale — poll ตัด eq2_inv ออกเป็น cold field)
+    _eq2Post({ action: 'info' }, d => { // แล้วดึงสดจาก server มาทับ — ของที่ดรอประหว่างเล่นโผล่ครบ
+      if (d && d.ok && d.player) {
+        const prev = player;
+        player = d.player;
+        if (prev && prev._equipmentMaster) player._equipmentMaster = prev._equipmentMaster; // cache master ฝั่ง client — server ส่งครั้งแรกครั้งเดียว
+        if (prev && prev._equipmentQty)    player._equipmentQty    = prev._equipmentQty;
+        if (prev && prev._equipmentBonus)  player._equipmentBonus  = prev._equipmentBonus;
+        _eq2Render(); updateHUD();
+      }
+    });
+  }
+  let _eq2Sort = 't'; // t | new
+  function _eq2SetSort(s) { _eq2Sort = s; _eq2Render(); }
+  let _eq2ChipsOpen = false, _eq2ListOpen = false; // ชิปโบนัส/รายชิ้น — ยุบเป็น default (จอมือถือ)
+  function _eq2TogChips() { _eq2ChipsOpen = !_eq2ChipsOpen; _eq2Render(); }
+  function _eq2TogList()  { _eq2ListOpen  = !_eq2ListOpen;  _eq2Render(); }
+  // 🗑️ โหมดจัดการทำลายหลายชิ้น — mirror ระบบโมดูล (แตะเลือก → ทำลายที่เลือก)
+  let _eq2Mng = false; const _eq2Sel = new Set();
+  function _eq2MngTog(on) { _eq2Mng = !!on; _eq2Sel.clear(); _eq2Render(); }
+  function _eq2SelTog(id) { _eq2Sel.has(id) ? _eq2Sel.delete(id) : _eq2Sel.add(id); _eq2Render(); }
+  function _eq2SelAll() { _eq2Inv().forEach(it => _eq2Sel.add(String(it.id || ''))); _eq2Render(); }
+  function _eq2SelClear() { _eq2Sel.clear(); _eq2Render(); }
+  function _eq2DestroySel() {
+    const ids = [..._eq2Sel];
+    if (!ids.length) return;
+    _eq2ConfirmDestroy(ids, () => {   // popup พรีวิวเพชรที่จะได้คืน (แทน confirm() เดิมที่บอกอะไรไม่ได้)
+      _eq2Mng = false; _eq2Sel.clear();
+      _eq2Act('destroy_multi', { ids: JSON.stringify(ids) });
+    });
+  }
+  function _eq2SetAuto(lvl) { _eq2Act('auto', { lvl: lvl }); } // 0=ปิด · 1-3 = ทิ้ง T ≤ ระดับนี้ตอนดรอปทันที
+  function _eq2Render() {
+    const bd = document.getElementById('eq2-body');
+    if (!bd) return;
+    const worn = _eq2Worn();
+    // 🧍 paper-doll — ช่องสวมกลมลอยรอบตัวละครจริง (ม็อค B 2026-07-24) · ป้าย T กับ +N รวมเป็นชิปเดียวใต้ช่อง
+    //    เดิมเป็นกล่องเหลี่ยม 54px + ป้ายลอยคนละมุม → ใหญ่กลบตัวละคร และสายตากระโดด
+    const _dollPos = { head: 'top:6px;left:50%;transform:translateX(-50%)', body: 'top:66px;left:12px', neck: 'top:66px;right:12px',
+                       ring1: 'top:126px;left:12px', ring2: 'top:126px;right:12px', foot: 'bottom:12px;left:50%;transform:translateX(-50%)' };
+    const slotCell = sl => {
+      const it = worn[sl];
+      const pos = `position:absolute;${_dollPos[sl] || ''};width:46px;height:46px;box-sizing:border-box;`;
+      const emo = EQ2_KIND_EMO[sl.startsWith('ring') ? 'ring' : sl] || '❓';
+      if (!it || typeof it !== 'object') { // ช่องว่าง — ไอคอนจางอย่างเดียว ไม่มีตัวหนังสือ (ลดความรกรอบตัวละคร · ม็อค 2026-07-19)
+        return `<div style="${pos}border:1.5px dashed #e6d8ce;border-radius:50%;background:rgba(255,255,255,.55);display:flex;align-items:center;justify-content:center;font-size:15px;opacity:.4">${emo}</div>`;
+      }
+      const tc = EQ2_TCOL[(it.t | 0) - 1];
+      const bc = RARITY_BORDER[tc] || '#d1d5db';
+      return `<div onclick="xhrpg._eq2Card('w','${sl}')" style="${pos}border:2.5px solid ${bc};background:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 3px 6px rgba(120,80,50,.18)">
+        ${_eq2Ico(it, 26)}<span style="position:absolute;bottom:-8px;left:50%;transform:translateX(-50%);background:${bc};color:#fff;font-size:8.5px;font-weight:800;border-radius:6px;padding:0 6px;line-height:1.6;white-space:nowrap">T${it.t | 0}${(it.p | 0) > 0 ? ` +${it.p | 0}` : ''}</span></div>`;
+    };
+    // ตัวละครกลาง — สกินฮีโร่ที่สวมจริง (avatar เดียวกับหน้าอันดับ) · ชีทยังไม่โหลด → เงาคน 🧍 จาง
+    //    ขนาด 100→68px (เจ้าของสั่ง "ตัวคนตรงกลางเล็กพอ") — ช่องกลมรอบตัวจึงไม่ชนกัน
+    let _dollHero = '';
+    try {
+      const _hu = _lbAvatarURL(player.hero_skin ? SUM['hs_' + player.hero_skin + '_idle'] : SUM['th_idle'], 4);
+      _dollHero = _hu ? `<img src="${_hu}" style="height:68px;image-rendering:pixelated;object-fit:contain;filter:drop-shadow(0 3px 3px rgba(120,80,50,.22))">`
+                      : `<span style="font-size:52px;line-height:1;filter:grayscale(1);opacity:.28">🧍</span>`;
+    } catch (e) { _dollHero = `<span style="font-size:52px;line-height:1;filter:grayscale(1);opacity:.28">🧍</span>`; }
+    const dollBox = `<div style="position:relative;height:206px;border:1px solid #f3e5da;border-radius:14px;background:linear-gradient(180deg,#fffefc 0%,#fdf4ec 100%);overflow:hidden">
+        <div style="position:absolute;inset:0;background-image:radial-gradient(#eaddd2 1px,transparent 1px);background-size:14px 14px;opacity:.45;pointer-events:none"></div>
+        <div style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);text-align:center;pointer-events:none">
+          ${_dollHero}
+          <div style="width:88px;height:20px;background:radial-gradient(ellipse,#f0d8c4 0%,rgba(240,216,196,0) 70%);border-radius:50%;margin:-6px auto 0"></div>
+        </div>
+        ${EQ2_SLOTS.map(slotCell).join('')}
+      </div>`;
+    // 🧮 กล่องรวมโบนัส: ป้าย DEF ใหญ่ + ชิป stat (เกิน 6 ยุบเป็น +N ▾)
+    const sum = _eq2BonusSum();
+    const CHIP_MAX = 6;
+    const chipsAll = sum.lines;
+    const chipsShown = _eq2ChipsOpen ? chipsAll : chipsAll.slice(0, CHIP_MAX);
+    const chipMore = chipsAll.length - chipsShown.length;
+    const chipStyle = 'border-radius:6px;padding:1px 7px;font-size:9.5px;font-weight:600;white-space:nowrap';
+    const moreStyle = `${chipStyle};background:#f5f5f4;color:#78716c;font-weight:700;cursor:pointer`;
+    const chipHtml = chipsShown.map(c => { const [bg, fg] = _eq2ChipClr(c.k); return `<span style="${chipStyle};background:${bg};color:${fg}">${c.s}</span>`; }).join('')
+      + (chipMore > 0 ? `<span onclick="xhrpg._eq2TogChips()" style="${moreStyle}">+${chipMore} ▾</span>` : '')
+      + (_eq2ChipsOpen && chipsAll.length > CHIP_MAX ? `<span onclick="xhrpg._eq2TogChips()" style="${moreStyle}">▴</span>` : '');
+    // 🧾 แถบ DEF รวม (บล็อกแดงซ้าย + ชิปขวา) แล้วรายชิ้นเป็น "แถวเต็มความกว้าง" ยึดรูปแบบโมดูลเป๊ะ — เจ้าของสั่ง 2026-07-24
+    //    โชว์ affix ต่อกัน (ยาวได้) + ปุ่มตีบวกทรงโมดูล (+N rate% / ต้นทุนล่าง) · กดปุ่ม = อัพเลยไม่มี confirm
+    const pieces = EQ2_SLOTS.map(sl => ({ sl, it: worn[sl] })).filter(p => p.it && typeof p.it === 'object');
+    const pieceRows = pieces.map(p => {
+      const t  = Math.max(1, Math.min(6, p.it.t | 0));
+      const bc = RARITY_BORDER[EQ2_TCOL[t - 1]];
+      const df = EQ2_DEF[t - 1] + Math.round(Math.floor(Math.max(1, Math.min(999, p.it.lv | 0)) / 10) * EQ2_DEF_LVF) + _eq2PlusDef(p.it.p | 0);
+      const affix = (p.it.af || []).map(a => _eq2OptShort(a[0], +a[1] || 0)).join(' · ');
+      const cur = Math.max(0, Math.min(EQ2_PLUS_MAX, p.it.p | 0));
+      let enhBtn;
+      if (cur >= EQ2_PLUS_MAX) {
+        enhBtn = `<button disabled style="flex:none;width:104px;font-size:10px;padding:5px 4px;border:none;border-radius:6px;background:#a8a29e;color:#fff;font-family:inherit">MAX</button>`;
+      } else {
+        const to = cur + 1, c = _eq2EnhCost(to), rate = Math.round(_eq2EnhRate(to) * 100);
+        // ต้นทุนแถวล่างของปุ่ม — ไอคอนเพชร inline + ทอง (มิเรอร์ costTxt ของโมดูล)
+        const costTxt = `${_icoGemHtml('blue', 10)}${c.blue}${c.red ? ` ${_icoGemHtml('red', 10)}${c.red}` : ''}${c.green ? ` ${_icoGemHtml('green', 10)}${c.green}` : ''} 💰${c.gold.toLocaleString()}`;
+        enhBtn = `<button onclick="event.stopPropagation();xhrpg._eq2Enhance('${p.sl}')" style="flex:none;width:104px;box-sizing:border-box;font-size:10px;padding:4px 4px;border:none;border-radius:6px;background:#7c3aed;color:#fff;cursor:pointer;text-align:center;line-height:1.35;white-space:nowrap;font-family:inherit"><b>+${to}</b> ${rate}%<br><span style="font-size:8.5px;white-space:nowrap">${costTxt}</span></button>`;
+      }
+      return `<div onclick="xhrpg._eq2Card('w','${p.sl}')" style="background:#fff;border:1px solid ${bc}55;border-left:3px solid ${bc};border-radius:0 9px 9px 0;margin-top:6px;cursor:pointer">
+        <div style="display:flex;align-items:center;gap:8px;padding:6px 8px">
+          <span style="flex:none;display:flex;align-items:center">${_eq2Ico(p.it, 22)}</span>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:11.5px;color:#1c1917;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"><b style="color:${RARITY_TEXT[EQ2_TCOL[t - 1]]}">${_eq2Name(p.it)}</b>${(p.it.p | 0) > 0 ? ` <b style="color:${_eq2PlusClr(p.it.p | 0)}">+${p.it.p | 0}</b>` : ''} <span style="font-size:9.5px;color:#94a3b8">Lv.${p.it.lv | 0}</span></div>
+            <div style="font-size:10px;color:#16a34a;line-height:1.4;margin-top:1px"><span style="color:#0f766e;font-weight:700">🛡️+${df}</span>${affix ? ' · ' + affix : ''}</div>
+          </div>
+          ${enhBtn}
+        </div>
+      </div>`;
+    }).join('');
+    const sumBox = `<div style="display:flex;align-items:stretch;margin-top:8px;border:1px solid #f3e5da;border-radius:12px;overflow:hidden">
+        <div style="flex:none;background:#7f1d1d;color:#fff;padding:7px 12px;display:flex;flex-direction:column;justify-content:center;text-align:center">
+          <div style="font-size:8.5px;color:#fecaca;line-height:1">🛡️ DEF</div>
+          <div style="font-size:17px;font-weight:800;line-height:1.25">+${sum.def}</div>
+        </div>
+        <div style="flex:1;min-width:0;background:#fff;padding:6px 8px;display:flex;flex-wrap:wrap;gap:3px;align-content:center">${chipHtml || `<span style="font-size:10px;color:#a8a29e">${T('ยังไม่มีของ — ล่ามอนและบอสเพื่อเก็บของสวมใส่!').split(' — ')[0]}</span>`}</div>
+      </div>`;
+    const listBox = pieceRows;
+    // 🎒 หัวกระเป๋า: แถบความจุ (สีตามความเต็ม) + ปุ่มเรียง segmented + ปุ่มจัดการทำลาย
+    const inv = _eq2Inv().slice();
+    if (_eq2Sort === 't') inv.sort((a, b) => (b.t | 0) - (a.t | 0) || (b.lv | 0) - (a.lv | 0));
+    const nInv = _eq2Inv().length;
+    const pct = Math.min(100, Math.round(nInv / EQ2_CAP * 100));
+    const barClr = pct < 60 ? '#22c55e' : (pct < 85 ? '#f59e0b' : '#ef4444');
+    const seg = (key, lbl) => `<span onclick="xhrpg._eq2SetSort('${key}')" style="padding:3px 9px;font-size:10px;cursor:pointer;${_eq2Sort === key ? 'background:#7f1d1d;color:#fff' : 'background:#fff;color:#78716c'}">${lbl}</span>`;
+    // 🎒 2 บรรทัดตายตัว (ม็อค 2026-07-19): บรรทัด 1 = แถบความจุเต็มกว้าง · บรรทัด 2 = Auto ซ้าย + เรียง/จัดการ ขวา (แถบเลือกเด้งแทรกเฉพาะโหมดจัดการ)
+    const bagHead = `<div style="display:flex;align-items:center;gap:8px;margin-top:11px">
+        <span style="flex:none;font-size:11.5px;font-weight:700;color:#44403c">🎒 ${T('กระเป๋า')}</span>
+        <div style="flex:1;height:8px;background:#f1f5f9;border-radius:5px;overflow:hidden"><div style="width:${pct}%;height:100%;background:${barClr};border-radius:5px"></div></div>
+        <span style="flex:none;font-size:10.5px;font-weight:700;color:${barClr}">${nInv}/${EQ2_CAP}</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;margin-top:6px;margin-bottom:6px">
+        <span title="${T('ทำลายอัตโนมัติ')}" style="flex:none;display:inline-flex;border:1px solid #e7e5e4;border-radius:8px;overflow:hidden;font-size:10px">
+          <span style="padding:2px 8px;background:#f5f5f4;color:#78716c">🗑️ Auto</span>
+          ${[0, 1, 2, 3].map(v => `<span onclick="xhrpg._eq2SetAuto(${v})" style="padding:2px 8px;cursor:pointer;${((_eq2Worn()._auto | 0) === v) ? 'background:#7f1d1d;color:#fff' : 'background:#fff;color:#78716c'}">${v === 0 ? 'OFF' : (v === 1 ? 'T1' : `≤T${v}`)}</span>`).join('')}
+        </span>
+        <span style="flex:1"></span>
+        <span style="flex:none;display:inline-flex;border:1px solid #e7e5e4;border-radius:8px;overflow:hidden">${seg('t', 'T ▾')}${seg('new', T('ใหม่'))}</span>
+        ${nInv ? `<button onclick="xhrpg._eq2MngTog(${_eq2Mng ? 'false' : 'true'})" style="flex:none;border:1px solid ${_eq2Mng ? '#b91c1c' : '#e7e5e4'};background:${_eq2Mng ? '#fef2f2' : '#fff'};color:${_eq2Mng ? '#b91c1c' : '#57534e'};border-radius:8px;padding:3px 8px;font-size:10px;cursor:pointer">${_eq2Mng ? T('ยกเลิก') : T('🗑️ จัดการ')}</button>` : ''}
+      </div>
+      ${_eq2Mng ? `<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;background:#fff7ed;border:1px solid #fed7aa;border-radius:9px;padding:5px 8px">
+        <span style="flex:1;min-width:0;font-size:10px;color:#9a3412">${T('เลือกแล้ว {a} ชิ้น (แตะเพื่อเลือก)', { a: _eq2Sel.size })}</span>
+        <button onclick="xhrpg._eq2SelAll()" style="border:1px solid #e7e5e4;background:#fff;border-radius:6px;padding:2px 7px;font-size:9.5px;cursor:pointer">${T('☑ ทั้งหมด')}</button>
+        <button onclick="xhrpg._eq2SelClear()" style="border:1px solid #e7e5e4;background:#fff;border-radius:6px;padding:2px 7px;font-size:9.5px;cursor:pointer">${T('☐ ล้าง')}</button>
+        <button onclick="xhrpg._eq2DestroySel()" ${_eq2Sel.size ? '' : 'disabled'} style="border:none;background:${_eq2Sel.size ? '#dc2626' : '#fca5a5'};color:#fff;border-radius:6px;padding:2px 9px;font-size:9.5px;font-weight:700;cursor:${_eq2Sel.size ? 'pointer' : 'default'}">${T('🗑️ ทำลายที่เลือก ({a})', { a: _eq2Sel.size })}</button>
+      </div>` : ''}
+    `;
+    // กริดกระเป๋า — T4+ มีวงเรือง · โหมดจัดการ: แตะ = เลือก (ขอบแดง+✓)
+    const cells = inv.map(it => {
+      const t = Math.max(1, Math.min(6, it.t | 0));
+      const bc = RARITY_BORDER[EQ2_TCOL[t - 1]];
+      const id = String(it.id || '');
+      const sel = _eq2Mng && _eq2Sel.has(id);
+      const click = _eq2Mng ? `xhrpg._eq2SelTog('${id}')` : `xhrpg._eq2Card('i','${id}')`;
+      return `<div onclick="${click}" style="position:relative;border:2px solid ${sel ? '#dc2626' : bc};background:${sel ? '#fee2e2' : RARITY_BG[EQ2_TCOL[t - 1]]};border-radius:9px;padding:3px 1px;text-align:center;cursor:pointer${!sel && t >= 4 ? `;box-shadow:0 0 0 2px ${bc}33` : ''}${_eq2Mng && !sel ? ';opacity:.75' : ''}">
+        ${_eq2Ico(it, 26)}<div style="font-size:8px;color:${RARITY_TEXT[EQ2_TCOL[t - 1]]};font-weight:700;line-height:1.1">${it.lv | 0}</div>${(it.p | 0) > 0 ? `<span style="position:absolute;bottom:-5px;left:-4px;background:${_eq2PlusClr(it.p|0)};color:#fff;font-size:8px;font-weight:800;border-radius:5px;padding:0 4px;line-height:1.5">+${it.p|0}</span>` : ''}${sel ? '<span style="position:absolute;top:-6px;right:-5px;background:#dc2626;color:#fff;font-size:9px;border-radius:7px;padding:0 4px">✓</span>' : ''}</div>`;
+    }).join('');
+    bd.innerHTML = `
+      <div style="font-size:11px;font-weight:700;color:#44403c;margin-bottom:4px">${T('สวมใส่อยู่')}</div>
+      ${dollBox}
+      ${sumBox}
+      ${listBox}
+      ${bagHead}
+      ${cells ? `<div style="display:grid;grid-template-columns:repeat(8,1fr);gap:5px">${cells}</div>`
+              : `<div style="text-align:center;color:#a8a29e;font-size:11px;padding:18px 8px">${T('ยังไม่มีของ — ล่ามอนและบอสเพื่อเก็บของสวมใส่!')}</div>`}
+      <div style="text-align:center;font-size:9px;color:#b9b2ae;margin-top:8px;line-height:1.5">ℹ️ ${T('ขาย/แลกได้ที่ 🏪 ตลาด (หมวด Equipment) และเทรด 1-1 · กระเป๋าเต็มของใหม่จะทับชิ้น T ต่ำสุดอัตโนมัติ')}</div>`;
+  }
+  // ⚒️ ตีบวก slot ที่สวมอยู่ — ยึดรูปแบบเดียวกับ moduleEnhance เป๊ะ: กดปุ่ม = อัพเลย ไม่มี confirm (เจ้าของสั่ง 2026-07-24)
+  //    _eq2Act โพสต์ → _eq2Render อัปเดตการ์ดในหน้าเดิม + addLog เด้งผลสำเร็จ/ล้มเหลว
+  function _eq2Enhance(slot) { _eq2Act('enhance', { slot: slot }); }
+  function _eq2Card(src, key) { // การ์ดรายละเอียด: src 'w' = ช่องสวม (key = slot) · 'i' = กระเป๋า (key = id)
+    document.getElementById('eq2-card')?.remove();
+    let it = null, slot = '';
+    if (src === 'w') { slot = key; it = _eq2Worn()[key]; }
+    else { it = _eq2Inv().find(x => String(x.id || '') === key); }
+    if (!it) return;
+    const t = Math.max(1, Math.min(6, it.t | 0));
+    const ov = document.createElement('div');
+    ov.id = 'eq2-card';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:10008;display:flex;align-items:center;justify-content:center;padding:18px';
+    const lines = (it.af || []).map(a => `<div style="font-size:11.5px;color:#374151;padding:1px 0">✦ ${_eq2OptLine(a[0], +a[1] || 0)}</div>`).join('');
+    ov.innerHTML = `<div style="background:#fff;border:3px solid ${RARITY_BORDER[EQ2_TCOL[t - 1]]};border-radius:14px;padding:14px 16px;max-width:290px;width:100%;box-shadow:0 12px 40px rgba(2,8,23,.45)">
+      <div style="display:flex;align-items:center;gap:8px">
+        <div style="border:2px solid ${RARITY_BORDER[EQ2_TCOL[t - 1]]};background:${RARITY_BG[EQ2_TCOL[t - 1]]};border-radius:9px;padding:4px">${_eq2Ico(it, 34)}</div>
+        <div><div style="font-size:13.5px;font-weight:800;color:${RARITY_TEXT[EQ2_TCOL[t - 1]]}">${_eq2Name(it)}${_eq2PlusTag(it.p)}</div>
+        <div style="font-size:10px;color:#6b7280">Lv.${it.lv | 0}</div></div>
+      </div>
+      <div style="border-top:1px dashed #e7e5e4;margin:8px 0 6px"></div>
+      <div style="font-size:11.5px;color:#0f766e;font-weight:700">🛡️ DEF +${EQ2_DEF[t - 1] + Math.round(Math.floor(Math.max(1, Math.min(999, it.lv | 0)) / 10) * EQ2_DEF_LVF) + _eq2PlusDef(it.p)}${(it.p | 0) > 0 ? `<span style="font-weight:500;color:#7c3aed"> (${T('ตีบวก')} +${_eq2PlusDef(it.p)})</span>` : ''}</div>
+      ${lines}
+      <div style="display:flex;gap:7px;margin-top:11px">
+        ${src === 'i'
+          ? `<button onclick="xhrpg._eq2Act('equip',{id:'${String(it.id || '')}'})" style="flex:1;background:#b91c1c;color:#fff;border:none;border-radius:9px;padding:8px;font-size:12px;font-weight:700;cursor:pointer">⚔️ ${T('สวมใส่')}</button>
+             <button onclick="xhrpg._eq2Destroy('${String(it.id || '')}')" style="flex:0 0 auto;background:#f1f5f9;color:#dc2626;border:1px solid #fecaca;border-radius:9px;padding:8px 12px;font-size:12px;cursor:pointer">🗑️</button>`
+          : `<button onclick="xhrpg._eq2Act('unequip',{slot:'${slot}'})" style="flex:1;background:#78716c;color:#fff;border:none;border-radius:9px;padding:8px;font-size:12px;font-weight:700;cursor:pointer">${T('ถอดออก')}</button>`}
+        <button onclick="document.getElementById('eq2-card')?.remove()" style="flex:0 0 auto;background:#f5f5f4;color:#57534e;border:none;border-radius:9px;padding:8px 12px;font-size:12px;cursor:pointer">${T('ปิดหน้าต่าง')}</button>
+      </div>
+      ${src === 'i' && _eq2Kind(it) === 'ring' && _eq2Worn().ring1 && _eq2Worn().ring2
+        ? `<div style="display:flex;gap:6px;margin-top:6px;font-size:10px"><span style="color:#a8a29e;align-self:center">${T('แหวนเต็มทั้งคู่ — เลือกช่อง')}:</span>
+           <button onclick="xhrpg._eq2Act('equip',{id:'${String(it.id || '')}',slot:'ring1'})" style="border:1px solid #e7e5e4;background:#fff;border-radius:6px;padding:2px 8px;cursor:pointer">💍1</button>
+           <button onclick="xhrpg._eq2Act('equip',{id:'${String(it.id || '')}',slot:'ring2'})" style="border:1px solid #e7e5e4;background:#fff;border-radius:6px;padding:2px 8px;cursor:pointer">💍2</button></div>` : ''}
+    </div>`;
+    ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+    document.body.appendChild(ov);
+  }
+
+  // ── 🎰 สุ่มโชค G (P → G · เจ้าของสั่ง 2026-07-19) — ⚖️ เรตตัวคูณ "เปิดเผยแล้ว" (เจ้าของสั่ง 2026-07-27 ตามข้อกำหนด compliance ผู้ให้บริการชำระเงิน) แสดงในแผง + บทคู่มือ ──
+  //    ทุกอย่างคิดฝั่ง server (ราคา/ตัวคูณ/โควตา) — client แค่แสดงผลจาก info/spin
+  const GACHA_TIER_CLR = ['#22c55e', '#fbbf24', '#fbbf24', '#f59e0b', '#f59e0b', '#f59e0b', '#ea580c', '#ea580c', '#ea580c', '#dc2626']; // สี pip ตามบันไดราคา (ฟรี/10/15/20/25)
+  function _gachaDotUpd() { // จุดแดงบนปุ่ม = วันนี้ยังไม่ได้สุ่มเลย (เก็บวันล่าสุดที่สุ่มใน localStorage — แค่ตัวช่วยเตือน สิทธิ์จริงอยู่ server)
+    const d = document.getElementById('gacha-dot');
+    if (!d) return;
+    let last = ''; try { last = localStorage.getItem('xh_gacha_d') || ''; } catch (e) {}
+    d.style.display = (player && player.line_uid && player.line_uid !== 'demo' && last !== new Date().toDateString()) ? 'block' : 'none';
+  }
+  // ── 🔨 ประมูลรายวัน (docs/auction-design.md) — เปิด 12:00 ปิด 21:30 เวลาไทย · 6 ช่อง (P×3 G×3) ──
+  function _aucPost(data, cb) {
+    $.post(baseUrl + 'xhrpg_auction.php', Object.assign({ line_uid: player.line_uid, lang: LANG(), session_token: sessionToken || '' }, data))
+      .done(res => { let d; try { d = typeof res === 'string' ? JSON.parse(res) : res; } catch (e) { return; } if (cb) cb(d); })
+      .fail(() => { if (cb) cb(null); });
+  }
+  let _aucState = null, _aucTimer = null, _aucTab = 'today';
+  // ⏰ ชดเชยนาฬิกาเครื่องผู้เล่นที่เดินไม่ตรงเซิร์ฟเวอร์ (เจอจริง 2026-07-28: นับถอยหลังถึง 00:00 แล้วของยังไม่มา)
+  //    เดิมเทียบ epoch ของ server กับ Date.now() ของเครื่อง → เครื่องเร็วไป 30 วิ = นับหมดก่อนรอบเปิดจริง
+  //    ค้างที่ 00:00 พร้อมข้อความ "ยังไม่ถึงเวลา" **และยิง state ทุก 1 วินาที** จนกว่านาฬิกาเครื่องจะข้าม 12:00
+  //    server ส่ง `now` มาให้อยู่แล้วทุกครั้ง → จับส่วนต่างไว้ แล้วใช้เวลาฝั่ง server เป็นหลักทุกจุด
+  let _aucSkew = 0, _aucRefetchAt = 0;
+  const _aucNow = () => Date.now() / 1000 + _aucSkew;   // "ตอนนี้" ตามนาฬิกาเซิร์ฟเวอร์
+  function _aucClose() { document.getElementById('auc-panel')?.remove(); if (_aucTimer) { clearInterval(_aucTimer); _aucTimer = null; } }
+  function _aucFmtLeft(sec) { sec = Math.max(0, sec | 0); const h = (sec / 3600) | 0, m = ((sec % 3600) / 60) | 0, s = sec % 60; return (h > 0 ? h + ':' : '') + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0'); }
+  // ══ ⏳🔨 นับถอยหลังใกล้ปิดประมูล (docs/auction-countdown-design.md) ══════════════════════════
+  //   2 ชั้น: (A) ป้ายบนปุ่ม 🔨 ทุกคนเห็น รบกวน 0 · (B) แถบเตือน เฉพาะคนมีส่วนได้เสีย
+  //   ⚠️ หลักการ "ไม่รำคาญ": คนไม่เคยแตะประมูลวันนี้ = ไม่เด้งเลย · ยิงขั้นละครั้งต่อรอบ · ไม่มีเสียง
+  const AUC_WARN_STEPS = [10800, 7200, 3600, 1800, 900, 300, 60];  // 3ชม. 2ชม. 1ชม. 30น. 15น. 5น. 1น.
+  const AUC_WATCH_ONLY = [3600, 300];                              // คนแค่ "เปิดดูหน้าประมูลวันนี้" ได้แค่ 2 ขั้นนี้
+  let _aucEnd = 0, _aucIsBidder = false, _aucBadgeTimer = null, _aucWarnKey = '', _aucWarnDone = {};
+  const _aucToday = () => { const d = new Date(); return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`; };
+  function _aucWarnLoad() {   // จำขั้นที่เตือนไปแล้ว ต่อรอบ (รีเฟรชหน้าไม่เด้งซ้ำ · ข้ามวันล้างเอง)
+    const k = 'xh_auc_warn_' + _aucToday();
+    if (_aucWarnKey === k) return;
+    _aucWarnKey = k; _aucWarnDone = {};
+    try { _aucWarnDone = JSON.parse(localStorage.getItem(k) || '{}') || {}; } catch (e) { _aucWarnDone = {}; }
+  }
+  const _aucWarnSave = () => { try { localStorage.setItem(_aucWarnKey, JSON.stringify(_aucWarnDone)); } catch (e) {} };
+  const _aucOpenedToday = () => { try { return localStorage.getItem('xh_auc_seen') === _aucToday(); } catch (e) { return false; } };
+  const _aucWarnOn = () => { try { return localStorage.getItem('xh_auc_warn_off') !== '1'; } catch (e) { return true; } };
+  // poll เรียกทุกครั้งที่ได้ field auc — เก็บค่าไว้ให้ตัวจับเวลาใช้ (ตัวจับเวลาเดินเอง 1 วิ ไม่รอ poll)
+  function _aucSetState(a) {
+    if (a && typeof a.now === 'number') _aucSkew = a.now - Date.now() / 1000; // ⏰ หักส่วนต่างนาฬิกาจาก poll (ไม่ต้องเปิดแผงก็ตรง)
+    if (!a || !a.end) { _aucEnd = 0; _aucBadgePaint(); return; }
+    _aucEnd = a.end | 0; _aucIsBidder = !!(a.bid | 0);
+    _aucWarnLoad();
+    if (!_aucBadgeTimer) _aucBadgeTimer = setInterval(_aucBadgePaint, 1000);
+    _aucBadgePaint();
+  }
+  function _aucBadgePaint() {
+    const el = document.getElementById('auc-badge'); if (!el) return;
+    const left = _aucEnd ? (_aucEnd - _aucNow()) | 0 : -1;
+    if (left <= 0 || left > 10800) { el.style.display = 'none'; el.style.animation = ''; return; } // >3 ชม./ปิดแล้ว = ปุ่มสะอาด
+    const mm = (left / 60) | 0, ss = left % 60;
+    el.textContent = '⏳' + (left > 3600 ? `${(left / 3600) | 0}:${String(((left % 3600) / 60) | 0).padStart(2, '0')}` : `${mm}:${String(ss).padStart(2, '0')}`);
+    el.style.background = left <= 300 ? '#dc2626' : (left <= 1800 ? '#ea580c' : '#f59e0b');
+    el.style.animation  = left <= 60 ? 'xhAucBlink 1s steps(2,end) infinite' : ''; // กะพริบเฉพาะนาทีสุดท้าย
+    el.style.display    = '';
+    _aucWarnCheck(left);
+  }
+  function _aucWarnCheck(left) {
+    if (!_aucWarnOn()) return;                                   // ผู้เล่นปิดเตือนเอง
+    if (document.getElementById('auc-panel')) return;            // เปิดหน้าประมูลอยู่ = เห็น countdown แล้ว
+    const tier = _aucIsBidder ? 2 : (_aucOpenedToday() ? 1 : 0); // 2=เคยบิด · 1=แค่เปิดดู · 0=ไม่เกี่ยว
+    if (tier === 0) return;
+    for (const s of AUC_WARN_STEPS) {
+      if (_aucWarnDone[s]) continue;
+      if (left > s) continue;                                    // ยังไม่ถึงขั้นนี้
+      _aucWarnDone[s] = 1;                                       // mark เสมอ (รวมขั้นที่ "เลยมาแล้วตอนเพิ่งเข้าเกม")
+      // ⚠️ เด้งเฉพาะขั้นที่เพิ่งมาถึงจริง (ห่างไม่เกิน 5 วิ) — เข้าเกมสายไม่โดนถล่มย้อนหลัง
+      if (s - left <= 5 && (tier === 2 || AUC_WATCH_ONLY.indexOf(s) >= 0)) {
+        addLog([{ type: s <= 60 ? 'dead' : 'levelup',
+                  msg: s <= 60 ? T('⏰ ปิดประมูลในอีก 1 นาที!') : T('🔨 ปิดประมูลในอีก {a}', { a: _aucFmtLeft(s) }) }]);
+      }
+    }
+    _aucWarnSave();
+  }
+  function openAucPanel() {
+    try { localStorage.setItem('xh_auc_seen', _aucToday()); } catch (e) {} // เปิดดูวันนี้แล้ว → ได้เตือนชั้นกลาง (1 ชม./5 นาที)
+    if (!player || !player.line_uid || player.line_uid === 'demo') return;
+    _aucClose(); _aucTab = 'today';
+    const ov = document.createElement('div'); ov.id = 'auc-panel';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.65);z-index:10009;display:flex;align-items:center;justify-content:center;padding:14px';
+    ov.addEventListener('click', e => { if (e.target === ov) _aucClose(); });
+    ov.innerHTML = `<div style="background:#fff;border-radius:16px;max-width:360px;width:100%;max-height:90vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 12px 40px rgba(2,8,23,.5)">
+      <div style="background:#4c1d95;padding:12px 16px;text-align:center;color:#fff;position:relative;flex:none">
+        <button onclick="xhrpg._aucClose()" style="position:absolute;top:8px;right:10px;width:28px;height:28px;border-radius:8px;border:none;background:rgba(255,255,255,.2);color:#fff;font-size:15px;cursor:pointer">✕</button>
+        <b style="font-size:15px">🔨 ${T('ประมูลรายวัน')}</b>
+        <div id="auc-count" style="font-size:11px;color:#ddd6fe;margin-top:2px">${T('กำลังโหลด...')}</div>
+        <!-- 🔔 สวิตช์ปิดแถบเตือนใกล้ปิด (ป้ายบนปุ่ม 🔨 ยังอยู่) — เผื่อคนรำคาญ -->
+        <button id="auc-bell" onclick="xhrpg._aucBellTog()" style="position:absolute;top:9px;left:10px;border:none;border-radius:8px;background:rgba(255,255,255,.18);color:#fff;font-size:11px;padding:4px 8px;cursor:pointer">${_aucWarnOn() ? '🔔' : '🔕'}</button>
+      </div>
+      <div style="display:flex;gap:6px;padding:9px 12px 0;flex:none">
+        <button onclick="xhrpg._aucSetTab('today')" id="auc-tab-today" style="flex:1;padding:7px 0;border:none;border-radius:8px;font-size:12px;font-weight:800;cursor:pointer">${T('รอบวันนี้')}</button>
+        <button onclick="xhrpg._aucSetTab('prev')" id="auc-tab-prev" style="flex:1;padding:7px 0;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">${T('ผลรอบก่อน')}</button>
+      </div>
+      <div id="auc-body" style="overflow-y:auto;min-height:0;flex:1;padding:10px 12px 14px"><div style="text-align:center;color:#a8a29e;padding:24px 0">${T('กำลังโหลด...')}</div></div>
+    </div>`;
+    document.body.appendChild(ov);
+    _aucTabPaint(); _aucFetch();
+    _aucTimer = setInterval(_aucTick, 1000);
+  }
+  function _aucBellTog() {   // สลับเตือน/ไม่เตือน — เก็บถาวรใน localStorage
+    const on = _aucWarnOn();
+    try { localStorage.setItem('xh_auc_warn_off', on ? '1' : '0'); } catch (e) {}
+    const b = document.getElementById('auc-bell'); if (b) b.textContent = on ? '🔕' : '🔔';
+    addLog([{ type: 'levelup', msg: on ? T('🔕 ปิดแถบเตือนใกล้ปิดประมูลแล้ว (ป้ายบนปุ่มยังอยู่)') : T('🔔 เปิดแถบเตือนใกล้ปิดประมูลแล้ว') }]);
+  }
+  function _aucTabPaint() {
+    const t = document.getElementById('auc-tab-today'), p = document.getElementById('auc-tab-prev');
+    if (t) { t.style.background = _aucTab === 'today' ? '#4c1d95' : '#f1f5f9'; t.style.color = _aucTab === 'today' ? '#fff' : '#64748b'; }
+    if (p) { p.style.background = _aucTab === 'prev' ? '#4c1d95' : '#f1f5f9'; p.style.color = _aucTab === 'prev' ? '#fff' : '#64748b'; }
+  }
+  function _aucSetTab(tab) { _aucTab = tab; _aucTabPaint(); const b = document.getElementById('auc-body'); if (b) b.innerHTML = `<div style="text-align:center;color:#a8a29e;padding:24px 0">${T('กำลังโหลด...')}</div>`; _aucTab === 'today' ? _aucFetch() : _aucFetchPrev(); }
+  function _aucTick() { // countdown สด — คำนวณจาก epoch server (ไม่มีปัญหา timezone เครื่องผู้เล่น)
+    const c = document.getElementById('auc-count'); if (!c || !_aucState) return;
+    const left = ((_aucState.phase === 'open' ? _aucState.ends_at : _aucState.opens_at) - _aucNow()) | 0;
+    c.textContent = _aucState.phase === 'open' ? T('⏳ ปิดประมูลใน {a} (21:30 น.)', { a: _aucFmtLeft(left) }) : T('⏳ รอบใหม่เริ่มใน {a} (12:00 น.)', { a: _aucFmtLeft(left) });
+    // ข้ามจุดเปิด/ปิด → รีเฟรช · ⚠️ throttle 5 วิ: ถ้า server ยังไม่ทันเปลี่ยนเฟส (นาฬิกาต่างกันเสี้ยววิ/รอบ roll ยังไม่ลง)
+    //    โค้ดเดิมยิงซ้ำทุก 1 วินาทีไม่มีเพดาน = ผู้เล่นทุกคนที่เปิดแผงค้างไว้ยิงพร้อมกันตอนเที่ยงตรง
+    if (left <= 0 && _aucTab === 'today' && Date.now() >= _aucRefetchAt) {
+      _aucRefetchAt = Date.now() + 5000;
+      _aucFetch();   // ไม่ล้าง _aucState — เก็บ countdown ไว้แสดงต่อระหว่างรอคำตอบ (เดิมล้างแล้วป้ายหาย)
+    }
+  }
+  function _aucFetch() {
+    _aucPost({ action: 'state' }, d => {
+      const b = document.getElementById('auc-body'); if (!b) return;
+      if (!d || !d.ok) { b.innerHTML = `<div style="text-align:center;color:#dc2626;padding:20px 8px;font-size:12px">${T('โหลดไม่สำเร็จ')}${d && d.error ? ' (' + d.error + ')' : ''}</div>`; return; }
+      if (typeof d.now === 'number') _aucSkew = d.now - Date.now() / 1000; // ⏰ จับส่วนต่างนาฬิกาทุกครั้งที่คุยกับ server
+      _aucState = d;
+      if (d.phase !== 'open') {
+        b.innerHTML = `<div style="text-align:center;padding:26px 10px;color:#64748b;font-size:12.5px">🌙 ${T('ยังไม่ถึงเวลาประมูล — รอบใหม่เปิด 12:00 ปิด 21:30 เวลาไทย')}<br><br><span style="font-size:11px;color:#94a3b8">${T('ดูผลรอบล่าสุดได้ที่แท็บ "ผลรอบก่อน"')}</span></div>`;
+        return;
+      }
+      const sec = (cur) => `<div style="font-size:11px;font-weight:800;color:${cur === 'P' ? '#7c3aed' : '#b45309'};margin:4px 2px 6px">${cur === 'P' ? '💎 ' + T('ประมูลด้วยแต้ม P') : '💰 ' + T('ประมูลด้วยเงิน G')}</div>`;
+      let html = '';
+      (d.slots || []).forEach(s => {
+        if (s.i === 0) html += sec('P');
+        if (s.i === 3) html += sec('G');
+        const sp = _monSpriteBg(s.lv), D = 40;
+        const ico = sp ? `<div style="flex:none;width:${D}px;height:${D}px;border-radius:9px;background:#f1f5f9 url('${sp.url}') 0 0/${sp.cols * D}px ${sp.rows * D}px no-repeat;image-rendering:pixelated"></div>` : `<div style="flex:none;width:${D}px;height:${D}px;border-radius:9px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;font-size:20px">🎴</div>`;
+        const unit = s.cur === 'P' ? 'P' : 'G';
+        // ค่าพลังการ์ด (เจ้าของขอ 2026-07-25): STAT + ค่าที่ได้เมื่อเสียบ — สูตร/สี/label เดียวกับสมุดการ์ด (_cardValue · การ์ดปกติ ×1)
+        const _ast = (s.cs || '').toLowerCase(), _aclr = _CARD_STAT_CLR[_ast] || '#94a3b8', _albl = _CARD_STAT_LBL[_ast] || '';
+        const statLine = _albl ? `<div style="font-size:10.5px;margin-top:1px"><b style="color:${_aclr}">${_albl} +${_cardValue(s.lv, 0)}</b> <span style="color:#94a3b8">· ${T('เสียบโมดูลได้')}</span></div>` : '';
+        // 💰 แถบราคาเด่นเต็มความกว้าง (เจ้าของขอ 2026-07-25 — เดิม text จางอ่านยาก): พื้นสีตามสกุล + เลขใหญ่หนา
+        const hasBid = s.n > 0, pclr = s.cur === 'P' ? '#7c3aed' : '#b45309', pbg = s.cur === 'P' ? '#f5f3ff' : '#fffbeb';
+        const priceBar = `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;background:${pbg};border:1.5px solid ${pclr}55;border-radius:9px;padding:6px 11px;margin-top:7px">
+          <span style="flex:1;min-width:0;font-size:10.5px;font-weight:700;color:#64748b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${hasBid ? '🔥 ' + T('ราคานำ') + ` · ${s.n} bid` : '🏁 ' + T('ราคาเริ่ม')}</span>
+          <b style="flex:none;font-size:17px;line-height:1;color:${pclr}">${s.cur === 'P' ? '💎' : '💰'} ${Number(hasBid ? s.top : s.start).toLocaleString()}<span style="font-size:11px;font-weight:800"> ${unit}</span></b>
+        </div>`;
+        const leader = s.n > 0 ? `<div style="font-size:10.5px;color:${s.mine ? '#b45309' : '#64748b'};margin-top:1px">👑 ${s.mine ? T('คุณนำอยู่') : _flag(s.cc) + _esc0(s.nm)}</div>` : '';
+        // ช่องว่าง = ปุ่มเดียว "เปิดบิดที่ {ราคาเริ่ม}" (inc=0 → server คิดเป็นราคาเริ่มพอดี) — เจ้าของแจ้ง 2026-07-25 กด +1 ตอนเปิดบิดแรกชวนงง · มีคนบิดแล้วค่อยโชว์ 5 ปุ่มแซงราคา
+        const btns = !hasBid
+          ? `<button onclick="xhrpg._aucBid(${s.i},0)" style="width:100%;padding:8px 0;border:none;border-radius:8px;background:${pclr};color:#fff;font-size:12.5px;font-weight:800;cursor:pointer">⚔️ ${T('เปิดบิดที่ {a}', { a: Number(s.start).toLocaleString() + ' ' + unit })}</button>`
+          : `<span style="flex:none;align-self:center;font-size:10px;color:#64748b;font-weight:700">${T('แซง')}</span>` + (d.inc[s.cur] || []).map((inc, ix) =>
+          `<button onclick="xhrpg._aucBid(${s.i},${ix})" style="flex:1;min-width:0;padding:6px 0;border:none;border-radius:7px;background:${s.cur === 'P' ? '#7c3aed' : '#b45309'};color:#fff;font-size:10px;font-weight:800;cursor:pointer;white-space:nowrap">+${inc >= 1000 ? (inc / 1000) + 'k' : inc}</button>`).join('');
+        html += `<div style="border:1px solid ${s.mine ? '#fbbf24' : '#e2e8f0'};border-radius:12px;padding:9px 10px;margin-bottom:8px;background:${s.mine ? '#fffbeb' : '#fff'}">
+          <div style="display:flex;align-items:center;gap:9px">
+            ${ico}
+            <div style="flex:1;min-width:0">
+              <div style="font-size:12.5px;font-weight:700;color:#1e293b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">🎴 ${T(s.name)} <span style="font-size:10px;color:#94a3b8;font-weight:400">Lv.${s.lv}</span></div>
+              ${statLine}
+              ${leader}
+            </div>
+            <button onclick="xhrpg._aucHist(${s.i})" title="${T('ประวัติบิด')}" style="flex:none;padding:6px 9px;border:1px solid #e2e8f0;border-radius:8px;background:#fff;color:#64748b;font-size:12px;cursor:pointer">📜</button>
+          </div>
+          ${priceBar}
+          <div style="display:flex;gap:5px;margin-top:6px">${btns}</div>
+        </div>`;
+      });
+      b.innerHTML = html || `<div style="text-align:center;color:#a8a29e;padding:24px 0">${T('ไม่มีของประมูลวันนี้')}</div>`;
+      _aucTick();
+    });
+  }
+  function _aucBid(slot, incIx) {
+    if (!_aucState || !_aucState.slots) return;
+    const s = _aucState.slots.find(x => x.i === slot); if (!s) return;
+    const inc = (_aucState.inc[s.cur] || [])[incIx] | 0;
+    const newBid = s.top + inc, unit = s.cur;
+    if (!confirm(T('ยืนยันบิด {a}? ({b})', { a: Number(newBid).toLocaleString() + ' ' + unit, b: T(s.name) }) + (s.mine ? '\n' + T('(คุณนำอยู่ — จ่ายเพิ่มเฉพาะส่วนต่าง {a})', { a: Number(inc).toLocaleString() + ' ' + unit }) : ''))) return;
+    _aucPost({ action: 'bid', slot: slot, inc: incIx, seen: s.top }, d => {
+      if (!d) { addLog([{ type: 'dead', msg: T('❌ เชื่อมต่อไม่ได้') }]); return; }
+      if (!d.ok) {
+        if (d.moved) { alert(T('ราคาขยับแล้ว — ดูราคาล่าสุดก่อนบิดอีกครั้ง')); _aucFetch(); return; }
+        alert(d.error || '?'); return;
+      }
+      if (d.cur === 'P') player.p_points = d.bal; else player.gold = d.bal;
+      addLog([{ type: 'levelup', msg: d.msg }]);
+      _aucFetch();
+    });
+  }
+  function _aucHist(slot) {
+    _aucPost({ action: 'hist', slot: slot }, d => {
+      document.getElementById('auc-hist')?.remove();
+      if (!d || !d.ok) return;
+      const ov = document.createElement('div'); ov.id = 'auc-hist';
+      ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:10011;display:flex;align-items:center;justify-content:center;padding:18px';
+      ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+      const rows = (d.bids || []).map(r => `<div style="display:flex;justify-content:space-between;gap:8px;font-size:11px;color:#475569;padding:3px 0;border-bottom:1px solid #f1f5f9">
+          <span style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${String(r.created_at).slice(11, 16)} · ${_flag(r.bidder_cc)}${_esc0(r.bidder_name)}${+r.refunded ? ' <span style="color:#16a34a">↩ ' + T('คืนแล้ว') + '</span>' : ''}</span>
+          <b style="flex:none;color:#1e293b">${Number(r.amount).toLocaleString()} ${r.cur}</b></div>`).join('')
+        || `<div style="text-align:center;color:#a8a29e;font-size:11.5px;padding:12px 0">${T('ยังไม่มีผู้บิดช่องนี้')}</div>`;
+      const past = (d.past || []).length ? `<div style="font-size:10.5px;font-weight:800;color:#7c3aed;margin:10px 0 3px">📈 ${T('ราคาปิดย้อนหลังของการ์ดใบนี้')}</div>` +
+        d.past.map(p => `<div style="display:flex;justify-content:space-between;font-size:10.5px;color:#64748b;padding:2px 0"><span>${String(p.round_date).slice(5)} · 🏆 ${_flag(p.winner_cc)}${_esc0(p.winner_name)}</span><b>${Number(p.final_price).toLocaleString()} ${p.cur}</b></div>`).join('') : '';
+      ov.innerHTML = `<div style="background:#fff;border-radius:14px;max-width:320px;width:100%;max-height:80vh;display:flex;flex-direction:column;overflow:hidden">
+        <div style="background:#4c1d95;color:#fff;padding:10px 14px;text-align:center;position:relative;flex:none"><b style="font-size:13px">📜 ${T('ประวัติบิด (โปร่งใสทุกรายการ)')}</b>
+          <button onclick="document.getElementById('auc-hist')?.remove()" style="position:absolute;top:7px;right:9px;width:26px;height:26px;border:none;border-radius:7px;background:rgba(255,255,255,.2);color:#fff;cursor:pointer">✕</button></div>
+        <div style="overflow-y:auto;padding:10px 14px 14px">${rows}${past}</div>
+      </div>`;
+      document.body.appendChild(ov);
+    });
+  }
+  function _aucFetchPrev() {
+    _aucPost({ action: 'prev' }, d => {
+      const b = document.getElementById('auc-body'); if (!b || _aucTab !== 'prev') return;
+      if (!d || !d.ok) { b.innerHTML = `<div style="text-align:center;color:#dc2626;padding:20px 0;font-size:12px">${T('โหลดไม่สำเร็จ')}</div>`; return; }
+      if (!d.rounds || !d.rounds.length) { b.innerHTML = `<div style="text-align:center;color:#a8a29e;padding:24px 0;font-size:12px">${T('ยังไม่มีผลรอบก่อน')}</div>`; return; }
+      let lastDate = '', html = '';
+      d.rounds.forEach(r => {
+        if (r.round_date !== lastDate) { lastDate = r.round_date; html += `<div style="font-size:11px;font-weight:800;color:#7c3aed;margin:8px 2px 4px">📅 ${String(r.round_date).slice(0, 10)}</div>`; }
+        html += `<div style="display:flex;justify-content:space-between;gap:8px;font-size:11.5px;color:#475569;padding:4px 6px;border:1px solid #f1f5f9;border-radius:8px;margin-bottom:4px">
+          <span style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">🎴 ${T(r.item_name)} <span style="font-size:9.5px;color:#94a3b8">Lv.${r.item_lv}</span></span>
+          <span style="flex:none">${r.winner_name ? '🏆 ' + _flag(r.winner_cc) + _esc0(r.winner_name) + ' · <b>' + Number(r.final_price).toLocaleString() + ' ' + r.cur + '</b>' : '<span style="color:#cbd5e1">' + T('ไม่มีผู้บิด') + '</span>'}</span>
+        </div>`;
+      });
+      b.innerHTML = html;
+    });
+  }
+  // 📣 แจ้งเตือนรอบประมูล (แบบมอนบุกต้นไม้ — เจ้าของสั่ง 2026-07-25): 12:00 เริ่ม · 21:00 เตือนก่อนปิด 30 นาที
+  //    เวลาไทยคำนวณฝั่ง client (UTC+7 — ไม่พึ่ง TZ เครื่อง) · dedup ต่อวันด้วย localStorage · เรียกทุก poll
+  function _aucAnnounce() {
+    try {
+      if (!player || !player.line_uid || player.line_uid === 'demo') return;
+      const th = new Date(Date.now() + (420 + new Date().getTimezoneOffset()) * 60000);
+      const dkey = th.getFullYear() * 10000 + (th.getMonth() + 1) * 100 + th.getDate(), hm = th.getHours() * 60 + th.getMinutes();
+      const fire = (tag, msg) => {
+        const k = 'xhrpg_auc_ann_' + dkey + '_' + tag;
+        if (localStorage.getItem(k)) return;
+        localStorage.setItem(k, '1');
+        addLog([{ type: 'levelup', msg: msg }]); _arenaToast(msg);
+      };
+      if (hm >= 720 && hm < 735) fire('o', T('🔨 ประมูลรายวันเปิดแล้ว! บิดได้ถึง 21:30 น.'));      // 12:00-12:15
+      if (hm >= 1260 && hm < 1275) fire('c', T('🔨 ประมูลจะปิดใน 30 นาที (21:30) — รีบบิดก่อนหมดเวลา!')); // 21:00-21:15
+    } catch (e) {}
+  }
+  // ═══ 🏰 กิล (docs/guild-design.md · 2026-07-26) ═══
+  //   tag = "ชื่อกิล|shape:color:icon" (mirror จาก server) — ตรา 3 ชั้นวาดสดด้วย canvas + cache
+  const GD_COLORS = ['#7f1d1d', '#1e3a8a', '#14532d', '#4c1d95', '#a16207', '#1c1917', '#0e7490', '#9d174d']; // sync PHP XHRPG_GUILD_EM_COLORS
+  const GD_ICONS  = ['🐉', '⚔️', '🛡️', '👑', '🔥', '⚡', '🌙', '⭐', '💀', '🦁', '🐺', '🦅', '🌸', '❄️', '🌊', '🍀', '💎', '🏹', '🗡️', '🎭', '🌋', '🦂', '🐍', '🏰'];   // sync PHP XHRPG_GUILD_EM_ICONS
+  const _gdEmCache = {}, _gdUrlCache = {};
+  const _gdEsc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  function _gdParseTag(tag) { // "ชื่อ|s:c:i" — แยกที่ | ตัวสุดท้าย (ชื่อกรอง | ฝั่ง server แล้ว แต่กันเหนียว)
+    if (!tag) return null;
+    const p = String(tag).lastIndexOf('|');
+    if (p < 1) return null;
+    const m = String(tag).slice(p + 1).split(':');
+    return { name: String(tag).slice(0, p), sh: Math.max(0, Math.min(5, +m[0] | 0)), co: Math.max(0, Math.min(GD_COLORS.length - 1, +m[1] | 0)), ic: Math.max(0, Math.min(GD_ICONS.length - 1, +m[2] | 0)) };
+  }
+  function _gdShapePath(g, sh, S) { // กรอบตรา 6 แบบ (วาดใน S×S · เว้นขอบ ~6%)
+    const m = S * 0.07, w = S - m * 2, cx = S / 2;
+    g.beginPath();
+    if (sh === 1) { g.arc(cx, S / 2, w / 2, 0, Math.PI * 2); }                                        // วงกลม
+    else if (sh === 2) { // โล่โค้งกว้าง (badge)
+      g.moveTo(m, m + w * 0.12); g.quadraticCurveTo(cx, m - w * 0.04, S - m, m + w * 0.12);
+      g.lineTo(S - m, m + w * 0.5); g.quadraticCurveTo(S - m, m + w * 0.82, cx, m + w);
+      g.quadraticCurveTo(m, m + w * 0.82, m, m + w * 0.5); g.closePath();
+    } else if (sh === 3) { g.moveTo(cx, m); g.lineTo(S - m, S / 2); g.lineTo(cx, S - m); g.lineTo(m, S / 2); g.closePath(); }  // เพชร
+    else if (sh === 4) { // ธงห้าเหลี่ยม (banner ปลายแหลมล่าง)
+      g.moveTo(m, m); g.lineTo(S - m, m); g.lineTo(S - m, m + w * 0.62); g.lineTo(cx, m + w); g.lineTo(m, m + w * 0.62); g.closePath();
+    } else if (sh === 5) { // หกเหลี่ยม
+      g.moveTo(cx, m); g.lineTo(S - m, m + w * 0.25); g.lineTo(S - m, m + w * 0.75); g.lineTo(cx, S - m); g.lineTo(m, m + w * 0.75); g.lineTo(m, m + w * 0.25); g.closePath();
+    } else { // 0 โล่คลาสสิก
+      g.moveTo(m, m); g.lineTo(S - m, m); g.lineTo(S - m, m + w * 0.55);
+      g.quadraticCurveTo(S - m, m + w * 0.85, cx, m + w); g.quadraticCurveTo(m, m + w * 0.85, m, m + w * 0.55); g.closePath();
+    }
+  }
+  function _gdEmblem(sh, co, ic, S) { // canvas ตรา (cache ต่อชุด index+ขนาด)
+    const k = sh + ':' + co + ':' + ic + ':' + S;
+    if (_gdEmCache[k]) return _gdEmCache[k];
+    const c = document.createElement('canvas'); c.width = c.height = S;
+    const g = c.getContext('2d');
+    g.save();
+    _gdShapePath(g, sh, S);
+    g.fillStyle = GD_COLORS[co] || GD_COLORS[0]; g.fill();
+    g.lineWidth = Math.max(1, S * 0.055); g.strokeStyle = 'rgba(255,255,255,.9)'; g.stroke();
+    g.clip();
+    g.fillStyle = 'rgba(255,255,255,.16)'; g.fillRect(0, 0, S, S * 0.46); // ไฮไลต์ครึ่งบน
+    g.restore();
+    g.font = `${Math.round(S * 0.5)}px serif`; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillText(GD_ICONS[ic] || '🏰', S / 2, S * 0.52);
+    _gdEmCache[k] = c; return c;
+  }
+  function _gdEmURL(sh, co, ic, S) { // dataURL สำหรับ <img> ในแผง HTML
+    const k = sh + ':' + co + ':' + ic + ':' + S;
+    if (!_gdUrlCache[k]) { try { _gdUrlCache[k] = _gdEmblem(sh, co, ic, S).toDataURL(); } catch (e) { _gdUrlCache[k] = ''; } }
+    return _gdUrlCache[k];
+  }
+  function _gdChipHTML(tag, fs) { // 【ตรา+ชื่อกิล】 เป็น HTML (ชื่อ escape แล้ว) — แถวอันดับ
+    const t = _gdParseTag(tag);
+    if (!t) return '';
+    const u = _gdEmURL(t.sh, t.co, t.ic, 28);
+    return ` <span style="font-size:${fs}px;color:#b45309;font-weight:700;white-space:nowrap">【${u ? `<img src="${u}" style="width:${fs + 2}px;height:${fs + 2}px;vertical-align:-2px">` : ''}${_gdEsc(t.name)}】</span>`;
+  }
+  function _gdChipEl(tag, fs) { // DOM element (แชท — createElement ล้วน)
+    const t = _gdParseTag(tag);
+    if (!t) return null;
+    const sp = document.createElement('span');
+    sp.style.cssText = `font-size:${fs}px;color:#b45309;font-weight:700;white-space:nowrap;display:inline-flex;align-items:center;gap:1px`;
+    sp.appendChild(document.createTextNode('【'));
+    const u = _gdEmURL(t.sh, t.co, t.ic, 28);
+    if (u) { const im = document.createElement('img'); im.src = u; im.style.cssText = `width:${fs + 2}px;height:${fs + 2}px`; sp.appendChild(im); }
+    sp.appendChild(document.createTextNode(t.name + '】'));
+    return sp;
+  }
+  function _drawGuildLine(tag, cx, y, scale) { // บนแมพ: ตราเล็ก + ชื่อกิลสีทอง เหนือชื่อผู้เล่น
+    const t = _gdParseTag(tag);
+    if (!t) return;
+    const em = _gdEmblem(t.sh, t.co, t.ic, 28);
+    const fpx = Math.max(4.5, 5 * scale), S = Math.max(6, 6.5 * scale);
+    ctx.save();
+    ctx.shadowBlur = 0; ctx.shadowColor = 'transparent'; ctx.globalAlpha = 1;
+    ctx.font = `700 ${fpx}px monospace`;
+    const nm = t.name.slice(0, 12);
+    const tw = ctx.measureText(nm).width, total = S + 1.5 * scale + tw;
+    const x0 = cx - total / 2;
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(em, x0, y - S * 0.82, S, S);
+    ctx.fillStyle = '#fbbf24'; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    ctx.fillText(nm, x0 + S + 1.5 * scale, y);
+    ctx.restore();
+  }
+  // ── แผงกิล 3 แท็บ: กิลของฉัน / ค้นหากิล / อันดับกิล ──
+  // ── ความคืบหน้าเลเวลกิลเป็น "ตัวเลขจริง" (เจ้าของสั่ง 2026-07-26 — เดิมเห็นแค่ % ไม่รู้ว่าต้องอีกเท่าไหร่) ──
+  //    ex/nx มาจาก xhrpg_gd_gpub · หน่วยเป็น G (บริจาค 1 G = 1 EXP กิล) · Lv เต็ม = MAX
+  function _gdProgTxt(g) {
+    if (!g || (g.lv | 0) >= 100) return 'MAX';
+    const ex = g.ex | 0, nx = g.nx | 0;
+    if (nx <= 0) return (g.pct | 0) + '%';                                   // client เก่า/ข้อมูลไม่ครบ → % แบบเดิม
+    return `${(g.pct | 0)}% · ${ex.toLocaleString()} / ${nx.toLocaleString()} G`;
+  }
+  const _gdShortG = n => { n = n | 0; return n >= 1000000 ? (n / 1000000).toFixed(n % 1000000 ? 1 : 0) + 'M' : (n >= 1000 ? Math.round(n / 1000) + 'k' : String(n)); };
+  // ══ 🛸🌌 ยาน Orion บุกอวกาศ (docs/orion-space-raid-design.md) ══════════════════════════
+  //    ยานหายจากจอ + ปืนยานหยุดยิงระหว่างภารกิจ (เจ้าของเคาะ: "ปิดจอไปนอนรอได้เลย")
+  //    สถานะยานอ่านจาก player.orion_raid ที่มาใน poll · free_left/ราคา P ดึงจาก endpoint (server เป็น authority)
+  const ORAID_TIERS = [ // มิเรอร์ XHRPG_ORAID_TIERS ฝั่ง server (เวลา/เลเวลปลด = ข้อมูลที่โชว์ผู้เล่นอยู่แล้ว ไม่ใช่สูตรลับ) · 8/16/24 ชม. (เจ้าของเคาะ 2026-07-27)
+    { t: 1, h: 8,  lv: 30, ic: '🌙', nm: 'วงโคจรดวงจันทร์',   rw: '🌙' },        // rw = แร่ที่อาจได้ (โชว์ในแถว — เจ้าของสั่งแสดงรางวัล)
+    { t: 2, h: 16, lv: 60, ic: '☄️', nm: 'แถบดาวเคราะห์น้อย', rw: '🌙☄️' },
+    { t: 3, h: 24, lv: 90, ic: '🌌', nm: 'ห้วงอวกาศลึก',      rw: '🌙☄️🌌' },
+  ];
+  // แร่ธรรมดาที่ได้ตอนภารกิจล้มเหลว — ⚠️ ไอคอนต้องเป็นชุดเดียวกับหน้า ITEM/ตลาด (มี SVG ใน _RES_EMOJI)
+  //    เคยใช้ 🔩/🟤 ที่นี่ที่เดียว → ผู้เล่นดูไม่ออกว่าเป็นเหล็ก/ทองแดง (เจ้าของแจ้ง 2026-07-29)
+  const _ORAID_CONS = [{ k: 'stone', ic: '🪨', nm: 'หิน' }, { k: 'iron', ic: '⚙️', nm: 'เหล็ก' }, { k: 'copper', ic: '🟫', nm: 'ทองแดง' }];
+  let _oraidInfo = null, _oraidCd = null, _oraidFetchAt = 0;
+  function _oraidPost(data, cb) {
+    $.post(baseUrl + 'xhrpg_orion_raid.php', Object.assign({ line_uid: player.line_uid, lang: LANG(), session_token: sessionToken || '' }, data))
+      .done(res => { let d; try { d = typeof res === 'string' ? JSON.parse(res) : res; } catch (e) { return; } if (cb) cb(d); })
+      .fail(() => { if (cb) cb(null); });
+  }
+  function _oraidCdStop() { if (_oraidCd) { clearInterval(_oraidCd); _oraidCd = null; } }
+  function _oraidCdTick() {
+    const el = document.getElementById('oraid-cd');
+    if (!el) { _oraidCdStop(); return; }                       // การ์ดหายไปแล้ว (ปิดแผง) → หยุดเอง กัน timer ค้าง/ซ้อน
+    const or  = player.orion_raid || {};
+    const now = Math.floor(Date.now() / 1000);
+    const left = Math.max(0, (or.end_at | 0) - now);
+    const h = Math.floor(left / 3600), m = Math.floor((left % 3600) / 60), s = left % 60;
+    el.textContent = (h > 0 ? h + ':' : '') + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+    // 📊 เกจความคืบหน้า (start มากับ blob จาก server · optimistic ตอนกดส่งก็เซ็ตไว้)
+    const bar = document.getElementById('oraid-bar');
+    if (bar) {
+      const total = Math.max(1, (or.end_at | 0) - (or.start | 0) || 1);
+      bar.style.width = Math.max(2, Math.min(100, Math.round((1 - left / total) * 100))) + '%';
+    }
+    // 💜 ราคาเร่งจบวิ่งตามเวลาจริง — สูตรเดียวกับ server: ceil(ชม.ที่เหลือ) × pph (ขั้นต่ำ 1P) · server ตรวจซ้ำตอนกดอยู่ดี
+    const rp = document.getElementById('oraid-rp');
+    if (rp) rp.textContent = Math.max(1, Math.ceil(left / 3600) * (((_oraidInfo || {}).pph | 0) || 1));
+  }
+  function _oraidCdStart() { _oraidCdStop(); if (!document.getElementById('oraid-cd')) return; _oraidCdTick(); _oraidCd = setInterval(_oraidCdTick, 1000); }
+  // ดึงสถานะสด (โควตาฟรี/ราคาเร่ง) แล้ววาดการ์ดใหม่ — cache 20 วิ กันยิงถี่ตอน re-render
+  function _oraidFetch(force) {
+    const now = Date.now();
+    if (!force && _oraidInfo && now - _oraidFetchAt < 20000) return;
+    _oraidFetchAt = now;
+    _oraidPost({ action: 'info' }, d => { if (d && d.ok) { _oraidInfo = d; if (document.getElementById('oraid-card')) renderHouse(); } });
+  }
+  // ⏸️ ปิดระบบบุกอวกาศชั่วคราว (เจ้าของสั่ง 2026-07-28 "นำระบบยานบินบุกอวกาศออกไปก่อน (ซ่อนไว้)")
+  //    ต้องมิเรอร์ XHRPG_ORAID_ON ฝั่ง server (ด่านจริงอยู่ที่ endpoint) · เปิดคืน = true ทั้ง 2 ที่
+  //    ✅ ภารกิจที่ค้างอยู่ยัง settle + เด้ง popup ผลตามปกติ — ซ่อนแค่แผงส่ง/เร่ง ไม่ได้ยึดของใคร
+  const ORAID_UI = true; // ▶️ เปิดคืน 2026-07-29 (เจ้าของสั่ง) — sync XHRPG_ORAID_ON
+  function _oraidCardHTML() {
+    if (!ORAID_UI) return '';                                    // ⏸️ ปิดอยู่ — ไม่โชว์ และไม่ยิง _oraidFetch ให้เปลือง request
+    const shipLv = player.house_lv | 0;
+    if (shipLv < 1) return '';                                   // ยังไม่มียาน — ไม่ต้องโชว์
+    _oraidFetch(false);
+    const act = player.orion_raid || null;
+    const inf = _oraidInfo || {};
+    const box = (inner) => `<div id="oraid-card" class="gun-row" style="background:#faf5ff;border-color:#d8b4fe;flex-wrap:wrap;flex-direction:column;align-items:stretch;gap:6px">${inner}</div>`;
+    const head = `<div style="font-size:12px;font-weight:700;color:#6b21a8">🛸🌌 ${T('บุกอวกาศ')}</div>`;
+    if (act) {
+      // 🛰️ กำลังทำภารกิจ — โชว์เป็นสถานะใหญ่ชัดๆ (เจ้าของแจ้ง UI เดิมงง) · ยานยังบินตาม/ยิงช่วยตามปกติ (เจ้าของเคาะถอดบทลงโทษ)
+      const rushP = (inf.rush_p | 0);
+      const td = ORAID_TIERS.find(x => x.t === ((act.tier | 0) || 1)) || ORAID_TIERS[0];
+      setTimeout(_oraidCdStart, 0);  // เริ่มนับถอยหลังหลัง HTML ลง DOM แล้ว (ข้างในหยุด timer ตัวเก่าให้เอง)
+      return box(`${head}
+        <div style="text-align:center;background:#ede9fe;border-radius:9px;padding:10px 8px">
+          <div style="font-size:12px;font-weight:800;color:#6b21a8">🛰️ ${T('ยานกำลังเดินทาง')} — ${td.ic} ${T(td.nm)}</div>
+          <div style="font-size:19px;font-weight:800;color:#4c1d95;margin:3px 0"><span id="oraid-cd">—</span></div>
+          <div style="height:8px;background:#ddd6fe;border-radius:5px;overflow:hidden;margin:2px 6px 5px"><div id="oraid-bar" style="height:100%;width:2%;background:linear-gradient(90deg,#a78bfa,#7c3aed);border-radius:5px;transition:width 1s linear"></div></div>
+          <div style="font-size:9.5px;color:#7c3aed">🎁 ${td.rw} · 🎲 ${(inf.rate | 0) || 50}%</div>
+        </div>
+        <div style="font-size:10px;color:#16a34a">✅ ${T('ยานยังบินตามและช่วยยิงตามปกติระหว่างทำภารกิจ')}</div>
+        <button onclick="xhrpg.oraidRush()" style="padding:8px 0;border:1px solid #c4b5fd;border-radius:8px;background:#ede9fe;color:#5b21b6;font-size:12px;font-weight:800;cursor:pointer">⚡ ${T('เร่งเวลา')} — <span id="oraid-rp">${rushP}</span> P</button>
+        <div style="font-size:9.5px;color:#94a3b8">${T('ใช้ P เร่งให้กลับทันที — 1P ต่อ 1 ชม.')}</div>`);
+    }
+    const freeLeft = (inf.free_left | 0);
+    if (freeLeft <= 0) {
+      // ✅ ใช้รอบวันนี้แล้ว (และยานกลับมาแล้ว) — ซ่อนแถวภารกิจไปเลย กันงงว่ายังกดได้ไหม
+      return box(`${head}
+        <div style="text-align:center;background:#f5f3ff;border-radius:9px;padding:12px 8px">
+          <div style="font-size:12.5px;font-weight:800;color:#6b21a8">✅ ${T('วันนี้ส่งยานไปแล้ว')}</div>
+          <div style="font-size:10px;color:#94a3b8;margin-top:3px">${T('รีเซ็ตเที่ยงคืน — พรุ่งนี้ส่งได้อีก 1 เที่ยว')}</div>
+        </div>`);
+    }
+    const rows = ORAID_TIERS.map(x => {
+      const ok = shipLv >= x.lv && freeLeft > 0;                     // 🔒 วันละรอบเดียว — ใช้แล้วปุ่มดับหมด (server ตรวจซ้ำอยู่ดี)
+      return `<button ${ok ? `onclick="xhrpg.oraidSend(${x.t})"` : 'disabled'} style="display:block;width:100%;padding:7px 9px;border:1px solid ${ok ? '#d8b4fe' : '#e5e7eb'};border-radius:8px;background:${ok ? '#fff' : '#f8fafc'};cursor:${ok ? 'pointer' : 'not-allowed'};opacity:${ok ? 1 : .6};text-align:left">
+        <span style="display:flex;align-items:center;gap:7px">
+          <span style="font-size:15px;flex:none">${x.ic}</span>
+          <span style="flex:1;font-size:11.5px;font-weight:700;color:#334155;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${T(x.nm)}</span>
+          <span style="flex:none;font-size:10.5px;font-weight:700;color:#7c3aed">${shipLv >= x.lv ? T('{a} ชม.', { a: x.h }) : '🔒 ' + T('ยาน Lv.{n}', { n: x.lv })}</span>
+        </span>
+        <span style="display:block;font-size:9.5px;color:#94a3b8;padding-left:26px;margin-top:1px">🎁 ${x.rw}</span>
+      </button>`;
+    }).join('');
+    const rate = (inf.rate | 0) || 50;
+    // ไอคอนแร่ธรรมดาผ่าน _icoHtml (SVG ชุดเดียวกับหน้า ITEM/ตลาด) — emoji ดิบหน้าตาไม่ตรงกับในเกม
+    const consIco = _ORAID_CONS.map(c => _icoHtml(c.ic, 12)).join('');
+    return box(`${head}
+      <div style="font-size:10.5px;color:#7e22ce">${T('ส่งได้วันละ 1 เที่ยว — เลือกภารกิจเดียว')} · ${T('ได้แร่อวกาศไปอัพเลเวลกิล')}</div>
+      <div style="display:flex;align-items:center;gap:4px;font-size:10px;color:#b45309;line-height:1.4">🎲 <span>${T('โอกาสสำเร็จ {n}% — พลาดได้แร่ธรรมดากลับมาแทน', { n: rate })}</span> <span style="display:inline-flex;gap:2px;flex:none">${consIco}</span></div>
+      ${rows}
+      <div style="font-size:9.5px;color:#94a3b8;line-height:1.5">${T('ยานยังบินตามและช่วยยิงตามปกติระหว่างทำภารกิจ')}</div>`);
+  }
+  function oraidSend(tier) {
+    _oraidPost({ action: 'send', tier: tier | 0 }, d => {
+      if (!d) return;
+      if (!d.ok) { alert(d.error || '?'); return; }
+      player.orion_raid = { tier: tier | 0, end_at: d.end_at | 0, start: Math.floor(Date.now() / 1000) };   // optimistic (start ไว้ให้เกจ) — poll ยืนยันอีกที
+      _oraidInfo = null; _oraidFetch(true);
+      if (d.msg) addLog([{ type: 'levelup', msg: d.msg }]);
+      renderHouse(); _oraidCdStart();
+    });
+  }
+  function oraidRush() {
+    _oraidPost({ action: 'rush' }, d => {
+      if (!d) return;
+      if (!d.ok) { alert(d.error || '?'); return; }
+      if (d.msg) addLog([{ type: 'levelup', msg: d.msg }]);
+      _oraidInfo = null; _oraidFetch(true);
+    });
+  }
+  // popup ผลภารกิจ — server ส่ง oraid_done มาครั้งเดียวใน poll ที่ settle
+  function _oraidDonePopup(res) {
+    if (!res || !res.log || !res.log.length) return;
+    const ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:10030;display:flex;align-items:center;justify-content:center;padding:18px';
+    const bx = document.createElement('div');
+    bx.style.cssText = 'background:#fff;border-radius:14px;padding:16px 18px;max-width:340px;width:100%;box-shadow:0 12px 40px rgba(0,0,0,.3)';
+    const h = document.createElement('div');
+    h.style.cssText = 'font-size:15px;font-weight:800;color:#6b21a8;margin-bottom:8px';
+    h.textContent = '🛸 ' + T('ยานกลับจากภารกิจแล้ว');
+    bx.appendChild(h);
+    // ⚠️ ภารกิจล้มเหลว: server ส่ง cons (แร่ธรรมดา) มาเป็นตัวเลข → วาดไอคอน SVG ชุดเดียวกับหน้า ITEM เอง
+    //    ไม่เอาบรรทัดไอคอนดิบจาก log (อีโมจิเปล่าดูไม่ตรงกับที่อื่นในเกม) · ตัวเลข/คีย์ผ่าน whitelist ฝั่งนี้ ไม่แตะ HTML จาก server
+    const consRow = (res.cons && typeof res.cons === 'object')
+      ? _ORAID_CONS.filter(c => (res.cons[c.k] | 0) > 0) : [];
+    //    เคสล้มเหลว server ส่ง log = [ข้อความ, บรรทัดไอคอนดิบ] เสมอ → ข้ามบรรทัด "สุดท้าย" (อิงตำแหน่ง ไม่เดาจากเนื้อความ = ไม่พังข้ามภาษา)
+    const _skipIdx = consRow.length ? res.log.length - 1 : -1;
+    res.log.forEach((line, i) => {
+      if (i === _skipIdx) return;                                     // วาดใหม่เป็นแถวไอคอนด้านล่างแทน
+      const p = document.createElement('div'); p.style.cssText = 'font-size:13px;color:#334155;padding:3px 0'; p.textContent = line; bx.appendChild(p); // textContent — ข้อความจาก server ไม่ใช่ HTML
+    });
+    if (consRow.length) {
+      const r = document.createElement('div');
+      r.style.cssText = 'display:flex;flex-wrap:wrap;gap:10px;margin-top:6px;background:#f8fafc;border-radius:9px;padding:8px 10px';
+      r.innerHTML = consRow.map(c =>
+        `<span style="display:inline-flex;align-items:center;gap:4px;font-size:13px;font-weight:700;color:#334155">${_icoHtml(c.ic, 16)}<span>${T(c.nm)} ×${(res.cons[c.k] | 0).toLocaleString()}</span></span>`
+      ).join('');                                                     // ทุกชิ้นสร้างจากค่าฝั่ง client + ตัวเลข int — ไม่มีสตริงดิบจาก server
+      bx.appendChild(r);
+    }
+    // ปุ่มเดียว "ตกลง" — ❌ ไม่มี "ส่งอีกรอบ" เพราะวันละ 1 เที่ยว กดไปก็เจอ "วันนี้ส่งไปแล้ว" (เจ้าของแจ้ง 2026-07-27)
+    const bOk = document.createElement('button');
+    bOk.style.cssText = 'width:100%;margin-top:12px;padding:9px 0;border:none;border-radius:9px;background:#7c3aed;color:#fff;font-size:12.5px;font-weight:800;cursor:pointer';
+    bOk.textContent = T('ตกลง');
+    bOk.onclick = () => ov.remove();
+    bx.appendChild(bOk);
+    ov.onclick = e => { if (e.target === ov) ov.remove(); };   // แตะนอกกล่องก็ปิดได้ (ทางลัด)
+    ov.appendChild(bx);
+    document.body.appendChild(ov);
+  }
+
+  function _gdPost(data, cb) {
+    $.post(baseUrl + 'xhrpg_guild.php', Object.assign({ line_uid: player.line_uid, lang: LANG(), session_token: sessionToken || '' }, data))
+      .done(res => { let d; try { d = typeof res === 'string' ? JSON.parse(res) : res; } catch (e) { return; } if (cb) cb(d); })
+      .fail(() => { if (cb) cb(null); });
+  }
+  // ── 🏯 ปราสาทกิล: ดึงข้อมูล / เข้า / ออก (docs/guild-castle-design.md) ──
+  function _ctFetch(force) {
+    const gid = (player && player.castle_in) | 0;
+    if (!gid) { _ctInfo = null; return; }
+    const now = Date.now();
+    if (!force && _ctInfo && _ctInfo.g && _ctInfo.g.id === gid && now - _ctFetchAt < 60000) return; // cache ฝั่ง client 60 วิ (server cache เท่ากัน)
+    _ctFetchAt = now;
+    _gdPost({ action: 'castle', gid: gid }, d => {
+      if (!d || !d.ok) return;
+      _ctInfo = d;
+      const key = _ctTier(d.g.lv) + ':' + d.g.sh + ':' + d.g.co + ':' + d.g.ic + ':' + d.g.name;
+      if (key !== _ctBakeKey && currentMap === 11) buildGround(); // ตรา/tier/ชื่อเปลี่ยน → bake ฉากใหม่
+    });
+  }
+  function castleEnter(gid) {
+    if (!player || !player.line_uid || player.line_uid === 'demo') return;
+    _gdAct({ action: 'castle_enter', gid: gid | 0 }, d => {
+      _gdClose();
+      currentMap = d.map | 0; player.map = currentMap; player.castle_in = gid | 0;
+      player.x = d.x; player.y = d.y;
+      _ctInfo = null; _ctBakeKey = ''; groundCanvas = null;
+      delete smoothPos['player'];                    // snap กล้อง (ข้ามแมพ)
+      _ctFetch(true); buildGround(); _homeBtnUpd(); updateHUD(); startAnim(); // ⚠️ ต้องเรียก _homeBtnUpd เอง — poll ไม่เห็นการเปลี่ยนแมพ (เราตั้ง currentMap ไปแล้ว) ปุ่มออก/รายชื่อเลยไม่โผล่
+    });
+  }
+  function castleExit() {
+    _gdAct({ action: 'castle_exit' }, d => {
+      currentMap = d.map | 0; player.map = currentMap;
+      player.castle_in = 0; player.x = d.x; player.y = d.y;
+      _ctInfo = null; _ctBakeKey = ''; groundCanvas = null;
+      delete smoothPos['player'];
+      buildGround(); _homeBtnUpd(); updateHUD(); startAnim();
+      addLog([{ type: 'levelup', msg: T('↩️ ออกจากปราสาทแล้ว') }]);
+    });
+  }
+  // ══ 🕳️ ดันกิล (map 12 · docs/guild-dungeon-design.md) ═══════════════════════════════════════
+  //    เข้า/ออกผ่าน xhrpg_guild.php action gdun_enter / gdun_exit — server เขียน map/gdun_in ในบลอบเอง
+  //    + ตรวจสมาชิกภาพทุกครั้ง (ซ่อนปุ่มไม่ใช่การกันสิทธิ์)
+  //    🔴 ต่างจากปราสาท: ดันมีมอนและมีโซน → ต้องเซ็ต _haveMon = false ทั้งตอนเข้าและตอนออก
+  //       (server ส่ง spots มาเฉพาะตอน have_static=0 — ลืมแล้ว spotDefs ค้างจากแมพเดิม มอนวาดผิดโซน + leash เพี้ยน)
+  let _gdunView = null;            // {name, hi} — จำตอนเข้า ไว้โชว์บนแบนเนอร์ (poll ไม่ส่งข้อมูลดันมาให้)
+  let _gdunCd = null, _gdunNext = 0; // ตัวจับเวลานับถอยหลังของการ์ดหน้ากิล
+  function gdunEnter() {
+    if (!player || !player.line_uid || player.line_uid === 'demo') return;
+    const g = _gdInfo && _gdInfo.g, gd = _gdInfo && _gdInfo.gdun; // จำชื่อกิล/เพดาน Lv ไว้ก่อนปิดแผง
+    _gdAct({ action: 'gdun_enter' }, d => {
+      _gdClose();
+      currentMap = (d.map | 0) || 12; player.map = currentMap; player.gdun_in = 1;
+      player.x = (d.x != null) ? d.x : SPAWN_X; player.y = (d.y != null) ? d.y : SPAWN_Y; // server ไม่ส่งพิกัด → จุดเกิดกลางแมพ
+      player.explore_cx = player.x; player.explore_cy = player.y;
+      _gdunView = { name: (g && g.name) || '', hi: (gd && gd.hi) | 0 };
+      currentSpotId = 0; travelingToSpot = null;
+      { const _s = document.getElementById('spot-select'); if (_s) _s.dataset.built = ''; }
+      _haveMon = false;                               // 🔴 บังคับ have_static=0 → server ส่ง spots ของดันมาให้
+      _ctInfo = null; _ctBakeKey = ''; groundCanvas = null;
+      delete smoothPos['player'];                     // snap กล้อง (ข้ามแมพ)
+      buildGround(); _homeBtnUpd(); updateHUD(); startAnim();
+      addLog([{ type: 'levelup', msg: T('🕳️ เข้าดันกิลแล้ว — ลุยให้สุด!') }]);
+    });
+  }
+  function gdunExit() {
+    _gdAct({ action: 'gdun_exit' }, d => {
+      currentMap = (d.map | 0) || 1; player.map = currentMap; player.gdun_in = 0;
+      player.x = (d.x != null) ? d.x : SPAWN_X; player.y = (d.y != null) ? d.y : SPAWN_Y;
+      player.explore_cx = player.x; player.explore_cy = player.y;
+      _gdunView = null;
+      currentSpotId = 0; travelingToSpot = null;
+      { const _s = document.getElementById('spot-select'); if (_s) _s.dataset.built = ''; }
+      _haveMon = false;                               // 🔴 เหมือนตอนเข้า — โซนของแมพปลายทางต้องมาใหม่
+      groundCanvas = null;
+      delete smoothPos['player'];
+      buildGround(); _homeBtnUpd(); updateHUD(); startAnim();
+      addLog([{ type: 'levelup', msg: T('↩️ ออกจากดันแล้ว') }]);
+    });
+  }
+  // แบนเนอร์บนจอตอนอยู่ในดัน — ชื่อกิลผ่าน textContent เสมอ (ผู้เล่นตั้งชื่อกิลเองได้ · ห้าม innerHTML)
+  function _gdunBanner() {
+    const id = 'gdun-banner';
+    let el = document.getElementById(id);
+    if (currentMap !== 12) { if (el) el.remove(); return; }
+    if (!el) {
+      el = document.createElement('div');
+      el.id = id;
+      const txt = document.createElement('span'); txt.id = id + '-t';
+      const btn = document.createElement('button');
+      btn.textContent = '🚪 ' + T('ออกจากดัน');
+      btn.style.cssText = 'border:none;background:#fff;color:#4c1d95;border-radius:999px;padding:4px 11px;font-size:11px;font-weight:800;cursor:pointer;font-family:inherit';
+      btn.onclick = () => gdunExit();
+      el.appendChild(txt); el.appendChild(btn);
+      _floatMount(el, 'top:8px;left:50%;transform:translateX(-50%);z-index:9990;display:flex;align-items:center;gap:8px;background:rgba(46,39,64,.94);color:#e9d5ff;border-radius:999px;padding:6px 8px 6px 14px;font-size:12px;font-weight:700;box-shadow:0 4px 14px rgba(2,8,23,.35);pointer-events:auto;max-width:94%;box-sizing:border-box'); // 📌 เกาะกรอบเกม
+    }
+    const t = document.getElementById(id + '-t');
+    if (t) {
+      const nm = String((_gdunView && _gdunView.name) || '').slice(0, 16);
+      const hi = (_gdunView && _gdunView.hi) | 0;
+      t.textContent = '🕳️ ' + T('ดันกิล') + (nm ? ' · ' + nm : '') + (hi > 0 ? ' · ' + T('มอน Lv 1-{n}', { n: hi }) : '');
+    }
+  }
+  // การ์ด "🕳️ ดันกิล" ในแท็บกิลของฉัน — โครงเดียวกับการ์ดหอโจมตี (_gtCardHTML)
+  //    ⚠️ server เก่าไม่ส่ง key gdun → คืนสตริงว่าง ซ่อนการ์ดเงียบๆ ห้าม throw
+  //    🔒 โชว์ได้แค่ผลลัพธ์ (Lv 1-hi · เวลารอบถัดไป) — สูตรเพดาน/ตัวคูณ HP ห้ามลง UI
+  function _gdunCardHTML(d) {
+    const gd = d && d.gdun; if (!gd) return '';
+    const WRAP = 'background:#f5f3ff;border:1px solid #ddd6fe;border-radius:9px;padding:8px;margin-top:9px';
+    const head = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <span style="font-size:11.5px;font-weight:800;color:#4c1d95">🕳️ ${T('ดันกิล')}</span>
+        <span style="font-size:10.5px;color:#7c3aed">${T('เลเวลกิล')} Lv.${gd.lv | 0}</span>
+      </div>`;
+    if ((gd.ok | 0) !== 1) { // ยังไม่ปลด — บอกแค่เลเวลกิลที่ต้องถึง
+      return `<div style="${WRAP};opacity:.75">${head}
+        <div style="text-align:center;font-size:11px;font-weight:700;color:#7c3aed;padding:5px 0">🔒 ${T('ปลดดันกิลที่กิล Lv {n}', { n: gd.req | 0 })}</div>
+      </div>`;
+    }
+    _gdunNext = gd.next | 0;
+    const alive = gd.alive | 0, mvp = (gd.mvp | 0) === 1;
+    const status = (alive > 0 || mvp)
+      ? `${mvp ? '👑 ' + T('บอสยังอยู่') + ' · ' : ''}${T('มอนเหลือ {n} ตัว', { n: alive })}`
+      : T('เคลียร์รอบนี้หมดแล้ว');
+    return `<div style="${WRAP}">${head}
+      <div style="display:flex;gap:5px">
+        <div style="flex:1;background:#fff;border:1px solid #ede9fe;border-radius:8px;padding:5px 7px">
+          <div style="font-size:9px;font-weight:700;color:#a78bfa">${T('มอนรอบนี้')}</div>
+          <div style="font-size:12.5px;font-weight:800;color:#4c1d95">Lv 1-${gd.hi | 0}</div>
+        </div>
+        <div style="flex:1;background:#fff;border:1px solid #ede9fe;border-radius:8px;padding:5px 7px">
+          <div style="font-size:9px;font-weight:700;color:#a78bfa">${T('รอบถัดไป')} ${_gtHmm(gd.next)}</div>
+          <div style="font-size:12.5px;font-weight:800;color:#4c1d95"><span id="gdun-cd">—</span></div>
+        </div>
+      </div>
+      <div style="text-align:center;font-size:10px;color:#6d28d9;margin-top:5px">${status}</div>
+      <button onclick="xhrpg.gdunEnter()" style="width:100%;margin-top:7px;padding:8px 0;border:1px solid #c4b5fd;border-radius:9px;background:#ede9fe;color:#5b21b6;font-size:12px;font-weight:800;cursor:pointer">🕳️ ${T('เข้าดัน')}</button>
+    </div>`;
+  }
+  // นับถอยหลังถึงรอบถัดไป — ⚠️ ต้องหยุด timer ทุกครั้งที่วาดการ์ดใหม่/ปิดแผง ไม่งั้นซ้อนกันรัว (ท่าเดียวกับ _invCd)
+  function _gdunCdStop() { if (_gdunCd) { clearInterval(_gdunCd); _gdunCd = null; } }
+  function _gdunCdTick() {
+    const el = document.getElementById('gdun-cd');
+    if (!el) { _gdunCdStop(); return; } // การ์ดหายไปแล้ว (สลับแท็บ/ปิดแผง) → หยุดเอง
+    const left = Math.max(0, _gdunNext - Math.floor(Date.now() / 1000));
+    el.textContent = Math.floor(left / 60) + ':' + ('0' + (left % 60)).slice(-2);
+  }
+  function _gdunCdStart() {
+    _gdunCdStop();
+    if (!document.getElementById('gdun-cd')) return; // ไม่มีการ์ด (ยังไม่ปลด/server เก่า) = ไม่ต้องมี timer
+    _gdunCdTick();
+    _gdunCd = setInterval(_gdunCdTick, 1000);
+  }
+  function _ctMemberList() { // popup รายชื่อเต็ม (read-only — แตะป้ายหน้าปราสาท)
+    const info = _ctInfo; if (!info) return;
+    document.getElementById('ct-mem')?.remove();
+    const ov = document.createElement('div'); ov.id = 'ct-mem';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.65);z-index:10009;display:flex;align-items:center;justify-content:center;padding:14px';
+    ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+    const rows = (info.members || []).map(m => `<div style="display:flex;align-items:center;gap:6px;padding:5px 2px;border-bottom:1px solid #f1f5f9">
+        <span style="flex:none;width:16px;text-align:center">${m.role === 'leader' ? '👑' : (m.role === 'officer' ? '⭐' : '')}</span>
+        <div style="flex:1;min-width:0;font-size:12px;color:#1e293b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_gdNameLbl(m)} <span style="font-size:10px;color:#94a3b8">Lv.${m.lv | 0}</span></div>
+        <span style="flex:none;font-size:9.5px;color:#94a3b8">${_gdRoleTxt(m.role)}</span>
+      </div>`).join('');
+    ov.innerHTML = `<div style="background:#fff;border-radius:16px;max-width:340px;width:100%;max-height:80vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 12px 40px rgba(2,8,23,.5)">
+      <div style="background:#1e3a8a;padding:11px 16px;text-align:center;color:#fff;position:relative;flex:none">
+        <button onclick="document.getElementById('ct-mem').remove()" style="position:absolute;top:7px;right:9px;width:26px;height:26px;border-radius:8px;border:none;background:rgba(255,255,255,.2);color:#fff;font-size:14px;cursor:pointer">✕</button>
+        <b style="font-size:14px">🏯 ${_gdEsc(info.g.name)}</b>
+        <div style="font-size:11px;color:#bfdbfe;margin-top:2px">Lv.${info.g.lv} · ${T('สมาชิก')} ${info.g.n}/${info.g.cap}</div>
+      </div>
+      <div style="overflow-y:auto;padding:9px 13px 14px">${info.g.notice ? `<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:9px;padding:7px 9px;margin-bottom:8px;font-size:11.5px;color:#334155;white-space:pre-wrap;word-break:break-word">📢 ${_gdEsc(info.g.notice)}</div>` : ''}${rows}</div>
+    </div>`;
+    document.body.appendChild(ov);
+  }
+  // ══ 🎟️ P Gift Voucher (docs/p-voucher-design.md) ═══════════════════════════════════════════
+  //   ราคา/หน้าบัตรมาจาก server (action list → tiers) — ห้าม hardcode ฝั่ง client
+  //   แท็บ "บัตรของฉัน" ออกแบบเผื่อตัวแทนจำหน่ายถือหลายร้อยใบ: กรอง 3 ชั้น + แบ่งหน้า
+  //   ⚠️ โค้ด/ชื่อผู้เล่น ผ่าน _gdEsc ทุกจุด (ชื่อมาจาก input ผู้เล่น)
+  let _vcTab = 'buy', _vcData = null, _vcBusy = false, _vcPage = 0;
+  let _vcFStat = 'all', _vcFFace = 0, _vcFQ = '';     // ตัวกรอง: สถานะ · หน้าบัตร (0=ทุกราคา) · ค้นหาโค้ด
+  const VC_PER_PAGE = 10;
+  function _vcPost(data, cb) {
+    $.post(baseUrl + 'xhrpg_voucher.php', Object.assign({ line_uid: player.line_uid, lang: LANG(), session_token: sessionToken || '' }, data))
+      .done(res => { let d; try { d = typeof res === 'string' ? JSON.parse(res) : res; } catch (e) { d = null; } if (cb) cb(d); })
+      .fail(() => { if (cb) cb(null); });
+  }
+  function _vcClose() { document.getElementById('vc-panel')?.remove(); }
+  function openVoucherPanel() {
+    if (!player || !player.line_uid || player.line_uid === 'demo') return;
+    _vcClose(); _vcTab = 'buy'; _vcPage = 0; _vcFStat = 'all'; _vcFFace = 0; _vcFQ = '';
+    const ov = document.createElement('div'); ov.id = 'vc-panel';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.65);z-index:10010;display:flex;align-items:center;justify-content:center;padding:14px';
+    ov.addEventListener('click', e => { if (e.target === ov) _vcClose(); });
+    ov.innerHTML = `<div style="background:#fff;border-radius:16px;max-width:390px;width:100%;max-height:86vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 12px 40px rgba(2,8,23,.5)">
+      <div style="background:#1e3a8a;padding:11px 16px;text-align:center;color:#fff;position:relative;flex:none">
+        <button onclick="xhrpg._vcClose()" style="position:absolute;top:7px;right:9px;width:26px;height:26px;border-radius:8px;border:none;background:rgba(255,255,255,.2);color:#fff;font-size:14px;cursor:pointer">✕</button>
+        <b style="font-size:14px">🎟️ ${T('P Gift Voucher')}</b>
+      </div>
+      <div id="vc-body" style="overflow-y:auto;padding:11px 13px 14px"></div>
+    </div>`;
+    document.body.appendChild(ov);
+    _vcFetch();
+  }
+  function _vcFetch() {
+    const b = document.getElementById('vc-body');
+    if (b && !_vcData) b.innerHTML = `<div style="text-align:center;color:#64748b;padding:22px 0;font-size:12px">${T('กำลังโหลด...')}</div>`;
+    _vcPost({ action: 'list' }, d => {
+      if (!d || !d.ok) {
+        const el = document.getElementById('vc-body');
+        if (el) el.innerHTML = `<div style="text-align:center;color:#dc2626;padding:20px 8px;font-size:12px">${_gdEsc((d && d.error) || T('โหลดไม่สำเร็จ'))}</div>`;
+        return;
+      }
+      _vcData = d; _vcBody();
+    });
+  }
+  // กล่องกรอกโค้ด — อยู่บนสุดทุกแท็บ (คนรับบัตรเจอทันที ไม่ต้องหา)
+  function _vcRedeemBox() {
+    return `<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:9px 11px;margin-bottom:10px">
+        <div style="font-size:11.5px;color:#15803d;font-weight:800;margin-bottom:6px">🎁 ${T('มีโค้ด? กรอกที่นี่เพื่อรับ P')}</div>
+        <div style="display:flex;gap:6px">
+          <input id="vc-code" placeholder="RGV-XXXX-XXXX-XXXX / RGK-XXXXX-XXXXX" maxlength="24" autocomplete="off"
+                 style="flex:1;min-width:0;padding:7px 9px;border:1px solid #86efac;border-radius:8px;font-size:12px;font-family:ui-monospace,monospace;text-transform:uppercase"
+                 onkeydown="if(event.key==='Enter')xhrpg._vcRedeem()">
+          <button onclick="xhrpg._vcRedeem()" style="flex:none;padding:7px 13px;border:none;border-radius:8px;background:#16a34a;color:#fff;font-size:12px;font-weight:800;cursor:pointer">${T('รับ P')}</button>
+        </div>
+      </div>`;
+  }
+  function _vcBody() {
+    const b = document.getElementById('vc-body'); if (!b || !_vcData) return;
+    const s = _vcData.sum || {};
+    const tab = (k, label) => `<button onclick="xhrpg._vcSetTab('${k}')" style="flex:1;padding:7px 0;border:1px solid ${_vcTab === k ? '#1e3a8a' : '#e2e8f0'};border-radius:9px;background:${_vcTab === k ? '#1e3a8a' : '#fff'};color:${_vcTab === k ? '#fff' : '#64748b'};font-size:12px;font-weight:${_vcTab === k ? '800' : '600'};cursor:pointer">${label}</button>`;
+    b.innerHTML = _vcRedeemBox()
+      + `<div style="display:flex;gap:6px;margin-bottom:11px">${tab('buy', '🛒 ' + T('ซื้อบัตร'))}${tab('mine', '🎫 ' + T('บัตรของฉัน') + ' (' + (s.active | 0) + ')')}</div>`
+      + `<div id="vc-tab">${_vcTab === 'buy' ? _vcBuyHTML() : _vcMineHTML()}</div>`;
+  }
+  function _vcSetTab(k) { _vcTab = k; _vcPage = 0; _vcBody(); }
+  function _vcBuyHTML() {
+    const tiers = _vcData.tiers || {};
+    const pts = player.p_points | 0;
+    const cards = Object.keys(tiers).map(f => {
+      const face = f | 0, cost = tiers[f] | 0, can = pts >= cost;
+      return `<button ${can ? `onclick="xhrpg._vcBuy(${face})"` : 'disabled'} style="padding:10px 4px;border:1px solid ${can ? '#c4b5fd' : '#e2e8f0'};border-radius:11px;background:${can ? '#faf5ff' : '#f8fafc'};cursor:${can ? 'pointer' : 'default'};opacity:${can ? 1 : .5};font-family:inherit">
+          <div style="font-size:15px;font-weight:800;color:#6d28d9">🎟️ ${face.toLocaleString()} P</div>
+          <div style="font-size:10.5px;color:#64748b;margin-top:1px">${T('จ่าย')} ${cost.toLocaleString()} P</div>
+        </button>`;
+    }).join('');
+    return `<div style="display:flex;align-items:center;justify-content:space-between;font-size:12px;margin-bottom:5px">
+        <span style="color:#64748b">${T('P ของฉัน')}</span><span style="font-weight:800;color:#7c3aed">${pts.toLocaleString()} P</span>
+      </div>
+      <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:9px;padding:7px 10px;font-size:10.5px;color:#92400e;line-height:1.5;margin-bottom:9px">${T('⚠️ ซื้อแล้วคืนไม่ได้ · มีค่าออกบัตรรวมอยู่ในราคาแล้ว')}</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px">${cards}</div>
+      <div id="vc-result" style="margin-top:10px"></div>`;
+  }
+  // กรองสด: สถานะ × หน้าบัตร × ค้นหาโค้ด (ทำฝั่ง client จากก้อนที่โหลดมาแล้ว)
+  function _vcFiltered() {
+    const q = _vcFQ.trim().toUpperCase().replace(/[^0-9A-Z]/g, '');
+    return (_vcData.list || []).filter(v =>
+      (_vcFStat === 'all' || (_vcFStat === 'active' ? !v.used : v.used))
+      && (_vcFFace === 0 || (v.face | 0) === _vcFFace)
+      && (q === '' || v.code.replace(/[^0-9A-Z]/g, '').indexOf(q) >= 0));
+  }
+  function _vcMineHTML() {
+    const s = _vcData.sum || {}, tiers = _vcData.tiers || {};
+    const stat = (lbl, val, col) => `<div style="flex:1;min-width:0;background:#f8fafc;border:1px solid #e2e8f0;border-radius:9px;padding:6px 3px;text-align:center">
+        <div style="font-size:9.5px;color:#94a3b8">${lbl}</div><div style="font-size:15px;font-weight:800;color:${col}">${val}</div></div>`;
+    const fBtn = (k, lbl) => `<button onclick="xhrpg._vcSetStat('${k}')" style="flex:none;padding:5px 11px;border:1px solid ${_vcFStat === k ? '#1e3a8a' : '#e2e8f0'};border-radius:8px;background:${_vcFStat === k ? '#1e3a8a' : '#fff'};color:${_vcFStat === k ? '#fff' : '#64748b'};font-size:11.5px;font-weight:700;cursor:pointer">${lbl}</button>`;
+    const opts = `<option value="0">${T('ทุกราคา')}</option>` + Object.keys(tiers).map(f =>
+      `<option value="${f | 0}" ${_vcFFace === (f | 0) ? 'selected' : ''}>${(f | 0).toLocaleString()} P</option>`).join('');
+    const all = _vcFiltered();
+    const pages = Math.max(1, Math.ceil(all.length / VC_PER_PAGE));
+    if (_vcPage > pages - 1) _vcPage = pages - 1;
+    const rows = all.slice(_vcPage * VC_PER_PAGE, _vcPage * VC_PER_PAGE + VC_PER_PAGE).map(v => v.used
+      ? `<div style="display:flex;align-items:center;gap:7px;padding:7px 2px;border-bottom:1px solid #f1f5f9;opacity:.55">
+          <span style="flex:none;width:14px;text-align:center;font-size:11px">✅</span>
+          <div style="flex:1;min-width:0">
+            <div style="font-family:ui-monospace,monospace;font-size:12px;color:#475569;text-decoration:line-through">${_gdEsc(v.code)}</div>
+            <div style="font-size:9.5px;color:#94a3b8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${T('ซื้อเมื่อ')} ${_vcDate(v.at)}${v.rnm ? ' · ' + T('ใช้โดย') + ' ' + (v.rcc ? _ccFlag(v.rcc) : '') + _gdEsc(v.rnm) : ''}${v.rat ? ' · ' + _vcDate(v.rat) : ''}</div>
+          </div>
+          <span style="flex:none;font-size:12px;font-weight:800;color:#94a3b8">${(v.face | 0).toLocaleString()} P</span>
+        </div>`
+      : `<div style="display:flex;align-items:center;gap:7px;padding:7px 2px;border-bottom:1px solid #f1f5f9">
+          <span style="flex:none;width:8px;height:8px;border-radius:50%;background:#22c55e"></span>
+          <div style="flex:1;min-width:0">
+            <div style="font-family:ui-monospace,monospace;font-size:12.5px;color:#0f172a">${_gdEsc(v.code)}</div>
+            <div style="font-size:9.5px;color:#94a3b8">${T('ซื้อเมื่อ')} ${_vcDate(v.at)}</div>
+          </div>
+          <span style="flex:none;font-size:12.5px;font-weight:800;color:#6d28d9">${(v.face | 0).toLocaleString()} P</span>
+          <button onclick="xhrpg._vcCopy('${_gdEsc(v.code)}',this)" title="${T('คัดลอกโค้ด')}" style="flex:none;width:30px;height:28px;border:1px solid #e2e8f0;border-radius:8px;background:#fff;font-size:12px;cursor:pointer">📋</button>
+        </div>`).join('');
+    return `<div style="display:flex;gap:5px;margin-bottom:6px">
+        ${stat(T('ซื้อแล้ว'), (s.n | 0).toLocaleString(), '#1e293b')}
+        ${stat(T('ยังไม่ใช้'), (s.active | 0).toLocaleString(), '#16a34a')}
+        ${stat(T('ใช้แล้ว'), (s.used | 0).toLocaleString(), '#94a3b8')}
+      </div>
+      <div style="font-size:11.5px;color:#64748b;margin-bottom:9px">💰 ${T('มูลค่าค้างในมือ')} <b style="color:#0f172a">${(s.active_p | 0).toLocaleString()} P</b></div>
+      <div style="display:flex;gap:5px;margin-bottom:6px;align-items:center">
+        ${fBtn('all', T('ทั้งหมด'))}${fBtn('active', T('ยังไม่ใช้'))}${fBtn('used', T('ใช้แล้ว'))}
+        <select onchange="xhrpg._vcSetFace(this.value)" style="flex:1;min-width:0;padding:5px 6px;border:1px solid #cbd5e1;border-radius:8px;font-size:11.5px;font-family:inherit">${opts}</select>
+      </div>
+      <input value="${_gdEsc(_vcFQ)}" placeholder="${T('ค้นหาโค้ด...')}" oninput="xhrpg._vcSetQ(this.value)"
+             style="width:100%;box-sizing:border-box;padding:7px 9px;border:1px solid #cbd5e1;border-radius:8px;font-size:11.5px;margin-bottom:8px;font-family:inherit">
+      ${rows || `<div style="text-align:center;color:#a8a29e;padding:18px 0;font-size:12px">${(_vcData.list || []).length ? T('ไม่พบบัตรตามที่กรอง') : T('ยังไม่มีบัตร — ซื้อได้ที่แท็บ 🛒')}</div>`}
+      ${all.length > VC_PER_PAGE ? `<div style="display:flex;align-items:center;justify-content:center;gap:9px;padding-top:10px">
+          <button onclick="xhrpg._vcPageGo(-1)" ${_vcPage > 0 ? '' : 'disabled'} style="padding:5px 13px;border:1px solid #e2e8f0;border-radius:8px;background:#fff;color:${_vcPage > 0 ? '#334155' : '#cbd5e1'};font-size:12px;font-weight:700;cursor:pointer">←</button>
+          <span style="font-size:11.5px;color:#64748b;font-weight:700">${T('หน้า {a}/{b}', { a: _vcPage + 1, b: pages })}</span>
+          <button onclick="xhrpg._vcPageGo(1)" ${_vcPage < pages - 1 ? '' : 'disabled'} style="padding:5px 13px;border:1px solid #e2e8f0;border-radius:8px;background:#fff;color:${_vcPage < pages - 1 ? '#334155' : '#cbd5e1'};font-size:12px;font-weight:700;cursor:pointer">→</button>
+        </div>` : ''}
+      ${(_vcData.list || []).length >= (_vcData.cap | 0) ? `<div style="font-size:9.5px;color:#94a3b8;text-align:center;padding-top:8px">${T('แสดง {n} ใบล่าสุด (ยอดสรุปด้านบนนับครบทุกใบ)', { n: _vcData.cap | 0 })}</div>` : ''}`;
+  }
+  const _vcDate = s => { if (!s) return '-'; const d = new Date(String(s).replace(' ', 'T')); return isNaN(d) ? String(s) : `${d.getDate()}/${d.getMonth() + 1} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+  function _vcSetStat(k) { _vcFStat = k; _vcPage = 0; _vcRerender(); }
+  function _vcSetFace(v) { _vcFFace = v | 0; _vcPage = 0; _vcRerender(); }
+  function _vcSetQ(v) {   // ⚠️ อย่า re-render ทั้งแท็บ — จะเด้ง focus ออกจากช่องค้นหาทุกตัวอักษร
+    _vcFQ = String(v || ''); _vcPage = 0;
+    const t = document.getElementById('vc-tab'); if (t) t.innerHTML = _vcMineHTML();
+    const q = document.getElementById('vc-body')?.querySelector('input[placeholder]');
+    void q;
+  }
+  function _vcPageGo(d) { _vcPage = Math.max(0, _vcPage + d); _vcRerender(); }
+  function _vcRerender() { const t = document.getElementById('vc-tab'); if (t) t.innerHTML = _vcMineHTML(); }
+  function _vcCopy(code, btn) {
+    const done = () => { if (btn) { const o = btn.textContent; btn.textContent = '✅'; setTimeout(() => { btn.textContent = o; }, 1200); } };
+    try { navigator.clipboard.writeText(code).then(done, () => _vcCopyFallback(code, done)); }
+    catch (e) { _vcCopyFallback(code, done); }
+  }
+  function _vcCopyFallback(code, done) { // เบราว์เซอร์เก่า/หน้าไม่ใช่ https → ใช้ textarea + execCommand
+    try {
+      const ta = document.createElement('textarea'); ta.value = code;
+      ta.style.cssText = 'position:fixed;top:-999px'; document.body.appendChild(ta);
+      ta.select(); document.execCommand('copy'); ta.remove(); done();
+    } catch (e) {}
+  }
+  function _vcBuy(face) {
+    if (_vcBusy) return;
+    const cost = (_vcData && _vcData.tiers) ? (_vcData.tiers[face] | 0) : 0;
+    if (!confirm(T('ซื้อบัตร {f} P ราคา {c} P?', { f: (face | 0).toLocaleString(), c: cost.toLocaleString() }) + '\n\n' + T('⚠️ ซื้อแล้วคืนไม่ได้'))) return;
+    _vcBusy = true;
+    _vcPost({ action: 'buy', face: face | 0 }, d => {
+      _vcBusy = false;
+      if (!d || !d.ok) { addLog([{ type: 'dead', msg: (d && d.error) || T('โหลดไม่สำเร็จ') }]); return; }
+      if (d.player) { player = Object.assign(player, d.player); updateHUD(); }
+      _vcFetch();   // รีเฟรชยอดสรุป/รายการ
+      setTimeout(() => {   // แสดงโค้ดหลัง body ถูกวาดใหม่
+        const r = document.getElementById('vc-result'); if (!r) return;
+        r.innerHTML = `<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:11px;padding:11px;text-align:center">
+            <div style="font-size:12px;font-weight:800;color:#15803d;margin-bottom:6px">✅ ${T('ได้บัตร {f} P แล้ว!', { f: (d.face | 0).toLocaleString() })}</div>
+            <div style="font-family:ui-monospace,monospace;font-size:15px;font-weight:800;color:#0f172a;letter-spacing:.5px;user-select:all;word-break:break-all">${_gdEsc(d.code)}</div>
+            <button onclick="xhrpg._vcCopy('${_gdEsc(d.code)}',this)" style="margin-top:8px;padding:6px 14px;border:1px solid #86efac;border-radius:8px;background:#fff;color:#15803d;font-size:12px;font-weight:800;cursor:pointer">📋 ${T('คัดลอกโค้ด')}</button>
+            <div style="font-size:10px;color:#64748b;margin-top:7px;line-height:1.5">${T('ส่งโค้ดนี้ให้เพื่อนเพื่อรับ P — เก็บเป็นความลับ ใครมีโค้ดก็ใช้ได้')}</div>
+          </div>`;
+      }, 400);
+    });
+  }
+  function _vcRedeem() {   // ช่องกรอกใน popup — ใช้ตัวส่งกลางตัวเดียวกับปุ่ม 🎟️ CODE (รับ RGK ได้ด้วย กันกรอกผิดช่อง)
+    if (_vcBusy) return;
+    const el = document.getElementById('vc-code'); if (!el) return;
+    if (!(el.value || '').trim()) return;
+    _vcBusy = true;
+    _rdSubmit(el.value, ok => {
+      _vcBusy = false;
+      if (!ok) return;
+      const e2 = document.getElementById('vc-code'); if (e2) e2.value = '';
+      _vcFetch(); // ผู้ซื้อ redeem บัตรตัวเองได้ → รายการอาจเปลี่ยนสถานะ
+    });
+  }
+
+  // ── ℹ️ รายละเอียดกิล (อ่านอย่างเดียว · เปิดจากทุกแท็บ) ────────────────────────────────────────
+  //    ใช้ action 'castle' ที่มีอยู่แล้ว — public + cache 60 วิ + ไม่ส่ง uid ให้คนนอก (ไม่ต้องเพิ่ม endpoint ใหม่)
+  //    ⚠️ ชื่อกิล/ชื่อผู้เล่น/ประกาศ ต้องผ่าน _gdEsc ทุกจุด (ป้ายมาจาก input ผู้เล่น)
+  const _GD_BTN = 'flex:none;width:32px;height:32px;display:flex;align-items:center;justify-content:center;border-radius:8px;font-size:13px;cursor:pointer'; // ปุ่มไอคอนขนาดเดียวกันทุกแถว
+  function _gdDetail(gid) {
+    gid = gid | 0; if (gid <= 0) return;
+    document.getElementById('gd-detail')?.remove();
+    const ov = document.createElement('div'); ov.id = 'gd-detail';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.65);z-index:10011;display:flex;align-items:center;justify-content:center;padding:14px';
+    ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+    ov.innerHTML = `<div style="background:#fff;border-radius:16px;padding:26px 20px;font-size:12px;color:#64748b">${T('กำลังโหลด...')}</div>`;
+    document.body.appendChild(ov);
+    _gdPost({ action: 'castle', gid: gid }, d => {
+      const el = document.getElementById('gd-detail'); if (!el) return;
+      if (!d || !d.ok) { el.innerHTML = `<div style="background:#fff;border-radius:16px;padding:24px 20px;font-size:12px;color:#dc2626">${T('โหลดไม่สำเร็จ')}</div>`; return; }
+      const g = d.g, ms = d.members || [];
+      const lvs = ms.map(m => m.lv | 0).filter(v => v > 0);
+      const avg = lvs.length ? Math.round(lvs.reduce((a, b) => a + b, 0) / lvs.length) : 0;
+      const top = lvs.length ? Math.max.apply(null, lvs) : 0;
+      const ld  = ms.find(m => m.role === 'leader');
+      const stat = (ic, k, v) => `<div style="flex:1;min-width:0;background:#f8fafc;border:1px solid #e2e8f0;border-radius:9px;padding:6px 4px;text-align:center">
+          <div style="font-size:9.5px;color:#94a3b8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${ic} ${k}</div>
+          <div style="font-size:13px;font-weight:800;color:#1e293b">${v}</div>
+        </div>`;
+      const rows = ms.map(m => `<div style="display:flex;align-items:center;gap:6px;padding:5px 2px;border-bottom:1px solid #f1f5f9">
+          <span style="flex:none;width:16px;text-align:center">${m.role === 'leader' ? '👑' : (m.role === 'officer' ? '⭐' : '')}</span>
+          <div style="flex:1;min-width:0;font-size:12px;color:#1e293b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_gdNameLbl(m)}</div>
+          <span style="flex:none;font-size:11px;font-weight:700;color:#1e3a8a">Lv.${m.lv | 0}</span>
+          <span style="flex:none;width:52px;text-align:right;font-size:9.5px;color:#94a3b8">${_gdRoleTxt(m.role)}</span>
+        </div>`).join('');
+      el.innerHTML = `<div style="background:#fff;border-radius:16px;max-width:360px;width:100%;max-height:84vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 12px 40px rgba(2,8,23,.5)">
+        <div style="background:#1e3a8a;padding:11px 16px;text-align:center;color:#fff;position:relative;flex:none">
+          <button onclick="document.getElementById('gd-detail').remove()" style="position:absolute;top:7px;right:9px;width:26px;height:26px;border-radius:8px;border:none;background:rgba(255,255,255,.2);color:#fff;font-size:14px;cursor:pointer">✕</button>
+          <b style="font-size:14px">ℹ️ ${T('รายละเอียดกิล')}</b>
+        </div>
+        <div style="overflow-y:auto;padding:11px 13px 14px">
+          <div style="display:flex;align-items:center;gap:10px">
+            <img src="${_gdEmURL(g.sh, g.co, g.ic, 96)}" style="flex:none;width:48px;height:48px">
+            <div style="flex:1;min-width:0">
+              <div style="font-size:15px;font-weight:800;color:#1e293b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_gdEsc(g.name)}</div>
+              <div style="font-size:10.5px;color:#94a3b8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">👑 ${T('หัวหน้ากิล')} ${ld ? (ld.cc ? _ccFlag(ld.cc) : '') + _gdEsc(ld.nm) : '-'}</div>
+            </div>
+          </div>
+          <div style="margin-top:8px">
+            <div style="font-size:10px;font-weight:700;color:#64748b;margin-bottom:2px">${T('ความคืบหน้าเลเวลกิล')} ${_gdProgTxt(g)}</div>
+            <div style="height:8px;background:#e2e8f0;border-radius:5px;overflow:hidden"><div style="height:100%;width:${g.lv >= 100 ? 100 : g.pct}%;background:linear-gradient(90deg,#3b82f6,#1e3a8a)"></div></div>
+          </div>
+          <div style="display:flex;gap:5px;margin-top:9px">
+            ${stat('🏰', T('เลเวลกิล'), 'Lv.' + (g.lv | 0))}
+            ${stat('👥', T('สมาชิก'), (g.n | 0) + '/' + (g.cap | 0))}
+            ${stat('🏯', T('ระดับปราสาท'), (d.g.tier | 0) + '/20')}
+          </div>
+          <div style="display:flex;gap:5px;margin-top:5px">
+            ${stat('📊', T('เลเวลเฉลี่ย'), avg ? 'Lv.' + avg : '-')}
+            ${stat('🔝', T('เลเวลสูงสุด'), top ? 'Lv.' + top : '-')}
+          </div>
+          <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:9px;padding:7px 10px;margin-top:9px;font-size:11.5px;color:#334155;white-space:pre-wrap;word-break:break-word">📢 ${g.notice ? _gdEsc(g.notice) : `<span style="color:#94a3b8">${T('ยังไม่มีประกาศ')}</span>`}</div>
+          <div style="font-size:11px;font-weight:800;color:#1e293b;margin:11px 0 3px">👥 ${T('รายชื่อสมาชิก')} <span style="font-weight:400;color:#94a3b8">${ms.length}</span></div>
+          ${rows || `<div style="text-align:center;color:#a8a29e;padding:14px 0;font-size:12px">-</div>`}
+          <button onclick="document.getElementById('gd-detail').remove();xhrpg.castleEnter(${gid})" style="width:100%;margin-top:11px;padding:8px 0;border:1px solid #bfdbfe;border-radius:9px;background:#eff6ff;color:#1d4ed8;font-size:12px;font-weight:800;cursor:pointer">🏯 ${T('เยือนปราสาท')}</button>
+        </div>
+      </div>`;
+    });
+  }
+  let _gdTab = 'my', _gdInfo = null, _gdPage = 0, _gdQ = '', _gdSel = { sh: 0, co: 0, ic: 0 }, _gdBusy = false;
+  function _gdClose() { _gdunCdStop(); document.getElementById('gd-panel')?.remove(); } // 🕳️ ปิดแผง = ต้องหยุดนับถอยหลังด้วย (กัน timer ค้าง/ซ้อน)
+  function openGuildPanel() {
+    if (!player || !player.line_uid || player.line_uid === 'demo') return;
+    _gdClose(); _gdTab = 'my';
+    const ov = document.createElement('div'); ov.id = 'gd-panel';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.65);z-index:10009;display:flex;align-items:center;justify-content:center;padding:14px';
+    ov.addEventListener('click', e => { if (e.target === ov) _gdClose(); });
+    ov.innerHTML = `<div style="background:#fff;border-radius:16px;max-width:380px;width:100%;max-height:90vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 12px 40px rgba(2,8,23,.5)">
+      <div style="background:#1e3a8a;padding:12px 16px;text-align:center;color:#fff;position:relative;flex:none">
+        <button onclick="xhrpg._gdClose()" style="position:absolute;top:8px;right:10px;width:28px;height:28px;border-radius:8px;border:none;background:rgba(255,255,255,.2);color:#fff;font-size:15px;cursor:pointer">✕</button>
+        <b style="font-size:15px">🏰 ${T('กิล')}</b>
+      </div>
+      <div style="display:flex;gap:6px;padding:9px 12px 0;flex:none">
+        <button onclick="xhrpg._gdSetTab('my')" id="gd-tab-my" style="flex:1;padding:7px 0;border:none;border-radius:8px;font-size:11.5px;font-weight:800;cursor:pointer">${T('กิลของฉัน')}</button>
+        <button onclick="xhrpg._gdSetTab('find')" id="gd-tab-find" style="flex:1;padding:7px 0;border:none;border-radius:8px;font-size:11.5px;font-weight:700;cursor:pointer">${T('ค้นหากิล')}</button>
+        <button onclick="xhrpg._gdSetTab('rank')" id="gd-tab-rank" style="flex:1;padding:7px 0;border:none;border-radius:8px;font-size:11.5px;font-weight:700;cursor:pointer">🏆 ${T('อันดับกิล')}</button>
+      </div>
+      <div id="gd-body" style="overflow-y:auto;min-height:0;flex:1;padding:10px 12px 14px"><div style="text-align:center;color:#a8a29e;padding:24px 0">${T('กำลังโหลด...')}</div></div>
+    </div>`;
+    document.body.appendChild(ov);
+    _gdTabPaint(); _gdFetchMy();
+  }
+  function _gdTabPaint() {
+    [['my', 'gd-tab-my'], ['find', 'gd-tab-find'], ['rank', 'gd-tab-rank']].forEach(([t, id]) => {
+      const el = document.getElementById(id); if (!el) return;
+      el.style.background = _gdTab === t ? '#1e3a8a' : '#f1f5f9'; el.style.color = _gdTab === t ? '#fff' : '#64748b';
+    });
+  }
+  function _gdSetTab(tab) {
+    _gdTab = tab; _gdTabPaint();
+    const b = document.getElementById('gd-body');
+    if (b) b.innerHTML = `<div style="text-align:center;color:#a8a29e;padding:24px 0">${T('กำลังโหลด...')}</div>`;
+    if (tab === 'my') _gdFetchMy(); else if (tab === 'find') { _gdPage = 0; _gdQ = ''; _gdFetchFind(); } else _gdFetchRank();
+  }
+  const _gdRoleIco = r => r === 'leader' ? '👑' : (r === 'officer' ? '⭐' : '');
+  const _gdRoleTxt = r => r === 'leader' ? T('หัวหน้า') : (r === 'officer' ? T('รองหัวหน้า') : T('สมาชิก'));
+  // ── ตัวเลือกตรา (ใช้ทั้งตอนสร้างและแก้ตรา) ──
+  function _gdComposerHTML() {
+    const shapes = Array.from({ length: 6 }, (_, i) =>
+      `<button onclick="xhrpg._gdPick('sh',${i})" style="width:34px;height:34px;padding:2px;border:2px solid ${_gdSel.sh === i ? '#1e3a8a' : '#e2e8f0'};border-radius:8px;background:#fff;cursor:pointer"><img src="${_gdEmURL(i, _gdSel.co, _gdSel.ic, 56)}" style="width:100%;height:100%"></button>`).join('');
+    const colors = GD_COLORS.map((c, i) =>
+      `<button onclick="xhrpg._gdPick('co',${i})" style="width:26px;height:26px;border:2px solid ${_gdSel.co === i ? '#1e3a8a' : '#e2e8f0'};border-radius:7px;background:${c};cursor:pointer"></button>`).join('');
+    const icons = GD_ICONS.map((ic, i) =>
+      `<button onclick="xhrpg._gdPick('ic',${i})" style="width:26px;height:26px;border:2px solid ${_gdSel.ic === i ? '#1e3a8a' : '#e2e8f0'};border-radius:7px;background:#fff;font-size:14px;padding:0;cursor:pointer">${ic}</button>`).join('');
+    return `<div style="text-align:center;margin:6px 0"><img id="gd-em-prev" src="${_gdEmURL(_gdSel.sh, _gdSel.co, _gdSel.ic, 160)}" style="width:64px;height:64px"></div>
+      <div style="font-size:10.5px;font-weight:800;color:#64748b;margin:6px 0 3px">${T('รูปโล่')}</div><div style="display:flex;gap:4px;flex-wrap:wrap">${shapes}</div>
+      <div style="font-size:10.5px;font-weight:800;color:#64748b;margin:8px 0 3px">${T('สีพื้น')}</div><div style="display:flex;gap:4px;flex-wrap:wrap">${colors}</div>
+      <div style="font-size:10.5px;font-weight:800;color:#64748b;margin:8px 0 3px">${T('สัญลักษณ์')}</div><div style="display:flex;gap:4px;flex-wrap:wrap">${icons}</div>`;
+  }
+  function _gdPick(k, i) {
+    _gdSel[k] = i;
+    const nameEl = document.getElementById('gd-name'); const keep = nameEl ? nameEl.value : null;
+    if (document.getElementById('gd-em-editor')) { _gdRenderEmEditor(); return; }
+    _gdRenderCreate(keep);
+  }
+  function _gdRenderCreate(keepName) {
+    const b = document.getElementById('gd-body'); if (!b) return;
+    const cd = _gdInfo && _gdInfo.cd > 0 ? `<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:9px;padding:7px 10px;font-size:11px;color:#b91c1c;margin-bottom:8px">⏳ ${T('เพิ่งออกจากกิล — เข้ากิลใหม่ได้ในอีก {n} ชม.', { n: Math.ceil(_gdInfo.cd / 3600) })}</div>` : '';
+    b.innerHTML = `${cd}<div style="font-size:12.5px;font-weight:800;color:#1e293b;margin-bottom:6px">🏰 ${T('ตั้งกิลใหม่')}</div>
+      <input id="gd-name" maxlength="12" placeholder="${T('ชื่อกิล (2-12 ตัวอักษร)')}" style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid #cbd5e1;border-radius:9px;font-size:13px">
+      <div style="font-size:10.5px;font-weight:800;color:#64748b;margin:10px 0 0">${T('เลือกตรากิล')}</div>
+      ${_gdComposerHTML()}
+      <button onclick="xhrpg._gdCreate()" style="width:100%;margin-top:12px;padding:10px 0;border:none;border-radius:10px;background:#1e3a8a;color:#fff;font-size:13px;font-weight:800;cursor:pointer">🏰 ${T('ตั้งกิล')} <span style="font-weight:700;font-size:11px">(100,000 G · Lv.10+)</span></button>
+      <div style="font-size:10.5px;color:#94a3b8;margin-top:6px;text-align:center">${T('ยังไม่มีกิล? หากิลเข้าได้ที่แท็บ "ค้นหากิล"')}</div>`;
+    if (keepName != null) { const el = document.getElementById('gd-name'); if (el) el.value = keepName; }
+  }
+  function _gdFetchMy(cb) { // cb (ออปชัน) = เรียกหลังวาดเสร็จ — ใช้เปิด popup ป้อมซ้ำหลังบริจาค
+    _gdPost({ action: 'info' }, d => {
+      const b = document.getElementById('gd-body'); if (!b) return;
+      if (!d || !d.ok) { b.innerHTML = `<div style="text-align:center;color:#dc2626;padding:20px 8px;font-size:12px">${T('โหลดไม่สำเร็จ')}${d && d.error ? ' (' + _gdEsc(d.error) + ')' : ''}</div>`; return; }
+      _gdInfo = d;
+      if (d.none) { _gdSel = { sh: 0, co: 0, ic: 0 }; _gdRenderCreate(null); return; }
+      const g = d.g, me = d.me, isLd = me.role === 'leader', isOf = me.role === 'officer';
+      const em = _gdEmURL(g.sh, g.co, g.ic, 160);
+      const members = (d.members || []).map((mm, mi) => { // ⚠️ ส่ง index ไม่ส่งชื่อ/uid เข้า inline JS (ชื่อผู้เล่นอาจมี quote — กัน XSS/พัง)
+        const btns = [];
+        if (!mm.me) {
+          const canKick = (isLd && mm.role !== 'leader') || (isOf && mm.role === 'member');
+          if (canKick) btns.push(`<button onclick="xhrpg._gdKick(${mi})" title="${T('เตะ')}" style="border:1px solid #fecaca;background:#fef2f2;color:#b91c1c;border-radius:6px;font-size:10px;padding:2px 5px;cursor:pointer">🥾</button>`);
+          if (isLd && mm.role === 'member') btns.push(`<button onclick="xhrpg._gdPromote(${mi})" title="${T('เลื่อนเป็นรอง')}" style="border:1px solid #bfdbfe;background:#eff6ff;color:#1d4ed8;border-radius:6px;font-size:10px;padding:2px 5px;cursor:pointer">⬆️</button>`);
+          if (isLd && mm.role === 'officer') btns.push(`<button onclick="xhrpg._gdDemote(${mi})" title="${T('ปลดจากรอง')}" style="border:1px solid #e2e8f0;background:#f8fafc;color:#64748b;border-radius:6px;font-size:10px;padding:2px 5px;cursor:pointer">⬇️</button>`);
+          if (isLd) btns.push(`<button onclick="xhrpg._gdTransfer(${mi})" title="${T('โอนหัวหน้า')}" style="border:1px solid #fde68a;background:#fffbeb;color:#b45309;border-radius:6px;font-size:10px;padding:2px 5px;cursor:pointer">👑</button>`);
+        }
+        return `<div style="display:flex;align-items:center;gap:6px;padding:5px 2px;border-bottom:1px solid #f1f5f9">
+          <span style="flex:none;width:16px;text-align:center">${_gdRoleIco(mm.role)}</span>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:12px;font-weight:${mm.me ? 800 : 600};color:${mm.me ? '#1e3a8a' : '#1e293b'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_gdNameLbl(mm)} <span style="font-size:10px;color:#94a3b8;font-weight:400">Lv.${mm.lv}</span></div>
+            <div style="font-size:9.5px;color:#94a3b8">${_gdRoleTxt(mm.role)} · ${T('ยอดบริจาค')} ${Number(mm.ct).toLocaleString()} G</div>
+          </div>
+          <div style="flex:none;display:flex;gap:3px">${btns.join('')}</div>
+        </div>`;
+      }).join('');
+      const ldTools = isLd ? `<div style="display:flex;gap:5px;margin-top:8px">
+          <button onclick="xhrpg._gdEmEdit()" style="flex:1;padding:6px 0;border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc;color:#334155;font-size:11px;font-weight:700;cursor:pointer">🛡️ ${T('แก้ตรา')}</button>
+          <button onclick="xhrpg._gdNoticeSave()" style="flex:1;padding:6px 0;border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc;color:#334155;font-size:11px;font-weight:700;cursor:pointer">✏️ ${T('แก้ประกาศ')}</button>
+          <button onclick="xhrpg._gdDisband()" style="flex:1;padding:6px 0;border:1px solid #fecaca;border-radius:8px;background:#fef2f2;color:#b91c1c;font-size:11px;font-weight:700;cursor:pointer">💥 ${T('ยุบกิล')}</button>
+        </div>` : `<button onclick="xhrpg._gdLeave()" style="width:100%;margin-top:8px;padding:7px 0;border:1px solid #fecaca;border-radius:8px;background:#fef2f2;color:#b91c1c;font-size:11px;font-weight:700;cursor:pointer">🚪 ${T('ออกจากกิล')}</button>`;
+      b.innerHTML = `
+        <div style="display:flex;align-items:center;gap:10px">
+          <img src="${em}" style="flex:none;width:52px;height:52px">
+          <div style="flex:1;min-width:0">
+            <div style="font-size:15px;font-weight:800;color:#1e293b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_gdEsc(g.name)}</div>
+            <div style="font-size:11px;color:#64748b">Lv.${g.lv} · ${T('สมาชิก')} ${g.n}/${g.cap}</div>
+          </div>
+          <div style="flex:none;display:flex;gap:4px">
+            <button onclick="xhrpg._gdDetail(${g.id | 0})" title="${T('รายละเอียดกิล')}" style="${_GD_BTN};border:1px solid #e2e8f0;background:#fff;color:#64748b">ℹ️</button>
+            <button onclick="xhrpg.castleEnter(${g.id | 0})" title="${T('เยือนปราสาท')}" style="${_GD_BTN};border:1px solid #bfdbfe;background:#eff6ff;color:#1d4ed8">🏯</button>
+            <button onclick="xhrpg._gdLog()" title="${T('บันทึกกิล')}" style="${_GD_BTN};border:1px solid #e2e8f0;background:#fff;color:#64748b">📜</button>
+          </div>
+        </div>
+        <div style="margin-top:8px">
+          <div style="font-size:10px;font-weight:700;color:#64748b;margin-bottom:2px">${T('ความคืบหน้าเลเวลกิล')} ${_gdProgTxt(g)}</div>
+          <div style="height:8px;background:#e2e8f0;border-radius:5px;overflow:hidden"><div style="height:100%;width:${g.lv >= 100 ? 100 : g.pct}%;background:linear-gradient(90deg,#3b82f6,#1e3a8a)"></div></div>
+        </div>
+        <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:9px;padding:7px 10px;margin-top:8px;font-size:11.5px;color:#334155;white-space:pre-wrap;word-break:break-word">📢 ${g.notice ? _gdEsc(g.notice) : `<span style="color:#94a3b8">${T('ยังไม่มีประกาศ')}</span>`}</div>
+        <div style="margin-top:9px">
+          <div style="font-size:11px;font-weight:800;color:#b45309;margin-bottom:4px">💰 ${T('บริจาค G ให้กิล')} <span style="font-weight:400;color:#94a3b8">(${T('ยอดบริจาคของฉัน')} ${Number(me.ct).toLocaleString()} G)</span></div>
+          <div style="display:flex;gap:4px">
+            ${[10000, 100000, 1000000, 10000000].map(a => `<button onclick="xhrpg._gdDonate(${a})" style="flex:1;padding:6px 0;border:none;border-radius:7px;background:#b45309;color:#fff;font-size:10px;font-weight:800;cursor:pointer">${a >= 1000000 ? (a / 1000000) + 'M' : (a / 1000) + 'k'}</button>`).join('')}
+            <button onclick="xhrpg._gdDonateCustom()" style="flex:1;padding:6px 0;border:1px solid #b45309;border-radius:7px;background:#fffbeb;color:#b45309;font-size:10px;font-weight:800;cursor:pointer">${T('ระบุเอง')}</button>
+          </div>
+        </div>
+        <button onclick="xhrpg.chatOpenGuild()" style="width:100%;margin-top:9px;padding:9px 0;border:1px solid #99f6e4;border-radius:9px;background:#f0fdfa;color:#0f766e;font-size:12px;font-weight:800;cursor:pointer">💬 ${T('คุยในกิล')}${_chatGdN > 0 ? ` <span style="background:#dc2626;color:#fff;border-radius:7px;padding:0 6px;font-size:10px">${_chatGdN > 99 ? '99+' : _chatGdN}</span>` : ''}</button>
+        ${_gtCardHTML(d)}
+        ${_gdunCardHTML(d)}
+        ${_gdOreHTML(d)}
+        ${ldTools}
+        <div style="font-size:11px;font-weight:800;color:#1e293b;margin:11px 0 3px">👥 ${T('สมาชิก')} (${g.n}/${g.cap})</div>
+        ${members}`;
+      _gdunCdStart(); // 🕳️ เริ่มนับถอยหลังใหม่ทุกครั้งที่วาดการ์ด (ข้างในหยุดตัวเก่าให้แล้ว)
+      if (typeof cb === 'function') cb();
+    });
+  }
+  // ══ 🪨 แร่อวกาศอัพเลเวลกิล (docs/guild-ore-upgrade-design.md) — แถบใต้การ์ดดัน ในแท็บ "กิลของฉัน" ══
+  //    server ส่ง d.ore = { lv, have:{}, need:{}, mine:{} } · คีย์ที่ไม่มีใน need = เลเวลนี้ยังไม่ใช้แร่ชนิดนั้น
+  //    ⚠️ server เก่าไม่มี key `ore` → คืนสตริงว่างเงียบๆ ห้าม throw (หน้ากิลทั้งหน้าจะพังตาม)
+  //    🔒 โชว์ได้แค่ตัวเลข have/need ที่ server ส่งมา — ห้ามคำนวณ/โชว์สูตรจำนวนแร่ต่อเลเวล
+  const _GD_ORE_META = {
+    ore1: { ico: '🌙', nm: 'แร่จันทรา'   },
+    ore2: { ico: '☄️', nm: 'เศษดาวตก'    },
+    ore3: { ico: '🌌', nm: 'ผลึกเนบิวลา' },
+  };
+  function _gdOreHTML(d) {
+    const o = d && d.ore;
+    if (!o || typeof o !== 'object') return '';
+    const need = (o.need && typeof o.need === 'object') ? o.need : {};
+    const keys = ['ore1', 'ore2', 'ore3'].filter(k => (need[k] | 0) > 0);
+    if (!keys.length) return '';                       // กิล Lv < 21 (หรือ server ยังไม่ส่ง need) = ซ่อนทั้งแถบ
+    const have = (o.have && typeof o.have === 'object') ? o.have : {};
+    const mine = (o.mine && typeof o.mine === 'object') ? o.mine : {};
+    const rows = keys.map(k => {
+      const m  = _GD_ORE_META[k], nd = need[k] | 0, hv = have[k] | 0, ok = hv >= nd;
+      const pct = Math.max(0, Math.min(100, Math.round(hv / Math.max(1, nd) * 100)));
+      return `<div style="margin-top:6px">
+        <div style="display:flex;justify-content:space-between;gap:6px;font-size:10px;font-weight:700;color:${ok ? '#15803d' : '#6d28d9'}">
+          <span>${m.ico} ${T(m.nm)}</span>
+          <span style="flex:none">${hv.toLocaleString()}/${nd.toLocaleString()}${ok ? ' ✅' : ''}</span>
+        </div>
+        <div style="height:7px;background:#e2e8f0;border-radius:5px;overflow:hidden;margin-top:2px">
+          <div style="height:100%;width:${pct}%;background:${ok ? 'linear-gradient(90deg,#22c55e,#15803d)' : 'linear-gradient(90deg,#a78bfa,#6d28d9)'};transition:width .4s"></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:5px;margin-top:3px">
+          <span style="flex:1;min-width:0;font-size:9.5px;color:#94a3b8">${T('ที่ฉันมี')} ${(mine[k] | 0).toLocaleString()}</span>
+          <button onclick="xhrpg._gdDonateOre('${k}')" style="flex:none;padding:4px 11px;border:1px solid #ddd6fe;border-radius:7px;background:#f5f3ff;color:#6d28d9;font-size:10px;font-weight:800;cursor:pointer">${T('บริจาคแร่')}</button>
+        </div>
+      </div>`;
+    }).join('');
+    return `<div style="background:#faf5ff;border:1px solid #ddd6fe;border-radius:9px;padding:8px;margin-top:9px">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:6px">
+        <span style="font-size:11.5px;font-weight:800;color:#6d28d9">🪨 ${T('แร่อวกาศอัพเลเวลกิล')}</span>
+        <span style="flex:none;font-size:9.5px;color:#a78bfa">Lv.${o.lv | 0} → Lv.${(o.lv | 0) + 1}</span>
+      </div>
+      ${rows}
+      <div style="font-size:9px;color:#a78bfa;margin-top:6px;text-align:center;line-height:1.5">${T('ต้องครบทั้ง G และแร่ กิลจึงขึ้นเลเวล · บริจาคแล้วคืนไม่ได้')}</div>
+    </div>`;
+  }
+  function _gdDonateOre(f) {
+    const m = _GD_ORE_META[f]; if (!m) return;
+    const o    = (_gdInfo && _gdInfo.ore) || {};
+    const mine = ((o.mine && o.mine[f]) | 0);
+    if (mine <= 0) { alert(T('คุณยังไม่มีแร่ชนิดนี้ — ส่งยานบุกอวกาศไปหาก่อน')); return; }
+    const v = prompt(T('บริจาค {a} กี่ก้อน? (มีอยู่ {n})', { a: T(m.nm), n: mine.toLocaleString() }), String(mine));
+    if (v == null) return;
+    const n = Math.min(mine, parseInt(String(v).replace(/[^0-9]/g, ''), 10) || 0); // client clamp เฉยๆ — server verify จำนวนจริงอีกชั้น
+    if (n <= 0) { alert(T('จำนวนไม่ถูกต้อง')); return; }
+    if (!confirm(T('ยืนยันบริจาค {a} ×{n} ให้กิล? — บริจาคแล้วคืนไม่ได้', { a: T(m.nm), n: n.toLocaleString() }))) return;
+    _gdAct({ action: 'donate_ore', f: f, n: n }, () => _gdFetchMy());
+  }
+  // ══ 🏰🔫 หอโจมตีกิล (docs/guild-turret-design.md) — การ์ดในแท็บ "กิลของฉัน" ═══════════════════
+  //    กองทุน: สมาชิกทุกคนเติมได้ · ซื้อ/อัพ/ย้าย: หัวหน้าเท่านั้น (server ตรวจ role อีกชั้น — ซ่อนปุ่มไม่ใช่การกันสิทธิ์)
+  let _gtMvIdx = -1;
+  function _gtMapNm(id) {
+    const m = MAP_DEFS.find(x => x.id === (id | 0));
+    return m ? (m.emoji + ' ' + T(m.name)) : ('#' + id);
+  }
+  function _gtZoneNm(map, zone) {
+    const mm = ((_gdInfo && _gdInfo.gt && _gdInfo.gt.maps) || []).find(x => (x.map | 0) === (map | 0));
+    const z  = mm && (mm.zones || []).find(x => (x.i | 0) === (zone | 0));
+    return z ? T(z.nm) : T('โซน {n}', { n: zone });
+  }
+  // ── UI v2 (เจ้าของสั่ง 2026-07-26): กริดปืน 5 ช่อง/แถว × 2 แถว (สูงคงที่แม้มี 10 ป้อม) + เกจกองทุน ──
+  //    ปุ่มบริจาคย้ายเข้า popup ทั้งหมด · แตะช่องไหนก็เปิด popup ตามสถานะช่องนั้น
+  const GT_MAX_SLOT = 10, GT_PER_LV = 10; // sync PHP XHRPG_GT_MAX / XHRPG_GT_PER_LV
+  const _gtSlotLvReq = k => (k - 1) * GT_PER_LV;            // ช่องที่ k ปลดเมื่อกิลถึง Lv นี้ (ช่อง 1 = Lv0 = มีตั้งแต่แรก)
+  // เกจกองทุนเทียบราคาเป้าหมาย — ตอบคำถาม "บริจาคไปเท่าไหร่แล้ว พอรึยัง"
+  //    opt = {ico, lab, full} เปลี่ยนป้ายได้ (ค่า default = เกจ "ป้อมถัดไป") → ใช้ซ้ำกับเกจค่าอัพในป็อปอัปป้อม
+  //    ⚠️ ตัวเลขซ้ายโชว์กองทุนจริงไม่ clamp — เจ้าของสั่งให้เห็น "180,000 / 150,000" ตอนเงินเกิน (แถบเต็ม 100% พอ)
+  function _gtGaugeHTML(fund, cost, big, opt) {
+    opt = opt || {};
+    const full = fund >= cost, pct = Math.max(0, Math.min(100, Math.round(fund / Math.max(1, cost) * 100)));
+    const col = full ? '#15803d' : '#b45309';
+    return `<div style="margin-top:${big ? 4 : 8}px">
+      <div style="display:flex;justify-content:space-between;gap:6px;font-size:${big ? 10.5 : 9.5}px;font-weight:700;color:${col}">
+        <span>${opt.ico || '🔨'} ${opt.lab || T('ป้อมถัดไป')}${full ? ' — ' + (opt.full || T('พอสร้างแล้ว!')) : ''}</span>
+        <span style="flex:none">${fund.toLocaleString()}/${cost.toLocaleString()} G</span>
+      </div>
+      <div style="height:${big ? 11 : 9}px;background:#e2e8f0;border-radius:6px;overflow:hidden;margin-top:2px">
+        <div style="height:100%;width:${pct}%;background:${full ? 'linear-gradient(90deg,#22c55e,#15803d)' : 'linear-gradient(90deg,#f59e0b,#d97706)'};transition:width .4s"></div>
+      </div>
+    </div>`;
+  }
+  function _gtCardHTML(d) {
+    const gt = d && d.gt; if (!gt) return '';
+    const list = gt.list || [], slots = gt.slots | 0, fund = gt.fund | 0, cost = gt.buy | 0;
+    const glv = (d.g && d.g.lv) | 0;
+    const cells = [];
+    for (let k = 1; k <= GT_MAX_SLOT; k++) {
+      const t = list[k - 1];
+      let inner, bg, bd, dim = 0, dot = 0;
+      if (t) {                                   // มีป้อมแล้ว
+        bg = '#e0f2fe'; bd = '#7dd3fc'; dot = (t.map | 0) > 0 ? 0 : 1; // จุดแดง = ยังไม่ได้ตั้งที่
+        inner = `<span style="font-size:16px">🔫</span><span style="font-size:8.5px;font-weight:800;color:#0c4a6e">Lv.${t.lv}</span>`;
+      } else if (k <= slots) {                   // ช่องปลดแล้ว รอสร้าง
+        const ready = fund >= cost;
+        bg = '#fffbeb'; bd = ready ? '#f59e0b' : '#fde68a';
+        inner = `<span style="font-size:17px">➕</span><span style="font-size:8px;font-weight:700;color:#b45309">${ready ? T('พร้อมสร้าง!') : T('รอสร้าง')}</span>`;
+      } else {                                   // ยังไม่ปลด — บอกเลเวลกิลที่ต้องถึงบนหน้าช่องเลย (เจ้าของสั่ง)
+        bg = '#f8fafc'; bd = '#e2e8f0'; dim = 1;
+        inner = `<span style="font-size:14px">🔒</span><span style="font-size:7.5px;font-weight:700;color:#94a3b8;text-align:center;line-height:1.1">${T('ปลด Lv.{n}', { n: _gtSlotLvReq(k) })}</span>`;
+      }
+      cells.push(`<div onclick="xhrpg._gtSlotOpen(${k})" style="position:relative;aspect-ratio:1;border:1.5px solid ${bd};background:${bg};border-radius:9px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;cursor:pointer;${dim ? 'opacity:.55;' : ''}">
+        ${dot ? '<span style="position:absolute;top:3px;right:3px;width:7px;height:7px;border-radius:50%;background:#dc2626"></span>' : ''}${inner}</div>`);
+    }
+    const hasFree = list.length < slots; // มีช่องว่างที่ปลดแล้ว → โชว์เกจ (ไม่มีช่อง = ไม่ต้องลุ้นราคา)
+    return `<div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:9px;padding:8px;margin-top:9px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px">
+        <span style="font-size:11.5px;font-weight:800;color:#0c4a6e">🏰🔫 ${T('หอโจมตีกิล')} <span style="font-weight:400;color:#0369a1">${list.length}/${slots}</span></span>
+        <span style="font-size:10.5px;color:#0369a1">${T('กองทุน')} <b>${fund.toLocaleString()}</b> G</span>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:5px">${cells.join('')}</div>
+      ${hasFree ? _gtGaugeHTML(fund, cost, false) : `<div style="margin-top:6px;text-align:center;font-size:9.5px;color:#94a3b8">${T('ช่องป้อมเต็ม — อัพเลเวลกิลเพื่อปลดเพิ่ม')}</div>`}
+      ${_gtHistLineHTML(gt)}
+      <div style="font-size:9px;color:#94a3b8;margin-top:5px;text-align:center">${T('แตะช่องเพื่อบริจาค / สร้าง / จัดการป้อม')}</div>
+    </div>`;
+  }
+  // ── 📜 ประวัติแบ่งรางวัล (ทุกคนในกิลเห็น) — บรรทัดสรุปรอบล่าสุดในการ์ด + แตะดูย้อนหลัง 20 รอบ ──
+  const _gtHmm = ts => { const d = new Date((ts | 0) * 1000); return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2); };
+  const _gtHdm = ts => { const d = new Date((ts | 0) * 1000); return ('0' + d.getDate()).slice(-2) + '/' + ('0' + (d.getMonth() + 1)).slice(-2); };
+  function _gtHistLineHTML(gt) {
+    const h = (gt && gt.hist) || [], h0 = h[0];
+    if (!h0) return `<div style="margin-top:6px;text-align:center;font-size:9px;color:#94a3b8">${T('ยังไม่มีรอบแบ่งรางวัล — ตั้งป้อมแล้วรอครบชั่วโมง')}</div>`;
+    return `<div onclick="xhrpg._gtHistOpen()" title="${T('ประวัติแบ่งรางวัลป้อม')}" style="margin-top:6px;background:#e0f2fe;border:1px solid #7dd3fc;border-radius:8px;padding:5px 8px;font-size:9.5px;color:#0c4a6e;cursor:pointer;display:flex;justify-content:space-between;gap:6px;align-items:center">
+      <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">📜 ${T('รอบล่าสุด')} ${_gtHmm(h0.ts)} · ${T('ฆ่า {n} ตัว', { n: (h0.k | 0).toLocaleString() })}</span>
+      <span style="flex:none;font-weight:800">+${(h0.e | 0).toLocaleString()} EXP · +${(h0.g | 0).toLocaleString()} G</span>
+    </div>`;
+  }
+  function _gtHistOpen() {
+    const h = ((_gdInfo && _gdInfo.gt && _gdInfo.gt.hist) || []);
+    document.getElementById('gt-pop')?.remove();
+    _gtPopSlot = -1;
+    // 📜 แถวประวัติ: เวลา+รางวัลบรรทัดบน · รายการป้อมที่ยิงรอบนั้นบรรทัดถัดไป (เจ้าของสั่งเอา "จำนวนคน" ออก โชว์ที่ตั้งป้อมแทน)
+    //    ทุกข้อความผ่าน T() และชื่อแมพ/โซนใช้ helper เดิม (_gtMapNm/_gtZoneNm) → ไม่มีคีย์แปลใหม่
+    //    ⚠️ รอบเก่าที่บันทึกไว้ก่อนอัปเดตไม่มี tl → ข้ามบล็อกป้อมไปเฉยๆ ไม่พัง
+    const rows = h.length ? h.map(r => {
+      const tl = Array.isArray(r.tl) ? r.tl : [];
+      const tHtml = tl.map(x => `<div style="display:flex;gap:5px;align-items:baseline;color:#0c4a6e">
+          <span style="flex:none;font-weight:700">🔫 ${T('ป้อม')} #${x.s | 0}</span>
+          <span style="flex:1;min-width:0;color:#64748b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_gtMapNm(x.m | 0)} · ${_gdEsc(_gtZoneNm(x.m | 0, x.z | 0))}</span>
+          <span style="flex:none;color:#94a3b8">${T('ฆ่า {n} ตัว', { n: (x.k | 0).toLocaleString() })}</span>
+        </div>`).join('');
+      return `<div style="padding:6px 2px;border-bottom:1px solid #f1f5f9;font-size:10.5px">
+        <div style="display:flex;gap:6px;align-items:baseline">
+          <span style="flex:1;min-width:0;color:#64748b">${_gtHdm(r.ts)} ${_gtHmm(r.ts)}</span>
+          <span style="flex:none;text-align:right;font-weight:700;color:#0c4a6e">+${(r.e | 0).toLocaleString()} EXP · <span style="color:#b45309">+${(r.g | 0).toLocaleString()} G</span></span>
+        </div>
+        ${tHtml ? `<div style="margin-top:3px;display:flex;flex-direction:column;gap:2px">${tHtml}</div>` : ''}
+        <div style="margin-top:3px;color:#94a3b8">${T('ฆ่า {n} ตัว', { n: (r.k | 0).toLocaleString() })}${(r.d | 0) > 0 ? ' · ' + T('ของ {n} ชิ้น', { n: r.d | 0 }) : ''}</div>
+      </div>`;
+    }).join('') : `<div style="text-align:center;color:#94a3b8;font-size:11px;padding:12px 0">${T('ยังไม่มีรอบแบ่งรางวัล — ตั้งป้อมแล้วรอครบชั่วโมง')}</div>`;
+    const wrap = document.createElement('div');
+    wrap.id = 'gt-pop';
+    wrap.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:10040;display:flex;align-items:center;justify-content:center;padding:16px';
+    wrap.onclick = e => { if (e.target === wrap) _gtPopClose(); };
+    wrap.innerHTML = `<div style="background:#fff;border-radius:12px;padding:13px;width:100%;max-width:340px;max-height:76vh;display:flex;flex-direction:column;box-shadow:0 10px 30px rgba(0,0,0,.3)">
+      <div style="font-size:13px;font-weight:800;color:#1e293b">📜 ${T('ประวัติแบ่งรางวัลป้อม')}</div>
+      <div style="font-size:9.5px;color:#94a3b8;margin:2px 0 6px">${T('ยอดที่แต่ละคนได้รับต่อรอบ (20 รอบล่าสุด · ทุกคนในกิลเห็นเหมือนกัน)')}</div>
+      <div style="overflow-y:auto;flex:1">${rows}</div>
+      <button onclick="xhrpg._gtPopClose()" style="width:100%;margin-top:8px;padding:7px 0;border:1px solid #e2e8f0;border-radius:9px;background:#f8fafc;color:#64748b;font-size:11.5px;font-weight:700;cursor:pointer">${T('ปิดหน้าต่าง')}</button>
+    </div>`;
+    document.body.appendChild(wrap);
+  }
+  // ── popup ต่อช่อง: 3 แบบตามสถานะ (ป้อมจริง / ช่องว่างรอสร้าง / ยังไม่ปลด) ──
+  let _gtPopSlot = -1; // ช่องที่ popup เปิดอยู่ (−1 = ปิด) — ใช้ re-render popup หลังบริจาคสำเร็จ
+  function _gtPopClose() { document.getElementById('gt-pop')?.remove(); _gtPopSlot = -1; }
+  function _gtFundRowHTML() { // แถวปุ่มบริจาค — ทุกคนในกิลกดได้ (ไม่ใช่แค่หัวหน้า)
+    return `<div style="display:flex;gap:4px">
+      ${[10000, 100000, 1000000, 10000000].map(a => `<button onclick="xhrpg._gtFund(${a})" style="flex:1;padding:7px 0;border:none;border-radius:7px;background:#0369a1;color:#fff;font-size:10px;font-weight:800;cursor:pointer">+${a >= 1000000 ? (a / 1000000) + 'M' : (a / 1000) + 'k'}</button>`).join('')}
+      <button onclick="xhrpg._gtFundCustom()" style="flex:1;padding:7px 0;border:1px solid #0369a1;border-radius:7px;background:#f0f9ff;color:#0369a1;font-size:10px;font-weight:800;cursor:pointer">${T('ระบุเอง')}</button>
+    </div>`;
+  }
+  function _gtSlotOpen(k) {
+    const d = _gdInfo, gt = d && d.gt; if (!gt) return;
+    const list = gt.list || [], slots = gt.slots | 0, fund = gt.fund | 0, cost = gt.buy | 0;
+    const isLd = d.me && d.me.role === 'leader';
+    const t = list[k - 1], i = k - 1;
+    let body;
+    if (t) { // ── ป้อมจริง: สรุป + บริจาค + อัพเกรด/ย้าย (2 ปุ่มท้ายเฉพาะหัวหน้า) ──
+      const placed = (t.map | 0) > 0;
+      const where = placed ? `${_gtMapNm(t.map)} · ${_gdEsc(_gtZoneNm(t.map, t.zone))}` : `<span style="color:#dc2626">${T('ยังไม่ได้ตั้ง')}</span>`;
+      const upBtn = (t.up | 0) > 0
+        ? `<button onclick="xhrpg._gtUp(${i})" style="flex:1;padding:8px 0;border:1px solid #fde68a;border-radius:9px;background:#fffbeb;color:#b45309;font-size:11px;font-weight:800;cursor:pointer">⬆️ ${T('อัพเกรด')} (${Number(t.up).toLocaleString()} G)</button>`
+        : `<div style="flex:1;padding:8px 0;border:1px solid #e2e8f0;border-radius:9px;background:#f8fafc;color:#94a3b8;font-size:10px;font-weight:700;text-align:center">${T('เลเวลป้อมเกินเลเวลกิลไม่ได้')}</div>`;
+      body = `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+          <span style="font-size:24px">🔫</span>
+          <div style="min-width:0">
+            <div style="font-size:13px;font-weight:800;color:#1e293b">${T('ป้อม')} #${k} <span style="color:#0369a1">Lv.${t.lv}</span></div>
+            <div style="font-size:10px;color:#64748b">ATK ${Number(t.atk).toLocaleString()} · ${where}</div>
+          </div>
+        </div>
+        ${(t.up | 0) > 0 ? _gtGaugeHTML(fund, t.up | 0, true, { ico: '⬆️', lab: T('อัพป้อมนี้'), full: isLd ? T('พออัพแล้ว!') : T('รอหัวหน้ากิลกดอัพ') }) : ''}
+        <div style="font-size:10px;font-weight:800;color:#0369a1;margin:7px 0 4px">💰 ${T('บริจาคเข้ากองทุน')} <span style="font-weight:400;color:#94a3b8">(${T('กองทุน')} ${fund.toLocaleString()} G)</span></div>
+        ${_gtFundRowHTML()}
+        ${isLd ? `<div style="display:flex;gap:6px;margin-top:9px">${upBtn}
+          <button onclick="xhrpg._gtMoveOpen(${i})" style="flex:1;padding:8px 0;border:1px solid #bfdbfe;border-radius:9px;background:#eff6ff;color:#1d4ed8;font-size:11px;font-weight:800;cursor:pointer">📍 ${T('ตั้ง/ย้ายป้อม')}</button>
+        </div>` : `<div style="font-size:9.5px;color:#94a3b8;text-align:center;margin-top:8px">${T('อัพเกรด/ย้าย = หัวหน้ากิลเท่านั้น')}</div>`}`;
+    } else if (k <= slots) { // ── ช่องว่างที่ปลดแล้ว: เกจใหญ่ + บริจาค + ปุ่มสร้าง ──
+      const ok = fund >= cost, short = Math.max(0, cost - fund);
+      const buyBtn = isLd
+        ? `<button ${ok ? 'onclick="xhrpg._gtBuy()"' : 'disabled'} style="width:100%;margin-top:9px;padding:9px 0;border:none;border-radius:9px;background:${ok ? '#1d4ed8' : '#cbd5e1'};color:${ok ? '#fff' : '#64748b'};font-size:12px;font-weight:800;cursor:${ok ? 'pointer' : 'not-allowed'}">🔨 ${T('สร้างป้อม')} (${cost.toLocaleString()} G)${ok ? '' : ' — ' + T('ขาดอีก {n} G', { n: short.toLocaleString() })}</button>`
+        : `<div style="margin-top:9px;text-align:center;font-size:10.5px;color:#0369a1;background:#e0f2fe;border-radius:8px;padding:7px 6px">${ok ? T('รอหัวหน้ากิลกดสร้าง') : T('ขาดอีก {n} G', { n: short.toLocaleString() })}</div>`;
+      body = `<div style="font-size:13px;font-weight:800;color:#1e293b;margin-bottom:2px">➕ ${T('สร้างป้อมช่องที่ {k}', { k: k })}</div>
+        <div style="font-size:10px;color:#64748b;margin-bottom:6px">${T('ป้อมยิงมอนในโซนที่ตั้ง แล้วแบ่ง EXP · G · ของดรอป ให้สมาชิกทุกคนชั่วโมงละรอบ (รับได้แม้ออฟไลน์)')}</div>
+        ${_gtGaugeHTML(fund, cost, true)}
+        <div style="font-size:10px;font-weight:800;color:#0369a1;margin:9px 0 4px">💰 ${T('บริจาคเข้ากองทุน')} <span style="font-weight:400;color:#94a3b8">(${T('ทุกคนช่วยได้')})</span></div>
+        ${_gtFundRowHTML()}
+        ${buyBtn}`;
+    } else { // ── ยังไม่ปลด ──
+      body = `<div style="text-align:center;padding:6px 2px">
+        <div style="font-size:30px">🔒</div>
+        <div style="font-size:12.5px;font-weight:800;color:#1e293b;margin-top:4px">${T('ช่องที่ {k} ยังไม่ปลด', { k: k })}</div>
+        <div style="font-size:11px;color:#64748b;margin-top:3px">${T('ปลดเมื่อกิลถึง Lv.{n}', { n: _gtSlotLvReq(k) })} · ${T('ตอนนี้กิล Lv.{n}', { n: (d.g && d.g.lv) | 0 })}</div>
+        <div style="font-size:9.5px;color:#94a3b8;margin-top:5px">${T('ปลดเพิ่ม 1 ช่องทุกเลเวลกิล 10 (สูงสุด 10 ป้อม)')}</div>
+      </div>`;
+    }
+    document.getElementById('gt-pop')?.remove();
+    _gtPopSlot = k;
+    const wrap = document.createElement('div');
+    wrap.id = 'gt-pop';
+    wrap.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:10040;display:flex;align-items:center;justify-content:center;padding:16px';
+    wrap.onclick = e => { if (e.target === wrap) _gtPopClose(); }; // แตะพื้นหลัง = ปิด
+    wrap.innerHTML = `<div style="background:#fff;border-radius:12px;padding:13px;width:100%;max-width:330px;box-shadow:0 10px 30px rgba(0,0,0,.3)">
+      ${body}
+      <button onclick="xhrpg._gtPopClose()" style="width:100%;margin-top:8px;padding:7px 0;border:1px solid #e2e8f0;border-radius:9px;background:#f8fafc;color:#64748b;font-size:11.5px;font-weight:700;cursor:pointer">${T('ปิดหน้าต่าง')}</button>
+    </div>`;
+    document.body.appendChild(wrap);
+  }
+  // รีเฟรชการ์ด แล้วเปิด popup ช่องเดิมซ้ำ — บริจาคแล้วเห็นเกจขยับทันทีในหน้าเดิม (เจ้าของเคยงงว่า "ไม่มีอะไรเปลี่ยน")
+  function _gtRefresh() { _gdFetchMy(() => { if (_gtPopSlot > 0) _gtSlotOpen(_gtPopSlot); }); }
+  function _gtFund(a) { _gdAct({ action: 'turret_fund', amt: a | 0 }, () => _gtRefresh()); }
+  function _gtFundCustom() {
+    const v = prompt(T('เติมกองทุนป้อมกี่ G? (ขั้นต่ำ 1,000)'), '100000');
+    if (v === null) return;
+    const n = Math.floor(Number(String(v).replace(/[^0-9]/g, '')));
+    if (!(n >= 1000)) { alert(T('ยอดไม่ถูกต้อง')); return; }
+    _gtFund(n);
+  }
+  function _gtBuy() {
+    const gt = _gdInfo && _gdInfo.gt; if (!gt) return;
+    if (!confirm(T('ซื้อป้อมใหม่ด้วยกองทุน {n} G?', { n: Number(gt.buy | 0).toLocaleString() }))) return;
+    _gdAct({ action: 'turret_buy' }, () => _gtRefresh());
+  }
+  function _gtUp(i) {
+    const t = ((_gdInfo && _gdInfo.gt && _gdInfo.gt.list) || [])[i]; if (!t || !(t.up > 0)) return;
+    if (!confirm(T('อัพป้อม #{i} เป็น Lv.{lv} ด้วยกองทุน {n} G?', { i: i + 1, lv: (t.lv | 0) + 1, n: Number(t.up).toLocaleString() }))) return;
+    _gdAct({ action: 'turret_up', tid: t.id | 0 }, () => _gtRefresh());
+  }
+  // ── popup ตั้ง/ย้ายป้อม: เลือกแผนที่ → โซน (ฟรี ไม่มีคูลดาวน์ · มีผลรอบแบ่งถัดไป) ──
+  function _gtMoveOpen(i) {
+    const gt = _gdInfo && _gdInfo.gt;
+    const t  = (gt && gt.list || [])[i]; if (!t) return;
+    const maps = (gt.maps || []);
+    if (!maps.length) { alert(T('ยังไม่มีแผนที่ที่ตั้งป้อมได้')); return; }
+    _gtMvIdx = i;
+    document.getElementById('gt-mv')?.remove();
+    const cur = maps.findIndex(mm => (mm.map | 0) === (t.map | 0));
+    const wrap = document.createElement('div');
+    wrap.id = 'gt-mv';
+    wrap.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:10050;display:flex;align-items:center;justify-content:center;padding:16px';
+    wrap.innerHTML = `<div style="background:#fff;border-radius:12px;padding:13px;width:100%;max-width:320px;box-shadow:0 10px 30px rgba(0,0,0,.3)">
+      <div style="font-size:13px;font-weight:800;color:#1e293b;margin-bottom:8px">📍 ${T('ตั้ง/ย้ายป้อม')} #${i + 1}</div>
+      <div style="font-size:10.5px;color:#64748b;margin-bottom:3px">${T('แผนที่')}</div>
+      <select id="gt-mv-map" onchange="xhrpg._gtMvZones()" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:8px;font-size:12px;margin-bottom:8px">
+        ${maps.map((mm, k) => `<option value="${k}"${k === (cur < 0 ? 0 : cur) ? ' selected' : ''}>${_gdEsc(_gtMapNm(mm.map))}</option>`).join('')}
+      </select>
+      <div style="font-size:10.5px;color:#64748b;margin-bottom:3px">${T('โซน')}</div>
+      <select id="gt-mv-zone" style="width:100%;padding:7px;border:1px solid #e2e8f0;border-radius:8px;font-size:12px"></select>
+      <div id="gt-mv-hint" style="font-size:9.5px;color:#dc2626;margin-top:5px;font-weight:700"></div>
+      <div style="font-size:9.5px;color:#94a3b8;margin-top:6px">${T('ตั้งได้เฉพาะโซนที่มอนตัวแรก Lv ต่ำกว่าหัวหน้ากิล · ย้ายฟรี ไม่มีคูลดาวน์ · มีผลกับรอบแบ่งรางวัลถัดไป')}</div>
+      <div style="display:flex;gap:6px;margin-top:11px">
+        <button onclick="xhrpg._gtMvClose()" style="flex:1;padding:8px 0;border:1px solid #e2e8f0;border-radius:9px;background:#f8fafc;color:#64748b;font-size:12px;font-weight:700;cursor:pointer">${T('ยกเลิก')}</button>
+        <button onclick="xhrpg._gtMvSave()" style="flex:2;padding:8px 0;border:none;border-radius:9px;background:#1d4ed8;color:#fff;font-size:12px;font-weight:800;cursor:pointer">📍 ${T('ตั้งป้อมที่นี่')}</button>
+      </div>
+    </div>`;
+    document.body.appendChild(wrap);
+    _gtMvZones(t.zone | 0);
+  }
+  function _gtMvZones(sel) {
+    const gt = _gdInfo && _gdInfo.gt; if (!gt) return;
+    const mi = (document.getElementById('gt-mv-map') || {}).value | 0;
+    const mm = (gt.maps || [])[mi]; const zs = (mm && mm.zones) || [];
+    const el = document.getElementById('gt-mv-zone'); if (!el) return;
+    // 🔫 โซนที่ Lv มอนตัวแรก ≥ Lv หัวหน้ากิล → ตั้งไม่ได้ (server เป็นคนตัดสิน · ที่นี่แค่เทาให้เห็นเหตุผล)
+    //    เลือกช่องที่ตั้งได้ให้เป็น default เสมอ — ไม่งั้นกด "ตั้งป้อมที่นี่" แล้วเด้ง error ทั้งที่ยังไม่เคยแตะ dropdown
+    const _fst = zs.find(z => (z.ok | 0) === 1);
+    const _pick = (sel != null && zs.some(z => (z.i | 0) === (sel | 0) && (z.ok | 0) === 1)) ? (sel | 0)
+                : (_fst ? (_fst.i | 0) : null);
+    el.innerHTML = zs.map(z => {
+      const ok = (z.ok | 0) === 1;
+      const lbl = _gdEsc(T(z.nm)) + (ok ? '' : ' 🔒 ' + T('ต้องหัวหน้ากิล Lv.{a}+', { a: (z.lv | 0) + 1 }));
+      return `<option value="${z.i | 0}"${ok ? '' : ' disabled'}${(_pick != null && (z.i | 0) === _pick) ? ' selected' : ''}>${lbl}</option>`;
+    }).join('');
+    const _hint = document.getElementById('gt-mv-hint');
+    if (_hint) _hint.textContent = _fst ? '' : T('หัวหน้ากิล Lv.{a} ยังตั้งป้อมในแผนที่นี้ไม่ได้เลย', { a: (gt.leader_lv | 0) });
+  }
+  function _gtMvClose() { document.getElementById('gt-mv')?.remove(); _gtMvIdx = -1; }
+  function _gtMvSave() {
+    const gt = _gdInfo && _gdInfo.gt;
+    const t  = (gt && gt.list || [])[_gtMvIdx]; if (!t) { _gtMvClose(); return; }
+    const mi = (document.getElementById('gt-mv-map') || {}).value | 0;
+    const mm = (gt.maps || [])[mi]; if (!mm) return;
+    const zi = (document.getElementById('gt-mv-zone') || {}).value | 0;
+    _gtMvClose();
+    _gdAct({ action: 'turret_move', tid: t.id | 0, map: mm.map | 0, zone: zi }, () => _gtRefresh());
+  }
+  function _gdRenderEmEditor() {
+    const b = document.getElementById('gd-body'); if (!b) return;
+    b.innerHTML = `<div id="gd-em-editor"><div style="font-size:12.5px;font-weight:800;color:#1e293b;margin-bottom:2px">🛡️ ${T('แก้ตรา')}</div>
+      ${_gdComposerHTML()}
+      <div style="display:flex;gap:6px;margin-top:12px">
+        <button onclick="xhrpg._gdFetchMy()" style="flex:1;padding:8px 0;border:1px solid #e2e8f0;border-radius:9px;background:#f8fafc;color:#64748b;font-size:12px;font-weight:700;cursor:pointer">${T('กลับ')}</button>
+        <button onclick="xhrpg._gdEmblemSave()" style="flex:2;padding:8px 0;border:none;border-radius:9px;background:#1e3a8a;color:#fff;font-size:12px;font-weight:800;cursor:pointer">💾 ${T('บันทึกตรากิล')}</button>
+      </div></div>`;
+  }
+  function _gdEmEdit() {
+    if (!_gdInfo || !_gdInfo.g) return;
+    _gdSel = { sh: _gdInfo.g.sh, co: _gdInfo.g.co, ic: _gdInfo.g.ic };
+    _gdRenderEmEditor();
+  }
+  function _gdAct(data, cb) { // ยิง action + กัน double-click + แจ้งผล
+    if (_gdBusy) return;
+    _gdBusy = true;
+    _gdPost(data, d => {
+      _gdBusy = false;
+      if (!d) { addLog([{ type: 'dead', msg: T('❌ เชื่อมต่อไม่ได้') }]); return; }
+      if (!d.ok) { alert(d.error || d.err || '?'); return; } // 🕳️ gdun_* คืน key 'err' — รับทั้งสองแบบ ไม่งั้นขึ้นแค่ '?'
+      if (d.msg) addLog([{ type: 'levelup', msg: d.msg }]);
+      if (cb) cb(d);
+    });
+  }
+  function _gdCreate() {
+    const nameEl = document.getElementById('gd-name');
+    const name = nameEl ? nameEl.value.trim() : '';
+    if (name.length < 2) { alert(T('ชื่อกิลต้องยาว 2-12 ตัวอักษร')); return; }
+    if (!confirm(T('ยืนยันตั้งกิล "{a}"? (100,000 G)', { a: name }))) return;
+    _gdAct({ action: 'create', name: name, sh: _gdSel.sh, co: _gdSel.co, ic: _gdSel.ic }, () => _gdFetchMy());
+  }
+  let _gdFindList = [];
+  function _gdJoin(i) {
+    const g = _gdFindList[i]; if (!g) return;
+    if (!confirm(T('ยืนยันเข้ากิล {a}?', { a: g.name }))) return;
+    _gdAct({ action: 'join', gid: g.id }, () => { _gdTab = 'my'; _gdTabPaint(); _gdFetchMy(); });
+  }
+  function _gdLeave() {
+    if (!confirm(T('ยืนยันออกจากกิล? (เข้ากิลใหม่ได้ในอีก 24 ชม.)'))) return;
+    _gdAct({ action: 'leave' }, () => _gdFetchMy());
+  }
+  const _gdMember = i => ((_gdInfo && _gdInfo.members) || [])[i];
+  function _gdKick(i) {
+    const mm = _gdMember(i); if (!mm) return;
+    if (!confirm(T('ยืนยันเตะ {a} ออกจากกิล?', { a: mm.nm }))) return;
+    _gdAct({ action: 'kick', uid: mm.uid }, () => _gdFetchMy());
+  }
+  function _gdPromote(i) { const mm = _gdMember(i); if (mm) _gdAct({ action: 'promote', uid: mm.uid }, () => _gdFetchMy()); }
+  function _gdDemote(i) { const mm = _gdMember(i); if (mm) _gdAct({ action: 'demote', uid: mm.uid }, () => _gdFetchMy()); }
+  function _gdTransfer(i) {
+    const mm = _gdMember(i); if (!mm) return;
+    if (!confirm(T('ยืนยันโอนตำแหน่งหัวหน้าให้ {a}? — ย้อนกลับเองไม่ได้', { a: mm.nm }))) return;
+    _gdAct({ action: 'transfer', uid: mm.uid }, () => _gdFetchMy());
+  }
+  function _gdDonate(amt) {
+    if (!confirm(T('ยืนยันบริจาค {a} G ให้กิล?', { a: Number(amt).toLocaleString() }))) return;
+    _gdAct({ action: 'donate', amt: amt }, () => _gdFetchMy());
+  }
+  function _gdDonateCustom() {
+    const v = prompt(T('ระบุจำนวน G ที่จะบริจาค (ขั้นต่ำ 1,000)'), '100000');
+    if (v == null) return;
+    const amt = parseInt(String(v).replace(/[^0-9]/g, ''), 10) || 0;
+    if (amt < 1000) { alert(T('บริจาคขั้นต่ำ {n} G', { n: '1,000' })); return; }
+    _gdDonate(amt);
+  }
+  function _gdEmblemSave() { _gdAct({ action: 'emblem', sh: _gdSel.sh, co: _gdSel.co, ic: _gdSel.ic }, () => _gdFetchMy()); }
+  function _gdNoticeSave() {
+    const cur = _gdInfo && _gdInfo.g ? _gdInfo.g.notice : '';
+    const v = prompt(T('พิมพ์ประกาศกิล (ไม่เกิน 200 ตัวอักษร)'), cur || '');
+    if (v == null) return;
+    _gdAct({ action: 'notice', text: String(v).slice(0, 200) }, () => _gdFetchMy());
+  }
+  function _gdDisband() {
+    const gName = _gdInfo && _gdInfo.g ? _gdInfo.g.name : '';
+    if (!confirm(T('ยืนยันยุบกิล {a}? สมาชิกทั้งหมดจะหลุดจากกิล — ย้อนกลับไม่ได้!', { a: gName }))) return;
+    if (!confirm(T('แน่ใจจริงๆ? เงินบริจาคทั้งหมดจะหายไปพร้อมกิล'))) return;
+    _gdAct({ action: 'disband' }, () => _gdFetchMy());
+  }
+  function _gdLog() {
+    _gdPost({ action: 'log' }, d => {
+      const b = document.getElementById('gd-body'); if (!b) return;
+      if (!d || !d.ok) { alert((d && d.error) || '?'); return; }
+      const LBL = { create: T('ตั้งกิล'), join: T('เข้ากิล(log)'), leave: T('ออกจากกิล'), kick: T('เตะสมาชิก'), donate: T('บริจาค'), levelup: T('กิลเลเวลอัพ'), promote: T('เลื่อนตำแหน่ง'), demote: T('ปลดตำแหน่ง'), transfer: T('โอนหัวหน้า'), emblem: T('เปลี่ยนตรา'), notice: T('ตั้งประกาศ'), disband: T('ยุบกิล') };
+      const rows = (d.log || []).map(r => `<div style="padding:5px 2px;border-bottom:1px solid #f1f5f9">
+          <div style="font-size:11.5px;color:#1e293b"><b style="color:#1e3a8a">${LBL[r.action] || _gdEsc(r.action)}</b> · ${_gdEsc(r.meta)}</div>
+          <div style="font-size:9.5px;color:#94a3b8">${_gdEsc(r.created_at)}</div>
+        </div>`).join('');
+      b.innerHTML = `<button onclick="xhrpg._gdFetchMy()" style="margin-bottom:8px;padding:6px 12px;border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc;color:#64748b;font-size:11px;font-weight:700;cursor:pointer">← ${T('กลับ')}</button>
+        <div style="font-size:12px;font-weight:800;color:#1e293b;margin-bottom:4px">📜 ${T('บันทึกกิล')}</div>
+        ${rows || `<div style="text-align:center;color:#a8a29e;padding:18px 0;font-size:12px">${T('ยังไม่มีบันทึก')}</div>`}`;
+    });
+  }
+  function _gdSearch() {
+    const el = document.getElementById('gd-q');
+    _gdQ = el ? el.value.trim() : '';
+    _gdPage = 0; _gdFetchFind();
+  }
+  function _gdPageGo(dir) { _gdPage = Math.max(0, _gdPage + dir); _gdFetchFind(); }
+  function _gdFetchFind() {
+    _gdPost({ action: 'browse', page: _gdPage, q: _gdQ }, d => {
+      const b = document.getElementById('gd-body'); if (!b) return;
+      if (!d || !d.ok) { b.innerHTML = `<div style="text-align:center;color:#dc2626;padding:20px 8px;font-size:12px">${T('โหลดไม่สำเร็จ')}</div>`; return; }
+      const cd = d.cd > 0 ? `<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:9px;padding:6px 10px;font-size:10.5px;color:#b91c1c;margin-bottom:7px">⏳ ${T('เพิ่งออกจากกิล — เข้ากิลใหม่ได้ในอีก {n} ชม.', { n: Math.ceil(d.cd / 3600) })}</div>` : '';
+      _gdFindList = d.list || [];
+      const rows = _gdFindList.map((g, gi) => {
+        const full = g.n >= g.cap;
+        return `<div style="display:flex;align-items:center;gap:8px;padding:6px 2px;border-bottom:1px solid #f1f5f9">
+          <img src="${_gdEmURL(g.sh, g.co, g.ic, 72)}" style="flex:none;width:32px;height:32px">
+          <div style="flex:1;min-width:0">
+            <div style="font-size:12.5px;font-weight:700;color:#1e293b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_gdEsc(g.name)}</div>
+            <div style="font-size:10px;color:#94a3b8">Lv.${g.lv} · ${T('สมาชิก')} ${g.n}/${g.cap}</div>
+          </div>
+          <div style="flex:none;display:flex;align-items:center;gap:4px">
+            <button onclick="xhrpg._gdDetail(${g.id | 0})" title="${T('รายละเอียดกิล')}" style="${_GD_BTN};border:1px solid #e2e8f0;background:#fff;color:#64748b">ℹ️</button>
+            <button onclick="xhrpg.castleEnter(${g.id | 0})" title="${T('เยือนปราสาท')}" style="${_GD_BTN};border:1px solid #bfdbfe;background:#eff6ff;color:#1d4ed8">🏯</button>
+            ${full ? `<span style="flex:none;width:58px;text-align:center;font-size:10.5px;color:#94a3b8;font-weight:700">${T('เต็ม')}</span>`
+                   : `<button onclick="xhrpg._gdJoin(${gi})" ${d.cd > 0 ? 'disabled style="flex:none;width:58px;height:32px;border:none;border-radius:8px;background:#e2e8f0;color:#94a3b8;font-size:11px;font-weight:800"' : 'style="flex:none;width:58px;height:32px;border:none;border-radius:8px;background:#16a34a;color:#fff;font-size:11px;font-weight:800;cursor:pointer"'}>${T('เข้ากิล')}</button>`}
+          </div>
+        </div>`;
+      }).join('');
+      b.innerHTML = `${cd}<div style="display:flex;gap:5px;margin-bottom:8px">
+          <input id="gd-q" value="${_gdEsc(_gdQ)}" placeholder="${T('ค้นหาชื่อกิล...')}" style="flex:1;min-width:0;padding:7px 10px;border:1px solid #cbd5e1;border-radius:9px;font-size:12px" onkeydown="if(event.key==='Enter')xhrpg._gdSearch()">
+          <button onclick="xhrpg._gdSearch()" style="flex:none;padding:7px 12px;border:none;border-radius:9px;background:#1e3a8a;color:#fff;font-size:12px;font-weight:700;cursor:pointer">🔍</button>
+        </div>
+        ${rows || `<div style="text-align:center;color:#a8a29e;padding:20px 0;font-size:12px">${_gdQ ? T('ไม่พบกิล') : T('ยังไม่มีกิลในระบบ — ตั้งกิลแรกเลย!')}</div>`}
+        <div style="display:flex;gap:6px;justify-content:center;margin-top:10px">
+          ${_gdPage > 0 ? `<button onclick="xhrpg._gdPageGo(-1)" style="padding:5px 14px;border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc;color:#64748b;font-size:11px;font-weight:700;cursor:pointer">←</button>` : ''}
+          ${d.more ? `<button onclick="xhrpg._gdPageGo(1)" style="padding:5px 14px;border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc;color:#64748b;font-size:11px;font-weight:700;cursor:pointer">→</button>` : ''}
+        </div>`;
+    });
+  }
+  function _gdFetchRank() {
+    _gdPost({ action: 'rank' }, d => {
+      const b = document.getElementById('gd-body'); if (!b) return;
+      if (!d || !d.ok) { b.innerHTML = `<div style="text-align:center;color:#dc2626;padding:20px 8px;font-size:12px">${T('โหลดไม่สำเร็จ')}</div>`; return; }
+      const medal = i => i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `<span style="font-size:10.5px;color:#94a3b8;font-weight:800">${i + 1}</span>`;
+      // 📐 ทุกคอลัมน์กว้างตายตัว (อันดับ 26 · ตรา 30 · เลเวล 50) — เดิมคอลัมน์ Lv ยืดตามความยาวเลข EXP
+      //    ทำให้ปุ่มขวาขยับไปมาทีละแถว = ตารางดู "เบี้ยว" (เจ้าของติง 2026-07-27) · padding เท่ากันทุกแถวด้วย
+      //    ไฮไลต์ Top 3 ใช้ background + เส้นซ้าย inset shadow แทนการเพิ่ม padding (ไม่ดันคอลัมน์)
+      //    ถอดเกจ EXP + ตัวเลข EXP ออก (เจ้าของสั่ง 2026-07-27 "เอาแถบออก แสดงชื่อหัวหน้าดีกว่า") → คืนที่ ~22px ให้ชื่อหัวหน้า
+      //    สมาชิกแยกเป็นช่อง flex:none ท้ายบรรทัด — ชื่อหัวหน้ายาวแค่ไหนก็ไม่กินที่จนสมาชิกโดนตัด
+      const rows = (d.list || []).map((g, i) => `<div style="display:flex;align-items:center;gap:8px;padding:6px;border-bottom:1px solid #f1f5f9;${i < 3 ? 'background:#fffbeb;border-radius:8px;box-shadow:inset 3px 0 0 #f59e0b' : ''}">
+          <span style="flex:none;width:26px;text-align:center;font-size:15px;line-height:1">${medal(i)}</span>
+          <img src="${_gdEmURL(g.sh, g.co, g.ic, 72)}" style="flex:none;width:30px;height:30px;display:block">
+          <div style="flex:1;min-width:0">
+            <div style="font-size:12.5px;font-weight:700;color:#1e293b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_gdEsc(g.name)}</div>
+            <div style="display:flex;align-items:center;gap:5px;font-size:9.5px;color:#94a3b8">
+              <span style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">👑 ${g.ldcc ? _ccFlag(g.ldcc) : ''}${_gdEsc(g.ld)}</span>
+              <span title="${T('สมาชิก')}" style="flex:none;color:#475569;font-weight:700">👥 ${g.n}/${g.cap}</span>
+            </div>
+          </div>
+          <div style="flex:none;width:50px;text-align:right;font-size:13.5px;font-weight:800;color:#1e3a8a;white-space:nowrap">Lv.${g.lv}</div>
+          <div style="flex:none;display:flex;gap:4px">
+            <button onclick="xhrpg._gdDetail(${g.id | 0})" title="${T('รายละเอียดกิล')}" style="${_GD_BTN};border:1px solid #e2e8f0;background:#fff;color:#64748b">ℹ️</button>
+            <button onclick="xhrpg.castleEnter(${g.id | 0})" title="${T('เยือนปราสาท')}" style="${_GD_BTN};border:1px solid #bfdbfe;background:#eff6ff;color:#1d4ed8">🏯</button>
+          </div>
+        </div>`).join('');
+      b.innerHTML = `<div style="font-size:12px;font-weight:800;color:#1e293b;margin-bottom:5px">🏆 ${T('อันดับกิล')} <span style="font-weight:400;font-size:10px;color:#94a3b8">Top 50</span></div>
+        ${rows || `<div style="text-align:center;color:#a8a29e;padding:20px 0;font-size:12px">${T('ยังไม่มีกิลในระบบ — ตั้งกิลแรกเลย!')}</div>`}`;
+    });
+  }
+  function _gachaPost(data, cb) {
+    $.post(baseUrl + 'xhrpg_gacha.php', Object.assign({ line_uid: player.line_uid, lang: LANG(), session_token: sessionToken || '' }, data))
+      .done(res => { let d; try { d = typeof res === 'string' ? JSON.parse(res) : res; } catch (e) { return; } if (cb) cb(d); })
+      .fail(() => { if (cb) cb(null); });
+  }
+  function _gachaClose() { document.getElementById('gacha-panel')?.remove(); document.getElementById('gacha-result')?.remove(); }
+  let _gachaBusy = false;
+  function openGachaPanel() {
+    if (!player || !player.line_uid || player.line_uid === 'demo') return;
+    _gachaClose();
+    const el = document.createElement('div');
+    el.id = 'gacha-panel';
+    el.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:9998;display:flex;align-items:center;justify-content:center;padding:16px';
+    el.innerHTML = `<div style="background:#fff;border-radius:16px;max-width:340px;width:100%;overflow:hidden;box-shadow:0 12px 40px rgba(2,8,23,.4)">
+      <div style="background:linear-gradient(180deg,#92400e,#b45309);padding:10px 16px;text-align:center;color:#fff;position:relative">
+        <button onclick="xhrpg._gachaClose()" aria-label="close" style="position:absolute;top:8px;right:10px;width:28px;height:28px;border-radius:8px;border:none;background:rgba(0,0,0,.28);color:#fff;font-size:15px;cursor:pointer">✕</button>
+        <div style="font-size:24px;line-height:1">🎰</div>
+        <div style="font-size:15px;font-weight:700;margin-top:2px">${T('สุ่มโชค G')}</div>
+        <div style="font-size:10px;color:#fde68a">${T('ลุ้นแจ็คพอตสูงสุด ×6 ทุกครั้งที่สุ่ม!')}</div>
+      </div>
+      <div id="gacha-body" style="padding:12px 14px">${T('⏳ กำลังโหลด...')}</div>
+    </div>`;
+    el.addEventListener('click', e => { if (e.target === el) _gachaClose(); });
+    document.body.appendChild(el);
+    _gachaPost({ action: 'info' }, d => { if (d && d.ok) _gachaRender(d); });
+  }
+  function _gachaRender(d) {
+    const bd = document.getElementById('gacha-body');
+    if (!bd) return;
+    const left = Math.max(0, (d.max | 0) - (d.used | 0));
+    // pip: ใช้แล้ว = แท่งเข้มทึบ (เห็นชัดว่าเปิดไปกี่ครั้ง) · ยังเหลือ = สีตามบันไดราคา (เจ้าของขอเพิ่ม contrast 2026-07-19)
+    const pips = GACHA_TIER_CLR.map((c, i) => i < (d.used | 0)
+      ? `<div style="flex:1;height:8px;border-radius:4px;background:#44403c;box-shadow:inset 0 1px 2px rgba(0,0,0,.4)"></div>`
+      : `<div style="flex:1;height:8px;border-radius:4px;background:${c};border:1px solid rgba(0,0,0,.12)"></div>`).join('');
+    // 🔒 ด่าน Lv (server เป็นตัวตัดสินจริง — ตรงนี้แค่ทำให้ผู้เล่นเห็นเหตุผลก่อนกด)
+    const minLv = d.min_lv | 0, tooLow = minLv > 0 && (d.lv | 0) < minLv;
+    const noQuota = d.next_cost < 0;
+    const noP = !noQuota && d.next_cost > 0 && (d.p | 0) < d.next_cost;
+    const btnLbl = tooLow ? T('🔒 ปลดล็อกที่ Lv.{n} ขึ้นไป', { n: minLv })
+                 : noQuota ? T('สิทธิ์วันนี้หมดแล้ว — พรุ่งนี้มาใหม่')
+                 : d.next_cost === 0 ? T('🎲 สุ่มเลย — ฟรี 1 ครั้งแรก!')
+                 : T('🎲 สุ่ม ({a} P)', { a: d.next_cost });
+    bd.innerHTML = `
+      <div style="border:2px solid #fbbf24;background:radial-gradient(ellipse at 50% 30%,#fffbeb,#fef3c7);border-radius:14px;padding:13px 10px;text-align:center">
+        <div style="font-size:42px;line-height:1;filter:drop-shadow(0 4px 5px rgba(180,83,9,.35))">🪙</div>
+        <div style="font-size:11px;color:#92400e;margin-top:5px">${T('รางวัลฐานของคุณ (Lv.{a})', { a: d.lv | 0 })}</div>
+        <div style="font-size:21px;font-weight:800;color:#b45309;line-height:1.3">${(d.base | 0).toLocaleString()} G <span style="font-size:12px;font-weight:400;color:#d97706">${T('ขึ้นไป')}</span></div>
+        <div style="display:inline-block;margin-top:6px;background:#7f1d1d;color:#fde68a;border-radius:7px;padding:2px 10px;font-size:10px">${T('💥 แจ็คพอต ×2 – ×6 มีทุกรอบ')}</div>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-top:10px;font-size:11px">
+        <span style="color:#57534e">🎟️ ${T('วันนี้เหลือ {a}/{b} ครั้ง', { a: left, b: d.max | 0 })}</span>
+        <span style="color:#57534e">${noQuota ? '' : T('ครั้งถัดไป: {a}', { a: d.next_cost === 0 ? T('ฟรี!') : d.next_cost + ' P' })}</span>
+      </div>
+      <div style="display:flex;gap:3px;margin-top:5px">${pips}</div>
+      <button id="gacha-spin-btn" onclick="xhrpg._gachaSpin()" ${tooLow || noQuota || noP ? 'disabled' : ''}
+        style="width:100%;margin-top:11px;background:${tooLow || noQuota || noP ? '#d6d3d1' : 'linear-gradient(180deg,#f59e0b,#b45309)'};color:#fff;border:none;border-radius:12px;padding:12px;font-size:14.5px;font-weight:700;cursor:${tooLow || noQuota || noP ? 'default' : 'pointer'};box-shadow:0 4px 10px rgba(180,83,9,.3)">${btnLbl}</button>
+      ${tooLow ? `<div style="text-align:center;font-size:10.5px;color:#b45309;background:#fffbeb;border:1px solid #fde68a;border-radius:9px;padding:7px 9px;margin-top:8px;line-height:1.5">${T('เล่นถึง Lv.{n} ก่อนจึงจะสุ่มได้ (ตอนนี้ Lv.{a})', { n: minLv, a: d.lv | 0 })}</div>` : ''}
+      <div style="margin-top:10px;border:1px solid #e7e5e4;border-radius:10px;padding:6px 9px 3px;background:#fafaf9">
+        <div style="font-size:10.5px;font-weight:700;color:#57534e">🎲 ${T('อัตราการสุ่ม')}</div>
+        ${_gachaOddsHTML()}
+      </div>
+      <div style="text-align:center;font-size:9.5px;color:${noP ? '#dc2626' : '#a8a29e'};margin-top:6px">🅿️ ${(d.p | 0).toLocaleString()}${noP ? ' — ' + T('P ไม่พอ') : ''} · ${T('รีเซ็ตสิทธิ์ทุกวัน 00:00')}</div>`;
+  }
+  // ⚖️ ตาราง % ตัวคูณ — ประกาศตรงจุดที่จ่าย P (ข้อกำหนด compliance ผู้ให้บริการชำระเงิน 2026-07-27)
+  //    ใช้ค่าชุดเดียวกับบทคู่มือ (RND.gachaW) → ปรับเรตที่เดียวเปลี่ยนทั้ง 2 ที่
+  // 🎲 เรตสุ่มแบบกระชับ — แถบสัดส่วน + ชิป 6 ช่องแทนตาราง (เจ้าของสั่ง 2026-07-28 ตารางกินที่เกิน)
+  //    ตัวเลข % ยังครบทั้ง 6 ระดับ = ยังตรงข้อกำหนดเปิดเผยเรตสุ่ม (ดู memory: loot-box-compliance)
+  const _GA_COL = ['#22c55e', '#84cc16', '#eab308', '#f59e0b', '#f97316', '#ef4444'];
+  function _gachaOddsHTML() {
+    const _s = RND.gachaW.reduce((a, b) => a + b, 0);
+    const pct = RND.gachaW.map(w => w * 100 / _s);
+    const bar = pct.map((p, i) => `<div style="width:${p}%;background:${_GA_COL[i]}"></div>`).join('');
+    const chip = pct.map((p, i) => `<div style="text-align:center;padding:3px 0;border-radius:6px;background:${_GA_COL[i]}1a;border:1px solid ${_GA_COL[i]}55">`
+      + `<div style="font-size:11px;font-weight:800;color:${_GA_COL[i]}">×${i + 1}</div>`
+      + `<div style="font-size:10px;color:#475569;font-variant-numeric:tabular-nums">${_rndPct(p)}</div></div>`).join('');
+    return `<div style="margin:6px 0 2px">
+      <div style="display:flex;height:7px;border-radius:4px;overflow:hidden;margin-bottom:5px">${bar}</div>
+      <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:3px">${chip}</div>
+    </div>`;
+  }
+  function _gachaSpin() {
+    if (_gachaBusy) return;
+    _gachaBusy = true;
+    const b = document.getElementById('gacha-spin-btn'); if (b) { b.disabled = true; b.textContent = '🎲 ...'; }
+    _gachaPost({ action: 'spin' }, d => {
+      _gachaBusy = false;
+      if (!d) { addLog([{ type: 'dead', msg: T('❌ เชื่อมต่อไม่ได้') }]); _gachaClose(); return; }
+      if (!d.ok) { alert(d.error || '?'); _gachaClose(); return; }
+      if (d.player) player = d.player;
+      try { localStorage.setItem('xh_gacha_d', new Date().toDateString()); } catch (e) {}
+      _gachaDotUpd(); updateHUD();
+      if (d.msg) addLog([{ type: 'levelup', msg: d.msg }]);
+      _gachaRender({ ok: 1, used: d.used, max: d.max, next_cost: d.next_cost, base: d.base, lv: player.lv | 0, p: player.p_points | 0 });
+      _gachaResult(d);
+    });
+  }
+  function _gachaResult(d) { // ป๊อปอัพผล — ×1 กล่องทองเรียบ · ×2+ กรอบแดง JACKPOT + เหรียญ
+    document.getElementById('gacha-result')?.remove();
+    const jp = (d.mult | 0) >= 2;
+    const ov = document.createElement('div');
+    ov.id = 'gacha-result';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:10009;display:flex;align-items:center;justify-content:center;padding:20px';
+    ov.innerHTML = `<div style="background:#fff;border:3px solid ${jp ? '#dc2626' : '#fbbf24'};border-radius:16px;max-width:270px;width:100%;padding:16px 14px;text-align:center;box-shadow:0 12px 40px rgba(2,8,23,.5)">
+      ${jp ? `<div style="font-size:13px;color:#b91c1c;font-weight:800;letter-spacing:1px">💥 JACKPOT!</div>
+              <div style="font-size:40px;font-weight:800;color:#dc2626;line-height:1.1">×${d.mult | 0}</div>
+              <div style="font-size:11px;color:#92400e;margin-top:5px">${(d.base | 0).toLocaleString()} × ${d.mult | 0}</div>`
+           : `<div style="font-size:38px;line-height:1">🪙</div>`}
+      <div style="font-size:23px;font-weight:800;color:#b45309;margin-top:4px">+${(d.amount | 0).toLocaleString()} G</div>
+      ${jp ? '<div style="font-size:22px;margin-top:6px">🪙🪙🪙</div>' : ''}
+      <button onclick="document.getElementById('gacha-result')?.remove()" style="margin-top:11px;background:#b45309;color:#fff;border:none;border-radius:10px;padding:8px 26px;font-size:13px;font-weight:700;cursor:pointer">${T('รับแล้ว ✅')}</button>
+    </div>`;
+    ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+    document.body.appendChild(ov);
+  }
+  setTimeout(_gachaDotUpd, 3000); // จุดแดงรอบแรกหลังโหลด (รอ player จาก poll แรก)
+
   const _myCC = () => String(_svRegion || (typeof CF_REGION !== 'undefined' ? CF_REGION : '') || '').toUpperCase(); // ธงตัวเอง — จาก region ที่ server ส่ง (CF-IPCountry)
   function _pvpRenderShell(tab) {
     _pvpClose();
@@ -11857,20 +18204,36 @@ const xhrpg = (() => {
     else if (tab === 'log') _pvpFetchLog();
     else _pvpFetchRank();
   }
-  function _pvpFetchList() { // 🌙 ดวลเงาล้วน (ดวลสดปิดชั่วคราว) — สุ่ม ≤25 คนจาก DB ไม่สนออนไลน์
-    _pvpPost({ action: 'list' }, res => {
+  let _pvpPage = 0; // 📄 หน้าปัจจุบันของรายชื่อดวล (เรียง Lv มาก→น้อย ตาม leaderboard · 25 คน/หน้า)
+  function _pvpFetchList() { // 🌙 ดวลเงาล้วน (ดวลสดปิดชั่วคราว) — ไม่สนออนไลน์
+    _pvpPost({ action: 'list', page: _pvpPage }, res => {
       const bd = document.getElementById('pvp-body'); if (!bd) return;
       if (!res || !res.ok) { bd.innerHTML = T('❌ โหลดไม่สำเร็จ'); return; }
       const inDuel = !!(player.pvp && player.pvp.ph && player.pvp.ph !== 'invite');
+      const pg = res.page | 0, pgs = Math.max(1, res.pages | 0);
+      _pvpPage = pg; // server อาจปัดกลับหน้าสุดท้าย
+      const pbtn = (dir, dis) => `<button onclick="xhrpg._pvpPageGo(${dir})" ${dis ? 'disabled' : ''} style="width:34px;background:${dis ? 'rgba(51,65,85,.5)' : '#334155'};color:${dis ? '#64748b' : '#e2e8f0'};border:1px solid #475569;border-radius:8px;padding:6px 0;font-size:12px;font-weight:700;cursor:${dis ? 'default' : 'pointer'}">${dir < 0 ? '◀' : '▶'}</button>`;
+      const pager = pgs > 1 ? `<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          ${pbtn(-1, pg <= 0)}
+          <div style="flex:1;text-align:center;font-size:11.5px;color:#cbd5e1;font-weight:700">${T('หน้า {a}/{b}', {a: pg + 1, b: pgs})}</div>
+          ${pbtn(1, pg >= pgs - 1)}
+        </div>` : '';
       const rows = (res.players || []).map(p =>
         `<div style="display:flex;align-items:center;gap:8px;border:1px solid #334155;background:rgba(30,41,59,.8);border-radius:10px;padding:8px 10px;margin-bottom:7px">
-          <div style="flex:1;min-width:0"><div style="font-size:12.5px;font-weight:700;color:#f1f5f9">${_ccFlag(p.cc)}${p.name}</div>
+          <div style="flex:1;min-width:0"><div style="font-size:12.5px;font-weight:700;color:#f1f5f9">${_ccFlag(p.cc)}${_vipChip(p.vip)}${p.name}</div>
           <div style="font-size:10.5px;color:#94a3b8">Lv.${p.lv}</div></div>
           <button onclick="xhrpg._pvpShadow('${p.uid.replace(/'/g, '')}','${(p.name || '').replace(/['"<>]/g, '')}')" ${inDuel ? 'disabled' : ''} style="background:#be123c;color:#fff;border:none;border-radius:7px;padding:5px 11px;font-size:11px;font-weight:700;cursor:pointer;opacity:${inDuel ? .45 : 1}">${T('⚔️ ดวล')}</button>
         </div>`).join('') || '<div style="text-align:center;color:#94a3b8;font-size:12px;padding:16px">' + T('ยังไม่มีผู้เล่นอื่นในระบบ') + '</div>';
       const quitBtn = inDuel ? `<button onclick="xhrpg._pvpForfeit()" style="width:100%;margin-bottom:8px;background:#7f1d1d;color:#fecaca;border:1px solid #dc2626;border-radius:9px;padding:8px;font-size:12px;font-weight:700;cursor:pointer">${T('🏳️ ยอมแพ้/ออกจากดวลปัจจุบัน')}</button>` : '';
-      bd.innerHTML = quitBtn + rows;
+      bd.innerHTML = pager + quitBtn + rows;
+      bd.scrollTop = 0; // เปลี่ยนหน้าแล้วเลื่อนกลับบนสุด
     });
+  }
+  function _pvpPageGo(dir) {
+    _pvpPage = Math.max(0, _pvpPage + dir);
+    const bd = document.getElementById('pvp-body');
+    if (bd) bd.innerHTML = T('⏳ กำลังโหลด...');
+    _pvpFetchList();
   }
   function _pvpShadow(uid, name) {
     if (!confirm(T('ท้าดวล {a}?\n\n⚔️ DMG ÷30 · สู้จน HP หมด\n💀 ผู้แพ้กลับกลางแมพ (ไม่เสียของ)', {a: name}))) return;
@@ -11978,7 +18341,7 @@ const xhrpg = (() => {
     // VS bar
     let vs = document.getElementById('pvp-vsbar');
     if (ph === 'fight' || ph === 'count' || ph === 'run') {
-      if (!vs) { vs = document.createElement('div'); vs.id = 'pvp-vsbar'; vs.style.cssText = 'position:fixed;top:8px;left:50%;transform:translateX(-50%);z-index:9996;background:rgba(15,23,42,.92);border:1px solid #9f1239;border-radius:12px;padding:8px 12px;color:#e2e8f0;font-size:11px;width:min(320px,92vw);box-sizing:border-box;box-shadow:0 4px 16px rgba(0,0,0,.45);pointer-events:none'; document.body.appendChild(vs); }
+      if (!vs) { vs = document.createElement('div'); vs.id = 'pvp-vsbar'; _floatMount(vs, 'top:8px;left:50%;transform:translateX(-50%);z-index:9996;background:rgba(15,23,42,.92);border:1px solid #9f1239;border-radius:12px;padding:8px 12px;color:#e2e8f0;font-size:11px;width:min(320px,94%);box-sizing:border-box;box-shadow:0 4px 16px rgba(0,0,0,.45);pointer-events:none'); } // 📌 เกาะกรอบเกม
       // แถบเลือด: ตัวเลขซ้อน "ใน" แถบ (ไม่มีทางตกบรรทัด/ทับกัน) · ชื่อยาวโดนตัด …
       const hpBar = (cur, max, col) => { const pc = max > 0 ? Math.max(0, Math.min(100, cur / max * 100)) : 0; return `<div style="position:relative;background:#1e293b;border-radius:6px;height:15px;overflow:hidden;margin-top:2px"><div style="width:${pc}%;height:100%;background:${col};transition:width .4s"></div><div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:9.5px;font-weight:700;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.85);white-space:nowrap">${cur ?? '?'}/${max ?? '?'}</div></div>`; };
       const _nm = s => `<div style="font-weight:700;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${s}</div>`;
@@ -11995,9 +18358,171 @@ const xhrpg = (() => {
     } else if (vs) vs.remove();
   }
 
+  // ── 👑 VIP (docs/vip-design.md): หน้า VIP (progress+ตารางสิทธิ์) + ร้านกล่องรายวันในหน้าไอเทม ──
+  let _vipInfo = null;    // cache ล่าสุดจาก xhrpg_vip.php — ใช้ทั้งหน้า VIP และแถบร้าน (โควตา/ราคาอยู่ Redis ไม่อยู่ blob)
+  let _vipBuying = false; // in-flight guard กันกดรัว (server มี NX lock อีกชั้น)
+  let _vipFetching = false, _vipFailAt = 0; // 🛡️ กันลูปยิงรัว (บั๊กจริง 2026-07-19: หน้าเดโม server ตอบ ok=false → _vipInfo ไม่เซ็ต → callback วาดแผง → ยิงซ้ำวนจน 4,000+ requests)
+  function _vipFetch(cb) {
+    // เดโม/ก่อน login = ไม่ยิงเด็ดขาด · ⚠️ ตอน guard ห้ามเรียก cb — cb คือ "วาดแผงใหม่" เรียกตอนไม่มีข้อมูลจะวนกลับมาที่นี่ทันที (recursion)
+    if (!player || !player.line_uid || player.line_uid === 'demo') return;
+    if (_vipFetching) return;                        // มี request ค้างอยู่ — รอผลตัวเดิม
+    if (Date.now() - _vipFailAt < 15000) return;     // เพิ่งล้มเหลว — พัก 15 วิ ค่อยลองใหม่
+    _vipFetching = true;
+    $.post(baseUrl + 'xhrpg_vip.php', { line_uid: player.line_uid, session_token: sessionToken || '' })
+      .done(res => { _vipFetching = false; if (res && res.ok) { _vipInfo = res; _vipFailAt = 0; } else _vipFailAt = Date.now(); if (cb) cb(res); })
+      .fail(() => { _vipFetching = false; _vipFailAt = Date.now(); if (cb) cb(null); });
+  }
+  // 👑 ปุ่ม VIP (index.php .zoom-btns) โชว์ระดับ 2 ชั้น: VIP ตัวใหญ่ / เลขตัวเล็ก — ขนาดปุ่มเท่าเดิม (เจ้าของขอ 2026-07-17)
+  //    เนื้อหาคงที่ (int จาก player.vip_lv เท่านั้น) · เรียกทุก poll แต่เขียน DOM เฉพาะตอนระดับเปลี่ยน
+  function _vipBtnUpd() {
+    const b = document.getElementById('vip-btn');
+    if (!b) return;
+    const lv = (player && player.vip_lv) | 0;
+    if (b.dataset.vlv === String(lv)) return;
+    b.dataset.vlv = String(lv);
+    b.innerHTML = lv > 0
+      // ⚠️ VIP_MAX ไม่ใช่ 10 ตายตัว — ขยายเป็น 15 แล้ว (ปุ่มนี้ค้างที่ 10 ทำให้ VIP11-15 โชว์ VIP10 · แก้ 2026-07-28 จุดที่ 4 ต่อจากชิป 3 จุด)
+      ? `<span style="display:block;line-height:1.05;font-size:9px">VIP</span><span style="display:block;line-height:1;font-size:7.5px;opacity:.92">${Math.min(VIP_MAX, lv)}</span>`
+      : 'VIP';
+  }
+  function openVipPanel() {
+    if (!player || !player.line_uid) return;
+    _vipClose();
+    const el = document.createElement('div');
+    el.id = 'vip-panel';
+    el.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:9998;display:flex;align-items:center;justify-content:center;padding:16px';
+    el.innerHTML = `<div style="background:#fff;border-radius:16px;max-width:360px;width:100%;max-height:88vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 12px 40px rgba(2,8,23,.4)">
+      <div style="background:#b45309;padding:12px 16px;text-align:center;position:relative;flex:none;color:#fff" id="vip-head">
+        <button onclick="xhrpg._vipClose()" aria-label="ปิด" style="position:absolute;top:9px;right:11px;width:28px;height:28px;border-radius:8px;border:none;background:rgba(0,0,0,.28);color:#fff;font-size:15px;line-height:1;cursor:pointer">✕</button>
+        <div style="font-size:24px;line-height:1">👑</div>
+        <div style="font-size:15px;font-weight:700;margin-top:2px">VIP</div>
+      </div>
+      <div style="padding:12px 14px;overflow:auto;flex:1;min-height:0" id="vip-body">${T('⏳ กำลังโหลด...')}</div>
+    </div>`;
+    el.addEventListener('click', e => { if (e.target === el) _vipClose(); });
+    document.body.appendChild(el);
+    _vipFetch(res => _vipRender(res));
+  }
+  function _vipClose() { const el = document.getElementById('vip-panel'); if (el) el.remove(); }
+  function _vipRender(res) {
+    const hd = document.getElementById('vip-head'), bd = document.getElementById('vip-body');
+    if (!bd) return;
+    if (!res || !res.ok) { bd.textContent = T('❌ โหลดไม่สำเร็จ'); return; }
+    const vip = res.vip | 0, pt = res.p_total | 0, req = res.req || [], quo = res.quota || [];
+    if (hd) {
+      const t1 = hd.querySelector('div:nth-of-type(2)');
+      if (t1) t1.textContent = `VIP ${vip}` + (vip >= VIP_MAX ? ' — MAX' : '');
+    }
+    let prog;
+    if (vip >= VIP_MAX) {
+      prog = `<div style="height:10px;background:#f59e0b;border-radius:5px"></div><div style="font-size:11px;color:#b45309;font-weight:700;margin-top:3px;text-align:center">${T('👑 VIP สูงสุดแล้ว — ขอบคุณที่สนับสนุนเกม!')}</div>`;
+    } else {
+      const need = res.next_req | 0, base = req[vip] | 0;
+      const pct = Math.max(2, Math.min(100, Math.round((pt - base) * 100 / Math.max(1, need - base))));
+      prog = `<div style="display:flex;justify-content:space-between;font-size:11px;color:#6b7280"><span>${T('ระดับถัดไป: VIP {a}', {a: vip + 1})}</span><b style="color:#b45309">${pt.toLocaleString()} / ${need.toLocaleString()}P</b></div>
+        <div style="height:10px;background:#f5f5f4;border-radius:5px;overflow:hidden;margin-top:3px"><div style="width:${pct}%;height:100%;background:#f59e0b"></div></div>
+        <div style="font-size:9.5px;color:#a8a29e;margin-top:2px">${T('แต้มสะสมจากการเติมและการใช้ P (เลื่อนระดับอัตโนมัติ · สิทธิ์ถาวร)')}</div>`;
+    }
+    // 💸 โมเดล A (เจ้าของเคาะ 2026-07-26): แตกยอดให้เห็นว่า "ใช้ก็ได้แต้ม" — server เก่ายังไม่ส่ง 2 ฟิลด์นี้ = ซ่อนแถบ
+    if (res.buy_total !== undefined) {
+      prog += `<div style="display:flex;gap:6px;margin-top:6px;font-size:10.5px">
+          <div style="flex:1;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:5px 8px;text-align:center;color:#92400e">💳 ${T('จากการเติม')} <b>${(res.buy_total | 0).toLocaleString()}</b> P</div>
+          <div style="flex:1;background:#f5f3ff;border:1px solid #ddd6fe;border-radius:8px;padding:5px 8px;text-align:center;color:#5b21b6">💸 ${T('จากการใช้')} <b>${(res.spend_total | 0).toLocaleString()}</b> P</div>
+        </div>`;
+    }
+    // คอลัมน์ ×5 (สิทธิ์ปุ่มซื้อรวด 5) ตัดออก — เจ้าของบอกงง (ฟีเจอร์ยังอยู่: ปุ่ม ×5 โผล่เองในร้านเมื่อ VIP1+)
+    // 2026-07-19 เจ้าของสั่ง: ยุบกล่อง G/P เหลือ col เดียว (เลขเท่ากันอยู่แล้ว) + เพิ่ม col ดันบอส (sync xhrpg_arena_free_max/paid_max: ทั้ง G และ P = 1+VIP (2026-07-28))
+    // 😴 คอลัมน์ "เปิดจอ" (เจ้าของสั่ง 2026-07-28) — นาทีที่เปิดหน้าจอทิ้งไว้ได้ก่อนเข้าโหมดพักจอ · ตัวเลขจาก VIP_IDLE ไม่ฝังในคำแปล
+    let rows = `<tr style="color:#6b7280;font-size:9px"><th style="padding:3px 1px">VIP</th><th>${T('P สะสม')}</th><th>+EXP<br>+DROP</th>${_vbShopOn() ? `<th>${T('กล่อง G/P')}<br>/${T('วัน')}</th>` : ''}<th>🏟️ ${T('ดันบอส')}<br>${T('ฟรี')}+P/${T('วัน')}</th><th>🏷️<br>${T('ช่องขาย')}</th><th>😴 ${T('เปิดจอ')}<br>${T('นาที')}</th></tr>`;
+    for (let v = 0; v <= VIP_MAX; v++) {
+      const cur = v === vip;
+      rows += `<tr style="${cur ? 'background:#fef3c7;font-weight:700;' : ''}border-top:1px solid #f1f5f9;text-align:center;font-size:10.5px">
+        <td style="padding:3px 1px;color:${cur ? '#b45309' : '#44403c'}">${cur ? '👑' : ''}${v}</td>
+        <td>${v ? (req[v] | 0).toLocaleString() : '–'}</td><td style="color:#16a34a">+${v * 5}%</td>
+        ${_vbShopOn() ? `<td>${quo[v] | 0}</td>` : ''}<td style="color:#dc2626">${1 + Math.floor(v / 3)}+${1 + Math.floor(v / 3)}</td><td style="color:#0891b2">${10 + v}</td>
+        <td style="color:#7c3aed">${_idleCutMin(v)}</td></tr>`; // 🏟️ = ฟรี(G)+เพย์(P) ต่อวัน · 🏷️ ช่องขายตลาด = 10 + VIP (sync MARKET_SLOTS ฝั่ง server · 5→10 2026-07-19) · 😴 = เพดานพักจอ (sync xhrpg_idle_cutoff_secs)
+    }
+    bd.innerHTML = `${prog}
+      <table style="width:100%;border-collapse:collapse;margin-top:10px">${rows}</table>
+      <div style="background:#faf5ff;border:1px solid #e9d5ff;border-radius:9px;padding:7px 9px;margin-top:9px;font-size:10.5px;color:#5b21b6;line-height:1.55">
+        😴 <b>${T('เปิดหน้าจอได้นานขึ้น')}</b> — ${T('ระดับของคุณตอนนี้: เปิดจอทิ้งไว้ได้ {n} นาที ก่อนเข้าโหมดพักจอ', { n: _idleCutMin(vip) })}
+        <div style="font-size:9.5px;color:#7c3aed;margin-top:2px">${T('ยิ่งระดับ VIP สูง ยิ่งเปิดจอทิ้งไว้ได้นานขึ้น — สูงสุด {n} นาที ที่ VIP {v}', { n: _idleCutMin(VIP_MAX), v: VIP_MAX })}</div>
+      </div>
+      <div style="font-size:9.5px;color:#6b7280;margin-top:8px;line-height:1.55">${T('🛒 ซื้อกล่องสุ่มรายวันได้ที่หน้า 🎒 ไอเทม — แถบใต้แผงกล่องการ์ด/กล่องไข่ · โควตาการ์ดกับไข่แยกกัน (G/P ก็แยกกัน) · +EXP/+DROP มีผลตลอดทั้งออนไลน์และออฟไลน์')} · ${T('🏟️ ดันบอส: ครั้งฟรี (จ่าย G) + ครั้งจ่าย P ต่อวัน')}</div>`;
+  }
+  // แถบร้านกล่องรายวัน — ฝังท้ายแผงกล่องการ์ด/กล่องไข่ (หน้าไอเทม · v2 ตาม feedback เจ้าของ)
+  //    ราคาบนปุ่ม = ราคารวมจริงจากตัวนับปัจจุบัน (server คิดสุดท้ายเสมอ — ตัวเลขนี้แค่โชว์)
+  // ⛔ ร้านกล่องสุ่มการ์ด/ไข่เปิดอยู่ไหม — server ตัดสิน (XHRPG_VIP_BOX_SHOP ใน xhrpg_config.php)
+  //    ยังไม่รู้ (ยังไม่ได้โหลด _vipInfo) = ถือว่าปิดไว้ก่อน ดีกว่าโชว์ปุ่มที่กดแล้วเด้ง error
+  const _vbShopOn = () => !!(_vipInfo && _vipInfo.box_shop);
+  function _vipShopRowHtml(kind) {
+    // ⚠️ ต้องยิง _vipFetch ก่อนเช็ค flag เสมอ — ไม่งั้นวันที่เปิดร้านกลับ (XHRPG_VIP_BOX_SHOP=true)
+    //    หน้า ITEM จะไม่มีใครโหลด _vipInfo อีกเลย แถบร้านเลยไม่โผล่ถาวร
+    if (!_vipInfo) {
+      _vipFetch(() => _vipRefreshBoxPanels()); // โหลดครั้งแรก → เติมแถบทีหลัง เฉพาะแผงกล่อง (ไม่ re-render ทั้งหน้า)
+      return '';                               // ยังไม่รู้ว่าร้านเปิดไหม → ไม่โชว์อะไรก่อน (กันแวบ "กำลังโหลด" ทั้งที่ปิดอยู่)
+    }
+    // ⛔ ปิดขายกล่องสุ่มการ์ด/ไข่ (เจ้าของสั่ง 2026-07-28) — ซ่อนแถบร้านทั้งแถว
+    //    ⚠️ ไม่แตะปุ่ม "เปิดกล่อง" ที่อยู่เหนือแถบนี้ — กล่องจาก MVP ยังเปิดได้ตามปกติ
+    if (!_vbShopOn()) return '';
+    const inf = _vipInfo, vip = inf.vip | 0, tmax = inf.tier_max | 0;
+    const BW = 92; // ปุ่มกว้างเท่ากันทั้ง 4 (G/P × ×1/×5) — feedback เจ้าของ 2026-07-17
+    const seg = pay => {
+      // 🔒 ปุ่มอยู่ครบเสมอ ไม่ถอดออก — VIP1+ เห็น 2 ปุ่มตำแหน่งเดิมตลอด ใช้ไม่ได้ = เทา disabled
+      //    (เจ้าของรายงาน 2026-07-17: กดไป 5 ที ปุ่ม ×5 หาย layout กระเด้ง กดพลาด)
+      const s = (inf.shops || {})[kind + '_' + pay] || { used: 0, max: 1, price_next: 0, bulk_n: 0, bulk_cost: 0 };
+      const left = Math.max(0, (s.max | 0) - (s.used | 0));
+      const cur = pay === 'g' ? 'G' : 'P', ic = pay === 'g' ? '💰' : '💎', clr = pay === 'g' ? '#b45309' : '#7c3aed';
+      const fmt = v => pay === 'g' ? (v | 0).toLocaleString() : (v | 0);
+      const on  = `box-sizing:border-box;text-align:center;color:#fff;border:none;border-radius:6px;padding:2px 7px;font-size:10px;font-weight:700;cursor:pointer;min-width:${BW}px`;
+      const off = `box-sizing:border-box;text-align:center;background:#f5f5f4;color:#a8a29e;border:1px solid #e7e5e4;border-radius:6px;padding:2px 7px;font-size:10px;font-weight:700;min-width:${BW}px`;
+      const b1 = (left > 0 && !_vipBuying)
+        ? `<button onclick="xhrpg.vipBoxBuy('${kind}','${pay}',1)" style="${on};background:${clr}">${ic} ${fmt(s.price_next)}${cur} ×1</button>`
+        : `<button disabled style="${off}">${ic} ${left <= 0 ? T('หมดแล้ว') : '...'}</button>`;
+      const n5 = Math.min(5, left);
+      const b5 = vip >= 1
+        ? ((n5 > 1 && !_vipBuying)
+            ? `<button onclick="xhrpg.vipBoxBuy('${kind}','${pay}',5)" style="${on};background:${clr};opacity:.88">×${n5} = ${fmt(s.bulk_cost)}${cur}</button>`
+            : `<button disabled style="${off}">×5</button>`)
+        : ''; // VIP0 ไม่มีสิทธิ์ ×5 อยู่แล้ว — layout ของเขาไม่เคยมีปุ่มนี้ ไม่กระเด้ง
+      return `<span style="display:inline-flex;align-items:center;gap:4px">${b1}${b5}<span style="color:#94a3b8;font-size:9px;min-width:26px">${T('เหลือ {a}/{b}', {a: left, b: s.max})}</span></span>`;
+    };
+    return `<div style="border-top:1px dashed #d6d3d1;margin-top:6px;padding-top:5px;display:flex;flex-wrap:wrap;gap:5px;align-items:center;font-size:10px">
+      <button onclick="xhrpg.openVipPanel()" style="background:#fde68a;color:#92400e;border:none;border-radius:5px;font-size:9px;font-weight:800;padding:1px 5px;cursor:pointer" title="VIP">👑 VIP${vip}</button>
+      <span style="color:#6b7280">🛒 ${T('สุ่มกล่องระดับ 1-{a} (ตามเลเวลของคุณ)', {a: tmax})}</span>
+      <span style="display:inline-flex;gap:8px;flex-wrap:wrap;margin-left:auto">${seg('g')}${seg('p')}</span>
+      <span style="flex-basis:100%;color:#94a3b8;font-size:9px;line-height:1.5">🎲 ${T('มอนทุกตัวในช่วงเลเวลของกล่องมีโอกาสเท่ากันหมด (100% หารด้วยจำนวนมอนในช่วงนั้น)')} · ⭐ MVP ${RND.boxMvp}%</span>
+    </div>`;   // ⚖️ ประกาศ % ตรงจุดที่จ่าย P (ข้อกำหนด compliance ผู้ให้บริการชำระเงิน 2026-07-27)
+  }
+  // รีเฟรชเฉพาะแผงกล่อง 2 แผงแบบ in-place — ห้ามใช้ renderItems() ทั้งหน้า
+  // (เจ้าของรายงาน 2026-07-17: กดซื้อแล้วแผง Equipment ข้างล่างแวบหาย เพราะทั้งหน้าโดนวาดใหม่)
+  function _vipRefreshBoxPanels() {
+    try {
+      const c = document.getElementById('cardbox-panel'); if (c) c.outerHTML = _renderCardBoxPanel();
+      const g = document.getElementById('eggbox-panel');  if (g) g.outerHTML = _renderEggBoxPanel();
+    } catch (e) {}
+  }
+  function vipBoxBuy(kind, pay, qty) {
+    if (_vipBuying || !player || !player.line_uid) return;
+    _vipBuying = true;
+    _vipRefreshBoxPanels(); // disable ปุ่มระหว่างรอ — แตะแค่ 2 แผง (Equipment ล่างไม่กระพริบ)
+    $.post(baseUrl + 'xhrpg_upgrade.php', { line_uid: player.line_uid, action: 'vip_box_buy', kind: kind, pay: pay, qty: qty, lang: LANG() })
+      .done(res => {
+        _vipBuying = false; // reset ก่อน parse — parse พังต้องไม่ทำให้ปุ่มค้าง (บทเรียนกล่องการ์ด)
+        try {
+          const d = typeof res === 'string' ? JSON.parse(res) : res;
+          if (d.ok) { player = d.player; addLog([{ type: 'levelup', msg: d.msg }]); }
+          else addLog([{ type: 'dead', msg: d.error || T('ซื้อไม่ได้') }]);
+        } catch (e) {}
+        _vipFetch(() => _vipRefreshBoxPanels()); // รีเฟรชโควตา/ราคา + จำนวนกล่อง เฉพาะ 2 แผง
+      })
+      .fail(() => { _vipBuying = false; _vipFetch(() => _vipRefreshBoxPanels()); });
+  }
+
   function openOfflinePanel() {
     if (!player || !player.line_uid) return;
     _offMap = (player.offline_zones_map | 0) || (player.map | 0) || 1;
+    _offMap = ({ 7: 1, 8: 2, 9: 3 })[_offMap] || _offMap; // 🌱 อยู่แมพผู้เล่นใหม่ → เปิดแท็บแมพจริง (โซน/มอน clone เหมือนกัน · ซ่อนแท็บผู้เล่นใหม่)
     _offFetch(_offMap, true); // เปิดครั้งแรก → init selection จาก selected_all
   }
   // ดึง preview ของแผนที่ที่ระบุ แล้ว render · initSel=true = โหลด selection ที่บันทึกไว้ (เฉพาะตอนเปิด ไม่ใช่ตอนสลับแท็บ)
@@ -12009,7 +18534,7 @@ const xhrpg = (() => {
         if (!res || !res.ok) { _offRenderShell(T('❌ โหลดไม่สำเร็จ') + (res && res.msg ? ': ' + res.msg : '')); return; }
         _offMap = res.map | 0;
         (res.maps || []).forEach(m => { _offMapNames[m.map | 0] = m.name; });
-        if (initSel) _offSel = new Set((res.selected_all || []).map(s => _offKey(s.map, s.zone))); // set กลางข้ามแมพ
+        if (initSel) _offSel = new Set((res.selected_all || []).map(s => _offKey(({ 7: 1, 8: 2, 9: 3 })[s.map | 0] || (s.map | 0), s.zone))); // set กลางข้ามแมพ · remap แมพผู้เล่นใหม่ → แมพจริง (กันเลือกเก่าค้างมองไม่เห็น)
         _offRenderPanel(res);
       })
       .fail(() => _offRenderShell(T('❌ เชื่อมต่อไม่ได้')));
@@ -12036,6 +18561,8 @@ const xhrpg = (() => {
       <div style="padding:14px 15px 10px;overflow:auto;flex:1;min-height:0" id="offline-body">${inner}</div>
       <div style="padding:9px 15px 14px;border-top:1px solid #1e293b;flex:none">
         <div id="off-count" style="font-size:11px;color:#a5b4fc;text-align:center;margin:0 0 9px"></div>
+        <!-- 🤖 จอเฝ้าบอท — สำหรับคนอยากเปิดจอทิ้งไว้ ไม่ต้องรอ idle 10 นาที (เจ้าของสั่ง 2026-07-26) -->
+        <button onclick="xhrpg._offClose();xhrpg.openBotMonitor()" style="width:100%;background:#0b1220;color:#4ade80;border:1px solid #14532d;border-radius:10px;padding:10px;font-size:13px;font-weight:700;cursor:pointer;margin-bottom:8px">🤖 ${T('ออฟไลน์ มอนิเตอร์')}</button>
         <div style="display:flex;gap:8px">
           <button id="off-save" style="flex:1;background:#4f46e5;color:#fff;border:none;border-radius:10px;padding:11px;font-size:14px;font-weight:700;cursor:pointer">${T('💾 บันทึกโซนฟาร์ม')}</button>
           <button onclick="xhrpg._offClose()" style="flex:0 0 auto;background:#334155;color:#e2e8f0;border:none;border-radius:10px;padding:11px 16px;font-size:14px;cursor:pointer">${LANG() === 'th' ? 'ปิด' : T('ปิดหน้าต่าง')}</button>
@@ -12070,7 +18597,9 @@ const xhrpg = (() => {
 
     const defHint = res.is_default ? `<div style="font-size:11px;color:#fcd34d;background:rgba(251,191,36,.12);border:1px solid #a16207;border-radius:8px;padding:6px 8px;margin-bottom:10px;text-align:center">${T('ℹ️ ยังไม่เคยเลือก — ค่าเริ่มต้นคือ <b>ทุ่งกลาง</b> (ติ๊กไว้ให้แล้ว) · เปลี่ยนได้ตามใจ')}</div>` : '';
     // แท็บสลับแผนที่ — แผนที่ที่เลเวลยังไม่ถึง (enterable=false) กดได้แต่โซนจะล็อกทั้งหมด
-    const tabs = (res.maps || []).map(m => {
+    // 🌱 ซ่อนแมพผู้เล่นใหม่ 7/8/9 (clone ของ 1/2/3 · โซน/มอนเหมือนกัน เลือกที่แมพจริงแทน) — เจ้าของสั่ง 2026-07-25
+    const _offMaps = (res.maps || []).filter(m => { const id = m.map | 0; return id < 7 || id > 9; });
+    const tabs = _offMaps.map(m => {
       const active = (m.map | 0) === (res.map | 0);
       const canEnter = !!m.enterable;
       const bg = active ? '#4f46e5' : (canEnter ? 'rgba(51,65,85,.9)' : 'rgba(51,65,85,.45)');
@@ -12078,7 +18607,7 @@ const xhrpg = (() => {
       const lock = canEnter ? '' : ` 🔒Lv.${m.lv_req}`;
       return `<button data-mapswitch="${m.map}" style="flex:1 1 0;min-width:0;background:${bg};color:${col};border:1px solid ${active ? '#818cf8' : '#334155'};border-radius:8px;padding:6px 4px;font-size:10.5px;font-weight:${active ? 700 : 500};cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:center">${T(m.name)}${lock}</button>`;
     }).join('');
-    const tabsRow = (res.maps && res.maps.length > 1)
+    const tabsRow = (_offMaps.length > 1)
       ? `<div style="display:flex;gap:6px;margin-bottom:11px">${tabs}</div>` : ''; // ปุ่มแท็บกว้างเท่ากัน (flex:1) ไม่ต้อง scroll
     document.getElementById('offline-body').innerHTML = `
       <div style="font-size:11px;color:#a5b4fc;font-weight:700;margin-bottom:9px;text-align:center">${T('🔓 ปลดถึง Lv.{a}', {a: res.unlock_lv})}</div>
@@ -12135,11 +18664,11 @@ const xhrpg = (() => {
       mp:0, cd:'—', maxLv:10, req:null, perLv:'+5 ATK มีด(สั้นยาว)',
       statLabel: lv => T('ATK มีด(สั้นยาว) +{a}', {a: lv * 5}) },
     { id:'kill_shot',  name:'มีดขว้างสายฟ้า', icon:'⚡', type:'active',  tree:'atk',
-      mp:10, cd:'~5s', maxLv:10, req:{skill:'crit_shot', lv:5},
+      mp:10, cd:'~3s', maxLv:10, req:{skill:'crit_shot', lv:5},
       perLv:'ตัวคูณ DMG +0.1×', rng: lv => T('ตามมีด(สั้นยาว)'), xtra: lv => T('ชิ่ง 3 ตัว · ลดหลั่น 100/80/60%'),
       statLabel: lv => T('DMG ×{a} (ต่อตัว) · ชิ่ง 3 ตัว', {a: (2 + lv * 0.1).toFixed(1)}) },
     { id:'explosive_shot', name:'มีดขว้างระเบิด', icon:'💥', type:'active', tree:'atk',
-      mp:15, cd:'~5s', maxLv:10, req:{all:[{player_lv:30},{skill:'crit_shot',lv:5},{skill:'kill_shot',lv:5}]},
+      mp:15, cd:'~3s', maxLv:10, req:{all:[{player_lv:30},{skill:'crit_shot',lv:5},{skill:'kill_shot',lv:5}]},
       perLv:'+1m รัศมี', rng: lv => T('ตามมีด(สั้นยาว)'), xtra: lv => T('AOE · {a}มีด(สั้นยาว)×3', {a: _LOG_KNIFE_S}),
       statLabel: lv => T('รัศมี {a}m · DMG 1.5× มีด(สั้นยาว)', {a: 15+(lv-1)}) },
     { id:'lock_on', name:'Lock-ON', icon:'🧿', type:'active', tree:'atk',
@@ -12147,7 +18676,7 @@ const xhrpg = (() => {
       perLv:'+0.2× DMG ที่เป้าล็อก', rng: lv => T('ตามมีด(สั้นยาว)'), xtra: lv => T('ล็อกจนเป้าตาย · MP 5/การล็อก'),
       statLabel: lv => T('เป้าล็อกรับ DMG มีดขว้าง ×{a}', {a: (1 + lv * 0.2).toFixed(1)}) },
     { id:'triple_knife', name:'สามมีดทะลวง', icon:'🔱', type:'active', tree:'atk',
-      mp:5, cd:'~5s', maxLv:10, req:{all:[{player_lv:50},{skill:'lock_on',lv:5}]},
+      mp:5, cd:'~3s', maxLv:10, req:{all:[{player_lv:50},{skill:'lock_on',lv:5}]},
       perLv:'+0.3× DMG รวม', rng: lv => T('ตามมีด(สั้นยาว)'), xtra: lv => T('มีด 3 เล่มวิถีโค้งม่วง · ใช้มีด 3'),
       statLabel: lv => T('DMG รวม ×{a}', {a: (2 + lv * 0.3).toFixed(1)}) },
     { id:'tough_body', name:'ร่างกายแกร่ง', icon:'❤️', type:'passive', tree:'def',
@@ -12169,8 +18698,10 @@ const xhrpg = (() => {
       statLabel: lv => T('สะท้อน {a}% ATK มอน + VIT×2', {a: 10 + (lv-1)*2}) },
     { id:'melee_charge', name:'Charge ATK', icon:'🔥', type:'active', tree:'def',
       mp:10, cd:'~10s', maxLv:10, req:{all:[{player_lv:50},{skill:'melee_return',lv:5}]},
-      perLv:'— (สเกลตาม ATK มอนที่สะสม)', rng: lv => '15m', xtra: lv => T('สะสม ATK มอนที่ตีทีมเรา 5 วิ + VIT×5 → ระเบิดใส่เป้าเดี่ยว'),
-      statLabel: lv => T('ระเบิด = ATK สะสม 5 วิ + VIT×5') },
+      // 🔥 สเกลตาม Lv แล้ว (เจ้าของเคาะ 2026-07-28) — เดิม statLabel ไม่ใช้ lv เลย = Lv.1 กับ Lv.10 แรงเท่ากัน
+      //    มิเรอร์ xhrpg_idle_logic.php: สะสม ×(1.0+0.1(Lv−1)) + VIT×(5+(Lv−1))
+      perLv:'+0.1× สะสม · +1 VIT', rng: lv => '15m', xtra: lv => T('สะสม ATK มอนที่ตีทีมเรา 5 วิ → ระเบิดใส่เป้าเดี่ยว'),
+      statLabel: lv => T('ระเบิด = สะสม ×{a} + VIT×{b}', { a: (1 + 0.1 * (lv - 1)).toFixed(1), b: 5 + (lv - 1) }) },
     { id:'knife_atk', name:'ฝึกดาบ', icon:'🗡️', type:'passive', tree:'melee',
       mp:0, cd:'—', maxLv:10, req:null, perLv:'+6 ATK ดาบ',
       statLabel: lv => T('ATK ดาบ +{a}', {a: lv * 6}) },
@@ -12180,7 +18711,7 @@ const xhrpg = (() => {
       statLabel: lv => T('ATK ×{a}/หมัด (รวม ×{b})', {a: (1.1 + lv*0.1).toFixed(1), b: ((1.1 + lv*0.1)*2).toFixed(1)}) },
     { id:'spin_attack', name:'แทงรอบตัว', icon:'🌀', type:'active', tree:'melee',
       mp:15, cd:'—', maxLv:10, req:{all:[{player_lv:30},{skill:'knife_atk',lv:5},{skill:'double_attack',lv:5}]},
-      perLv:'+0.1× DMG/เป้า', rng: lv => '15m', xtra: lv => T('≤3 เป้า'),
+      perLv:'+0.1× DMG/เป้า', rng: lv => '15m', xtra: lv => T('≤6 เป้า'),
       statLabel: lv => T('ATK ×{a}/เป้า', {a: (1.1 + lv*0.1).toFixed(1)}) },
     { id:'sword_cross', name:'ดาบกางเขน', icon:'➕', type:'active', tree:'melee',
       mp:3, cd:'~3s', maxLv:10, req:{all:[{player_lv:40},{skill:'spin_attack',lv:5}]},
@@ -12212,6 +18743,99 @@ const xhrpg = (() => {
   ];
 
   const SKILL_TREE_LABELS = { atk:{ label:'⚔ สาย ATK — มีดขว้าง', color:'#D85A30' }, def:{ label:'🛡 สาย DEF — ความอึด', color:'#185FA5' }, melee:{ label:'🗡 สายระยะประชิด — ดาบ', color:'#7A4FB5' }, turret:{ label:'🗼 สายป้อมปืน — ป้อมปืน', color:'#0F6E56' } };
+  // ══ 🎖️⭐ ระดับความชำนาญ (docs/job2-design.md) — ค่าคงที่ต้องตรงกับ xhrpg_config.php ══
+  const _J2_BONUS = 1, _J2_MAX_STAR = 5, _J2_LV_REQ = 60, _J2_COLOR = '#a879e0'; // 1 ดาว +5 → 5 ดาว ดาวละ +1 (เจ้าของเคาะ 2026-07-28)
+  const _J2_TREE_NAME = { atk:'มีดขว้าง', def:'ความอึด', melee:'ดาบ', turret:'ป้อมปืน' };
+  const _j2Obj = k => { const v = player && player[k]; return (v && typeof v === 'object') ? v : (() => { try { return JSON.parse(v || '{}') || {}; } catch (e) { return {}; } })(); };
+  const _j2Star = tr => Math.max(0, Math.min(_J2_MAX_STAR, parseInt(_j2Obj('job2_star')[tr] ?? 0) || 0));
+  const _j2Exp  = tr => Math.max(0, parseInt(_j2Obj('job2_exp')[tr] ?? 0) || 0);
+  // 🎯 เป้าดาวถัดไป **ต่อสาย** — server ส่งเป็น object {atk,def,melee,turret} (สูตรลับ ไม่คำนวณฝั่ง client)
+  //    0 = สายนั้นครบ 5 ดาวแล้ว · รองรับ server เก่าที่ยังส่งเลขเดี่ยวมา (fallback ใช้ค่าเดียวกันทุกสาย)
+  const _j2Target = tr => {
+    const n = player && player.job2_need;
+    if (n && typeof n === 'object') return Math.max(0, parseInt(n[tr] ?? 0) || 0);
+    return Math.max(1, parseInt(n || 0) || 0);
+  };
+  const _j2SkillMax = tr => 10 + _J2_BONUS * _j2Star(tr);   // เพดานสกิลของสายนั้นตอนนี้
+  // ⭐ แถบดาว — ดาวเล็ก อยู่บรรทัดของตัวเอง (เจ้าของสั่ง 2026-07-28 "ต่อไปอาจจะมี 10 ดาว")
+  //    เกิน STARS_INLINE ดวง สลับเป็นแบบย่อ "⭐ ×N" อัตโนมัติ → 10 ดาวก็ไม่ดันบรรทัดแตก
+  const _J2_STARS_INLINE = 5;
+  function _j2StarBar(tr, color) {
+    const n = _j2Star(tr);
+    if (n <= 0) return '';
+    const body = n > _J2_STARS_INLINE
+      ? `<span style="font-size:11px">⭐</span><b style="font-size:10.5px">×${n}</b>`
+      : `<span style="font-size:10px;letter-spacing:1px">${'⭐'.repeat(n)}</span>`;
+    return `<div style="display:flex;align-items:center;gap:4px;margin-bottom:3px;color:${color}">${body}
+      <span style="font-size:9.5px;color:#94a3b8;font-weight:600">${n}/${_J2_MAX_STAR}</span></div>`;
+  }
+  // สัดส่วนแบ่ง EXP ต่อสาย — มิเรอร์ xhrpg_job2_shares (ผลรวมเลเวลสกิลต่อสาย ÷ ทั้งหมด)
+  function _j2Shares(skills) {
+    const per = { atk:0, def:0, melee:0, turret:0 }; let tot = 0;
+    SKILL_DEFS.forEach(d => { const v = parseInt(skills[d.id] ?? 0) || 0; if (v > 0 && per[d.tree] != null) { per[d.tree] += v; tot += v; } });
+    if (tot <= 0) return null;
+    const out = {}; Object.keys(per).forEach(t => { if (per[t] > 0) out[t] = per[t] / tot; });
+    return out;
+  }
+  // ⚠️ ห้ามใช้ `n|0` ที่นี่ — bitwise แปลงเป็น int32 ก่อน (เพดาน 2.1 พันล้าน) แต่เป้า EXP สายอยู่ระดับ "แสนล้าน"
+  //    → 638B พันกลับเป็นเลขติดลบ แล้ว max(0,..) กลายเป็น 0 = โชว์ "x / 0" (บั๊กจริง 2026-07-27)
+  //    JS Number แม่นจำนวนเต็มถึง 2^53 (9 พันล้านล้าน) จึงไม่ต้องใช้ BigInt — แค่เลี่ยง bitwise
+  function _j2ShortN(n) { n = Math.max(0, Math.floor(Number(n) || 0)); return n >= 1e9 ? (n / 1e9).toFixed(2) + 'B' : n >= 1e6 ? (n / 1e6).toFixed(2) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'k' : String(n); }
+  // % ทศนิยมปรับตามขนาด — เป้าใหญ่ระดับแสนล้าน ถ้าโชว์ 1 ตำแหน่งจะค้าง "0.0%" เป็นเดือน (ดูเหมือนระบบพัง)
+  function _j2Pct(pct) { return pct >= 100 ? '100%' : (pct < 0.01 ? pct.toFixed(4) : pct < 1 ? pct.toFixed(2) : pct.toFixed(1)) + '%'; }
+  // การ์ดหัวสาย — 4 สถานะ: ยังไม่เคยอัพสกิล / กำลังสะสม / ครบเงื่อนไข / ปลดแล้ว
+  function _j2HeadCard(tree, skills) {
+    const t = SKILL_TREE_LABELS[tree], nm = T(_J2_TREE_NAME[tree] || tree);
+    const star = _j2Star(tree), exp = _j2Exp(tree), need = _j2Target(tree);
+    const sh = _j2Shares(skills), share = sh ? (sh[tree] || 0) : 0;
+    const pct = need > 0 ? Math.min(100, exp / need * 100) : 0;
+    const pctTxt = _j2Pct(pct);
+    const bar = (w, c) => `<div style="height:8px;background:#e2e8f0;border-radius:5px;overflow:hidden;margin:7px 0 5px"><div style="height:100%;width:${w}%;background:${c};border-radius:5px"></div></div>`;
+    if (star >= _J2_MAX_STAR) { // ปลดแล้ว — แถบเดินต่อรอดาวถัดไป
+      return `<div style="border:1.5px solid ${_J2_COLOR}66;background:${_J2_COLOR}12;border-radius:12px;padding:10px 12px;margin-bottom:10px">
+        ${_j2StarBar(tree, _J2_COLOR)}
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px">
+          <span style="font-size:12.5px;font-weight:800;color:${_J2_COLOR}">${T('ระดับความชำนาญ')} — ${nm}</span>
+          <span style="font-size:10.5px;font-weight:700;color:${_J2_COLOR};text-align:right">${T('สกิลสายนี้อัพได้ถึง Lv.{a}', {a: 10 + _J2_BONUS * star})}</span>
+        </div>
+        <div style="font-size:10px;color:${_J2_COLOR};font-weight:700;margin-top:6px">🎉 ${T('ครบทุกดาวแล้ว — สูงสุดของสายนี้')}</div></div>`;
+    }
+    if (!sh) { // ไม่เคยอัพสกิลเลยทั้งตัวละคร → เตือนแทนแถบ (ไม่งั้นค้าง 0% แล้วงงว่าทำไมไม่ขึ้น)
+      return `<div style="border:1.5px solid #e2e8f0;background:#f8fafc;border-radius:12px;padding:10px 12px;margin-bottom:10px">
+        <div style="display:flex;justify-content:space-between;align-items:baseline">
+          <span style="font-size:12.5px;font-weight:800;color:#64748b">🎖️ ${T('ระดับความชำนาญ')} — ${nm}</span>
+          <span style="font-size:15px;font-weight:800;color:#cbd5e1">0%</span>
+        </div>
+        <div style="font-size:10.5px;color:#b45309;margin-top:5px">⚠️ ${T('อัพสกิลอย่างน้อย 1 ระดับก่อน จึงจะเริ่มสะสม EXP สาย')}</div></div>`;
+    }
+    const lvOk = (player.lv || 1) >= _J2_LV_REQ, expOk = exp >= need && need > 0, ready = lvOk && expOk;
+    return `<div style="border:1.5px solid ${t.color}66;background:${t.color}0e;border-radius:12px;padding:10px 12px;margin-bottom:10px">
+      ${_j2StarBar(tree, t.color)}
+      <div style="display:flex;justify-content:space-between;align-items:baseline">
+        <span style="font-size:12.5px;font-weight:800;color:${t.color}">🎖️ ${T('ระดับความชำนาญ')} — ${nm}</span>
+        <span style="font-size:15px;font-weight:800;color:${expOk ? '#15803d' : t.color}">${pctTxt}</span>
+      </div>
+      <div style="font-size:10px;color:#64748b;margin-top:2px">${T('ดาวถัดไป ⭐{a} · ตอนนี้สกิลสายนี้อัพได้ถึง Lv.{b}', { a: star + 1, b: _j2SkillMax(tree) })}</div>
+      ${bar(pct, expOk ? '#15803d' : t.color)}
+      <div style="display:flex;justify-content:space-between;gap:8px;font-size:10px;color:#64748b;flex-wrap:wrap">
+        <span>${T('EXP สาย')} ${_j2ShortN(exp)} / ${_j2ShortN(need)}</span>
+        <span>${T('แบ่งจากมอนตาย {a}%', {a: (share * 100).toFixed(0)})}</span>
+      </div>
+      <div style="display:flex;gap:10px;font-size:10.5px;margin-top:5px;font-weight:600">
+        <span style="color:${lvOk ? '#15803d' : '#b91c1c'}">${lvOk ? '✓' : '✗'} Lv.${_J2_LV_REQ}</span>
+        <span style="color:${expOk ? '#15803d' : '#b91c1c'}">${expOk ? '✓ ' + T('EXP สายเต็มแล้ว') : '✗ ' + T('EXP สายยังไม่เต็ม')}</span>
+      </div>
+      <button ${ready ? `onclick="xhrpg.job2Unlock('${tree}')"` : 'disabled'} style="width:100%;margin-top:8px;padding:10px 0;border:none;border-radius:10px;font-size:12.5px;font-weight:800;cursor:${ready ? 'pointer' : 'default'};${ready ? `background:${t.color};color:#fff;box-shadow:0 3px 10px ${t.color}66` : 'background:#e2e8f0;color:#94a3b8'}">${ready ? '🎖️ ' : '🔒 '}${star > 0 ? T('ปลดดาวที่ {n}', { n: star + 1 }) : T('ปลดระดับความชำนาญ')}</button></div>`;
+  }
+  function job2Unlock(tree) {
+    if (!player || !player.line_uid) return;
+    $.post(baseUrl + 'xhrpg_upgrade.php', { line_uid: player.line_uid, lang: LANG(), session_token: sessionToken || '', action: 'job2_unlock', tree: tree })
+      .done(res => {
+        let d; try { d = typeof res === 'string' ? JSON.parse(res) : res; } catch (e) { return; }
+        if (d && d.ok) { player = d.player; renderSkills(); updateHUD(); addLog([{ type: 'default', msg: d.msg }]); }
+        else addLog([{ type: 'dead', msg: (d && d.error) || T('ปลดระดับความชำนาญ ไม่สำเร็จ') }]);
+      });
+  }
   const TYPE_TAG = {
     active:  { bg:'#FAECE7', color:'#993C1D', border:'#F0997B', label:'Auto' },
     passive: { bg:'#E6F1FB', color:'#0C447C', border:'#85B7EB', label:'Passive' },
@@ -12386,8 +19010,14 @@ const xhrpg = (() => {
     html += `<div style="display:flex;gap:4px;margin-bottom:8px">` + _trees.map(tr => {
       const t = SKILL_TREE_LABELS[tr], on = skillTab === tr;
       const _ic = t.label.split(' ')[0], _nm = (t.label.split('— ')[1] || tr);
-      return `<button onclick="xhrpg.setSkillTab('${tr}')" style="flex:1;min-width:0;font-size:11px;padding:6px 2px;border:none;border-radius:8px;font-weight:700;cursor:pointer;line-height:1.25;${on?`background:${t.color}1f;color:${t.color};box-shadow:inset 0 0 0 2px ${t.color}`:'background:#f1f5f9;color:#64748b'}">${_ic} ${T(_nm)}<br><span style="font-size:8.5px;font-weight:600;opacity:.85">${T('{a}/{b} แต้ม', {a: treeInvest[tr]||0, b: treeCounts[tr]*10})}</span></button>`;
+      // 🎖️ ดาวระดับความชำนาญ — บรรทัดบนสุดของปุ่ม แยกจากชื่อสาย (ปุ่มแคบ 4 ช่อง · รองรับถึง 10 ดาว)
+      //    เกิน 3 ดวงย่อเป็น "⭐×N" ทันที ไม่งั้นชื่อสายถูกเบียดจนตกบรรทัด
+      const _sn = _j2Star(tr);
+      const _st = _sn <= 0 ? ''
+        : `<div style="font-size:9px;line-height:1.1;letter-spacing:0;margin-bottom:1px">${_sn > 3 ? '⭐×' + _sn : '⭐'.repeat(_sn)}</div>`;
+      return `<button onclick="xhrpg.setSkillTab('${tr}')" style="flex:1;min-width:0;font-size:11px;padding:6px 2px;border:none;border-radius:8px;font-weight:700;cursor:pointer;line-height:1.25;${on?`background:${t.color}1f;color:${t.color};box-shadow:inset 0 0 0 2px ${t.color}`:'background:#f1f5f9;color:#64748b'}">${_st}${_ic} ${T(_nm)}<br><span style="font-size:8.5px;font-weight:600;opacity:.85">${T('{a}/{b} แต้ม', {a: treeInvest[tr]||0, b: treeCounts[tr]*10})}</span></button>`;
     }).join('') + `</div>`;
+    html += _j2HeadCard(skillTab, skills); // 🎖️ การ์ดหัวสาย (แถบ EXP + เงื่อนไข + ปุ่มปลด / สถานะดาว)
 
     let lastTree = null;
     SKILL_DEFS.filter(d => d.tree === skillTab).forEach((def, idx) => {
@@ -12404,7 +19034,7 @@ const xhrpg = (() => {
       }
 
       const lv = (int => int)(parseInt(skills[def.id] ?? 0));
-      const maxLv = def.maxLv;
+      const maxLv = def.maxLv + _J2_BONUS * _j2Star(def.tree); // 🎖️ ระดับความชำนาญ: เพดาน +1/ดาว × สูงสุด 5 ดาว (สูตรเดียวกับ xhrpg_skill_max_lv ฝั่ง server)
       const isMax = lv >= maxLv;
       const unlocked = !def.req
         ? true
@@ -12414,9 +19044,11 @@ const xhrpg = (() => {
       const tag = TYPE_TAG[def.type];
       const treeColor = SKILL_TREE_LABELS[def.tree].color;
 
-      const dots = Array.from({length:maxLv},(_,i) =>
-        `<div class="skill-dot" style="background:${i<lv?treeColor:'transparent'};border-color:${treeColor};opacity:${i<lv?1:0.25}"></div>`
-      ).join('');
+      // ช่อง 1-10 = สีสายเดิม · ช่อง 11+ = สีม่วงดาว (เห็นชัดว่าเป็นโซนที่ปลดด้วยระดับความชำนาญ)
+      const dots = Array.from({length:maxLv},(_,i) => {
+        const _j2Zone = i >= def.maxLv, _dc = _j2Zone ? _J2_COLOR : treeColor;
+        return `<div class="skill-dot" style="background:${i<lv?_dc:'transparent'};border-color:${_dc};opacity:${i<lv?1:0.25}"></div>`;
+      }).join('');
 
       const btnStyle = isMax
         ? `border-color:${treeColor};color:${treeColor};opacity:0.5`
@@ -12444,7 +19076,7 @@ const xhrpg = (() => {
 
       html += `<div class="skill-card${!unlocked?' locked':''}${isMax?' maxed':''}" id="skc-${def.id}">
         <div class="skill-top">
-          <div class="skill-ico">${def.id === 'deploy_turret' ? `<img src="${assetsBaseUrl}assets/hero/turret.png" alt="${def.icon}" style="width:17px;height:17px;image-rendering:pixelated;vertical-align:-2px" onerror="this.outerHTML=this.alt">` : def.icon}</div>
+          <div class="skill-ico">${def.id === 'deploy_turret' ? `<img src="${baseUrl}assets/hero/turret.png" alt="${def.icon}" style="width:17px;height:17px;image-rendering:pixelated;vertical-align:-2px" onerror="this.outerHTML=this.alt">` : def.icon}</div>
           <div class="skill-mid">
             <div class="skill-name">${T(def.name)}
               <span class="skill-tag" style="background:${tag.bg};color:${tag.color};border-color:${tag.border}">${tag.label}</span>
@@ -12525,7 +19157,7 @@ const xhrpg = (() => {
 
   const SKILL_HELP_DATA = [
     { icon:'🎯', name:'ขว้างจุดตาย (Passive)', desc:'เพิ่ม ATK มีด(สั้นยาว) ถาวร +5 ต่อ Lv.\nLv1 = +5 … Lv10 = +50 ATK' },
-    { icon:'⚡', name:'มีดขว้างสายฟ้า (Action)', desc:'Chain Lightning ⚡ ชิ่ง 3 เป้า · ต้องการ ขว้างจุดตาย Lv.5 — MP 10 CD 5s\nDMG = ATK มีด(สั้นยาว) ×2.1 ถึง ×3.0 ตาม Lv.' },
+    { icon:'⚡', name:'มีดขว้างสายฟ้า (Action)', desc:'Chain Lightning ⚡ ชิ่ง 3 เป้า · ต้องการ ขว้างจุดตาย Lv.5 — MP 10 CD 3s\nDMG = ATK มีด(สั้นยาว) ×2.1 ถึง ×3.0 ตาม Lv.' },
     { icon:'❤️', name:'ร่างกายแกร่ง (Passive)', desc:'อัพแล้วได้เลย ไม่ต้องกด ไม่ใช้ MP\nHP สูงสุด +30 ต่อ Lv. (Lv.10 = +300 HP)' },
     { icon:'🛡️', name:'เพิ่มเกราะ (Passive)', desc:'ต้องการ ร่างกายแกร่ง Lv.3\nPassive บวกติดตัว: เกราะสูงสุด +5/Lv + ♻️ ฟื้นเกราะ +1/Lv ต่อวินาที (ไม่ใช้ MP)' },
     { icon:'💚', name:'ฟื้น HP (Passive)',     desc:'ต้องการ ร่างกายแกร่ง Lv.5\nPassive บวกติดตัว: ฟื้น HP +1/Lv ต่อวินาที (บวกกับ regen ปกติ ไม่ใช้ MP)' },
@@ -12585,16 +19217,31 @@ const xhrpg = (() => {
     { field:'diamond_red',   icon:'🔴', name:'เพชรแดง',  desc:'ตีบวกโมดูล +6 ขึ้นไป',   rarity:'red'   },
     { field:'diamond_green', icon:'🟢', name:'เพชรเขียว', desc:'ตีบวกโมดูล +12 ขึ้นไป',  rarity:'green' },
   ];
+  // 🪨 แร่อวกาศ 3 ชนิด (docs/guild-ore-upgrade-design.md) — fungible เหมือนเพชร · ได้จากยานบุกอวกาศ
+  // ⚠️ slot ต้องเป็น ore1/ore2/ore3 เป๊ะ — server whitelist ตามนี้ (ผิด = ลงขาย/เทรดไม่ผ่าน)
+  const MKT_ORE_DEFS = [
+    // 🛸 สายอวกาศ — ได้จากภารกิจยาน Orion · ใช้บริจาคอัพเลเวลกิลได้
+    { slot:'ore1', icon:'🌙', name:'แร่จันทรา',   desc:'ใช้บริจาคอัพเลเวลกิล', rarity:'blue',   color:'#4f46e5', grp:'sp' },
+    { slot:'ore2', icon:'☄️', name:'เศษดาวตก',    desc:'ใช้บริจาคอัพเลเวลกิล', rarity:'purple', color:'#c2410c', grp:'sp' },
+    { slot:'ore3', icon:'🌌', name:'ผลึกเนบิวลา', desc:'ใช้บริจาคอัพเลเวลกิล', rarity:'gold',   color:'#7c3aed', grp:'sp' },
+    // 🌾 สายพื้นดิน — ขุดเจอตอนเก็บเกี่ยวผัก · ⚠️ กิลใช้ไม่ได้ (server กันที่ donate_ore ไม่ใช่แค่ซ่อนปุ่ม)
+    //    ไอคอน 🟩🍯🪩 ตรวจแล้วไม่ชนกับ ICO (emoji→PNG ของสวมใส่) และ _RES_EMOJI (emoji→SVG ทรัพยากร)
+    { slot:'ore4', icon:'🟩', name:'หินหยก',      desc:'ขุดเจอตอนเก็บเกี่ยวผัก', rarity:'blue',   color:'#16a34a', grp:'fm' },
+    { slot:'ore5', icon:'🍯', name:'อำพันโบราณ',  desc:'ขุดเจอตอนเก็บเกี่ยวผัก', rarity:'purple', color:'#d97706', grp:'fm' },
+    { slot:'ore6', icon:'🪩', name:'ผลึกน้ำค้าง', desc:'ขุดเจอตอนเก็บเกี่ยวผัก', rarity:'gold',   color:'#0891b2', grp:'fm' },
+  ];
   const MKT_CATS = [
     { key:'resource',    label:'ทรัพยากร' },
     { key:'diamond',     label:'💎 เพชร' },
+    { key:'ore',         label:'🪨 แร่อวกาศ' },
     { key:'ammo',        label:'🔫 กระสุน' },
     { key:'treasure',    label:'🗃️ ของวิเศษ ของล้ำค่า' },
     { key:'hardware',    label:'🗃️ ของวิเศษ ชิ้นส่วนไททัน' },
     { key:'weapon_parts',label:'🗃️ ของวิเศษ ชิ้นส่วนอาวุธ' },
     { key:'house_parts', label:'🗃️ ของวิเศษ ชิ้นส่วนยานบิน' },
     { key:'stat_parts',  label:'🗃️ ของวิเศษ ชิ้นส่วนสเตตัส' },
-    { key:'equipment',   label:'🗃️ ของวิเศษ อุปกรณ์สวมใส่' },
+    { key:'equipment',   label:'🗃️ Old King Equipment' }, // เปลี่ยนชื่อตามแผง ITEM (latin ล้วน ทุกภาษาเห็นเหมือนกัน — จอง Equipment ให้ระบบคราฟต์ใหม่)
+    { key:'eq2',         label:'🛡️ Equipment' }, // ⚔️ ของสวมใส่ D2 (instance เดี่ยว — ขาย/ซื้อทั้ง option ติดชิ้น)
     { key:'card',        label:'🎴 การ์ดมอน' },
     { key:'module_pistol', label:'🔪 โมดูลมีดสั้น' },
     { key:'module_sniper', label:'🗡️ โมดูลมีดยาว' },
@@ -12603,11 +19250,12 @@ const xhrpg = (() => {
     { key:'module_robot',  label:'🔋 โมดูลไททัน' },
     { key:'module_robot_gun', label:'🦾 โมดูลธนูไททัน (ARM)' },
     { key:'module_railgun',   label:'⚡ โมดูล Premium Titan Beam' },
-    { key:'module_armor',  label:'🛡️ โมดูลเกราะ' },
+    { key:'module_armor',  label:'🔰 โมดูลโล่' }, // ระบบโล่ (เกราะเดิม) — เลี่ยง 🛡️ ที่เป็นของ Equipment แล้ว · ชิปใช้ไอคอน PNG (_MKT_CAT_CHIP)
     { key:'module_house',  label:'🛸 โมดูลยานบิน' },
     { key:'module_turret', label:'🗼 โมดูลป้อม' },
     { key:'module_box',    label:'📦 กล่องสุ่มโมดูล' },
     { key:'card_box',      label:'🎁 กล่องสุ่มการ์ด' },
+    { key:'egg_box',       label:'🧰 กล่องสุ่มไข่' },
     { key:'egg',           label:'🥚 ไข่สัตว์เลี้ยง' },
   ];
   // override icon SVG เฉพาะแถวชิปหมวด (select/search ยังใช้ label emoji เดิม — SVG ใส่ใน <option> ไม่ได้)
@@ -12615,6 +19263,7 @@ const xhrpg = (() => {
     module_pistol: () => _LOG_KNIFE_S + ' ' + T('โมดูลมีดสั้น'),
     module_sniper: () => _LOG_KNIFE_B + ' ' + T('โมดูลมีดยาว'),
     module_knife:  () => _LOG_SWORD  + ' ' + T('โมดูลดาบ'),
+    module_armor:  () => _SHIELD_ICO(12) + ' ' + T('โมดูลโล่'),
     diamond: () => _icoGemHtml('blue',12) + _icoGemHtml('red',12) + _icoGemHtml('green',12) + ' ' + T('เพชร'),
   };
   // ราคาตั้งต้นแนะนำของโมดูล แยกตามระดับ rarity 1-7
@@ -12658,6 +19307,18 @@ const xhrpg = (() => {
 
   function _mktInventory(cat) {
     if (!player) return [];
+    if (cat === 'eq2') { // ⚔️ ของสวมใส่ D2 — เฉพาะในกระเป๋า (ชิ้นที่สวมอยู่ต้องถอดก่อน) · id ชิ้น (string) ส่งผ่าน item_slot
+      return _eq2Inv().map(it => {
+        const t = Math.max(1, Math.min(6, it.t | 0));
+        return { id: 'e2_' + String(it.id || ''), // 🔑 คีย์ให้การ์ดผูก onclick → _mktPickItem (เดิมลืมใส่ — คลิกแล้ว find ไม่เจอ เงียบ ตั้งราคาไม่ได้)
+          item_type: 'eq2', item_id: 0, item_slot: String(it.id || ''), tier: t, qty: 1,
+          icon: EQ2_KIND_EMO[_eq2Kind(it)] || '⚔️',
+          name: (EQ2_KIND_TH[_eq2Kind(it)] || 'ของสวมใส่') + ' T' + t, // fixed ไทย — ผู้ดูแปลผ่าน _mktTName
+          // latin ล้วน อ่านได้ทุกภาษา · ⚒️ +N นำหน้าให้ผู้ซื้อเห็นระดับตีบวก (ติดไปกับชิ้นผ่าน payload)
+          desc: ((it.p | 0) > 0 ? '+' + (it.p | 0) + ' · ' : '') + 'Lv.' + (it.lv | 0) + ' · DEF+' + (EQ2_DEF[t - 1] + _eq2PlusDef(it.p)) + (it.af && it.af.length ? ' · ' + it.af.map(a => _eq2OptShort(a[0], +a[1] || 0)).join(' · ') : ''),
+          rarity: EQ2_TCOL[t - 1] };
+      }).sort((a, b) => b.tier - a.tier);
+    }
     if (cat === 'ammo') {
       const guns = [{g:'pistol',icon:'🔪',name:'มีดสั้น'},{g:'sniper',icon:'🗡️',name:'มีดยาว'},{g:'robot',icon:'🦾',name:'ลูกธนูไททัน'}]; // ชื่อ/icon โชว์ (key g คงเดิม) — emoji ล้วน กัน item_icon ยาวเกิน (เดิม img HTML)
       const tierIcons = ['⚪','🟢','🔵','🟣','🟡','🔴'];
@@ -12703,6 +19364,17 @@ const xhrpg = (() => {
           rarity: d.rarity, qty: player[d.field] || 0,
         }));
     }
+    if (cat === 'ore') {
+      // 🪨 แร่อวกาศ — มิเรอร์ branch เพชรทุกจุด (fungible · จำนวนจาก player.ore1/2/3 · server verify อีกชั้นตอนขาย)
+      return MKT_ORE_DEFS
+        .filter(o => (player[o.slot] || 0) > 0)
+        .map(o => ({
+          id: `ore_${o.slot}`, item_type: 'ore',
+          item_id: o.slot, item_slot: o.slot,
+          icon: o.icon, name: o.name, desc: o.desc,
+          rarity: o.rarity, qty: player[o.slot] || 0,
+        }));
+    }
     if (cat === 'module_box') {
       // 📦 กล่องสุ่มโมดูล — stackable ต่อระดับ (tier → item_tier ฝั่ง server)
       const out = [];
@@ -12730,6 +19402,23 @@ const xhrpg = (() => {
           id: 'card_box_' + t, item_type: 'card_box', item_id: 0, item_slot: '', tier: t,
           icon: '🎁', name: `กล่องการ์ด Lv.${lo}-${hi}`,
           desc: `สุ่มการ์ดมอน Lv.${lo}-${hi} · ⭐MVP 1%`,
+          rarity: rar[t - 1], qty: n,
+          suggested: MKT_CARD_BASE[rar[t - 1]] || 150,
+        });
+      }
+      return out;
+    }
+    if (cat === 'egg_box') {
+      // 🧰 กล่องสุ่มไข่ — stackable ต่อระดับ 1-8 (มิเรอร์กล่องการ์ดเป๊ะ · docs/egg-box-design.md)
+      const rar = ['white', 'green', 'blue', 'purple', 'gold', 'red', 'red', 'red'];
+      const out = [];
+      for (let t = 1; t <= 8; t++) {
+        const n = player['egg_box' + t] | 0; if (n <= 0) continue;
+        const lo = (t - 1) * 10 + 1, hi = t * 10;
+        out.push({
+          id: 'egg_box_' + t, item_type: 'egg_box', item_id: 0, item_slot: '', tier: t,
+          icon: '🧰', name: `กล่องไข่ Lv.${lo}-${hi}`,
+          desc: `สุ่มไข่มอน Lv.${lo}-${hi} · ⭐MVP 1%`,
           rarity: rar[t - 1], qty: n,
           suggested: MKT_CARD_BASE[rar[t - 1]] || 150,
         });
@@ -12865,6 +19554,7 @@ const xhrpg = (() => {
         <button class="mkt2-tab ${mktMode==='buy'?'on':''}" data-mode="buy" onclick="xhrpg._mktSetMode('buy')">${T('🛒 ซื้อ')}</button>
         <button class="mkt2-tab ${mktMode==='my'?'on':''}" data-mode="my" onclick="xhrpg._mktSetMode('my')">${T('📦 ของฉัน')}<span class="mkt2-badge" id="mkt2-my-badge" style="display:none"></span></button>
         <button class="mkt2-tab ${mktMode==='history'?'on':''}" data-mode="history" onclick="xhrpg._mktSetMode('history')">${T('🧾 ประวัติ')}</button>
+        <button class="mkt2-tab ${mktMode==='trade'?'on':''}" data-mode="trade" onclick="xhrpg._mktSetMode('trade')">${T('🤝 แลกเปลี่ยน')}</button>
       </div>
       <div id="mkt-body">${_mktBody()}</div>`;
   }
@@ -12876,6 +19566,7 @@ const xhrpg = (() => {
     if (m==='buy')     { mktBuyStep=1; mktSelListing=null; mktSelGroup=null; window._mktListingsCache=null; }
     if (m==='my')      { window._mktMyCache=null; }
     if (m==='history') { window._mktHistCache=null; mktHistFilter='all'; }
+    if (m==='trade')   { _trOpen(); }
     document.querySelectorAll('.mkt2-tab').forEach(b => b.classList.toggle('on', b.dataset.mode === m));
     _mktRefreshBody();
     _mktBindEvents();
@@ -12890,16 +19581,17 @@ const xhrpg = (() => {
     if (mktSellOpen)         return _mktSellSheet();
     if (mktMode==='history') return _mktHistoryBody();
     if (mktMode==='my')      return _mktMyBody();
+    if (mktMode==='trade')   return _trBody();
     return _mktBuyBody();
   }
 
   // dropdown หมวด จัดกลุ่ม 3 กลุ่ม (ใช้ใน sheet วางขาย)
   function _mktCatSelect(active, setter, withAll) {
     const groups = [
-      { label:null,         keys:['resource','diamond','ammo'] },
+      { label:null,         keys:['resource','diamond','ore','ammo','eq2'] }, // 🪨 ore = แร่อวกาศ (ขาย/เทรดได้เต็มรูปแบบ) · 🛡️ eq2 อยู่นอกกลุ่ม — เด่นระดับบนสุดเหมือนทรัพยากร (เดิมลืมใส่ → หมวดไม่โผล่ใน dropdown ขาย)
       { label:'🗃️ ของวิเศษ', keys:['treasure','hardware','weapon_parts','house_parts','stat_parts','equipment','card'] },
       { label:'🔧 โมดูล',    keys:['module_pistol','module_sniper','module_knife','module_axe','module_robot','module_robot_gun','module_railgun','module_armor','module_house','module_turret'] },
-      { label:'🎁 กล่อง/ไข่', keys:['module_box','card_box','egg'] }, // 📦🎁🥚 กล่องสุ่ม + ไข่สัตว์เลี้ยง
+      { label:'🎁 กล่อง/ไข่', keys:['module_box','card_box','egg_box','egg'] }, // 📦🎁🧰🥚 กล่องสุ่ม + ไข่สัตว์เลี้ยง
     ];
     const byKey = Object.fromEntries(MKT_CATS.map(c => [c.key, c]));
     let opts = withAll ? `<option value="all" ${active==='all'?'selected':''}>${T('ทั้งหมด')}</option>` : '';
@@ -13001,12 +19693,49 @@ const xhrpg = (() => {
   }
 
   // 🌐 แปลชื่อของใน listing (item_name จาก DB เป็นไทย) — ชื่อประกอบแบบ "มีดสั้น ⚪ T3" คีย์ตรงไม่ match → แยก suffix tier ออก แปลฐาน แล้วต่อกลับ
-  function _mktTName(n) {
+  // แปลชื่อ listing ที่ถูกประกอบเป็นไทยตายตัวตอนตั้งขาย (เก็บใน DB) — ลอง dict ตรงก่อน แล้วถอดแพทเทิร์นที่รู้จัก
+  //    (บั๊กจริง 2026-07-18: แท็บของฉันโชว์ "ไข่ไก่เจี๊ยบ" เป็นไทยในโหมด EN — ชื่อประกอบ 'ไข่'+ชื่อมอน dict ไม่ตรง)
+  function _mktTName0(n) {
     n = String(n || '');
     const t = T(n);
     if (t !== n || LANG() === 'th') return t; // dict ตรง หรือโหมดไทย = จบ
-    const m = n.match(/^(.*?)(\s*(?:[⚪🟢🔵🟣🟡🔴]\s*)?T\d+)$/u); // "ชื่อฐาน [ไอคอน] T3"
-    return m ? T(m[1].trim()) + m[2] : n;
+    let m;
+    if ((m = n.match(/^ไข่(.+?)( ⭐MVP)?$/u)))          return T('ไข่{a}', {a: T(m[1])}) + (m[2] || '');          // ไข่{มอน} (+MVP)
+    if ((m = n.match(/^กล่องการ์ด Lv\.(\d+)-(\d+)$/u))) return T('กล่องการ์ด Lv.{a}-{b}', {a: m[1], b: m[2]});    // key เดิมของร้านกล่อง
+    if ((m = n.match(/^กล่องไข่ Lv\.(\d+)-(\d+)$/u)))   return T('กล่องไข่ Lv.{a}-{b}', {a: m[1], b: m[2]});
+    if ((m = n.match(/^กล่องโมดูล(.+)$/u)))             return T('กล่องโมดูล{a}', {a: T(m[1])});
+    if ((m = n.match(/^(.+?)( ⭐MVP)$/u)) && T(m[1]) !== m[1]) return T(m[1]) + m[2];                             // {มอน} ⭐MVP (การ์ด)
+    if ((m = n.match(/^(.*?)(\s*(?:[⚪🟢🔵🟣🟡🔴]\s*)?T\d+)$/u))) return T(m[1].trim()) + m[2];                    // "ชื่อฐาน [ไอคอน] T3"
+    if ((m = n.match(/^(.+?) (ทั่วไป|ซับซ้อน|หายาก|ขั้นสูง|ขั้นสูงพิเศษ|ขั้นตำนาน|ตำนานพิเศษ) \+(\d+)$/u))) {     // โมดูลตลาด "{ไอคอน} {ชื่อช่อง} {ระดับ} +N" (ผู้เล่น VN แจ้งประวัติตลาดโชว์ไทย 2026-07-25)
+      let _mb = m[1].trim(), _mp = '';
+      if (T(_mb) === _mb) { const _sp = _mb.indexOf(' '); if (_sp > 0) { _mp = _mb.slice(0, _sp + 1); _mb = _mb.slice(_sp + 1); } } // ท่อนแรกเป็นไอคอน emoji — ตัดเก็บไว้ แปลเฉพาะชื่อ
+      return _mp + T(_mb) + ' ' + T(m[2]) + ' +' + m[3];
+    }
+    if (n.indexOf(' · ') > 0) { // ชื่อประกอบ "A · B" (เช่น ธนูไททัน (ARM) · ใบมีด) — แปลทีละท่อน (ผู้เล่น VN แจ้งแท็บเทรดไม่แปล 2026-07-20)
+      const _ps = n.split(' · ').map(s => T(s.trim()));
+      if (_ps.some((s, i2) => s !== n.split(' · ')[i2].trim())) return _ps.join(' · ');
+    }
+    return n;
+  }
+  // แปลคำอธิบาย listing (item_desc ประกอบไทย) — pattern เด่นๆ: ไข่/การ์ด/กระสุน/กล่องสุ่ม · ไม่ตรงแพทเทิร์น = คงเดิม
+  // 🔒 escape ก่อนใส่ innerHTML — item_name/item_desc มาจากผู้ขาย (POST) ไม่ถูกกรองฝั่ง server มาก่อน = stored XSS
+  //    ห่อที่ "ผลลัพธ์" ของ _mktTName/_mktTDesc เพราะต้องแปล dict จากสตริงดิบก่อน (escape ก่อนแปล = คีย์ไม่ตรง)
+  //    ประกาศเป็น function (hoisted) เพราะ _icoHtml ซึ่งอยู่ก่อนหน้าไฟล์นี้เรียกใช้ด้วย
+  function _escHtml(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+  function _mktTDesc(s)  { return _escHtml(_mktTDesc0(s)); }
+  function _mktTName(n)  { return _escHtml(_mktTName0(n)); }
+  function _mktTDesc0(s) {
+    s = String(s || '');
+    if (!s) return s;
+    const t = T(s);
+    if (t !== s || LANG() === 'th') return t;
+    let m;
+    if ((m = s.match(/^สัตว์เลี้ยง Lv\.(\d+) · ค่าฟัก ([\d,]+) G$/u)))       return T('สัตว์เลี้ยง Lv.{a} · ค่าฟัก {b} G', {a: m[1], b: m[2]});
+    if ((m = s.match(/^การ์ด · \+(\d+) (.+)$/u)))                            return T('การ์ด · +{a} {b}', {a: m[1], b: m[2]});
+    if ((m = s.match(/^ดาเมจ ×([\d.]+)$/u)))                                 return T('ดาเมจ ×{a}', {a: m[1]});
+    if ((m = s.match(/^สุ่มการ์ดมอน Lv\.(\d+)-(\d+) · ⭐MVP 1%$/u)))          return T('สุ่มการ์ดมอน Lv.{a}-{b} · ⭐MVP 1%', {a: m[1], b: m[2]});
+    if ((m = s.match(/^สุ่มไข่มอน Lv\.(\d+)-(\d+) · ⭐MVP 1%$/u)))            return T('สุ่มไข่มอน Lv.{a}-{b} · ⭐MVP 1%', {a: m[1], b: m[2]});
+    return s;
   }
   function _mktRarityLegend() {
     const r = [['#6b7280','ขาว'],['#22c55e','เขียว'],['#3b82f6','ฟ้า'],['#a855f7','ม่วง'],['#eab308','ทอง'],['#ef4444','แดง']];
@@ -13055,7 +19784,7 @@ const xhrpg = (() => {
           <span style="font-size:11px;color:#4b5563;white-space:nowrap">/ ${it.qty}</span></div>`
       : '';
     return _mktSheetHead(T('🏷️ วางขาย — ตั้งราคา'), '_mktSellBack') +
-      `<div class="mkt-detail"><div class="dico">${it.isModule ? it.icon : _icoHtml(it.icon, 20)}</div><div><div class="dname">${_mktTName(it.name)}</div><div class="ddesc">${T(it.desc)}</div></div></div>` + // โมดูลคงไอคอนช่องเดิม (📏/🎯/⚙️ ฯลฯ) — กันชนกับ map เหล็ก
+      `<div class="mkt-detail"><div class="dico">${it.isModule ? it.icon : _icoHtml(it.icon, 20)}</div><div><div class="dname">${_mktTName(it.name)}</div><div class="ddesc">${_mktTDesc(it.desc)}</div></div></div>` + // โมดูลคงไอคอนช่องเดิม (📏/🎯/⚙️ ฯลฯ) — กันชนกับ map เหล็ก
       qtyRow +
       `<div class="mkt-frow"><label>${T('ราคา/ชิ้น')}</label><input type="number" id="mkt-price" value="${mktSellPrice}" min="1" oninput="xhrpg._mktCalcNet()"><span style="font-size:13px;color:#4b5563">G</span></div>` +
       (minP != null ? `<div class="mkt2-mhint">${T('💡 ราคาตลาดตอนนี้: เริ่ม {a}G', {a: minP.toLocaleString()})}</div>` : '') +
@@ -13074,7 +19803,7 @@ const xhrpg = (() => {
   }
 
   // ── BUY (design A: กริดการ์ดกลุ่ม 3 คอลัมน์ + drill-down + ยืนยันซื้อ) ──
-  const MKT_FUNGIBLE = { resource:1, diamond:1, ammo:1 }; // 📦🎁🥚 กล่อง/ไข่ ย้ายไป unique display (การ์ด grid สวยแบบโมดูล) — ยังซื้อทีละหลายชิ้นได้ (qty ในหน้ายืนยัน)
+  const MKT_FUNGIBLE = { resource:1, diamond:1, ore:1, ammo:1 }; // 🪨 ore = แร่อวกาศ (นับเป็นชิ้น เหมือนเพชร) · 📦🎁🥚 กล่อง/ไข่ ย้ายไป unique display (การ์ด grid สวยแบบโมดูล) — ยังซื้อทีละหลายชิ้นได้ (qty ในหน้ายืนยัน)
 
   function _mktBuyBody() {
     if (mktBuyStep===2) return _mktBuyConfirm();
@@ -13240,9 +19969,14 @@ const xhrpg = (() => {
       const A = _mktEggMeta(a), B = _mktEggMeta(b);
       return (B.mvp - A.mvp) || (B.lv - A.lv) || ((parseInt(a.price_per)||0) - (parseInt(b.price_per)||0));
     });
+    if (cat === 'eq2') rows.sort((a,b) => { // ⚔️ T สูง→ต่ำ · Lv สูง→ต่ำ · ราคาถูกสุดก่อน (tie) — เจ้าของสั่ง 2026-07-20
+      const P = l => { const p = _mktModPayload(l) || {}; return { t: parseInt(p.t) || 0, lv: parseInt(p.lv) || 0 }; };
+      const A = P(a), B = P(b);
+      return (B.t - A.t) || (B.lv - A.lv) || ((parseInt(a.price_per)||0) - (parseInt(b.price_per)||0));
+    });
     if (!rows.length) return head + chips + `<div class="mkt2-loading">${T('ไม่มีประกาศในหมวดนี้')}</div>`;
     const isCard = cat === 'card';
-    const isBox  = cat === 'module_box' || cat === 'card_box';
+    const isBox  = cat === 'module_box' || cat === 'card_box' || cat === 'egg_box';
     const isEgg  = cat === 'egg';
     const cardFn = isCard ? _mktCardPieceCard : isBox ? _mktBoxPieceCard : isEgg ? _mktEggPieceCard : _mktModPieceCard;
     const body = (isMod || isCard || isBox || isEgg)
@@ -13287,7 +20021,7 @@ const xhrpg = (() => {
     const mb  = mvp ? _mvpCardBonus(+mid, lv) : null;
     const mbTxt = (mb && mb.a > 0) ? `+${mb.a} ${_CB_LBL[mb.t]||mb.t}` : '';
     return `<div class="mkt2-mcard" style="border-left:3px solid ${bc}">
-      <div style="display:flex;align-items:center"><span style="font-size:16px">${l.item_icon}</span><span style="margin-left:auto;font-size:8px;font-weight:800;color:#fff;background:${mvp?'#dc2626':bc};padding:0 4px;border-radius:4px">${mvp?'⭐MVP':'Lv.'+lv}</span></div>
+      <div style="display:flex;align-items:center"><span style="font-size:16px">${l.item_icon}</span><span style="margin-left:auto;font-size:8px;font-weight:800;color:#fff;background:${mvp?'#dc2626':bc};padding:0 4px;border-radius:4px">${mvp?'⭐MVP Lv.'+lv:'Lv.'+lv}</span></div>
       <div style="font-size:10px;font-weight:600;color:#111;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${T(mm.n || l.item_name || '?')}</div>
       <div style="font-size:11px;font-weight:700;color:${clr};margin-top:1px">+${v} ${su}</div>
       <div style="font-size:9px;font-weight:600;color:#7c3aed;min-height:11px">${mbTxt}</div>
@@ -13298,16 +20032,22 @@ const xhrpg = (() => {
     </div>`;
   }
 
-  // การ์ดกล่องสุ่มฝั่งซื้อ (โมดูล/การ์ด) — grid สวยแบบโมดูล: icon + ระดับ + คำอธิบายสิ่งที่ได้ + ×qty + ราคา/ผู้ขาย/ปุ่มซื้อ
+  // การ์ดกล่องสุ่มฝั่งซื้อ (โมดูล/การ์ด/ไข่) — grid สวยแบบโมดูล: icon + ระดับ + คำอธิบายสิ่งที่ได้ + ×qty + ราคา/ผู้ขาย/ปุ่มซื้อ
   function _mktBoxPieceCard(l) {
     const isCardBox = l.item_type === 'card_box';
+    const isEggBox  = l.item_type === 'egg_box';
     const t   = parseInt(l.item_tier) || 1;
-    const c   = isCardBox ? (CARD_BOX_COLORS[t-1] || '#94a3b8') : ((MODULE_BOX_META[t-1]||{}).c || '#94a3b8');
-    const name = isCardBox ? T('กล่องการ์ด Lv.{a}-{b}', {a: (t-1)*10+1, b: t*10}) : T('กล่องโมดูล{a}', {a: T((MODULE_BOX_META[t-1]||{}).n||'')});
-    const sub  = isCardBox ? T('สุ่มการ์ดมอน Lv.{a}-{b} · ⭐MVP 1%', {a: (t-1)*10+1, b: t*10}) : T('สุ่มโมดูล rarity {a} ({b} รู) ทุกอาวุธ', {a: t+1, b: t+1});
+    const c   = (isCardBox || isEggBox) ? (CARD_BOX_COLORS[t-1] || '#94a3b8') : ((MODULE_BOX_META[t-1]||{}).c || '#94a3b8');
+    const name = isEggBox  ? T('กล่องไข่ Lv.{a}-{b}', {a: (t-1)*10+1, b: t*10})
+               : isCardBox ? T('กล่องการ์ด Lv.{a}-{b}', {a: (t-1)*10+1, b: t*10})
+               : T('กล่องโมดูล{a}', {a: T((MODULE_BOX_META[t-1]||{}).n||'')});
+    const sub  = isEggBox  ? T('สุ่มไข่มอน Lv.{a}-{b} · ⭐MVP 1%', {a: (t-1)*10+1, b: t*10})
+               : isCardBox ? T('สุ่มการ์ดมอน Lv.{a}-{b} · ⭐MVP 1%', {a: (t-1)*10+1, b: t*10})
+               : T('สุ่มโมดูล rarity {a} ({b} รู) ทุกอาวุธ', {a: t+1, b: t+1});
+    const ic   = isEggBox ? '🧰' : (isCardBox ? '🎁' : '📦');
     const qty  = parseInt(l.qty) || 1;
     return `<div class="mkt2-mcard" style="border-left:3px solid ${c}">
-      <div style="display:flex;align-items:center"><span style="font-size:16px">${isCardBox?'🎁':'📦'}</span><span style="margin-left:auto;font-size:8px;font-weight:800;color:#fff;background:${c};padding:0 4px;border-radius:4px">${T('ระดับ {a}', {a: t})}</span></div>
+      <div style="display:flex;align-items:center"><span style="font-size:16px">${ic}</span><span style="margin-left:auto;font-size:8px;font-weight:800;color:#fff;background:${c};padding:0 4px;border-radius:4px">${T('ระดับ {a}', {a: t})}</span></div>
       <div style="font-size:10px;font-weight:600;color:#111;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${name}</div>
       <div style="font-size:9px;color:#64748b;margin-top:1px;min-height:22px;line-height:1.3">${sub}</div>
       <div style="font-size:9px;font-weight:700;color:#7c3aed;min-height:11px">${qty>1?T('มี ×{a} ใบ', {a: qty}):''}</div>
@@ -13334,7 +20074,7 @@ const xhrpg = (() => {
     const hatch = lv * 100 * (mvp ? 10 : 1);
     const qty = parseInt(l.qty) || 1;
     return `<div class="mkt2-mcard" style="border-left:3px solid ${bc}">
-      <div style="display:flex;align-items:center"><span style="font-size:16px">🥚</span><span style="margin-left:auto;font-size:8px;font-weight:800;color:#fff;background:${mvp?'#dc2626':bc};padding:0 4px;border-radius:4px">${mvp?'⭐MVP':'Lv.'+lv}</span></div>
+      <div style="display:flex;align-items:center"><span style="font-size:16px">🥚</span><span style="margin-left:auto;font-size:8px;font-weight:800;color:#fff;background:${mvp?'#dc2626':bc};padding:0 4px;border-radius:4px">${mvp?'⭐MVP Lv.'+lv:'Lv.'+lv}</span></div>
       <div style="font-size:10px;font-weight:600;color:#111;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${T(mm.n || l.item_name || 'ไข่')}</div>
       <div style="font-size:9px;color:#64748b;margin-top:1px;min-height:22px;line-height:1.3">${T('ฟักเป็นสัตว์เลี้ยง')}</div>
       <div style="font-size:9px;font-weight:700;color:#7c3aed;min-height:11px">${qty>1?T('มี ×{a} ฟอง', {a: qty}):''}</div>
@@ -13346,14 +20086,29 @@ const xhrpg = (() => {
   // แถวของสะสม unique (ไม่ใช่โมดูล/การ์ด): ชื่อ + ราคา + ผู้ขาย + [ซื้อ]
   // การ์ดของวิเศษฝั่งซื้อ (ชิ้นส่วนสเตตัส/ไททัน/อาวุธ/ยานบิน/ของล้ำค่า/อุปกรณ์) — grid สวยแบบโมดูล: icon + สีระดับ + ชื่อ + ผล(item_desc) + ราคา/ผู้ขาย/ปุ่มซื้อ
   const _SPEC_RAR_TH = { white:'ขาว', green:'เขียว', blue:'ฟ้า', purple:'ม่วง', gold:'ทอง', red:'แดง' };
+  // ⚔️ eq2 ในตลาด: อ่านสเปกจริงจาก item_payload (server เก็บ instance ทั้งก้อน) — ห้ามเชื่อ item_desc ที่ผู้ขาย POST มาเอง
+  //    (ผู้ขายแต่ง desc ปลอมเป็น "+15" ได้ · ป้าย/คำบรรยายต่อไปนี้จึงคำนวณใหม่จาก payload ทุกครั้ง)
+  function _mktEq2Payload(l) { return (l && l.item_type === 'eq2') ? _mktModPayload(l) : null; }
+  function _mktPlusTagOf(l)  { const p = _mktEq2Payload(l); return p ? _eq2PlusTag(p.p) : ''; }
+  function _mktDescOf(l) {
+    const p = _mktEq2Payload(l);
+    if (!p) return _mktTDesc(l.item_desc);
+    const t  = Math.max(1, Math.min(EQ2_DEF.length, parseInt(p.t) || 1));
+    const lv = Math.max(1, Math.min(999, parseInt(p.lv) || 1));
+    return 'Lv.' + (parseInt(p.lv) || 0)
+      + ' · DEF+' + (EQ2_DEF[t - 1] + Math.round(Math.floor(lv / 10) * EQ2_DEF_LVF) + _eq2PlusDef(p.p))
+      + (Array.isArray(p.af) && p.af.length ? ' · ' + p.af.map(a => _eq2OptShort(a[0], +a[1] || 0)).join(' · ') : '');
+  }
+
   function _mktUniquePieceCard(l) {
     const c   = _CARD_RAR_C[l.item_rarity] || '#94a3b8';
     const qty = parseInt(l.qty) || 1;
     const rl  = _SPEC_RAR_TH[l.item_rarity] || '';
+    const pTag = _mktPlusTagOf(l), dsc = _mktDescOf(l);
     return `<div class="mkt2-mcard" style="border-left:3px solid ${c}">
       <div style="display:flex;align-items:center"><span style="font-size:16px">${_icoHtml(l.item_icon, 16)}</span>${rl?`<span style="margin-left:auto;font-size:8px;font-weight:800;color:#fff;background:${c};padding:0 4px;border-radius:4px">${T(rl)}</span>`:''}</div>
-      <div style="font-size:10px;font-weight:600;color:#111;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_mktTName(l.item_name)}</div>
-      <div style="font-size:9px;color:#16a34a;font-weight:600;margin-top:1px;min-height:22px;line-height:1.3;overflow:hidden">${l.item_desc || ''}</div>
+      <div style="font-size:10px;font-weight:600;color:#111;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_mktTName(l.item_name)}${pTag}</div>
+      <div style="font-size:9px;color:#16a34a;font-weight:600;margin-top:1px;min-height:22px;line-height:1.3;overflow:hidden">${dsc}</div>
       <div style="font-size:9px;font-weight:700;color:#7c3aed;min-height:11px">${qty>1?`×${qty}`:''}</div>
       <div class="mprice">${parseInt(l.price_per).toLocaleString()}G</div>
       <div class="mseller">${l.seller_name}</div>
@@ -13361,10 +20116,311 @@ const xhrpg = (() => {
     </div>`;
   }
 
+  // ══════════ 🤝 แลกเปลี่ยน 1-1 (แท็บที่ 4 ของตลาด · docs/trade-design.md) ══════════
+  let _trView = 'idle';      // idle | sent | room | ended
+  let _trRoom = null, _trSearchRes = [], _trHist = null, _trTimer = null;
+  let _trCat = 'diamond', _trItems = [], _trSelIdx = -1, _trSearchT = null, _trLastQ = '', _trBusy = false;
+  const _trEscH = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  function _trPost(data, cb) {
+    if (!player) return;
+    $.post(baseUrl + 'xhrpg_trade.php', Object.assign({ line_uid: player.line_uid, lang: LANG() }, data))
+      .done(res => { let d; try { d = typeof res === 'string' ? JSON.parse(res) : res; } catch (e) { return; } if (cb) cb(d); })
+      .fail(() => { if (cb) cb(null); });
+  }
+  function _trOpen() { // เข้าแท็บ — ดึงสถานะ + ประวัติ แล้วเริ่ม tick
+    _trSearchRes = []; _trSelIdx = -1;
+    _trPost({ action: 'status' }, d => { _trApplyStatus(d); });
+    _trHist = null; // refetch ทุกครั้งที่เข้าแท็บ — cache ข้ามรอบทำให้ฝั่งถูกเชิญไม่เห็นรายการใหม่ (บั๊กเจ้าของรายงาน 2026-07-19)
+    _trPost({ action: 'history' }, d => { _trHist = (d && d.rows) || []; _trRefresh(); });
+    _trTickStart();
+  }
+  function _trApplyStatus(d) {
+    if (!d || !d.ok) return;
+    if (d.player) player = d.player;
+    if (d.msg) addLog([{ type: 'levelup', msg: d.msg }]);
+    if (d.st === 'sent')      { _trView = 'sent'; _trRoom = { partner: d.to_name }; }
+    else if (d.st === 'room') { const _prevLocked = _trRoom && _trRoom.me && _trRoom.me.locked; _trView = 'room'; _trRoom = d.room;
+                                if (_prevLocked === undefined && d.room.me && !d.room.me.locked) { _trSelIdx = -1; } }
+    else if (d.st === 'ended'){ _trView = 'ended'; _trRoom = d.room; }
+    else {
+      // ห้อง/คำเชิญ → ว่าง: ฝั่งที่ "ไม่ได้กดยืนยันคนสุดท้าย" จบดีลทางนี้ (server ลบ pointer แล้ว poll เห็น none ไม่ใช่ ended)
+      // → ดึงประวัติใหม่ทันที ไม่งั้นรายการล่าสุดไม่โผล่จนกว่าจะสลับแท็บ (บั๊กเจ้าของรายงาน 2026-07-19)
+      const _wasActive = _trView === 'room' || _trView === 'sent';
+      _trView = 'idle'; _trRoom = null;
+      if (_wasActive) { _trHist = null; _trPost({ action: 'history' }, h => { _trHist = (h && h.rows) || []; _trRefresh(); }); }
+    }
+    _trRefresh();
+  }
+  let _trSig = ''; // ลายเซ็นสถานะล่าสุดที่วาดไปแล้ว — สถานะไม่เปลี่ยน = ไม่ rebuild (กันช่องกรอกเด้งหาย/โฟกัสหลุดทุก tick)
+  function _trCalcSig() {
+    const r = _trRoom || {};
+    return [_trView, r.st || '', r.ver | 0, r.partner || '',
+            r.me && r.me.locked ? 1 : 0, r.me && r.me.confirm ? 1 : 0,
+            r.other && r.other.locked ? 1 : 0, r.other && r.other.confirm ? 1 : 0,
+            _trHist === null ? -1 : _trHist.length].join('|');
+  }
+  function _trRefresh(force) {
+    if (openPanel !== 'market' || mktMode !== 'trade') return;
+    const ae = document.activeElement; // กำลังพิมพ์ในช่องไหนอยู่ → เลื่อน rebuild ไป tick หน้า (สถานะยังไม่ถูกบันทึกใน _trSig จึงไม่หาย)
+    if (!force && ae && ae.tagName === 'INPUT' && ae.closest && ae.closest('#mkt-body')) return;
+    if (!force && _uiTouchBusy()) return;
+    const sig = _trCalcSig();
+    if (!force && sig === _trSig) { _trTimerTick(); return; } // ไม่มีอะไรเปลี่ยน — ขยับแค่นาฬิกา
+    _trSig = sig;
+    const g = document.getElementById('tr-gold'), q = document.getElementById('tr-qty');
+    const gv = g ? g.value : null, qv = q ? q.value : null; // เก็บค่าที่พิมพ์ค้างไว้ก่อน rebuild (เช่น กดเลือกของหลังพิมพ์เงิน)
+    _mktRefreshBody();
+    const g2 = document.getElementById('tr-gold'), q2 = document.getElementById('tr-qty');
+    if (g2 && gv) g2.value = gv;
+    if (q2 && qv && qv !== '1') q2.value = qv;
+  }
+  function _trTimerTick() { // อัปเดตเฉพาะตัวเลขนับถอยหลัง — ไม่แตะ DOM ส่วนอื่น
+    const el = document.getElementById('tr-timer');
+    if (!el || !_trRoom || !_trRoom.deadline) return;
+    const left = Math.max(0, (_trRoom.deadline | 0) - Math.floor(Date.now() / 1000));
+    el.textContent = '⏳ ' + Math.floor(left / 60) + ':' + ('0' + (left % 60)).slice(-2);
+    el.style.color = left < 60 ? '#dc2626' : '#64748b';
+  }
+  function _trTickStart() {
+    if (_trTimer) return;
+    let _n = 0;
+    _trTimer = setInterval(() => {
+      if (openPanel !== 'market' || mktMode !== 'trade') { clearInterval(_trTimer); _trTimer = null; return; }
+      _trTimerTick(); // นาฬิกาเดินทุก 1 วิ (ไม่ rebuild)
+      if (_trCalcSig() !== _trSig) _trRefresh(); // ตามเก็บ rebuild ที่ถูกเลื่อนตอนผู้เล่นพิมพ์ค้าง — พอโฟกัสหลุดค่อยวาด
+      if ((++_n % 2) === 0 && (_trView === 'sent' || _trView === 'room')) _trPost({ action: 'status' }, d => _trApplyStatus(d)); // poll server ทุก 2 วิเท่าเดิม
+    }, 1000);
+  }
+  // ── ค้นหาผู้เล่น (debounce 400ms) ──
+  function _trSearchInput(v) {
+    _trLastQ = String(v || '');
+    clearTimeout(_trSearchT);
+    _trSearchT = setTimeout(() => {
+      if (_trLastQ.trim().length < 2) { _trSearchRes = []; _trRefresh(); return; }
+      _trPost({ action: 'search', q: _trLastQ.trim() }, d => { _trSearchRes = (d && d.players) || []; _trRefreshResults(); });
+    }, 400);
+  }
+  function _trRefreshResults() { // อัปเดตเฉพาะกล่องผลลัพธ์ — ไม่ rebuild ทั้ง body (ช่องค้นหาจะเสียโฟกัส)
+    const el = document.getElementById('tr-results');
+    if (el) el.innerHTML = _trResultsHtml(); else _trRefresh();
+  }
+  function _trResultsHtml() {
+    if (!_trSearchRes.length) return `<div style="font-size:10px;color:#94a3b8;text-align:center;padding:6px 0">${_trLastQ.trim().length >= 2 ? T('ไม่พบผู้เล่นออนไลน์ชื่อนี้') : T('พิมพ์ชื่ออย่างน้อย 2 ตัวอักษร')}</div>`;
+    return _trSearchRes.map(p => `
+      <div style="display:flex;align-items:center;gap:6px;padding:6px 8px;border-bottom:1px dashed #f1f5f9">
+        <span style="width:8px;height:8px;border-radius:50%;background:#22c55e;flex:none"></span>
+        <span style="flex:1;font-size:12px;font-weight:600;color:#1e293b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_trEscH(p.name)}</span>
+        <span style="font-size:10px;color:#64748b">Lv.${p.lv|0}</span>${(p.vip|0) > 0 ? `<span style="font-size:9px;font-weight:800;color:#b45309">VIP${p.vip|0}</span>` : ''}
+        <button onclick='xhrpg._trInvite(${JSON.stringify(String(p.uid))},${JSON.stringify(String(p.name))})' style="flex:none;font-size:10px;font-weight:700;border:none;border-radius:6px;background:#0d9488;color:#fff;padding:4px 10px;cursor:pointer">${T('เชิญ')}</button>
+      </div>`).join('');
+  }
+  function _trInvite(uid, name) {
+    if (_trBusy) return; _trBusy = true;
+    _trPost({ action: 'invite', target: uid }, d => {
+      _trBusy = false;
+      if (!d) return;
+      if (!d.ok) { alert(T('เกิดข้อผิดพลาด: ') + (d.error || '?')); return; }
+      _trApplyStatus(Object.assign({ ok: 1, st: 'sent', to_name: name }, d));
+      updateHUD();
+    });
+  }
+  function _trRespond(tid, accept) {
+    _trPost({ action: 'respond', accept: accept ? 1 : 0 }, d => {
+      if (!d) return;
+      if (!d.ok) { if (d.error) addLog([{ type: 'dead', msg: '❌ ' + d.error }]); return; }
+      if (accept && d.st === 'room') {
+        if (openPanel !== 'market') togglePanel('market'); // เปิดตลาดเฉพาะถ้ายังไม่เปิด (toggle ตอนเปิดอยู่ = ปิด)
+        _mktSetMode('trade');
+        _trApplyStatus(d);
+      }
+    });
+  }
+  // ── เลือกไอเทม (reuse คลังชุดเดียวกับหน้าตั้งขาย — รวมตัวแปลชื่อ/คำอธิบาย) ──
+  function _trSetCat(c) { _trCat = c; _trSelIdx = -1; _trRefresh(true); }   // force — sig ไม่รวมหมวด/ของที่เลือก
+  function _trPickItem(i) { _trSelIdx = (_trSelIdx === i ? -1 : i); _trRefresh(true); }
+  function _trPickerHtml() {
+    _trItems = _mktInventory(_trCat) || [];
+    const grid = _trItems.length ? _trItems.slice(0, 40).map((it, i) => `
+      <button onclick="xhrpg._trPickItem(${i})" style="display:flex;align-items:center;gap:4px;border:1.5px solid ${i === _trSelIdx ? '#0d9488' : '#e2e8f0'};background:${i === _trSelIdx ? '#f0fdfa' : '#fff'};border-radius:8px;padding:4px 6px;font-size:10px;cursor:pointer;max-width:100%;overflow:hidden">
+        <span style="flex:none">${_icoHtml(it.icon, 14)}</span>
+        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#1e293b">${_mktTName(it.name)}</span>
+        <b style="flex:none;color:#0f172a">×${it.qty|0}</b>
+      </button>`).join('')
+      : `<div style="font-size:10px;color:#94a3b8;padding:4px 0">${T('ไม่มีของหมวดนี้')}</div>`;
+    const sel = _trSelIdx >= 0 ? _trItems[_trSelIdx] : null;
+    const maxQ = sel ? Math.max(1, sel.qty|0) : 1;
+    return `
+      <div class="mkt-catbar" style="margin-top:4px">${_mktCatSelect(_trCat, '_trSetCat', false)}</div>
+      <div style="display:flex;flex-wrap:wrap;gap:4px;max-height:110px;overflow-y:auto;margin-top:4px">${grid}</div>
+      <div style="display:flex;align-items:center;gap:6px;margin-top:6px;font-size:11px">
+        <span>${T('จำนวน')}</span><input id="tr-qty" type="number" min="1" max="${maxQ}" value="1" ${sel && !sel.isModule && maxQ > 1 ? '' : 'disabled'} style="width:64px;padding:3px 6px;border:1px solid #e2e8f0;border-radius:6px">
+        <span>💰</span><input id="tr-gold" type="number" min="0" value="0" placeholder="G" style="width:90px;padding:3px 6px;border:1px solid #e2e8f0;border-radius:6px">
+      </div>
+      <div style="font-size:9.5px;color:#94a3b8;margin-top:2px">${T('ใส่ไอเทม 1 ชนิด (เลือกจำนวนได้) และ/หรือเงิน — ล็อกแล้วของถูกกันไว้จนจบดีล')}</div>
+      <button onclick="xhrpg._trLock()" style="width:100%;margin-top:6px;background:#0d9488;color:#fff;border:none;border-radius:9px;padding:8px;font-size:12.5px;font-weight:700;cursor:pointer">🔒 ${T('ล็อกข้อเสนอ')}</button>`;
+  }
+  function _trEscRow(esc, gold) { // แสดงข้อเสนอ (ของ+เงิน) — ชื่อ/คำอธิบายผ่านตัวแปลตลาด
+    let h = '';
+    if (esc) h += `<div style="display:flex;align-items:center;gap:5px;font-size:11px;color:#1e293b"><span>${_icoHtml(esc.icon, 15)}</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600">${_mktTName(esc.name)}</span><b>×${esc.q|0}</b></div>`
+       + (esc.desc ? `<div style="font-size:9px;color:#64748b;margin-top:1px">${_mktTDesc(esc.desc)}</div>` : '');
+    if ((gold|0) > 0) h += `<div style="font-size:11px;color:#b45309;font-weight:700;margin-top:2px">💰 ${(gold|0).toLocaleString()} G</div>`;
+    if (!h) h = `<div style="font-size:10px;color:#94a3b8">${T('(ยังไม่ใส่อะไร)')}</div>`;
+    return h;
+  }
+  function _trLock() {
+    if (_trBusy) return;
+    const gold = Math.max(0, parseInt(document.getElementById('tr-gold')?.value || 0) || 0);
+    const sel = _trSelIdx >= 0 ? _trItems[_trSelIdx] : null;
+    const qty = sel ? Math.max(1, Math.min(sel.qty|0 || 1, parseInt(document.getElementById('tr-qty')?.value || 1) || 1)) : 0;
+    if (!sel && gold <= 0) { alert(T('ใส่ไอเทมหรือเงินอย่างน้อย 1 อย่าง')); return; }
+    _trBusy = true;
+    const data = { action: 'lock', gold };
+    if (sel) Object.assign(data, { item_type: sel.item_type, item_id: sel.item_id || 0, item_slot: sel.item_slot || sel.slot || '',
+      item_tier: sel.tier || 0, qty: sel.isModule ? 1 : qty, item_icon: sel.icon, item_name: sel.name, item_desc: sel.desc, item_rarity: sel.rarity || 'white' });
+    _trPost(data, d => {
+      _trBusy = false;
+      if (!d) return;
+      if (!d.ok) { alert(T('เกิดข้อผิดพลาด: ') + (d.error || '?')); _trPost({ action: 'status' }, s => _trApplyStatus(s)); return; }
+      _trSelIdx = -1; _trApplyStatus(d); updateHUD();
+    });
+  }
+  function _trUnlock()  { if (_trBusy) return; _trBusy = true; _trPost({ action: 'unlock' }, d => { _trBusy = false; if (d && !d.ok && d.error) alert(T('เกิดข้อผิดพลาด: ') + d.error); if (d) _trApplyStatus(d); updateHUD(); }); }
+  // ── 💜 ค่าดำเนินการตามมูลค่าของ (docs/trade-fee-redesign.md) ──
+  //    ตัวเลขทั้งหมดคิดฝั่ง server แล้วส่งมาใน r.fee — client แค่แสดง ไม่คิดเอง (กันโชว์ไม่ตรงกับที่หักจริง)
+  //    คีย์รายการใน br เป็นคีย์แปล (การ์ด/ไข่ · เพชร · ทอง · ของสวมใส่ · ของวิเศษ · กล่อง · โมดูล) → T() ตามภาษาผู้ดู
+  const _TR_FEE_ICO = { 'การ์ด/ไข่':'🎴', 'การ์ด/ไข่ MVP':'👑', 'เพชร':'💎', 'ทอง':'💰', 'ของสวมใส่':'🛡️', 'ของวิเศษ':'🏆', 'กล่อง':'📦', 'โมดูล':'🔧' };
+  function _trFeeHtml(r) {
+    const f = r && r.fee; if (!f) return '';                       // server เก่ายังไม่ส่ง → ไม่โชว์ ไม่พัง
+    // 💰 โชว์เฉพาะ "ผู้เริ่มเทรด" = คนที่จ่ายจริง (เจ้าของสั่ง 2026-07-28 "กลัวอีกฝ่ายงงว่าต้องจ่ายด้วย")
+    //    อีกฝ่ายไม่เสีย P เลย → ซ่อนทั้งกล่อง ไม่โชว์ 0P (โชว์เลข 0 ยังชวนให้สงสัยว่าทำไมมีบรรทัดค่าธรรมเนียม)
+    if (!r.initiator) return '';
+    const p = f.p | 0, capped = !!(f.cap | 0);
+    const parts = (f.br || []).map(b => `${_TR_FEE_ICO[b.k] || '•'} ${_escHtml(T(b.k))} ${b.p | 0}`).join(' · ');
+    return `<div style="margin-top:7px;border:1px solid ${capped ? '#fed7aa' : '#e9d5ff'};background:${capped ? '#fff7ed' : '#faf5ff'};border-radius:9px;padding:7px 9px">
+      <div style="display:flex;align-items:baseline;gap:6px">
+        <span style="font-size:11px;font-weight:800;color:#6d28d9">💜 ${T('ค่าดำเนินการ')}</span>
+        <span style="flex:1"></span>
+        <span style="font-size:15px;font-weight:800;color:#6d28d9">${p} P</span>
+      </div>
+      <div style="font-size:9.5px;color:#7c3aed;margin-top:3px;line-height:1.45">
+        ${T('ฐาน')} ${f.base | 0}${parts ? ' · ' + parts : ''}${capped ? ` · <b>${T('ถึงเพดานสูงสุดแล้ว')}</b>` : ''}
+      </div>
+      <div style="font-size:9px;color:#a78bfa;margin-top:2px">${T('ผู้เริ่มเทรดเป็นผู้จ่าย · ยกเลิกหรือหมดเวลา = คืนเต็มจำนวน')}</div>
+    </div>`;
+  }
+  // ยอดบนปุ่มยืนยัน — เฉพาะผู้จ่ายเช่นกัน (อีกฝ่ายเห็นปุ่ม "ยืนยันแลก" เปล่าๆ ไม่มีตัวเลข P)
+  const _trFeeBtn = r => (r && r.fee && r.initiator) ? ` <span style="font-size:11px;opacity:.9">(${r.fee.p | 0} P)</span>` : '';
+  function _trConfirm() {
+    if (_trBusy || !_trRoom) return;
+    // 🛡️ ยืนยันราคาก่อนหักจริง (เจ้าของสั่ง 2026-07-28 "แจ้งราคา P ชัดเจน ให้ยืนยัน")
+    //    ถามเฉพาะ "ผู้เริ่มเทรด" = คนที่จ่ายจริง · อีกฝ่ายไม่เสีย P จึงไม่ต้องถาม
+    const f = _trRoom.fee;
+    if (_trRoom.initiator && f && (f.p | 0) > 0
+        && !confirm(T('ยืนยันแลกเปลี่ยน — ค่าดำเนินการ {n} P จะถูกหักจาก P ของคุณเมื่อแลกสำเร็จ', { n: f.p | 0 }))) return;
+    _trBusy = true;
+    _trPost({ action: 'confirm', ver: _trRoom.ver|0 }, d => { _trBusy = false; if (d && !d.ok && d.error) { alert('⚠️ ' + d.error); if (d.room) { _trRoom = d.room; _trRefresh(); } return; } if (d) _trApplyStatus(d); });
+  }
+  function _trCancel()  { if (_trBusy) return; _trBusy = true; _trPost({ action: 'cancel' }, d => { _trBusy = false; if (d) _trApplyStatus(d); _trHist = null; }); }
+  function _trBody() {
+    const feeNote = `<div style="font-size:10px;color:#7c3aed;font-weight:600;margin-top:4px">💎 ${T('ค่าดำเนินการ {n} P (ฝ่ายเชิญ · หักเมื่อแลกสำเร็จเท่านั้น)', {n: 10})}</div>`;
+    if (_trView === 'sent') {
+      return `<div style="text-align:center;padding:18px 10px">
+        <div style="font-size:34px">🤝</div>
+        <div style="font-size:13px;font-weight:700;color:#0f172a;margin-top:6px">${T('รอ {a} ตอบรับ...', {a: _trEscH(_trRoom?.partner || '?')})}</div>
+        <div style="font-size:10.5px;color:#64748b;margin-top:4px">${T('คำเชิญหมดอายุใน 60 วินาที — ไม่ตอบ = คืน P อัตโนมัติ')}</div>
+        <div class="mkt-hload" style="margin-top:8px">⏳</div></div>`;
+    }
+    if (_trView === 'room' && _trRoom) {
+      const r = _trRoom, left = Math.max(0, (r.deadline|0) - Math.floor(Date.now()/1000));
+      const tstr = Math.floor(left/60) + ':' + ('0' + (left%60)).slice(-2);
+      const meL = !!(r.me && r.me.locked), otL = !!(r.other && r.other.locked);
+      const meC = !!(r.me && r.me.confirm), otC = !!(r.other && r.other.confirm);
+      const stTxt = meC && !otC ? T('รออีกฝ่ายยืนยัน...') : (!meL ? T('เลือกของแล้วกดล็อกข้อเสนอ') : (!otL ? T('รออีกฝ่ายล็อกข้อเสนอ...') : T('ตรวจสอบของทั้งสองฝั่ง แล้วกดยืนยันแลก')));
+      return `<div style="padding:4px 0">
+        <div style="display:flex;align-items:center;font-size:12px;font-weight:700;color:#0f172a"><span>🤝 ${T('แลกกับ {a}', {a: _trEscH(r.partner)})}</span><span id="tr-timer" style="margin-left:auto;color:${left < 60 ? '#dc2626' : '#64748b'}">⏳ ${tstr}</span></div>
+        <div style="display:flex;gap:6px;margin-top:6px">
+          <div style="flex:1;border:1.5px solid ${meL ? '#0d9488' : '#e2e8f0'};border-radius:10px;padding:7px;background:${meL ? '#f0fdfa' : '#fff'}">
+            <div style="font-size:10px;font-weight:800;color:#0d9488">${T('ของฉัน')} ${meL ? '🔒' : ''}${meC ? ' ✅' : ''}</div>
+            ${meL ? _trEscRow(r.me.esc, r.me.gold) + `<button onclick="xhrpg._trUnlock()" style="width:100%;margin-top:5px;background:#f1f5f9;color:#475569;border:none;border-radius:7px;padding:4px;font-size:10px;font-weight:700;cursor:pointer">🔓 ${T('ปลดล็อก/แก้ไข')}</button>` : ''}
+          </div>
+          <div style="flex:1;border:1.5px solid ${otL ? '#0d9488' : '#e2e8f0'};border-radius:10px;padding:7px;background:${otL ? '#f0fdfa' : '#fff'}">
+            <div style="font-size:10px;font-weight:800;color:#7c3aed">${T('ของเขา')} ${otL ? '🔒' : ''}${otC ? ' ✅' : ''}</div>
+            ${_trEscRow(r.other && r.other.esc, r.other && r.other.gold)}
+          </div>
+        </div>
+        ${!meL ? _trPickerHtml() : ''}
+        ${_trFeeHtml(r)}
+        <div style="font-size:10.5px;color:#64748b;text-align:center;margin-top:6px">${stTxt}</div>
+        <button onclick="xhrpg._trConfirm()" ${meL && otL && !meC ? '' : 'disabled'} style="width:100%;margin-top:6px;background:${meL && otL && !meC ? '#16a34a' : '#e7e5e4'};color:${meL && otL && !meC ? '#fff' : '#a8a29e'};border:none;border-radius:9px;padding:9px;font-size:13px;font-weight:700;cursor:${meL && otL && !meC ? 'pointer' : 'default'}">✅ ${T('ยืนยันแลก')}${_trFeeBtn(r)}</button>
+        <button onclick="xhrpg._trCancel()" style="width:100%;margin-top:5px;background:#fee2e2;color:#dc2626;border:none;border-radius:9px;padding:6px;font-size:11px;font-weight:700;cursor:pointer">❌ ${T('ยกเลิกการแลกเปลี่ยน')}</button>
+        <div style="font-size:9px;color:#94a3b8;text-align:center;margin-top:4px">⚠️ ${T('ถ้าฝ่ายใดแก้ข้อเสนอ ทั้งสองฝ่ายต้องยืนยันใหม่')}</div>
+      </div>`;
+    }
+    if (_trView === 'ended' && _trRoom) {
+      const done = _trRoom.st === 'done';
+      setTimeout(() => { if (_trView === 'ended') { _trView = 'idle'; _trRoom = null; _trHist = null; _trPost({ action: 'history' }, d => { _trHist = (d && d.rows) || []; _trRefresh(); }); } }, 4000);
+      return `<div style="text-align:center;padding:16px 10px">
+        <div style="font-size:36px">${done ? '🎉' : '↩️'}</div>
+        <div style="font-size:14px;font-weight:800;color:${done ? '#16a34a' : '#b45309'};margin-top:5px">${done ? T('แลกเปลี่ยนสำเร็จ!') : T('การแลกเปลี่ยนถูกยกเลิก')}</div>
+        <div style="font-size:11px;color:#64748b;margin-top:4px">${done ? T('ของเข้ากระเป๋าภายในไม่กี่วินาที (ดูใน Log)') : T('ของทั้งหมดคืนเข้ากระเป๋าแล้ว')}</div>
+      </div>`;
+    }
+    // idle: ค้นหา + ประวัติ
+    const hist = _trHist == null ? `<div class="mkt-hload">${T('กำลังโหลด...')}</div>`
+      : (!_trHist.length ? `<div style="font-size:10px;color:#94a3b8;text-align:center;padding:6px 0">${T('ยังไม่มีประวัติแลกเปลี่ยน')}</div>`
+        : _trHist.map(h => {
+            const ok = h.status === 'done';
+            const gv = (h.gave_item ? `${_icoHtml(h.gave_item.icon, 12)} ${_mktTName(h.gave_item.name)} ×${h.gave_item.q|0}` : '') + ((h.gave_gold|0) > 0 ? ` 💰${(h.gave_gold|0).toLocaleString()}G` : '');
+            const gt = (h.got_item ? `${_icoHtml(h.got_item.icon, 12)} ${_mktTName(h.got_item.name)} ×${h.got_item.q|0}` : '') + ((h.got_gold|0) > 0 ? ` 💰${(h.got_gold|0).toLocaleString()}G` : '');
+            return `<div style="border-bottom:1px dashed #f1f5f9;padding:5px 2px;font-size:10px">
+              <div style="display:flex;gap:6px;color:#334155"><b style="color:${ok ? '#16a34a' : '#94a3b8'}">${ok ? '✅' : '↩️'}</b><span style="font-weight:700">${_trEscH(h.partner)}</span><span style="margin-left:auto;color:#94a3b8">${_trEscH(String(h.when || '').slice(5, 16))}</span></div>
+              ${ok ? `<div style="color:#dc2626;margin-top:1px">↗ ${T('ให้')}: ${gv || '–'}</div><div style="color:#16a34a">↘ ${T('ได้รับ')}: ${gt || '–'}</div>${(h.fee|0) > 0 ? `<div style="color:#7c3aed">💎 -${h.fee|0} P</div>` : ''}`
+                   : `<div style="color:#94a3b8;margin-top:1px">${T('ยกเลิก/หมดอายุ — ไม่มีการแลก')}</div>`}
+            </div>`;
+          }).join(''));
+    return `<div>
+      <div style="font-size:12px;font-weight:700;color:#0f172a">🤝 ${T('แลกเปลี่ยน 1-1')}</div>
+      <div style="font-size:10px;color:#64748b;margin-top:2px">${T('ค้นหาผู้เล่นที่ออนไลน์อยู่ แล้วส่งคำเชิญแลกเปลี่ยน — ฝ่ายละ 1 ไอเทม + เงิน')}</div>
+      ${feeNote}
+      <input class="mkt2-search" style="width:100%;margin-top:6px;box-sizing:border-box" type="text" placeholder="${T('🔍 พิมพ์ชื่อผู้เล่น...')}" value="${_trEscH(_trLastQ)}" oninput="xhrpg._trSearchInput(this.value)">
+      <div id="tr-results" style="margin-top:4px;max-height:150px;overflow-y:auto">${_trResultsHtml()}</div>
+      <div style="font-size:11px;font-weight:700;color:#334155;margin-top:10px;border-top:1px solid #e2e8f0;padding-top:7px">📜 ${T('ประวัติแลกเปลี่ยน')}</div>
+      <div style="max-height:160px;overflow-y:auto">${hist}</div>
+    </div>`;
+  }
+  // ── popup คำเชิญ (มาจาก game poll d.trade_inv — dedup ด้วย tid) ──
+  let _trInvSeen = '';
+  function _trInvitePopup(inv) {
+    if (!inv || !inv.tid || inv.tid === _trInvSeen || document.getElementById('tr-inv-pop')) return;
+    _trInvSeen = inv.tid;
+    const ov = document.createElement('div');
+    ov.id = 'tr-inv-pop';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:10007;display:flex;align-items:center;justify-content:center;padding:16px';
+    const box = document.createElement('div');
+    box.style.cssText = 'background:#fff;border-radius:16px;padding:20px 22px;max-width:300px;width:100%;text-align:center;box-shadow:0 12px 40px rgba(2,8,23,.4)';
+    box.innerHTML = `<div style="font-size:36px">🤝</div>
+      <div style="font-size:13.5px;font-weight:700;color:#0f172a;margin-top:6px">${T('{a} อยากแลกเปลี่ยนไอเทมกับคุณ', {a: _trEscH(inv.from_name)})}</div>
+      <div style="font-size:10px;color:#94a3b8;margin-top:3px">${T('คำเชิญหมดอายุใน 60 วินาที')}</div>`;
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;gap:8px;margin-top:12px';
+    const bA = document.createElement('button');
+    bA.textContent = '✅ ' + T('ยอมรับ');
+    bA.style.cssText = 'flex:1;background:#16a34a;color:#fff;border:none;border-radius:10px;padding:9px;font-size:12.5px;font-weight:700;cursor:pointer';
+    bA.onclick = () => { ov.remove(); _trRespond(inv.tid, true); };
+    const bD = document.createElement('button');
+    bD.textContent = '❌ ' + T('ปฏิเสธ');
+    bD.style.cssText = 'flex:1;background:#f1f5f9;color:#475569;border:none;border-radius:10px;padding:9px;font-size:12.5px;font-weight:700;cursor:pointer';
+    bD.onclick = () => { ov.remove(); _trRespond(inv.tid, false); };
+    row.appendChild(bA); row.appendChild(bD);
+    box.appendChild(row); ov.appendChild(box);
+    document.body.appendChild(ov);
+    setTimeout(() => { if (ov.parentNode) ov.remove(); }, 60000);
+  }
+
   function _mktPlayerOwns(l) {
     if (!player) return false;
-    if (l.item_type === 'resource' || l.item_type === 'diamond') return false; // stackable, always can buy more
-    if (l.item_type === 'module_box' || l.item_type === 'card_box') return ((player[l.item_type + (parseInt(l.item_tier)||0)] | 0) > 0);
+    if (l.item_type === 'resource' || l.item_type === 'diamond' || l.item_type === 'ore') return false; // stackable, always can buy more
+    if (l.item_type === 'module_box' || l.item_type === 'card_box' || l.item_type === 'egg_box') return ((player[l.item_type + (parseInt(l.item_tier)||0)] | 0) > 0);
     if (l.item_type === 'egg') {
       const eggs = _eggsArr();
       let pl = null; try { pl = typeof l.item_payload === 'object' ? l.item_payload : JSON.parse(l.item_payload || 'null'); } catch (e) {}
@@ -13409,19 +20465,19 @@ const xhrpg = (() => {
     const ok   = myG >= cost;
     const isMod = (l.item_type||'').indexOf('module_') === 0 && l.item_type !== 'module_box'; // module_box = กล่อง ไม่เช็คคลังโมดูลเต็ม
     const invFull = isMod && _mktModInvCount(l.item_type) >= 30;
-    const isNew = l.item_type !== 'resource' && l.item_type !== 'diamond' && !isMod && !_mktPlayerOwns(l);
+    const isNew = l.item_type !== 'resource' && l.item_type !== 'diamond' && l.item_type !== 'ore' && !isMod && !_mktPlayerOwns(l);
     const banner = isMod
       ? (invFull
           ? `<div class="mkt-banner-new" style="background:#fee2e2;border-color:#fca5a5;color:#dc2626">${T('⚠️ คลังโมดูลเต็ม (30) — ทำลาย/ติดตั้งก่อนซื้อ')}</div>`
           : `<div class="mkt-banner-dup">${T('🔧 โมดูลรายชิ้น — จะเข้าคลังโมดูลของคุณ')}</div>`)
-      : (l.item_type === 'resource' || l.item_type === 'diamond')
-      ? `<div class="mkt-banner-dup">${l.item_type==='diamond'?T('💎 เพชร — จะเพิ่มเข้าคลังของคุณ'):T('📦 ทรัพยากร — จะเพิ่มเข้าคลังของคุณ')}</div>`
+      : (l.item_type === 'resource' || l.item_type === 'diamond' || l.item_type === 'ore')
+      ? `<div class="mkt-banner-dup">${l.item_type==='diamond'?T('💎 เพชร — จะเพิ่มเข้าคลังของคุณ'):(l.item_type==='ore'?T('🪨 แร่อวกาศ — จะเพิ่มเข้าคลังของคุณ'):T('📦 ทรัพยากร — จะเพิ่มเข้าคลังของคุณ'))}</div>`
       : (isNew ? `<div class="mkt-banner-new">${T('✨ ของชิ้นนี้คุณยังไม่มี — ซื้อแล้วจะได้เป็นของใหม่!')}</div>` : `<div class="mkt-banner-dup">${T('📦 คุณมีของชิ้นนี้อยู่แล้ว — จะเพิ่มจำนวน')}</div>`);
     const qtyRow = parseInt(l.qty) > 1
       ? `<div class="mkt-crow"><span>${T('จำนวน')}</span><span class="cv"><input type="number" id="mkt-buy-qty" value="1" min="1" max="${l.qty}" style="width:52px;text-align:right;border:1px solid #d1d5db;border-radius:4px;padding:2px 4px" oninput="xhrpg._mktCalcBuyTotal()"> <button class="mkt2-qbtn" onclick="xhrpg._mktQtyBuy('add10')">+10</button> <button class="mkt2-qbtn" onclick="xhrpg._mktQtyBuy('max')">MAX</button> / ${l.qty}</span></div>`
       : `<div class="mkt-crow"><span>${T('จำนวน')}</span><span class="cv">${T('{a} ชิ้น', {a: 1})}</span></div>`;
     return `<div class="mkt2-dethead"><button class="mkt2-back" onclick="xhrpg._mktBuyGo(1)">${T('‹ กลับ')}</button><span class="ti">${T('ยืนยันการซื้อ')}</span></div>` +
-      `<div class="mkt-detail"><div class="dico">${_icoHtml(l.item_icon, 20)}</div><div><div class="dname">${_mktTName(l.item_name)}</div><div class="ddesc">${T(l.item_desc)}</div><div style="font-size:11px;color:#4b5563;margin-top:3px">${T('ขายโดย {a}', {a: l.seller_name})}</div></div></div>` +
+      `<div class="mkt-detail"><div class="dico">${_icoHtml(l.item_icon, 20)}</div><div><div class="dname">${_mktTName(l.item_name)}${_mktPlusTagOf(l)}</div><div class="ddesc">${_mktDescOf(l)}</div><div style="font-size:11px;color:#4b5563;margin-top:3px">${T('ขายโดย {a}', {a: l.seller_name})}</div></div></div>` +
       banner +
       `<div class="mkt-crows">
         <div class="mkt-crow"><span>${T('ราคา')}</span><span class="cv">${T('{a} G / ชิ้น', {a: cost.toLocaleString()})}</span></div>
@@ -13446,7 +20502,7 @@ const xhrpg = (() => {
     if (!mktSelListing) { mktBuyStep = 1; return _mktBuyBody(); }
     const l = mktSelListing;
     return `<div class="mkt-big-ok"><div class="oi">🎉</div><div class="ot">${T('ซื้อสำเร็จ!')}</div><div class="od">${T('{a} จาก {b}', {a: _mktTName(l.item_name), b: l.seller_name})}</div></div>` +
-      `<div class="mkt-recv"><div class="rico">${_icoHtml(l.item_icon, 20)}</div><div><div class="rname">${_mktTName(l.item_name)}</div><div class="rdesc">${T(l.item_desc)}</div><span class="mkt-badge-ok">${T('เข้ากระเป๋าแล้ว')}</span></div></div>` +
+      `<div class="mkt-recv"><div class="rico">${_icoHtml(l.item_icon, 20)}</div><div><div class="rname">${_mktTName(l.item_name)}${_mktPlusTagOf(l)}</div><div class="rdesc">${_mktDescOf(l)}</div><span class="mkt-badge-ok">${T('เข้ากระเป๋าแล้ว')}</span></div></div>` +
       `<button class="stat-btn" onclick="xhrpg._mktBuyGo(1)" style="width:100%;background:#eff6ff;color:#1d4ed8;border-color:#93c5fd">${T('ซื้อต่อ')}</button>`;
   }
 
@@ -13461,8 +20517,8 @@ const xhrpg = (() => {
       const hrs = Math.max(0, Math.round((parseInt(l.expires_at) - now) / 3600));
       return `<div class="mkt2-mcard" style="border-left:3px solid ${c}">
         <div style="display:flex;align-items:center"><span style="font-size:16px">${_icoHtml(l.item_icon, 16)}</span><span style="margin-left:auto;font-size:8px;font-weight:700;color:#64748b;background:#f1f5f9;padding:0 4px;border-radius:4px">${T('เหลือ {a} ชม.', {a: hrs})}</span></div>
-        <div style="font-size:10px;font-weight:600;color:#111;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_mktTName(l.item_name)}</div>
-        <div style="font-size:9px;color:#64748b;margin-top:1px;min-height:22px;line-height:1.3;overflow:hidden">${l.item_desc || ''}</div>
+        <div style="font-size:10px;font-weight:600;color:#111;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_mktTName(l.item_name)}${_mktPlusTagOf(l)}</div>
+        <div style="font-size:9px;color:#64748b;margin-top:1px;min-height:22px;line-height:1.3;overflow:hidden">${_mktDescOf(l)}</div>
         <div style="font-size:9px;font-weight:700;color:#7c3aed;min-height:11px">×${parseInt(l.qty).toLocaleString()}</div>
         <div class="mprice">${parseInt(l.price_per).toLocaleString()}G<span style="font-size:8px;color:#94a3b8">${T('/ชิ้น')}</span></div>
         <button class="mkt2-buybtn w" style="background:#fee2e2;color:#dc2626" onclick="xhrpg._mktCancel(${l.id})">${T('ยกเลิก')}</button>
@@ -13510,14 +20566,15 @@ const xhrpg = (() => {
     const all = MKT_CATS.flatMap(c => _mktInventory(c.key));
     mktSelItem = all.find(i => i.id === id);
     if (mktSelItem) {
-      const resPrices = { wood:3, stone:5, iron:12, copper:15, herb:8, diamond_blue:50, diamond_red:200, diamond_green:500 };
+      const resPrices = { wood:3, stone:5, iron:12, copper:15, herb:8, diamond_blue:50, diamond_red:200, diamond_green:500,
+                          ore1:1000, ore2:3000, ore3:10000 }; // 🪨 แร่อวกาศ = ราคาแนะนำเริ่มต้นเฉยๆ ผู้ขายปรับเองได้
       mktSellPrice = mktSelItem.isModule
         ? (MKT_MODULE_BASE[mktSelItem.module.rarity] || 100)
         : mktSelItem.item_type === 'card'
           ? (MKT_CARD_BASE[mktSelItem.rarity] || 150)
-        : (mktSelItem.item_type === 'ammo' || mktSelItem.item_type === 'module_box' || mktSelItem.item_type === 'card_box' || mktSelItem.item_type === 'egg')
+        : (mktSelItem.item_type === 'ammo' || mktSelItem.item_type === 'module_box' || mktSelItem.item_type === 'card_box' || mktSelItem.item_type === 'egg_box' || mktSelItem.item_type === 'egg')
           ? (mktSelItem.suggested || 5)
-        : (mktSelItem.item_type === 'resource' || mktSelItem.item_type === 'diamond')
+        : (mktSelItem.item_type === 'resource' || mktSelItem.item_type === 'diamond' || mktSelItem.item_type === 'ore')
           ? (resPrices[mktSelItem.item_id] || 5)
           : (MKT_RARITY_BASE[mktSelItem.rarity] || 50);
       mktSellQty   = 1;
@@ -13555,7 +20612,7 @@ const xhrpg = (() => {
       data.item_payload = JSON.stringify({ slot: it.module.slot, rarity: it.module.rarity, plus: it.module.plus||0, stat: it.module.stat||null, weapon: it.item_type==='module_sniper'?'sniper':(it.item_type==='module_knife'?'knife':(it.item_type==='module_axe'?'axe':(it.item_type==='module_robot'?'robot':(it.item_type==='module_armor'?'armor':(it.item_type==='module_house'?'house':(it.item_type==='module_robot_gun'?'robot_gun':(it.item_type==='module_railgun'?'railgun':(it.item_type==='module_turret'?'turret':'pistol')))))))) });
     }
     clearTimeout(pollTimer);
-    $.post(baseUrl + 'xhrpg_market.php', data)
+    $.post(baseUrl + 'xhrpg_market.php', Object.assign({ lang: LANG() }, data)) // 🌐 server แปล error/msg ตลาดตามภาษาผู้เล่น
       .done(res => {
         const d = typeof res==='string'?JSON.parse(res):res;
         if (d.ok) {
@@ -13590,7 +20647,7 @@ const xhrpg = (() => {
     const l = mktSelListing;
     const qty = Math.max(1, Math.min(parseInt(l.qty), parseInt(document.getElementById('mkt-buy-qty')?.value || 1) || 1));
     clearTimeout(pollTimer);
-    $.post(baseUrl + 'xhrpg_market.php', { line_uid: player.line_uid, action:'buy', listing_id: l.id, qty })
+    $.post(baseUrl + 'xhrpg_market.php', { line_uid: player.line_uid, action:'buy', listing_id: l.id, qty, lang: LANG() })
       .done(res => {
         const d = typeof res==='string'?JSON.parse(res):res;
         if (d.ok) {
@@ -13618,7 +20675,7 @@ const xhrpg = (() => {
     if (!confirm(T('ยกเลิกรายการนี้?'))) return;
     // หยุด poll ชั่วคราวป้องกัน race condition
     clearTimeout(pollTimer);
-    $.post(baseUrl + 'xhrpg_market.php', { line_uid: player.line_uid, action:'cancel', listing_id: lid })
+    $.post(baseUrl + 'xhrpg_market.php', { line_uid: player.line_uid, action:'cancel', listing_id: lid, lang: LANG() })
       .done(res => {
         const d = typeof res==='string'?JSON.parse(res):res;
         if (d.ok) {
@@ -13659,13 +20716,14 @@ const xhrpg = (() => {
       return;
     }
     let lastDay = '';
+    const _hLoc = ({ th:'th-TH', ja:'ja-JP', zh:'zh-TW', pt:'pt-BR', es:'es-ES', id:'id-ID', vi:'vi-VN' })[LANG()] || 'en-GB'; // 🌐 วันที่/เวลาตามภาษาผู้เล่น (เดิม hardcode th-TH — ต่างชาติเห็น "25 ก.ค." · เจ้าของแจ้ง 2026-07-25)
     const html = rows.map(r => {
       const ts = parseInt(r.created_at) * 1000;
       const d  = new Date(ts);
-      const dayStr = d.toLocaleDateString('th-TH', {day:'numeric',month:'short'});
+      const dayStr = d.toLocaleDateString(_hLoc, {day:'numeric',month:'short'});
       let dayHdr = '';
       if (dayStr !== lastDay) { dayHdr = `<div class="mkt-hday">${dayStr}</div>`; lastDay = dayStr; }
-      const timeStr = d.toLocaleTimeString('th-TH', {hour:'2-digit',minute:'2-digit'});
+      const timeStr = d.toLocaleTimeString(_hLoc, {hour:'2-digit',minute:'2-digit'});
       const gc = parseInt(r.gold_change);
       const gcHtml = gc > 0
         ? `<span class="mkt-hgc plus">+${gc.toLocaleString()} G</span>`
@@ -13898,7 +20956,220 @@ const xhrpg = (() => {
     document.body.appendChild(overlay);
   }
 
+  // ═══ 🆕 Release Note (เจ้าของสั่ง 2026-07-26) — ใหม่สุดอยู่บน · append-only ห้ามแก้ของเก่า ═══
+  //   ทุกบรรทัดวิ่งผ่าน T() → เพิ่มเวอร์ชันใหม่ต้องเติมคีย์ครบ 8 ภาษาเสมอ (client 6 dict + EN inline)
+  //   เลขเวอร์ชัน/วันที่ไม่ต้องแปล · เขียนย่อ ไม่ลงลึกตัวเลข (ตัวเลขจริงอยู่บท 📊 อัตราดรอป)
+  const XHRPG_VERSION = '1.036';
+  const RELEASE_NOTES = [
+    { v: '1.037', d: '2026-07-29', items: [
+      '💰 อีเวนต์คูณ G (ทอง) — แอดมินตั้งคูณทองจากการฆ่ามอนได้แล้ว',
+      '🏷️ อีเวนต์มีชื่อแล้ว — โชว์บนหน้าจอ เช่น WEEKEND · EXP ×2 · DROP ×2 · G ×1.5',
+      '🎯 ฮีโร่หันหน้าเข้าหาเป้าที่กำลังโจมตีแม่นขึ้น (เดิมบางจังหวะหันคนละทาง)',
+      '🛡️ ปรับสมดุลอัตราดรอปของสวมใส่จากบอส MVP',
+      '🎁 โบนัสเติมเงินแบบใหม่ — รอบละ 3 สิทธิ์ ×1.5 → ×1.3 → ×1.1 (เดิมรอบละ 1 สิทธิ์)',
+      '🪨 แร่หายากเพิ่มเป็น 6 ชนิด — 3 ชนิดใหม่ขุดเจอตอนเก็บเกี่ยวผักที่บ้าน',
+    ] },
+    { v: '1.036', d: '2026-07-28', items: [
+      '🌱 อีเวนต์คูณ EXP/DROP พิเศษสำหรับผู้เล่นใหม่ (แอดมินตั้งเพดานเลเวลได้)',
+      '💎 ปรับอัตราดรอปเพชรฟ้า/เพชรแดงขึ้น',
+      '🛡️ มอนสเตอร์มีพลังป้องกันแล้ว — ยิ่งเลเวลสูงยิ่งลดดาเมจที่รับ (ดาเมจของคุณไม่ได้ลดลง)',
+      '📦 ปรับสมดุลอัตราดรอปกล่องสุ่มทุกชนิด (โมดูล/การ์ด/ไข่)',
+      '🎯 ระบบ SKIN LV — สกินทุกใบที่ซื้อสะสมรวมกันเป็นเลเวล ดันเพดาน STAT ขึ้นถึง +50',
+      '🏟️ ปรับดันท้าบอส — ลดสิทธิ์รายวันลง (ดูตารางในหน้า VIP) · ค่าบัตร G ขึ้นเท่าตัว · ค่าบัตร P คิดตาม Lv บอส',
+      '📜 ดันท้าบอส — ย้อนไปตีบอสเลเวลต่ำได้ครบทุกตัวถึง Lv.1 (เดิมตัวเตี้ยหายจากรายการ)',
+      '🎴 ปรับสมดุลอัตราดรอปของมอนปกติ',
+      '⛔ ปิดขายกล่องสุ่มการ์ด/ไข่ชั่วคราว (กล่องจากบอส MVP ยังได้ตามปกติ)',
+    ] },
+    { v: '1.035', d: '2026-07-28', items: [
+      '🆕 หน้ารางวัลออฟไลน์ กดย้อนดูอัปเดตเวอร์ชันเก่าได้แล้ว',
+    ] },
+    { v: '1.034', d: '2026-07-28', items: [
+      '🌐 บันทึกอัปเดตแปลครบทุกภาษาแล้ว (ย้อนหลังทุกเวอร์ชัน)',
+    ] },
+    { v: '1.033', d: '2026-07-28', items: [
+      '👾 คู่หูกลุ่มใหม่ MONSTER เปิดขาย 13 ตัว (กลุ่มเดิมเปลี่ยนชื่อเป็น ANIMAL)',
+    ] },
+    { v: '1.032', d: '2026-07-28', items: [
+      '🏰 รายชื่อสมาชิกกิลแสดงป้าย GM/CL/ธง/VIP ครบเหมือนบนแผนที่',
+      '👑 แก้ป้าย VIP ค้างที่ VIP10 สำหรับคนระดับ 11-15',
+    ] },
+    { v: '1.031', d: '2026-07-28', items: [
+      '🔫 ป้อมกิลตั้งได้เฉพาะโซนที่มอนตัวแรกอ่อนกว่าหัวหน้ากิล',
+    ] },
+    { v: '1.030', d: '2026-07-28', items: [
+      '⚔️👑 อัศวินบุกใส่ MVP ก่อนเสมอ ถ้ามี MVP อยู่ในระยะ',
+    ] },
+    { v: '1.029', d: '2026-07-28', items: [
+      '🎯 เลิกยิงเม็ดกลมส้มมั่วเวลาแหล่งโจมตีไม่มีเอฟเฟกต์ของตัวเอง',
+    ] },
+    { v: '1.028', d: '2026-07-28', items: [
+      '🎯 แก้แผง STAT ไม่โชว์โบนัสจากสกิน (ตีจริงได้อยู่แล้ว แค่เลขไม่ขึ้น)',
+    ] },
+    { v: '1.027', d: '2026-07-28', items: [
+      '🎯 ซื้อสกินไม่ต้องเลือก STAT แล้ว — เลือกที่แถบในร้าน ครั้งแรกฟรี',
+    ] },
+    { v: '1.026', d: '2026-07-28', items: [
+      '🥋 สกินฮีโร่กลุ่มใหม่ SHINOBI เปิดขาย 12 ตัว',
+    ] },
+    { v: '1.025', d: '2026-07-28', items: [
+      '🎯 STAT จากสกินเป็นค่ากลาง ใส่สกินตัวไหนก็ได้เท่ากัน',
+      '⭐ สมุดสะสมในหน้าอันดับแสดงการ์ด/ไข่ MVP ด้วย',
+    ] },
+    { v: '1.024', d: '2026-07-28', items: [
+      '🤖 เปิดขายสกินไททันที่เคยปิดไปกลับมา',
+    ] },
+    { v: '1.023', d: '2026-07-28', items: [
+      '🗂️ ร้านสกินจัดเป็นกลุ่ม หาง่ายขึ้น',
+    ] },
+    { v: '1.022', d: '2026-07-28', items: [
+      '🤝 ปรับค่าดำเนินการแลกเปลี่ยน 1-1 ตามมูลค่าของ',
+    ] },
+    { v: '1.021', d: '2026-07-28', items: [
+      '🎴 สมุดสะสมการ์ดและไข่ ดูเป็นรายตัวได้แล้ว',
+      '🔧 ดูโมดูลที่ผู้เล่นอื่นติดตั้งได้จากหน้าอันดับ',
+    ] },
+    { v: '1.020', d: '2026-07-28', items: [
+      '👑😴 ปรับเวลาเปิดหน้าจอของ VIP แต่ละระดับ',
+    ] },
+    { v: '1.019', d: '2026-07-28', items: [
+      '🌀 ปรับปรุงสกิลแทงรอบตัว',
+      '🎴 ดูของสะสมของผู้เล่นได้ละเอียดขึ้น',
+    ] },
+    { v: '1.018', d: '2026-07-28', items: [
+      '🏅 ปรับหน้าอันดับใหม่ + ดูของที่สะสมของผู้เล่นได้',
+    ] },
+    { v: '1.017', d: '2026-07-28', items: [
+      '🎖️ ปรับชื่อเรียกและหน้าตาระดับความชำนาญ',
+    ] },
+    { v: '1.016', d: '2026-07-28', items: [
+      '🎖️⭐ ขยายระดับความชำนาญ เป็น 5 ดาว',
+    ] },
+    { v: '1.015', d: '2026-07-28', items: [
+      '👑 เปิดระดับ VIP 11-15',
+    ] },
+    { v: '1.014', d: '2026-07-28', items: [
+      '👑 สิทธิ์ VIP: เปิดหน้าจอได้นานขึ้น',
+    ] },
+    { v: '1.013', d: '2026-07-27', items: [
+      '🎲 เพิ่มบทอัตราการสุ่มในคู่มือ',
+    ] },
+    { v: '1.012', d: '2026-07-27', items: [
+      '🛸🌌 เพิ่มระบบยานบุกอวกาศ',
+      '🪨 แร่อวกาศใช้อัพเลเวลกิลเกิน Lv.20',
+    ] },
+    { v: '1.011', d: '2026-07-27', items: [
+      '🕳️ เปิดระบบดันกิล',
+    ] },
+    { v: '1.010', d: '2026-07-27', items: [
+      '💬 เพิ่มระบบแชทกิล',
+      '🏰🔫 ป้อมกิลแสดงบนแผนที่แล้ว',
+    ] },
+    { v: '1.009', d: '2026-07-27', items: [
+      '🎖️⭐ เปิดระบบระดับความชำนาญ',
+    ] },
+    { v: '1.008', d: '2026-07-27', items: [
+      'ปรับสมดุลอัตราดรอปของมอนปกติ',
+      'ปรับปรุงระบบตรวจจับการพักจอ',
+    ] },
+    { v: '1.007', d: '2026-07-26', items: [
+      '🤖 เพิ่มออฟไลน์ มอนิเตอร์ — ดูบอทออกล่าแบบสดๆ',
+      'บอทออฟไลน์ทำงานเร็วขึ้น',
+    ] },
+    { v: '1.006', d: '2026-07-26', items: [
+      '🏰🔫 เปิดระบบหอโจมตีกิล',
+      '🪓 ปรับปรุงขวานไททัน',
+    ] },
+    { v: '1.005', d: '2026-07-26', items: [
+      '👑 ปรับระบบแต้มสะสม VIP',
+    ] },
+    { v: '1.004', d: '2026-07-26', items: [
+      '🎟️ เปิดระบบบัตรของขวัญ P',
+    ] },
+    { v: '1.003', d: '2026-07-26', items: [
+      'ปรับค่าบัตรดันท้าบอส',
+      '🎁 ผู้เล่นใหม่รับ P เริ่มต้นเมื่อสมัคร', // เคยถอดแล้วคืน 2026-07-26 — แก้ช่องโหว่ด้วยการตัดบัตร 50 P แทน (ดู XHRPG_NEWBIE_P)
+      'เพิ่มหน้ารายละเอียดกิล',
+    ] },
+    { v: '1.002', d: '2026-07-26', items: [
+      '🏯 เปิดระบบปราสาทกิล',
+    ] },
+    { v: '1.001', d: '2026-07-26', items: [
+      'ปรับสมดุลอัตราดรอปหลายรายการ',
+      'เพิ่มตารางอัตราดรอปและหน้าอัปเดตล่าสุดในคู่มือ',
+    ] },
+    { v: '1.000', d: '2026-07-26', items: [
+      '🏰 เปิดระบบกิล',
+      'เพิ่มตรากิลออกแบบเอง และแท็บอันดับกิล',
+    ] },
+  ];
+
+  // ═══ 📊 ตารางอัตราดรอปในคู่มือ (เจ้าของสั่งเปิดเผย 2026-07-26) ═══
+  //   ⚠️ ค่าทั้งหมดเป็น "สำเนา" ของ xhrpg_config.php / xhrpg_idle_logic.php — ปรับเรตต้องแก้ทั้ง 2 ที่ (ดู docs/drop-rates-audit.md)
+  //   🔒 ไม่รวมสูตรลับ: เส้นเลเวลกิล · Ragnalok (ตาม secret-formulas-policy) — 🎰 สุ่มโชค G ย้ายไปบท 🎲 อัตราการสุ่ม แล้ว
+  //   🌐 ภาษา: ตัวเลขทุกตัวสร้างจากค่าคงที่ชุดนี้ ไม่ฝังในประโยคแปล → ปรับเรตแล้วทุกภาษาเปลี่ยนตามเอง ไม่ต้องแตะ dict
+  const DR = {
+    resLuk5: 25, resCap: 48,                                    // ทรัพยากร: LUK5 = 25% · เพดาน 48%
+    // ⬇️ ชุดมอนปกติลด 20% ทั้งแถบ (2026-07-27) — MVP ไม่แตะ · 💎 เพชรดันขึ้นเป็น 0.050/0.020 เมื่อ 2026-07-28 (เจ้าของสั่ง)
+    blue: 0.050, blueLv: 10, red: 0.020, redLv: 25,             // เพชร (ต่อ kill)
+    seed: 0.08,                                                  // เมล็ดพืช
+    cardLo: 0.070, cardHi: 0.008, cardMvpLo: 0.20, cardMvpHi: 0.05, // การ์ด: Lv1 → Lv100 (2026-07-28 จุดเริ่ม 0.096→0.070 · MVP คงเดิม)
+    eggLo: 0.050,  eggHi: 0.008, eggMvpLo: 0.15,  eggMvpHi: 0.05,  // ไข่ (2026-07-28 จุดเริ่ม 0.080→0.050 · MVP คงเดิม)
+    mod:    [[1, 20, 1, 0.012], [21, 40, 2, 0.012], [41, 60, 3, 0.012], [61, 80, 4, 0.006], [81, 100, 5, 0.004]], // [lvLo, lvHi, rarity, %]
+    modMvp: [[1, 20, 2, 2.5], [21, 40, 3, 2.5], [41, 60, 4, 2.5], [61, 80, 5, 1.25], [81, 100, 6, 0.625]],
+    eq2:    [[1, 0.080], [2, 0.020], [3, 0.008], [4, 0.003], [5, 0.00075], [6, 0]], // [tier, % มอนปกติ] — sync XHRPG_EQ2_RATE_MON (ต่อ 10M) · T4-T6 −25% 2026-07-29
+    eq2Mvp: [[1, 50], [2, 30], [3, 20], [4, 10], [5, 5], [6, 1]],                    // [tier, % MVP]
+    // ⬇️ กล่องทุกชนิด ×0.75 (เจ้าของสั่ง 2026-07-28) — มิเรอร์ xhrpg_module_box_by_level / xhrpg_card_box_by_level
+    boxMod:  [[1, 20, 11.25], [21, 40, 6.75], [41, 60, 6.75], [61, 80, 6.75]],       // 📦 กล่องโมดูล MVP
+    boxCard: [[1, 20, 11.25], [21, 40, 5.63], [41, 80, 3.38]],                       // 🎁🧰 กล่องการ์ด/ไข่ MVP
+    mvpItem: [[1, 20, 20], [21, 40, 15], [41, 60, 10], [61, 80, 5], [81, 100, 3]],   // ของล้ำค่า/อุปกรณ์ MVP
+    offRes: 1.0,                                                                      // ออฟไลน์: แร่เท่าออนไลน์ (2026-07-27 ถอน ×1.5 · ตารางแสดง "เท่าออนไลน์" ไม่ใช้ค่านี้แล้ว)
+  };
+  const _drPct = (n) => n === 0 ? '—'                                     // 0 = ไม่ดรอป (ห้ามต่อ % — เดิมได้ "—%")
+    : (n < 0.01 ? n.toFixed(3) : (n < 1 ? n.toFixed(3).replace(/0+$/, '').replace(/\.$/, '') : String(n))) + '%';
+  const _drLv  = (lo, hi) => 'Lv.' + lo + (hi >= 100 ? '+' : '-' + hi);
+  // ตารางมาตรฐานของบทนี้ — head/rows เป็นข้อความที่แปลมาแล้ว (ตัวเลขไม่ผ่าน T)
+  function _drTable(head, rows) {
+    return `<table style="width:100%;border-collapse:collapse;font-size:11.5px;margin:5px 0 2px">
+      <tr>${head.map((h, i) => `<th style="text-align:${i ? 'right' : 'left'};padding:4px 5px;border-bottom:1.5px solid #cbd5e1;color:#475569;font-weight:700;white-space:nowrap">${h}</th>`).join('')}</tr>
+      ${rows.map(r => `<tr>${r.map((c, i) => `<td style="text-align:${i ? 'right' : 'left'};padding:4px 5px;border-bottom:1px solid #f1f5f9;${i ? 'font-weight:700;color:#0f172a;white-space:nowrap' : 'color:#334155'}">${c}</td>`).join('')}</tr>`).join('')}
+    </table>`;
+  }
+  const _drNote = (s) => `<div style="font-size:10.5px;color:#64748b;margin-top:6px;line-height:1.55">${s}</div>`;
+
+  // 🆕 Release note แบ่งหน้า 5 เวอร์ชัน/หน้า (เจ้าของสั่ง 2026-07-26 — ปล่อยไว้จะยาวเรื่อยๆ ทุกอัปเดต)
+  //    ⚠️ ต้องเป็น getter ไม่ใช่ค่าคงที่ — GUIDE_CHAPTERS สร้างครั้งเดียวตอนโหลด ถ้า slice ไว้เลยจะค้างหน้าแรกตลอด
+  const RN_PER_PAGE = 5;
+  let _rnPage = 0;
+  const _rnPages = () => Math.max(1, Math.ceil(RELEASE_NOTES.length / RN_PER_PAGE));
+
+  // ═══ 🎲 บทเปิดเผยอัตราการสุ่ม (เจ้าของสั่ง 2026-07-27) ═══
+  //   เหตุผล: ทีม compliance ของผู้ให้บริการชำระเงินกำหนดว่า กลไกสุ่มทุกอย่างต้องประกาศ % รายชิ้นในเกม
+  //           (เงื่อนไขปลดล็อกการจ่ายเงินใน 🇰🇷 เกาหลี · 🇯🇵 ญี่ปุ่น · 🇹🇼 ไต้หวัน)
+  //   ⚠️ ชุดนี้ทับ secret-formulas-policy เฉพาะรายการในนี้ (เจ้าของอนุมัติเปิดเผย) — สูตรอื่นยังลับเหมือนเดิม
+  //   ⚠️ ทุกค่าเป็น "สำเนา" ของ server — ปรับเรตต้องแก้ทั้ง 2 ที่:
+  //        gachaW/gachaBase/gachaMax → xhrpg_gacha.php · enh → xhrpg_config.php::xhrpg_module_enhance_rate()
+  //        boxMvp → xhrpg_upgrade.php (open_card_box/open_egg_box) · oraid → XHRPG_ORAID_SUCCESS
+  //   🌐 ตัวเลขสร้างจากค่าคงที่ชุดนี้ ไม่ฝังในประโยคแปล → ปรับเรตแล้วทุกภาษาเปลี่ยนตามเอง
+  const RND = {
+    gachaW: [50, 20, 18, 10, 5, 2],   // ×1..×6 น้ำหนักดิบ (แสดงเป็น % หารผลรวมจริง)
+    gachaBase: 200, gachaMax: 10,
+    boxMvp: 1,                        // ⭐ โอกาสได้เวอร์ชัน MVP ในกล่องการ์ด/ไข่
+    enh: [[1, 5, 100], [6, 6, 90], [7, 7, 80], [8, 8, 70], [9, 9, 60], [10, 10, 50], [11, 11, 40], [12, 15, 30]],
+    oraid: 50,                        // 🛸 ภารกิจอวกาศสำเร็จ
+  };
+  const _rndPct  = (n) => (Math.round(n * 100) / 100).toFixed(2).replace(/\.?0+$/, '') + '%';
+  const _rndPlus = (lo, hi) => lo === hi ? '+' + lo : '+' + lo + ' ~ +' + hi;
+
   const GUIDE_CHAPTERS = [
+    {
+      icon:'🆕', title:'อัปเดตล่าสุด', pager:'rn',
+      get items() {
+        return RELEASE_NOTES.slice(_rnPage * RN_PER_PAGE, _rnPage * RN_PER_PAGE + RN_PER_PAGE).map(rn => ({
+          q: `v${rn.v}  ·  ${rn.d}`,   // เลขเวอร์ชัน/วันที่ = ไม่ต้องแปล
+          a: () => `<ul style="margin:2px 0 0;padding-left:17px;line-height:1.75">${rn.items.map(t => `<li>${_rnT(t)}</li>`).join('')}</ul>`,
+        }));
+      },
+    },
     {
       icon:'📜', title:'เรื่องราว',
       items:[
@@ -13977,11 +21248,11 @@ const xhrpg = (() => {
     {
       icon:'🏪', title:'ตลาด (Market)',
       items:[
-        { q:'วางขาย', a:'เลือกของจากกระเป๋า ตั้งราคา/ชิ้น วางขายได้สูงสุด 5 รายการพร้อมกัน ของจะถูกดึงออกจากกระเป๋าทันที' },
+        { q:'วางขาย', a:'เลือกของจากกระเป๋า ตั้งราคา/ชิ้น วางขายได้สูงสุด 10 รายการพร้อมกัน (VIP +1 ช่อง/ระดับ) ของจะถูกดึงออกจากกระเป๋าทันที' },
         { q:'ซื้อของ', a:'ดูรายการของที่ผู้เล่นอื่นวางขาย กรองตามหมวดหรือค้นหาชื่อ Badge "ใหม่ ✨" = ของที่คุณยังไม่มี' },
         { q:'ของฉัน', a:'ดูรายการที่ตัวเองวางขายอยู่ กด "ยกเลิก" เพื่อดึงของกลับ' },
         { q:'ประวัติ', a:'บันทึกทุก transaction ทั้งซื้อและขาย กรองดูแต่ละประเภทได้ แสดง Gold +/- ของแต่ละรายการ' },
-        { q:'ค่า Fee', a:'ผู้ขายถูกหัก 5% ของราคาขาย เป็นค่าธรรมเนียมตลาด' },
+        { q:'ค่า Fee', a:'ผู้ขายถูกหัก 10% ของราคาขาย เป็นค่าธรรมเนียมตลาด' },
         { q:'อายุ Listing', a:'ของที่วางขายจะหมดอายุใน 24 ชั่วโมง หากไม่มีคนซื้อต้อง cancel เพื่อรับของคืน' },
       ]
     },
@@ -13991,7 +21262,140 @@ const xhrpg = (() => {
         { q:'EXP Premium', a:'EXP ที่ได้จากการต่อสู้เพิ่มขึ้น เหมาะช่วงที่อยากเลเวลขึ้นเร็ว' },
         { q:'Gold Premium', a:'Gold ที่ได้จาก Drop เพิ่มขึ้น ช่วยสะสมทองสำหรับใช้ในตลาด' },
         { q:'Miner Premium', a:'ตัวละครขุด Resource (Wood/Stone/Iron/Copper) ได้เพิ่มขึ้น ช่วยอัปเกรดยานบินเร็วขึ้น' },
+        // 😴 สิทธิ์ VIP เปิดจอนาน (เจ้าของสั่งใส่ทั้งคู่มือและหน้า VIP 2026-07-28) — ตัวเลขจาก VIP_IDLE_MIN ชุดเดียวกับหน้า VIP
+        //    ยุบ "ช่วงที่นาทีเท่ากัน" ให้เป็นแถวเดียวโดยอัตโนมัติ → ปรับตารางฝั่ง server/มิเรอร์แล้วคู่มือเปลี่ยนตามเอง ไม่ต้องแก้ตรงนี้
+        { q:'เปิดหน้าจอได้นานขึ้น', a: () => {
+          const runs = [];
+          for (let v = 0; v <= VIP_MAX; v++) {
+            const m = _idleCutMin(v);
+            if (runs.length && runs[runs.length - 1].m === m) runs[runs.length - 1].hi = v;
+            else runs.push({ lo: v, hi: v, m });
+          }
+          return _drTable([T('ระดับ'), T('เปิดจอทิ้งไว้ได้')],
+            runs.map(r => ['VIP ' + (r.lo === r.hi ? r.lo : r.lo + '-' + r.hi), T('{n} นาที', { n: r.m })])) +
+          _drNote(T('เปิดเกมทิ้งไว้โดยไม่แตะจอนานเกินนี้ ระบบจะพาเข้าโหมดพักจอ (บอทออกล่าให้ต่อ)')) +
+          _drNote(T('ยิ่งระดับ VIP สูง ยิ่งเปิดจอทิ้งไว้ได้นานขึ้น — สูงสุด {n} นาที ที่ VIP {v}', { n: _idleCutMin(VIP_MAX), v: VIP_MAX }));
+        } },
         { q:'P-Points', a:'สกุลเงิน Premium ซื้อด้วยเงินจริง กดเมนู Premium เพื่อดูแพ็กเกจ' },
+      ]
+    },
+    {
+      icon:'📊', title:'อัตราดรอป',
+      items:[
+        { q:'ตัวคูณอัตราดรอป', a: () =>
+          _drTable([T('ตัวคูณ'), T('เพิ่มขึ้น')], [
+            ['👑 VIP', '+5% / ' + T('ระดับ')],
+            ['💎 ' + T('PREMIUM DROP'), '+100%'],
+            ['🎉 ' + T('อีเวนต์'), T('ตามที่ประกาศ')],
+            ['🛡️ ' + T('ของสวมใส่') + ' (%DROP)', T('ตามค่าที่ติดมา')],
+          ]) +
+          _drNote(T('ตัวคูณทั้งหมดรวมกันก่อน แล้วคูณกับตัวคูณอีเวนต์อีกที')) +
+          _drNote('❌ ' + T('ไม่มีผลกับ: ทรัพยากร · สมุนไพร · ยา · ของที่การันตีจาก MVP')) },
+
+        { q:'ทรัพยากรและสมุนไพร', a: () =>
+          _drTable([T('ชนิดของ'), T('โอกาสต่อการฆ่า 1 ตัว')], [
+            ['🪵 ' + T('ไม้'), T('สูงกว่าอย่างอื่น 2 เท่า')],
+            ['🪨 ' + T('หิน') + ' · ⚙️ ' + T('เหล็ก') + ' · 🟫 ' + T('ทองแดง'), DR.resLuk5 + '%'],
+            ['🌿 ' + T('สมุนไพร'), DR.resLuk5 + '%'],
+          ]) +
+          _drNote(T('ค่าในตารางคือตอน LUK 5 · เพิ่มขึ้นตาม LUK จนถึงเพดาน {n}%', { n: DR.resCap })) +
+          _drNote(T('LUK ยังช่วยให้ได้จำนวนต่อครั้งมากขึ้น และเลเวลมอนยิ่งสูงยิ่งได้เพิ่ม')) },
+
+        { q:'เพชร', a: () =>
+          _drTable([T('ชนิดของ'), T('มอนปกติ'), 'MVP'], [
+            [_icoGemHtml('blue', 13) + ' ' + T('เพชรฟ้า'), _drPct(DR.blue), T('การันตี 100%')],
+            [_icoGemHtml('red', 13) + ' ' + T('เพชรแดง'), _drPct(DR.red), '50%'],
+          ]) +
+          _drNote(T('เพชรฟ้าเริ่มดรอปจากมอน Lv.{a} ขึ้นไป · เพชรแดง Lv.{b} ขึ้นไป', { a: DR.blueLv, b: DR.redLv })) +
+          _drNote(T('เพชรแดงจาก MVP ต้องเป็น MVP ที่เลเวลสูงกว่า {n}', { n: DR.redLv })) },
+
+        { q:'การ์ดและไข่สัตว์เลี้ยง', a: () =>
+          _drTable([T('ชนิดของ'), 'Lv.1', 'Lv.100'], [
+            ['🎴 ' + T('การ์ด') + ' (' + T('มอนปกติ') + ')', _drPct(DR.cardLo), _drPct(DR.cardHi)],
+            ['🎴 ' + T('การ์ด') + ' (MVP)', _drPct(DR.cardMvpLo), _drPct(DR.cardMvpHi)],
+            ['🥚 ' + T('ไข่') + ' (' + T('มอนปกติ') + ')', _drPct(DR.eggLo), _drPct(DR.eggHi)],
+            ['🥚 ' + T('ไข่') + ' (MVP)', _drPct(DR.eggMvpLo), _drPct(DR.eggMvpHi)],
+          ]) +
+          _drNote(T('ยิ่งเลเวลมอนสูง โอกาสยิ่งลดลงทีละน้อยจนถึงค่าในคอลัมน์ขวา')) +
+          _drNote('🌱 ' + T('เมล็ดพืช') + ': ' + _drPct(DR.seed) + ' — ' + T('เท่ากันทุกเลเวลมอน')) },
+
+        { q:'โมดูล', a: () =>
+          _drTable([T('ช่วงเลเวลมอน'), T('มอนปกติ'), 'MVP'], DR.mod.map((m, i) => [
+            _drLv(m[0], m[1]), _drPct(m[3]), _drPct(DR.modMvp[i][3]),
+          ])) +
+          _drNote(T('ยิ่งเลเวลมอนสูง ระดับโมดูลที่ได้ยิ่งสูงตาม · MVP ให้ระดับสูงกว่ามอนปกติ 1 ขั้นเสมอ')) },
+
+        { q:'ของสวมใส่ (Equipment)', a: () =>
+          _drTable([T('ระดับ'), T('มอนปกติ'), 'MVP'], DR.eq2.map((e, i) => [
+            AMMO_TIER_ICONS[e[0] - 1] + ' T' + e[0], _drPct(e[1]), _drPct(DR.eq2Mvp[i][1]),
+          ])) +
+          _drNote(T('ทอยไล่จากระดับสูงลงมา ได้มากสุด 1 ชิ้นต่อการฆ่า 1 ตัว')) +
+          _drNote(T('T6 หลุดจาก MVP เท่านั้น')) },
+
+        { q:'MVP ดรอปอะไรบ้าง', a: () =>
+          `<div style="font-size:11.5px;font-weight:700;color:#334155;margin-top:4px">📦🎁🧰 ${T('กล่องสุ่ม')}</div>` +
+          _drTable([T('ช่วงเลเวลมอน'), '📦 ' + T('โมดูล'), '🎁🧰 ' + T('การ์ด') + '/' + T('ไข่')], [
+            [_drLv(1, 20),   DR.boxMod[0][2] + '%', DR.boxCard[0][2] + '%'],
+            [_drLv(21, 40),  DR.boxMod[1][2] + '%', DR.boxCard[1][2] + '%'],
+            [_drLv(41, 60),  DR.boxMod[2][2] + '%', DR.boxCard[2][2] + '%'],
+            [_drLv(61, 80),  DR.boxMod[3][2] + '%', DR.boxCard[2][2] + '%'],
+          ]) +
+          `<div style="font-size:11.5px;font-weight:700;color:#334155;margin-top:9px">💠 ${T('ของล้ำค่าและอุปกรณ์')}</div>` +
+          _drTable([T('ช่วงเลเวลมอน'), T('โอกาส')], DR.mvpItem.map(m => [_drLv(m[0], m[1]), m[2] + '%'])) +
+          _drNote(T('ทอยแยกกันทุกชนิด — ดวงดีได้พร้อมกันหลายอย่างจาก MVP ตัวเดียว')) +
+          _drNote(T('กล่องเปิดที่เมนูไอเทม · กล่องการ์ด/ไข่ให้ของตามช่วงเลเวลของกล่องนั้น')) },
+
+        { q:'ออฟไลน์ต่างจากออนไลน์ยังไง', a: () =>
+          _drTable([T('ชนิดของ'), T('เทียบกับออนไลน์')], [
+            ['🪵🪨⚙️🟫🌿 ' + T('ทรัพยากร'), T('เท่าออนไลน์')],
+            ['🎴 ' + T('การ์ด') + ' · 🥚 ' + T('ไข่'), T('เท่าออนไลน์')],
+            ['🔧 ' + T('โมดูล') + ' · 🛡️ ' + T('ของสวมใส่'), T('เท่าออนไลน์')],
+            [_icoGemHtml('blue', 13) + _icoGemHtml('red', 13) + ' ' + T('เพชร') + ' · 🌱 ' + T('เมล็ดพืช'), T('เท่าออนไลน์')],
+            ['📦🎁🧰 ' + T('กล่องสุ่ม'), T('ไม่ได้จากออฟไลน์')],
+          ]) +
+          _drNote(T('ตอนออฟไลน์ไม่เจอ MVP จึงไม่มีกล่องสุ่มและของการันตีจาก MVP')) +
+          _drNote(T('เลือกโซนฟาร์มได้สูงสุด 3 โซน · สะสมรางวัลได้นานสุด 8 ชั่วโมง')) },
+      ]
+    },
+    {
+      icon:'🎲', title:'อัตราการสุ่ม',
+      items:[
+        { q:'สุ่มโชค G', a: () => {
+            const _sum = RND.gachaW.reduce((a, b) => a + b, 0);
+            return _drTable([T('ตัวคูณ'), T('โอกาส')],
+              RND.gachaW.map((w, i) => ['×' + (i + 1), _rndPct(w * 100 / _sum)])) +
+              _drNote(T('รางวัลที่ได้ = เลเวลผู้เล่น × {b} G × ตัวคูณที่ทอยได้', { b: RND.gachaBase })) +
+              _drNote(T('เล่นได้วันละ {n} ครั้ง · ครั้งแรกของวันฟรี ครั้งต่อไปจ่ายด้วย P', { n: RND.gachaMax }));
+          } },
+
+        { q:'กล่องสุ่มการ์ดและไข่', a: () =>
+          _drTable([T('ชนิดของ'), T('โอกาส')], [
+            ['🎴 ' + T('การ์ด') + ' · 🥚 ' + T('ไข่'), _rndPct(100 - RND.boxMvp)],
+            ['⭐ ' + T('การ์ด') + ' MVP · ' + T('ไข่') + ' MVP', _rndPct(RND.boxMvp)],
+          ]) +
+          _drNote(T('มอนทุกตัวในช่วงเลเวลของกล่องมีโอกาสเท่ากันหมด (100% หารด้วยจำนวนมอนในช่วงนั้น)')) +
+          _drNote(T('กล่องระดับ 1 = Lv.1-10 · ระดับ 2 = Lv.11-20 · ไล่ขึ้นไปจนระดับ 8 = Lv.71-80')) +
+          _drNote(T('ได้จาก MVP หรือซื้อที่ร้าน VIP ในเมนูไอเทม')) },
+
+        { q:'กล่องสุ่มโมดูล', a: () =>
+          _drNote(T('ระดับความหายากของโมดูลที่ได้ = ระดับกล่อง + 1 เสมอ (แน่นอน 100% ไม่สุ่ม)')) +
+          _drNote(T('สุ่มเฉพาะชนิดอาวุธ · ช่องติดตั้ง · STAT ที่ติดมา — ทุกแบบมีโอกาสเท่ากัน')) },
+
+        { q:'ตีบวก', a: () =>
+          _drTable([T('ตีเป็นระดับ'), T('โอกาสสำเร็จ')],
+            RND.enh.map(e => [_rndPlus(e[0], e[1]), e[2] + '%'])) +
+          _drNote(T('ใช้อัตราเดียวกันทั้งโมดูลและของสวมใส่')) +
+          _drNote(T('ล้มเหลวแล้วระดับลดลง 1 ขั้น · ค่าใช้จ่ายหักทุกครั้งไม่คืน')) },
+
+        { q:'ภารกิจอวกาศ', a: () =>
+          _drTable([T('ผลภารกิจ'), T('โอกาส')], [
+            ['🌌 ' + T('สำเร็จ'), RND.oraid + '%'],
+            ['🪨 ' + T('ล้มเหลว'), (100 - RND.oraid) + '%'],
+          ]) +
+          _drNote(T('สำเร็จได้แร่อวกาศตามระดับภารกิจ · ล้มเหลวได้แร่ธรรมดากลับมาแทน')) },
+
+        { q:'สกินสุ่มค่าไหม', a: () =>
+          _drNote('✅ ' + T('ไม่สุ่ม — ผู้เล่นเลือก STAT เองและได้ค่าสูงสุดของสกินนั้นเสมอ (100%)')) },
       ]
     },
   ];
@@ -14017,13 +21421,34 @@ const xhrpg = (() => {
     return `<div class="gd-root">${chapList}</div>`;
   }
 
+  // แถบเปลี่ยนหน้าใต้รายการ (ตอนนี้ใช้บทเดียว: 🆕 อัปเดตล่าสุด) — โชว์เมื่อมีมากกว่า 1 หน้าเท่านั้น
+  function _guidePager(ci) {
+    if (GUIDE_CHAPTERS[ci].pager !== 'rn' || _rnPages() <= 1) return '';
+    const btn = (d, txt, on) => on
+      ? `<button onclick="event.stopPropagation();xhrpg._rnPageGo(${d})" style="padding:5px 14px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;color:#334155;font-size:12px;font-weight:700;cursor:pointer">${txt}</button>`
+      : `<span style="padding:5px 14px;border:1px solid #f1f5f9;border-radius:8px;color:#cbd5e1;font-size:12px;font-weight:700">${txt}</span>`;
+    return `<div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:9px 0 3px">
+        ${btn(-1, '←', _rnPage > 0)}
+        <span style="font-size:11.5px;color:#64748b;font-weight:700;min-width:64px;text-align:center">${T('หน้า {a}/{b}', { a: _rnPage + 1, b: _rnPages() })}</span>
+        ${btn(1, '→', _rnPage < _rnPages() - 1)}
+      </div>`;
+  }
+  function _rnPageGo(d) {
+    _rnPage = Math.max(0, Math.min(_rnPages() - 1, _rnPage + d));
+    guideOpen = null; // ⚠️ คีย์ที่เปิดอยู่อิง index ในหน้า — ไม่ล้างจะเปิดผิดรายการ
+    const root = document.getElementById('guide-root');
+    if (root) root.innerHTML = _guideBuild();
+  }
   function _guideItems(ci) {
     const items = GUIDE_CHAPTERS[ci].items;
     return `<div class="gd-items">${items.map((it, ii) => `
       <div class="gd-item ${guideOpen===ci+','+ii?'open':''}" onclick="xhrpg._guideToggle(${ci},${ii})">
         <div class="gd-q"><span class="gd-arrow">${guideOpen===ci+','+ii?'▾':'›'}</span>${T(it.q)}</div>
-        ${guideOpen===ci+','+ii ? `<div class="gd-a">${T(it.a)}</div>` : ''}
-      </div>`).join('')}</div>`;
+        ${guideOpen===ci+','+ii ? (it.a===STORY_HTML
+          ? `<div class="gd-a" style="background:#1e293b;border-radius:10px;padding:12px 14px;margin-top:6px">${T(it.a)}</div>` /* 🌙 เนื้อเรื่องออกแบบตัวอักษรสีอ่อนสำหรับพื้นเข้ม (popup) — ในคู่มือพื้นขาวจะจมหาย ให้ครอบพื้นเข้มเหมือน popup */
+          /* a เป็นฟังก์ชัน = เนื้อหาสร้างด้วยโค้ด (ตารางอัตราดรอป/release note) — ตัวเลขไม่ผ่าน T() ปรับเรตแล้วทุกภาษาเปลี่ยนตามเอง */
+          : `<div class="gd-a">${typeof it.a === 'function' ? it.a() : T(it.a)}</div>`) : ''}
+      </div>`).join('')}${_guidePager(ci)}</div>`;
   }
 
   function _guideSetChap(i) {
@@ -14039,6 +21464,6 @@ const xhrpg = (() => {
     if (root) root.innerHTML = _guideBuild();
   }
 
-  return { init, startDemo, showOfflineReward, changeDisplayName, upgradeSolarCell, upgradeCat, toggleCat, upgradeDrone, toggleDrone, priestUp, archerUp, toggleArcher, stripeTopup, topupSetLang, toggleLang, openReportAdmin, togglePHistory, upgradeGun, upgradeKnife, upgradeRobot, upgradeRobotBody, upgradeHouse, orionGunUp, orionCannonUp, turretUp, buildHouse, houseToggle, toggleBurnWood, toggleHouseProdTier, toggleAmmTier, goToHouse, usePotion, switchGun, zoom, togglePanel, closePanel, logout, warpHome, warpToMap, openMapSelect, closeMapSelect, setDir, toggleBot, setExploreRadius, cycleExploreRadius, openOfflinePanel, _offClose, toggleMapClean, toggleMiniLog, toggleLock, toggleSfx, toggleAutoPotion, setAutoPotionThreshold, toggleAutoRefillPotion, togglePotionTier, toggleHousePotionProdTier, usePotionManual, toggleAutoRefill, toggleGunUse, setGunTab, upgradeArmor, mineBuild, mineUp, mineSelectOre, mineToggle, moduleEquip, moduleUnequip, moduleEnhance, openModuleBox, moduleDiscard, moduleManageToggle, moduleSelToggle, moduleSelectAll, moduleDiscardSelected, cardPickOpen, cardPickClose, cardSocket, cardUnsocket, _cardUnsockClose, _cardUnsockGo, cardMvpExchange, _cardMvpExClose, _cardMvpExGo, eggMvpExchange, _eggMvpExClose, _eggMvpExGo, showModCards, notYetOpen, toggleStatHelp, toggleRobotHelp, toggleGunHelp, toggleItemHelp, toggleHouseHelp, upgradeSkill, setSkillTab, toggleSkillAuto, toggleSkillHelp, useSkill, goToSpot, goToBoss, toggleAutoRailgun, toggleAutoRobotRecharge, toggleOrionRail, toggleOrionCannon, ragUp, rankTab, _rankSetCC, _rankCCOpen, _rankCCClose, buyPremium, buySkin, setSkin, buyPetSkin, setPetSkin, rerollPetSkin, rerollSkin, buyHeroSkin, setHeroSkin, rerollHeroSkin, confirmStatReset, confirmRagReset, togglePremiumHelp, renderMarket, _mktSetMode, _mktSetSellCat, _mktSellGo, _mktBuyGo, _mktSetBuyCat, _mktBuySearch, _mktPickItem, _mktPickListing, _mktCalcNet, _mktCalcBuyTotal, _mktDoSell, _mktDoBuy, _mktCancel, _mktSetHistFilter, _mktOpenSell, _mktCloseSell, _mktSellBack, _mktQtySell, _mktQtyBuy, _mktPickGroup, _mktGroupBack, _mktSetModFilter, renderGuide, _guideSetChap, _guideToggle, renderPet, petHatchAsk, petRecallAsk, petUpgrade, petCardPickOpen, petCardSocket, petCardUnsocket, openCardBox, openPvpPanel, _pvpClose, _pvpTab, _pvpChallenge, _pvpAccept, _pvpDecline, _pvpForfeit, _pvpToggleOff, _pvpShadow, openArenaPanel, _arenaGo, _arenaHist, _arenaSetPage, renderChat, chatSend, chatEmojiToggle, chatOpenDm };
+  return { init, startDemo, showOfflineReward, changeDisplayName, upgradeSolarCell, upgradeCat, toggleCat, upgradeDrone, toggleDrone, priestUp, togglePriest, knightUp, toggleKnight, migrateRedeem, archerUp, toggleArcher, stripeTopup, openCodashop, topupSetLang, toggleLang, openReportAdmin, togglePHistory, upgradeGun, upgradeKnife, upgradeRobot, upgradeRobotBody, upgradeHouse, orionGunUp, orionCannonUp, turretUp, buildHouse, houseToggle, toggleBurnWood, toggleHouseProdTier, toggleAmmTier, goToHouse, usePotion, switchGun, zoom, togglePanel, closePanel, logout, warpHome, warpToMap, openMapSelect, closeMapSelect, setDir, toggleBot, setExploreRadius, cycleExploreRadius, openOfflinePanel, _offClose, openBotMonitor, _bmBack, _bmZonePick, toggleMapClean, toggleMiniLog, toggleLock, toggleSfx, toggleAutoPotion, setAutoPotionThreshold, toggleAutoRefillPotion, togglePotionTier, toggleHousePotionProdTier, usePotionManual, toggleAutoRefill, toggleGunUse, setGunTab, upgradeArmor, mineBuild, mineUp, mineSelectOre, mineToggle, moduleEquip, moduleUnequip, moduleEnhance, openModuleBox, moduleDiscard, moduleManageToggle, moduleSelToggle, moduleSelectAll, moduleDiscardSelected, cardPickOpen, cardPickClose, cardSocket, cardUnsocket, _cardUnsockClose, _cardUnsockGo, cardMvpExchange, _cardMvpExClose, _cardMvpExGo, eggMvpExchange, _eggMvpExClose, _eggMvpExGo, showModCards, notYetOpen, toggleStatHelp, toggleRobotHelp, toggleGunHelp, toggleItemHelp, toggleHouseHelp, upgradeSkill, setSkillTab, job2Unlock, toggleSkillAuto, toggleSkillHelp, useSkill, goToSpot, goToBoss, toggleAutoRailgun, toggleAutoRobotRecharge, toggleOrionRail, toggleOrionCannon, ragUp, rankTab, _rankSetCC, _rankCCOpen, _rankCCClose, buyPremium, buySkin, setSkin, skinGrpOpen, skinGrpBack, buyPetSkin, setPetSkin, rerollPetSkin, rerollSkin, buyHeroSkin, setHeroSkin, rerollHeroSkin, confirmStatReset, confirmRagReset, togglePremiumHelp, renderMarket, _mktSetMode, _mktSetSellCat, _mktSellGo, _mktBuyGo, _mktSetBuyCat, _mktBuySearch, _mktPickItem, _mktPickListing, _mktCalcNet, _mktCalcBuyTotal, _mktDoSell, _mktDoBuy, _mktCancel, _mktSetHistFilter, _mktOpenSell, _mktCloseSell, _mktSellBack, _mktQtySell, _mktQtyBuy, _mktPickGroup, _mktGroupBack, _mktSetModFilter, renderGuide, _guideSetChap, _guideToggle, _rnPageGo, _offRnTog, _offRnGo, renderPet, petHatchAsk, petRecallAsk, petUpgrade, petResetUp, petCardPickOpen, petCardSocket, petCardUnsocket, _petCardUnsockGo, _petCardUnsockClose, _petResetGo, _petResetClose, _dvSetTab, dvAwaken, dvUp, dvResetUp, dvToggle, dvCardPickOpen, dvCardSocket, dvCardUnsocket, openCardBox, openEggBox, _godSetTab, godCardExchange, openVipPanel, _vipClose, vipBoxBuy, openPvpPanel, _pvpClose, _pvpTab, _pvpChallenge, _pvpAccept, _pvpDecline, _pvpForfeit, _pvpToggleOff, _pvpShadow, openArenaPanel, _arenaGo, _arenaHist, _arenaSetPage, renderChat, chatSend, chatEmojiToggle, chatOpenDm, chatOpenGuild, chatPickImage, _chatUploadImg, _chatClearPendingImg, renderLogPanel, openHomePanel, homeUp, homePlant, homeHarvest, homeVisit, homeEnterFriend, warpCenter, guardPick, guardSet, guardRemove, openRaidPanel, raidStart, openRaidHist, _raidPageGo, _trSearchInput, _trInvite, _trRespond, _trSetCat, _trPickItem, _trLock, _trUnlock, _trConfirm, _trCancel, _pvpPageGo, openEq2Panel, _eq2Close, _eq2Card, _eq2Act, _eq2Enhance, _eq2SetSort, _eq2Destroy, _eq2TogChips, _eq2TogList, _eq2MngTog, _eq2SelTog, _eq2SelAll, _eq2SelClear, _eq2DestroySel, _eq2SetAuto, openGachaPanel, _gachaClose, _gachaSpin, openAucPanel, _aucClose, _aucSetTab, _aucBid, _aucHist, openGuildPanel, _gdClose, _gdSetTab, _gdPick, _gdCreate, _gdJoin, _gdLeave, _gdKick, _gdPromote, _gdDemote, _gdTransfer, _gdDonate, _gdDonateCustom, _gdDonateOre, _gdEmEdit, _gdEmblemSave, _gdNoticeSave, _gdDisband, _gdLog, _gdSearch, _gdPageGo, _gdFetchMy, _gdDetail, _gtFund, _gtFundCustom, _gtBuy, _gtUp, _gtMoveOpen, _gtMvZones, _gtMvClose, _gtMvSave, _gtSlotOpen, _gtPopClose, _gtHistOpen, _aucBellTog, openVoucherPanel, _vcClose, _vcSetTab, _vcSetStat, _vcSetFace, _vcSetQ, _vcPageGo, _vcCopy, _vcBuy, _vcRedeem, castleEnter, castleExit, _ctMemberList, gdunEnter, gdunExit, oraidSend, oraidRush, lbShow, _lbShowClose, _lbShowTabSet };
 })();
 

@@ -283,6 +283,26 @@
   2. Tách `.compact-stats-strip` thành 2 khối riêng biệt: `.combat-rates-strip` (nền tím mờ `rgba(99, 102, 241, 0.08)`) chứa chỉ số tốc độ farm (kills/m, gold/m, exp/m) và `.resources-strip` chứa tổng 6 tài nguyên hiện có.
 - Lý do: Khắc phục lỗi tương tác UI và tăng tính mạch lạc, dễ quan sát dữ liệu trên Dashboard.
 
+---
+
+## 2026-07-29 - Tự động tải game script, Dịch log tiếng Việt, Sửa lỗi Cloudflare cdn-cgi & Tự cập nhật fallback (T27)
+
+- Bối cảnh:
+  1. Mỗi khi game cập nhật, bản đồ/khu vực không tự động cập nhật trừ khi Admin tải thủ công `xhrpg_canvas.js`.
+  2. Log nhận được ở backend chứa nhiều tiếng Thái do game server trả về thô.
+  3. Cloudflare Turnstile Challenge tiêm script xác thực từ `/cdn-cgi/challenge-platform/scripts/jsd/main.js`. Do máy chủ proxy thiếu định tuyến, nó trả về trang HTML `index.html` dẫn đến crash trình duyệt lỗi cú pháp `Unexpected token '<' (at main.js)`.
+  4. Nếu máy chủ game bị mất kết nối hoặc chặn IP, route `/play` rơi vào catch block phục vụ file tĩnh `play.html` cũ và không được vá lỗi proxy đăng nhập.
+  5. Nhà phát triển game quên thay đổi chuỗi log phiên bản cứng statically trong `xhrpg_canvas.js` (dòng 15727 vẫn để là `droptab-2026-07-17` dù đã cập nhật lên phiên bản ngày 29/7), khiến các tiện ích mở rộng client-side (như Tampermonkey Script) liên tục cảnh báo phiên bản cũ.
+- Quyết định:
+  1. **Auto-Downloader**: Tích hợp bộ Downloader tự động tải và ghi đè `xhrpg_canvas.js` mới nhất khi máy chủ khởi động hoặc khi admin bấm đồng bộ thủ công.
+  2. **Server-side Translation Engine (`translateThaiText()`)**: Thiết lập thuật toán dịch thuật tự động sử dụng từ điển `viDict` sắp xếp theo độ dài từ khóa giảm dần (longest key match) kết hợp regex thay thế các cụm từ log phổ biến sang tiếng Việt trước khi ghi log.
+  3. **Cloudflare Proxying (`/cdn-cgi/*`)**: Thêm định tuyến `app.all('/cdn-cgi/*', ...)` chuyển tiếp toàn bộ yêu cầu Turnstile Challenge về máy chủ game gốc.
+  4. **Play Fallback Patching**: Bổ sung bộ lọc vá lỗi DOM và chèn proxy script cho cả tệp dự phòng `play.html` trong khối catch của `/play`.
+  5. **Định tuyến tiền tố `/human`**: Mở rộng các endpoint JS (`/js/*`) và proxy PHP (`/xhrpg_*.php`) hỗ trợ đồng thời cả các request có tiền tố `/human/`.
+  6. **Self-Healing Fallbacks**: Tự động lưu đè tệp `xhrpg_canvas.js` và `sdk.js` local làm dự phòng mỗi khi tải động thành công từ máy chủ game qua proxy.
+  7. **Vấn đề Version string**: Xác định đây là lỗi do nhà phát triển game quên cập nhật log cứng nên hệ thống giữ nguyên bản gốc mà không tự ý sửa chuỗi phiên bản để tránh xung đột theo thống nhất với người dùng.
+- Lý do: Đảm bảo độ ổn định cao, vượt qua mọi thử thách Cloudflare, dịch log hoàn toàn sang tiếng Việt, và duy trì mã nguồn dự phòng tự hồi phục (self-healing) tự động.
+
 
 
 

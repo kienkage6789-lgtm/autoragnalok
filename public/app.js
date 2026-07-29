@@ -83,6 +83,8 @@ document.addEventListener('DOMContentLoaded', () => {
   let currentUser = null;
   let adminProxiesList = [];
   const activeTabs = {}; // line_uid -> tab_id
+  const rateUnits = {}; // line_uid -> 'min' | 'hour' | 'day'
+  const activeLogSubTabs = {}; // line_uid -> sub_tab_id
   let expandedUserGroups = new Set();
   let isUserGroupInitialized = false;
   let lastFetchedAccounts = [];
@@ -938,8 +940,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const botGrid = groupCard.querySelector(`#user-bot-grid-${userId}`);
         if (isExpanded) {
           userAccs.forEach(acc => {
-            if (!activeTabs[acc.line_uid] || !['core', 'logs'].includes(activeTabs[acc.line_uid])) {
-              activeTabs[acc.line_uid] = 'core';
+            if (activeTabs[acc.line_uid] === undefined) {
+              activeTabs[acc.line_uid] = null;
             }
             let card = document.getElementById(`card-${acc.line_uid}`);
             if (!card) {
@@ -983,8 +985,8 @@ document.addEventListener('DOMContentLoaded', () => {
       accountsGrid.style.flexDirection = '';
 
       accounts.forEach(acc => {
-        if (!activeTabs[acc.line_uid] || !['core', 'logs'].includes(activeTabs[acc.line_uid])) {
-          activeTabs[acc.line_uid] = 'core';
+        if (activeTabs[acc.line_uid] === undefined) {
+          activeTabs[acc.line_uid] = null;
         }
         let card = document.getElementById(`card-${acc.line_uid}`);
         if (!card) {
@@ -1067,10 +1069,10 @@ document.addEventListener('DOMContentLoaded', () => {
         </div>
       </div>
 
-      <div class="combat-rates-strip">
-        <span class="stat-pill" title="Số quái hạ gục mỗi phút">⚔️ <strong id="rate-kills-${acc.line_uid}">0/m</strong></span>
-        <span class="stat-pill" title="Vàng nhận được mỗi phút">💰 <strong id="rate-gold-${acc.line_uid}">+0/m</strong></span>
-        <span class="stat-pill" title="EXP nhận được mỗi phút">⭐ <strong id="rate-exp-${acc.line_uid}">+0/m</strong></span>
+      <div class="combat-rates-strip" onclick="toggleRateUnit('${acc.line_uid}')" style="cursor: pointer;" title="Click để chuyển đổi thống kê Phút (/m) ➔ Giờ (/h) ➔ Ngày (/d)">
+        <span class="stat-pill" id="rate-pill-kills-${acc.line_uid}">⚔️ <strong id="rate-kills-${acc.line_uid}">0/m</strong></span>
+        <span class="stat-pill" id="rate-pill-gold-${acc.line_uid}">💰 <strong id="rate-gold-${acc.line_uid}">+0/m</strong></span>
+        <span class="stat-pill" id="rate-pill-exp-${acc.line_uid}">⭐ <strong id="rate-exp-${acc.line_uid}">+0/m</strong></span>
       </div>
 
       <div class="resources-strip">
@@ -1083,15 +1085,14 @@ document.addEventListener('DOMContentLoaded', () => {
       </div>
 
       <div class="card-tabs-nav">
-        <button class="tab-link active" id="tab-btn-core-${acc.line_uid}" onclick="switchTab('${acc.line_uid}', 'core')">Cơ Bản</button>
+        <button class="tab-link" id="tab-btn-core-${acc.line_uid}" onclick="switchTab('${acc.line_uid}', 'core')">Cơ Bản</button>
         <button class="tab-link" id="tab-btn-mvp-${acc.line_uid}" onclick="switchTab('${acc.line_uid}', 'mvp')">Săn Boss</button>
         <button class="tab-link" id="tab-btn-skills-${acc.line_uid}" onclick="switchTab('${acc.line_uid}', 'skills')">👤 Nhân Vật</button>
-        <button class="tab-link" id="tab-btn-loot-${acc.line_uid}" onclick="switchTab('${acc.line_uid}', 'loot')">Vật Phẩm</button>
-        <button class="tab-link" id="tab-btn-logs-${acc.line_uid}" onclick="switchTab('${acc.line_uid}', 'logs')">Nhật Ký</button>
+        <button class="tab-link" id="tab-btn-log-${acc.line_uid}" onclick="switchTab('${acc.line_uid}', 'log')">Log</button>
       </div>
 
       <div class="card-tab-content">
-        <div class="tab-pane active" id="pane-core-${acc.line_uid}">
+        <div class="tab-pane" id="pane-core-${acc.line_uid}">
           <div class="settings-group" style="display: none; border: 1px solid rgba(165,180,252,0.15); background: rgba(165,180,252,0.02); border-radius: 12px; padding: 10px 12px; margin-bottom: 10px;">
             <div class="toggle-control">
               <span class="toggle-label" style="font-weight: 700; color: #a5b4fc;">🚀 Chạy treo máy (Bot)</span>
@@ -1227,16 +1228,7 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
         </div>
 
-        <!-- Loot Tab Pane -->
-        <div class="tab-pane" id="pane-loot-${acc.line_uid}">
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; padding:0 2px;">
-            <span style="font-size:0.8rem; color:var(--text-secondary); font-weight:600;">🎁 Nhật ký rơi đồ (Database Máy Chủ)</span>
-            <button class="btn btn-secondary btn-sm" onclick="fetchDropLogs('${acc.line_uid}')" style="padding:2px 8px; font-size:0.75rem;">🔄 Cập nhật</button>
-          </div>
-          <div class="log-terminal" id="loot-terminal-${acc.line_uid}">
-            <div class="log-line"><span class="log-text-content">Chuyển sang tab này để tải lịch sử rơi đồ từ máy chủ.</span></div>
-          </div>
-        </div>
+        <!-- Merged into pane-log -->
 
         <!-- Character & Skills Tab Pane -->
         <div class="tab-pane" id="pane-skills-${acc.line_uid}">
@@ -1320,10 +1312,29 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
         </div>
 
-        <!-- Logs Tab Pane -->
-        <div class="tab-pane" id="pane-logs-${acc.line_uid}">
-          <div class="log-terminal" id="terminal-${acc.line_uid}">
-            <!-- Log lines will be appended here -->
+        <!-- Log Tab Pane (Merged Logs & Loot with Sub-tabs) -->
+        <div class="tab-pane" id="pane-log-${acc.line_uid}">
+          <div class="subtabs-nav" style="display:flex; gap:6px; margin-bottom:10px; border-bottom:1px solid rgba(255,255,255,0.08); padding-bottom:6px; overflow-x:auto;">
+            <button class="subtab-btn active" id="log-subtab-btn-act-${acc.line_uid}" onclick="switchLogSubTab('${acc.line_uid}', 'act')">📜 Hoạt Động</button>
+            <button class="subtab-btn" id="log-subtab-btn-loot-${acc.line_uid}" onclick="switchLogSubTab('${acc.line_uid}', 'loot')">🎁 Vật Phẩm</button>
+          </div>
+          
+          <!-- Sub-pane 1: Activity Logs -->
+          <div id="log-subpane-act-${acc.line_uid}" style="display:block;">
+            <div class="log-terminal" id="terminal-${acc.line_uid}">
+              <!-- Log lines will be appended here -->
+            </div>
+          </div>
+          
+          <!-- Sub-pane 2: Loot Logs -->
+          <div id="log-subpane-loot-${acc.line_uid}" style="display:none;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; padding:0 2px;">
+              <span style="font-size:0.8rem; color:var(--text-secondary); font-weight:600;">🎁 Nhật ký rơi đồ (Database Máy Chủ)</span>
+              <button class="btn btn-secondary btn-sm" onclick="fetchDropLogs('${acc.line_uid}')" style="padding:2px 8px; font-size:0.75rem;">🔄 Cập nhật</button>
+            </div>
+            <div class="log-terminal loot-terminal" id="loot-terminal-${acc.line_uid}">
+              <div class="log-line"><span class="log-text-content" style="font-size:0.6rem;">Chuyển sang tab này để tải lịch sử rơi đồ từ máy chủ.</span></div>
+            </div>
           </div>
         </div>
       </div>
@@ -1412,23 +1423,75 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Combat rates
     const rates = acc.combatRates || { killsPerMin: 0, goldPerMin: 0, expPerMin: 0 };
-    const formatRateValue = (val, isKills = false) => {
-      const prefix = isKills ? '' : '+';
-      const suffix = ' /m';
-      if (val >= 1000) {
-        return `${prefix}${(val / 1000).toFixed(1)}k${suffix}`;
+    const unit = rateUnits[acc.line_uid] || 'min';
+
+    const formatRateValue = (val, isKills = false, targetUnit = 'min') => {
+      let multiplier = 1;
+      let suffix = ' /m';
+      if (targetUnit === 'hour') {
+        multiplier = 60;
+        suffix = ' /h';
+      } else if (targetUnit === 'day') {
+        multiplier = 1440;
+        suffix = ' /d';
       }
-      return `${prefix}${val.toLocaleString()}${suffix}`;
+      
+      const calculatedVal = val * multiplier;
+      const prefix = isKills ? '' : '+';
+      
+      if (calculatedVal >= 1000000) {
+        return `${prefix}${(calculatedVal / 1000000).toFixed(1)}M${suffix}`;
+      } else if (calculatedVal >= 1000) {
+        return `${prefix}${(calculatedVal / 1000).toFixed(1)}k${suffix}`;
+      }
+      if (isKills && calculatedVal % 1 !== 0) {
+        return `${prefix}${calculatedVal.toFixed(1)}${suffix}`;
+      }
+      return `${prefix}${Math.round(calculatedVal).toLocaleString()}${suffix}`;
     };
 
+    const killsMin = rates.killsPerMin;
+    const goldMin = rates.goldPerMin;
+    const expMin = rates.expPerMin;
+
+    const killsHour = killsMin * 60;
+    const killsDay = killsMin * 1440;
+    const goldHour = goldMin * 60;
+    const goldDay = goldMin * 1440;
+    const expHour = expMin * 60;
+    const expDay = expMin * 1440;
+
+    const fmtShort = (n, isKills = false) => {
+      const prefix = isKills ? '' : '+';
+      if (n >= 1000000) return `${prefix}${(n/1000000).toFixed(1)}M`;
+      if (n >= 1000) return `${prefix}${(n/1000).toFixed(1)}k`;
+      return `${prefix}${Math.round(n).toLocaleString()}`;
+    };
+
+    const killsTooltip = `Quái: ${killsMin}/m | ${fmtShort(killsHour, true)}/h | ${fmtShort(killsDay, true)}/d (Click để đổi hiển thị)`;
+    const goldTooltip = `Vàng: ${fmtShort(goldMin)}/m | ${fmtShort(goldHour)}/h | ${fmtShort(goldDay)}/d (Click để đổi hiển thị)`;
+    const expTooltip = `EXP: ${fmtShort(expMin)}/m | ${fmtShort(expHour)}/h | ${fmtShort(expDay)}/d (Click để đổi hiển thị)`;
+
     const elKills = document.getElementById(`rate-kills-${acc.line_uid}`);
-    if (elKills) elKills.textContent = formatRateValue(rates.killsPerMin, true);
+    if (elKills) {
+      elKills.textContent = formatRateValue(killsMin, true, unit);
+      const pill = elKills.closest('.stat-pill') || elKills.parentElement;
+      if (pill) pill.setAttribute('title', killsTooltip);
+    }
 
     const elGold = document.getElementById(`rate-gold-${acc.line_uid}`);
-    if (elGold) elGold.textContent = formatRateValue(rates.goldPerMin, false);
+    if (elGold) {
+      elGold.textContent = formatRateValue(goldMin, false, unit);
+      const pill = elGold.closest('.stat-pill') || elGold.parentElement;
+      if (pill) pill.setAttribute('title', goldTooltip);
+    }
 
     const elExp = document.getElementById(`rate-exp-${acc.line_uid}`);
-    if (elExp) elExp.textContent = formatRateValue(rates.expPerMin, false);
+    if (elExp) {
+      elExp.textContent = formatRateValue(expMin, false, unit);
+      const pill = elExp.closest('.stat-pill') || elExp.parentElement;
+      if (pill) pill.setAttribute('title', expTooltip);
+    }
 
     // Render skills tab content
     const skillsSpEl = document.getElementById(`skills-sp-${acc.line_uid}`);
@@ -1587,7 +1650,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Render tab contents based on active state
     const currentTab = activeTabs[acc.line_uid];
-    if (currentTab === 'logs') {
+    if (currentTab === 'log' && (activeLogSubTabs[acc.line_uid] || 'act') === 'act') {
       fetchLogs(acc.line_uid);
     }
   }
@@ -1737,24 +1800,70 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Switch Tab
   window.switchTab = function(uid, tabId) {
-    activeTabs[uid] = tabId;
+    const isCurrentlyActive = activeTabs[uid] === tabId;
+    const targetTabId = isCurrentlyActive ? null : tabId;
+    activeTabs[uid] = targetTabId;
     
     const tabLinks = document.querySelectorAll(`#card-${uid} .tab-link`);
     tabLinks.forEach(link => {
-      link.classList.toggle('active', link.id === `tab-btn-${tabId}-${uid}`);
+      link.classList.toggle('active', targetTabId !== null && link.id === `tab-btn-${targetTabId}-${uid}`);
     });
 
     const panes = document.querySelectorAll(`#card-${uid} .tab-pane`);
     panes.forEach(pane => {
-      pane.classList.toggle('active', pane.id === `pane-${tabId}-${uid}`);
+      pane.classList.toggle('active', targetTabId !== null && pane.id === `pane-${targetTabId}-${uid}`);
     });
 
-    if (tabId === 'logs') {
-      fetchLogs(uid);
-    } else if (tabId === 'loot') {
-      fetchDropLogs(uid);
-    } else {
+    const content = document.querySelector(`#card-${uid} .card-tab-content`);
+    if (content) {
+      content.classList.toggle('active', targetTabId !== null);
+    }
+
+    if (targetTabId === 'log') {
+      const subTabId = activeLogSubTabs[uid] || 'act';
+      switchLogSubTab(uid, subTabId);
+    } else if (targetTabId) {
       fetchAccounts();
+    }
+  };
+
+  // Switch Sub-Tab inside Log Pane
+  window.switchLogSubTab = function(uid, subTabId) {
+    activeLogSubTabs[uid] = subTabId;
+    
+    const btnAct = document.getElementById(`log-subtab-btn-act-${uid}`);
+    const btnLoot = document.getElementById(`log-subtab-btn-loot-${uid}`);
+
+    const paneAct = document.getElementById(`log-subpane-act-${uid}`);
+    const paneLoot = document.getElementById(`log-subpane-loot-${uid}`);
+
+    if (btnAct) btnAct.classList.toggle('active', subTabId === 'act');
+    if (btnLoot) btnLoot.classList.toggle('active', subTabId === 'loot');
+
+    if (paneAct) paneAct.style.display = subTabId === 'act' ? 'block' : 'none';
+    if (paneLoot) paneLoot.style.display = subTabId === 'loot' ? 'block' : 'none';
+
+    if (subTabId === 'act') {
+      fetchLogs(uid);
+    } else if (subTabId === 'loot') {
+      fetchDropLogs(uid);
+    }
+  };
+
+  // Toggle Rate Unit for combat stats (/m -> /h -> /d)
+  window.toggleRateUnit = function(uid) {
+    const current = rateUnits[uid] || 'min';
+    let next = 'min';
+    if (current === 'min') next = 'hour';
+    else if (current === 'hour') next = 'day';
+    rateUnits[uid] = next;
+    
+    // Refresh card immediately
+    if (lastFetchedAccounts) {
+      const acc = lastFetchedAccounts.find(a => a.line_uid === uid);
+      if (acc) {
+        updateCard(acc);
+      }
     }
   };
 
@@ -2121,7 +2230,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const lootTerm = document.getElementById(`loot-terminal-${uid}`);
     if (!lootTerm) return;
 
-    lootTerm.innerHTML = `<div class="log-line"><span class="log-text-content" style="color:#a7f3d0;">⏳ Đang tải lịch sử rơi đồ từ máy chủ...</span></div>`;
+    lootTerm.innerHTML = `<div class="log-line"><span class="log-text-content" style="color:#a7f3d0; font-size:0.6rem;">⏳ Đang tải lịch sử rơi đồ từ máy chủ...</span></div>`;
 
     try {
       const response = await fetch(`/api/accounts/${uid}/droplogs`);
@@ -2138,7 +2247,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       lootTerm.innerHTML = '';
       if (!data.ok || !data.drops || data.drops.length === 0) {
-        lootTerm.innerHTML = `<div class="log-line"><span class="log-text-content">Chưa có lịch sử rơi đồ nào trên máy chủ.</span></div>`;
+        lootTerm.innerHTML = `<div class="log-line"><span class="log-text-content" style="font-size:0.6rem;">Chưa có lịch sử rơi đồ nào trên máy chủ.</span></div>`;
         return;
       }
 
@@ -2157,16 +2266,16 @@ document.addEventListener('DOMContentLoaded', () => {
         else if (item.category === 'gem') highlightStyle = 'color:#38bdf8; font-weight:700;';
 
         line.innerHTML = `
-          <span style="color:var(--text-muted); font-size:0.75rem; min-width:115px;">[${item.time}]</span>
-          <span style="font-size:0.7rem; padding:1px 5px; border-radius:4px; ${badgeStyle}">${badgeText}</span>
-          <span style="font-size:0.9rem;">${item.icon}</span>
-          <span style="flex:1; font-size:0.85rem; ${highlightStyle}">${item.name} ${item.quantity > 1 ? `(x${item.quantity})` : ''}</span>
+          <span style="color:var(--text-muted); font-size:0.6rem; min-width:115px;">[${item.time}]</span>
+          <span style="font-size:0.56rem; padding:1px 5px; border-radius:4px; ${badgeStyle}">${badgeText}</span>
+          <span style="font-size:0.72rem;">${item.icon}</span>
+          <span style="flex:1; font-size:0.68rem; ${highlightStyle}">${item.name} ${item.quantity > 1 ? `(x${item.quantity})` : ''}</span>
         `;
         lootTerm.appendChild(line);
       });
     } catch (err) {
       console.error('Error fetching droplogs:', err);
-      lootTerm.innerHTML = `<div class="log-line"><span class="log-text-content" style="color:#ef4444;">❌ Lỗi kết nối máy chủ: ${err.message}</span></div>`;
+      lootTerm.innerHTML = `<div class="log-line"><span class="log-text-content" style="color:#ef4444; font-size:0.6rem;">❌ Lỗi kết nối máy chủ: ${err.message}</span></div>`;
     }
   };
 

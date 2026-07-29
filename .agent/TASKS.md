@@ -3,6 +3,35 @@
 > Work Breakdown Structure. Update task states immediately upon changes.
 > Statuses: todo | doing | blocked | review | done
 
+### [x] T27 - Tự động hóa đồng bộ game script và dịch log tiếng Việt tự động
+- Description: Tự động tải file game script (xhrpg_canvas.js) mới nhất từ server game để cập nhật map/zone/skill khi khởi động hoặc đồng bộ, đồng thời tự động dịch log combat và nhặt đồ từ tiếng Thái sang tiếng Việt.
+- Files related: `server.js`
+- Acceptance criteria:
+  - [x] Hàm `syncMapsAndZonesFromGame()` tự động tải và ghi đè `xhrpg_canvas.js` trên local trước khi parse.
+  - [x] Đã thiết lập chạy tự động đồng bộ khi khởi động Express Server.
+  - [x] Chuyển đổi route `/api/admin/sync-maps-zones` thành bất đồng bộ.
+  - [x] Định nghĩa hàm dịch thuật `translateThaiText(msg)` kết hợp duyệt từ điển `viDict` sắp xếp theo độ dài từ khóa giảm dần kết hợp regex thay thế từ phổ biến.
+  - [x] Các hàm `addLog()` và `addLootLog()` của class `BotInstance` tự động gọi hàm dịch trước khi ghi log.
+  - [x] Bổ sung vá lỗi DOM và thay thế proxy script cho cả khối catch fallback của `/play` (khi fetch `index.php` lỗi).
+  - [x] Hỗ trợ tiền tố `/human` cho toàn bộ endpoint JS và proxy PHP.
+  - [x] Thêm định tuyến `app.all('/cdn-cgi/*', ...)` để proxy hóa toàn bộ luồng Turnstile Challenge của Cloudflare, tránh trả về HTML lỗi.
+  - [x] Cấu hình ghi đè tệp `xhrpg_canvas.js` và `sdk.js` local làm dự phòng mỗi khi `fetchGameAsset` tải thành công từ máy chủ game (Self-healing).
+  - [x] Chạy `npm test` thành công 100%.
+- Status: done
+
+### [x] T26 - Tái cấu trúc Bảng điều khiển: Gộp tab Log (chia sub-tab Hoạt động & Vật phẩm), thu gọn mặc định, giảm font size, hiển thị stats /h và /d
+- Description: Thực hiện cải tiến giao diện theo yêu cầu của người dùng: thu gọn các tab mặc định để tối ưu không gian, gộp tab Vật Phẩm và Nhật Ký thành một tab duy nhất tên là Log (chia làm 2 sub-tabs Hoạt Động & Vật Phẩm), giảm 20% cỡ chữ log rơi đồ, và hỗ trợ xem thống kê hiệu suất theo giờ (/h) và ngày (/d) khi click/hover dải chỉ số.
+- Files related: `public/app.js`, `public/app.css`
+- Acceptance criteria:
+  - [x] Thẻ tài khoản khi tải trang có các tab đều thu gọn (không có tab nào mở mặc định). Click tab đang mở sẽ đóng lại.
+  - [x] Bỏ hoàn toàn khoảng trống thừa ở cuối thẻ khi các tab thu gọn bằng cách đặt container `.card-tab-content` thành `display: none` mặc định.
+  - [x] Gộp 2 tab Vật Phẩm và Nhật Ký thành tab Log duy nhất.
+  - [x] Thiết lập 2 sub-tabs (Hoạt Động, Vật Phẩm) sử dụng lớp `.subtab-btn`, mặc định mở sub-tab Hoạt Động.
+  - [x] Log rơi đồ có kích thước chữ nhỏ hơn 20% (font-size 0.6rem) so với log hoạt động chung.
+  - [x] Dải chỉ số quái, vàng, exp có thể chuyển đổi hiển thị giữa `/m`, `/h`, `/d` bằng cách click trực tiếp, đồng thời hiển thị đầy đủ cả 3 đơn vị trong tooltip khi di chuột qua.
+  - [x] Toàn bộ test case trong `test.js` chạy thành công.
+- Status: done
+
 ### [x] T25 - Đồng Bộ Bản Đồ & Zone Xuống Bảng Điều Khiển Sau Passive Discovery
 - Description: Sau khi hệ thống Passive Map Discovery ghi nhận Map mới vào `maps_cache.json`, dropdown Bản đồ trên Dashboard không được cập nhật vì `GET /api/accounts` chưa trả về `mapsList`. Đồng thời Zone dropdown hiển thị trống do không có fallback vào `spotsCache`. Và `changeTargetMap()` vẫn dùng hardcode `MAP_REQS`/`MAP_NAMES` cố định 6 bản đồ.
 - Files related: `server.js`, `public/app.js`

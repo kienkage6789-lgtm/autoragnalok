@@ -26,24 +26,54 @@
     },
     {
       "id": 5,
-      "name": "Tàn tích Cổ đại",
-      "emoji": "🏛️",
-      "req": 55
+      "name": "บ้านของฉัน",
+      "emoji": "🏡",
+      "req": 1
     },
     {
       "id": 6,
-      "name": "Núi lửa Sôi trào",
-      "emoji": "🌋",
-      "req": 70
+      "name": "ดินแดนใต้ทะเลลึก",
+      "emoji": "🌊",
+      "req": 55
+    },
+    {
+      "id": 7,
+      "name": "ทุ่งกลาง (ผู้เล่นใหม่)",
+      "emoji": "🌿",
+      "req": 1
     },
     {
       "id": 8,
-      "name": "sa mạc newbie",
-      "emoji": "🏰",
+      "name": "ทะเลทราย (ผู้เล่นใหม่)",
+      "emoji": "🏜️",
       "req": 25,
       "discoveredAt": "2026-07-27T14:28:36.618Z",
       "source": "passive_live_discovery"
+    },
+    {
+      "id": 9,
+      "name": "ดินแดนเยือกแข็ง (ผู้เล่นใหม่)",
+      "emoji": "❄️",
+      "req": 40
+    },
+    {
+      "id": 10,
+      "name": "ป่ามังกรโบราณ",
+      "emoji": "🐉",
+      "req": 70
+    },
+    {
+      "id": 11,
+      "name": "ปราสาทกิล",
+      "emoji": "🏯",
+      "req": 1
+    },
+    {
+      "id": 12,
+      "name": "ดันกิล",
+      "emoji": "🕳️",
+      "req": 1
     }
   ],
-  "lastSyncedAt": "2026-07-27T14:38:18.999Z"
+  "lastSyncedAt": "2026-07-29T05:16:53.256Z"
 }
