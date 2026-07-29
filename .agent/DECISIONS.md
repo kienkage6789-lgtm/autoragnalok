@@ -2,6 +2,16 @@
 
 > Captured architectural decisions and trade-offs.
 
+## 2026-07-29 - Ghi nhận Vấn đề Trứng Thú Cưng (Pet Eggs) chưa giải quyết xong (Pending Issue T48)
+
+- Bối cảnh: Người dùng ghi nhận tính năng danh sách Trứng Thú Cưng (Pet Eggs) trong kho chưa hiển thị/chưa giải quyết xong trên giao diện Dashboard.
+- Quyết định: 
+  1. Tạm thời ghi nhận vấn đề vào task `T48` trong `.agent/TASKS.md` để tiếp tục xử lý ở phiên làm việc tiếp theo.
+  2. Nghiên cứu sâu hơn cấu trúc response của game server đối với trường `eggs` (dạng `player.eggs` JSON string / object) và các endpoint `xhrpg_pet.php` / `xhrpg_egg.php` để đảm bảo bóc tách chuẩn danh sách các loại trứng trong kho và hỗ trợ ấp trứng trực tiếp.
+
+---
+
+
 ## 2026-07-27 - Luồng Dữ Liệu Map & Zone: Server Cache → API Response → UI (T25)
 
 - Bối cảnh:
@@ -302,6 +312,23 @@
   6. **Self-Healing Fallbacks**: Tự động lưu đè tệp `xhrpg_canvas.js` và `sdk.js` local làm dự phòng mỗi khi tải động thành công từ máy chủ game qua proxy.
   7. **Vấn đề Version string**: Xác định đây là lỗi do nhà phát triển game quên cập nhật log cứng nên hệ thống giữ nguyên bản gốc mà không tự ý sửa chuỗi phiên bản để tránh xung đột theo thống nhất với người dùng.
 - Lý do: Đảm bảo độ ổn định cao, vượt qua mọi thử thách Cloudflare, dịch log hoàn toàn sang tiếng Việt, và duy trì mã nguồn dự phòng tự hồi phục (self-healing) tự động.
+
+---
+
+## 2026-07-29 - Cache Busting Tự Động Cho app.js và app.css (Content Hash)
+
+- Bối cảnh:
+  1. Trình duyệt cache các tệp static (`app.js`, `app.css`) trong vòng 7 ngày do cấu hình `express.static` có `maxAge: '7d'`.
+  2. Mỗi khi cập nhật code mới, người dùng phải xóa lịch sử web (Ctrl+F5) một cách thủ công, nếu không sẽ bị lỗi giao diện hoặc logic lỗi thời.
+  3. Cần giải pháp tự động, không dùng version tĩnh thủ công `?v=9.0` vì dev dễ quên tăng phiên bản.
+- Quyết định:
+  1. **Content Hash (MD5)**: Sử dụng hàm `computeFileHash()` để tính MD5 hash (8 ký tự đầu) trực tiếp từ nội dung tệp `app.js` và `app.css`.
+  2. **Hot-Reload Support**: Hash được tính toán lại trong mỗi request tới `/` để đảm bảo khi nhà phát triển sửa code (chạy nodemon hoặc môi trường dev), thay đổi được cập nhật tức thì mà không cần restart server.
+  3. **HTML Resource Injection**: Chặn auto-serve `index.html` của static middleware (`index: false`). Tạo route `app.get('/')` đọc và thay thế động các thẻ liên kết `/app.css` và `/app.js` bằng phiên bản có hash tương ứng (`/app.css?v=<hash>`, `/app.js?v=<hash>`).
+  4. **No-Cache HTML**: Thiết lập header `Cache-Control: no-cache, no-store, must-revalidate` cho `index.html` để đảm bảo trình duyệt luôn nhận được HTML chứa hash mới nhất khi tải trang.
+  5. **Long Cache Static Assets**: Tăng thời gian lưu cache của các static assets (`app.js`, `app.css`) lên `30d` vì cơ chế cache-busting qua URL đã bảo đảm cập nhật tự động khi nội dung thay đổi.
+- Lý do: Loại bỏ hoàn toàn sự phụ thuộc vào thao tác thủ công của dev và client (xóa cache trình duyệt), tối ưu hóa băng thông bằng cách tận dụng browser cache 30 ngày cho static files nhưng vẫn bảo đảm cập nhật tức thì khi có code mới.
+
 
 
 

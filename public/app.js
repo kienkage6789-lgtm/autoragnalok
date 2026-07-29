@@ -1086,12 +1086,77 @@ document.addEventListener('DOMContentLoaded', () => {
 
       <div class="card-tabs-nav">
         <button class="tab-link" id="tab-btn-core-${acc.line_uid}" onclick="switchTab('${acc.line_uid}', 'core')">Cơ Bản</button>
+        <button class="tab-link" id="tab-btn-home-${acc.line_uid}" onclick="switchTab('${acc.line_uid}', 'home')">🏡 Nông Trại</button>
         <button class="tab-link" id="tab-btn-mvp-${acc.line_uid}" onclick="switchTab('${acc.line_uid}', 'mvp')">Săn Boss</button>
         <button class="tab-link" id="tab-btn-skills-${acc.line_uid}" onclick="switchTab('${acc.line_uid}', 'skills')">👤 Nhân Vật</button>
         <button class="tab-link" id="tab-btn-log-${acc.line_uid}" onclick="switchTab('${acc.line_uid}', 'log')">Log</button>
       </div>
 
       <div class="card-tab-content">
+        <!-- Home Farm Tab Pane -->
+        <div class="tab-pane" id="pane-home-${acc.line_uid}">
+          <div class="home-overview-card" style="background: rgba(22, 101, 52, 0.15); border: 1px solid rgba(34, 197, 94, 0.3); border-radius: 12px; padding: 12px; margin-bottom: 10px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+              <div>
+                <span style="font-size: 1rem; font-weight: 800; color: #4ade80;">🏡 Nhà Lv.<b id="home-lv-${acc.line_uid}">1</b></span>
+                <span style="font-size: 0.75rem; color: #9ca3af; margin-left: 6px;">(Mở <b id="home-plots-${acc.line_uid}">1</b>/6 plots)</span>
+              </div>
+              <button class="btn-action-sm" onclick="triggerHomeUpgrade('${acc.line_uid}')" style="background: #16a34a; color: #fff; border: none; border-radius: 6px; padding: 4px 10px; font-size: 0.78rem; font-weight: 700; cursor: pointer;">⬆️ Nâng nhà</button>
+            </div>
+            <div style="display: flex; gap: 8px; font-size: 0.8rem; color: #e2e8f0; background: rgba(0,0,0,0.25); padding: 8px 10px; border-radius: 8px; justify-content: space-between; align-items: center;">
+              <span>🌱 Đất: <b id="home-used-${acc.line_uid}">0</b>/<span id="home-total-${acc.line_uid}">16</span> ô</span>
+              <span>🌾 Cây chín: <b id="home-ripe-${acc.line_uid}" style="color: #f59e0b;">0</b></span>
+              <button class="btn-action-sm" id="btn-home-harvest-${acc.line_uid}" onclick="triggerHomeHarvest('${acc.line_uid}')" style="background: #b45309; color: #fff; border: none; border-radius: 6px; padding: 4px 10px; font-size: 0.78rem; font-weight: 700; cursor: pointer;">🌾 Thu hoạch & Bán</button>
+            </div>
+            <div id="home-next-ripe-${acc.line_uid}" style="font-size: 0.73rem; color: #94a3b8; margin-top: 6px; text-align: right;"></div>
+          </div>
+
+          <div class="settings-group" style="margin-bottom: 8px;">
+            <div class="toggle-control">
+              <span class="toggle-label">🌾 Auto Harvest (Tự thu hoạch & bán)</span>
+              <label class="switch">
+                <input type="checkbox" id="chk-autohomeharvest-${acc.line_uid}" onchange="toggleSetting('${acc.line_uid}', 'autoHomeHarvest')">
+                <span class="slider"></span>
+              </label>
+            </div>
+            <div class="toggle-control">
+              <span class="toggle-label">🌱 Auto Plant (Tự động trồng)</span>
+              <label class="switch">
+                <input type="checkbox" id="chk-autohomeplant-${acc.line_uid}" onchange="toggleSetting('${acc.line_uid}', 'autoHomePlant')">
+                <span class="slider"></span>
+              </label>
+            </div>
+          </div>
+
+          <div class="settings-group" style="margin-bottom: 10px;">
+            <div class="input-control" style="grid-column: span 2;">
+              <label for="sel-home-priority-${acc.line_uid}">🎯 Ưu tiên hạt giống trồng tự động</label>
+              <select id="sel-home-priority-${acc.line_uid}" onchange="updateStringSetting('${acc.line_uid}', 'homePlantPriority')" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; padding: 6px; font-family: inherit; font-size: 0.85rem; outline: none; margin-top:2px;">
+                <option value="highest_tier">🥇 Hạt Tier cao nhất (T6 ➔ T1)</option>
+                <option value="gold_first">⭐ Ưu tiên Hạt Vàng (Gold) trước</option>
+                <option value="lowest_tier">🌱 Hạt Tier thấp nhất (T1 ➔ T6)</option>
+              </select>
+            </div>
+            <div class="toggle-control" style="margin-top: 4px;">
+              <span class="toggle-label">⬆️ Auto Upgrade Nhà</span>
+              <label class="switch">
+                <input type="checkbox" id="chk-autohomeup-${acc.line_uid}" onchange="toggleSetting('${acc.line_uid}', 'autoHomeUpgrade')">
+                <span class="slider"></span>
+              </label>
+            </div>
+          </div>
+
+          <div style="font-size: 0.8rem; font-weight: 700; color: #4ade80; margin-bottom: 6px;">🌱 Danh Sách Hạt Giống Trong Kho</div>
+          <div id="home-seeds-list-${acc.line_uid}" style="max-height: 140px; overflow-y: auto; background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 6px 8px; margin-bottom: 10px;">
+            <div style="font-size: 0.78rem; color: #94a3b8; text-align: center; padding: 8px 0;">Đang cập nhật kho hạt...</div>
+          </div>
+
+          <div style="font-size: 0.8rem; font-weight: 700; color: #38bdf8; margin-bottom: 6px;">🌾 Danh Sách Luống Đất Đang Trồng</div>
+          <div id="home-crops-list-${acc.line_uid}" style="max-height: 140px; overflow-y: auto; background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 6px 8px;">
+            <div style="font-size: 0.78rem; color: #94a3b8; text-align: center; padding: 8px 0;">Tất cả luống đất đang trống</div>
+          </div>
+        </div>
+
         <div class="tab-pane" id="pane-core-${acc.line_uid}">
           <div class="settings-group" style="display: none; border: 1px solid rgba(165,180,252,0.15); background: rgba(165,180,252,0.02); border-radius: 12px; padding: 10px 12px; margin-bottom: 10px;">
             <div class="toggle-control">
@@ -1298,6 +1363,57 @@ document.addEventListener('DOMContentLoaded', () => {
 
           <!-- Sub-pane 4: Pet Eggs Inventory & MVP Exchange -->
           <div class="subtab-pane" id="subpane-eggs-${acc.line_uid}" style="display:none;">
+            <!-- Pet Combat Stats & Upgrade Block -->
+            <div class="char-section-block" style="background: rgba(30, 41, 59, 0.4); border: 1px solid rgba(168, 85, 247, 0.25); border-radius: 10px; padding: 10px; margin-bottom: 10px;">
+              <div class="section-header-wrap" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <span class="section-title" style="color: #c084fc; font-weight: 700;">🐾 Nâng Cấp Thú Cưng (Pet Stats)</span>
+                <span style="font-size: 0.75rem; background: rgba(168, 85, 247, 0.15); color: #e9d5ff; padding: 2px 8px; border-radius: 10px; font-weight: 700; border: 1px solid rgba(168, 85, 247, 0.3);">
+                  Điểm Pet: <b id="pet-pts-${acc.line_uid}" style="color: #fbbf24;">0</b> pt
+                </span>
+              </div>
+
+              <!-- Combat stats summary row -->
+              <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin-bottom: 8px; text-align: center;">
+                <div style="background: rgba(220, 38, 38, 0.1); border: 1px solid rgba(220, 38, 38, 0.25); border-radius: 6px; padding: 3px 2px;">
+                  <div style="font-size: 0.65rem; color: #fca5a5;">⚔️ ATK</div>
+                  <div style="font-size: 0.82rem; font-weight: 800; color: #ef4444;" id="pet-atk-val-${acc.line_uid}">--</div>
+                </div>
+                <div style="background: rgba(37, 99, 235, 0.1); border: 1px solid rgba(37, 99, 235, 0.25); border-radius: 6px; padding: 3px 2px;">
+                  <div style="font-size: 0.65rem; color: #93c5fd;">🛡️ DEF</div>
+                  <div style="font-size: 0.82rem; font-weight: 800; color: #3b82f6;" id="pet-def-val-${acc.line_uid}">--</div>
+                </div>
+                <div style="background: rgba(22, 163, 74, 0.1); border: 1px solid rgba(22, 163, 74, 0.25); border-radius: 6px; padding: 3px 2px;">
+                  <div style="font-size: 0.65rem; color: #86efac;">❤️ HP Max</div>
+                  <div style="font-size: 0.82rem; font-weight: 800; color: #22c55e;" id="pet-hp-val-${acc.line_uid}">--</div>
+                </div>
+                <div style="background: rgba(13, 148, 136, 0.1); border: 1px solid rgba(13, 148, 136, 0.25); border-radius: 6px; padding: 3px 2px;">
+                  <div style="font-size: 0.65rem; color: #5eead4;">💚 ฟื้นตัว</div>
+                  <div style="font-size: 0.82rem; font-weight: 800; color: #14b8a6;" id="pet-regen-val-${acc.line_uid}">--</div>
+                </div>
+              </div>
+
+              <!-- Upgrade Buttons Grid -->
+              <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px;">
+                <!-- ATK Upgrade -->
+                <div style="background: rgba(15, 23, 42, 0.5); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 6px; padding: 5px; text-align: center; display: flex; flex-direction: column; justify-content: space-between;">
+                  <div style="font-size: 0.72rem; font-weight: 700; color: #f87171;">⚔️ ATK <span style="font-weight:400; color:#94a3b8;">Lv.<b id="pet-up-atk-lv-${acc.line_uid}">0</b></span></div>
+                  <button class="btn-action-sm" id="btn-petup-atk-${acc.line_uid}" onclick="upgradePetStat('${acc.line_uid}', 'atk')" style="width: 100%; margin-top: 4px; background: #dc2626; color: #fff; border: none; border-radius: 4px; padding: 3px 0; font-size: 0.7rem; font-weight: 700; cursor: pointer;">+1 ATK</button>
+                </div>
+
+                <!-- DEF / HP Upgrade -->
+                <div style="background: rgba(15, 23, 42, 0.5); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 6px; padding: 5px; text-align: center; display: flex; flex-direction: column; justify-content: space-between;">
+                  <div style="font-size: 0.72rem; font-weight: 700; color: #60a5fa;">🛡️ DEF <span style="font-weight:400; color:#94a3b8;">Lv.<b id="pet-up-hp-lv-${acc.line_uid}">0</b></span></div>
+                  <button class="btn-action-sm" id="btn-petup-hp-${acc.line_uid}" onclick="upgradePetStat('${acc.line_uid}', 'hp')" style="width: 100%; margin-top: 4px; background: #2563eb; color: #fff; border: none; border-radius: 4px; padding: 3px 0; font-size: 0.7rem; font-weight: 700; cursor: pointer;">+1 DEF</button>
+                </div>
+
+                <!-- Reco Upgrade -->
+                <div style="background: rgba(15, 23, 42, 0.5); border: 1px solid rgba(20, 184, 166, 0.3); border-radius: 6px; padding: 5px; text-align: center; display: flex; flex-direction: column; justify-content: space-between;">
+                  <div style="font-size: 0.72rem; font-weight: 700; color: #2dd4bf;">💚 RECO <span style="font-weight:400; color:#94a3b8;">Lv.<b id="pet-up-reco-lv-${acc.line_uid}">0</b></span></div>
+                  <button class="btn-action-sm" id="btn-petup-reco-${acc.line_uid}" onclick="upgradePetStat('${acc.line_uid}', 'reco')" style="width: 100%; margin-top: 4px; background: #0d9488; color: #fff; border: none; border-radius: 4px; padding: 3px 0; font-size: 0.7rem; font-weight: 700; cursor: pointer;">+1 RECO</button>
+                </div>
+              </div>
+            </div>
+
             <div class="char-section-block">
               <div class="section-header-wrap">
                 <span class="section-title" style="color:#38bdf8; font-weight:700;">🥚 Bộ Sưu Tập Trứng Thú Cưng</span>
@@ -1647,6 +1763,8 @@ document.addEventListener('DOMContentLoaded', () => {
     renderCombatSummary(acc);
     renderCardBook(acc);
     renderEggBook(acc);
+    renderPetSection(acc);
+    updateHomeTabUI(acc);
 
     // Render tab contents based on active state
     const currentTab = activeTabs[acc.line_uid];
@@ -2932,3 +3050,352 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }, 1000);
 });
+
+// ── 🏡 Home Farm (Nông Trại & Trồng Cây) Helpers & Triggers ──
+function parseHomeSeeds(raw) {
+  if (!raw) return {};
+  if (typeof raw === 'object' && !Array.isArray(raw)) return raw;
+  let cur = raw;
+  for (let i = 0; i < 3; i++) {
+    if (typeof cur === 'string') {
+      try {
+        cur = JSON.parse(cur);
+      } catch (e) {
+        break;
+      }
+    }
+  }
+  if (cur && typeof cur === 'object' && !Array.isArray(cur)) return cur;
+  return {};
+}
+
+function updateHomeTabUI(acc) {
+  const p = acc.player || {};
+  const line_uid = acc.line_uid;
+
+  // 1. Home Level & Plots
+  const HOME_PLOT_LV = [20, 40, 60, 80, 100];
+  const lv = Math.max(1, p.home_lv | 0);
+  const plots = 1 + HOME_PLOT_LV.filter(q => lv >= q).length;
+  const totalHoles = plots * 16;
+
+  const elLv = document.getElementById(`home-lv-${line_uid}`);
+  if (elLv) elLv.textContent = lv;
+
+  const elPlots = document.getElementById(`home-plots-${line_uid}`);
+  if (elPlots) elPlots.textContent = plots;
+
+  const elTotal = document.getElementById(`home-total-${line_uid}`);
+  if (elTotal) elTotal.textContent = totalHoles;
+
+  // 2. Crops Status
+  let crops = [];
+  try {
+    const c = p.home_crops;
+    crops = Array.isArray(c) ? c : (typeof c === 'string' ? (JSON.parse(c || '[]') || []) : []);
+  } catch (e) {}
+
+  const usedHoles = crops.filter(c => c.p < plots).length;
+  const nowS = Date.now() / 1000;
+  const SEED_NAMES  = ['องุ่นป่า','ถั่วเลื้อย','พริกแดง','กะหล่ำปลี','ดอกมันเทศ','ใบหยก','ว่านหนาม','ข้าวสาลี','แอปเปิล','เลมอน','เชอร์รี่','มะพร้าว'];
+  const SEED_GROW_H = [1, 2, 4, 8, 16, 24];
+  const SEED_PRICE  = [80, 160, 400, 800, 1920, 3200];
+  const seedTier   = id => (((id - 1) / 4) | 0) + 1;
+  const seedGold   = id => ((id - 1) & 1) === 1;
+  const seedSprite = id => ((((id - 1) / 4) | 0) * 2) + (((id - 1) >> 1) & 1) + 1;
+  const seedPrice  = id => SEED_PRICE[seedTier(id) - 1] * (seedGold(id) ? 3 : 1);
+  const seedGrowS  = id => SEED_GROW_H[seedTier(id) - 1] * 3600;
+  const seedLabel  = id => (seedGold(id) ? '⭐' : '') + (SEED_NAMES[seedSprite(id) - 1] || 'Cây') + (seedGold(id) ? ' (Gold)' : '');
+
+  let ripeCount = 0, nextS = Infinity;
+  crops.forEach(c => {
+    const left = seedGrowS(c.s) - (nowS - c.t);
+    if (c.r || left <= 0) ripeCount++;
+    else nextS = Math.min(nextS, left);
+  });
+
+  const elUsed = document.getElementById(`home-used-${line_uid}`);
+  if (elUsed) elUsed.textContent = usedHoles;
+
+  const elRipe = document.getElementById(`home-ripe-${line_uid}`);
+  if (elRipe) elRipe.textContent = ripeCount;
+
+  const elNext = document.getElementById(`home-next-ripe-${line_uid}`);
+  if (elNext) {
+    if (nextS !== Infinity && nextS > 0) {
+      const minLeft = Math.max(1, Math.ceil(nextS / 60));
+      elNext.textContent = `⏳ Cây tiếp theo sẽ chín sau ~${minLeft} phút`;
+    } else if (ripeCount > 0) {
+      elNext.textContent = `✅ Có ${ripeCount} cây đã sẵn sàng thu hoạch!`;
+    } else {
+      elNext.textContent = `🌱 Tất cả các ô đất chưa trồng hoặc mới trồng`;
+    }
+  }
+
+  // 3. Toggles & Settings Sync
+  const chkHarvest = document.getElementById(`chk-autohomeharvest-${line_uid}`);
+  if (chkHarvest && document.activeElement !== chkHarvest) chkHarvest.checked = acc.settings.autoHomeHarvest !== false;
+
+  const chkPlant = document.getElementById(`chk-autohomeplant-${line_uid}`);
+  if (chkPlant && document.activeElement !== chkPlant) chkPlant.checked = acc.settings.autoHomePlant !== false;
+
+  const selPriority = document.getElementById(`sel-home-priority-${line_uid}`);
+  if (selPriority && document.activeElement !== selPriority) selPriority.value = acc.settings.homePlantPriority || 'highest_tier';
+
+  const chkUp = document.getElementById(`chk-autohomeup-${line_uid}`);
+  if (chkUp && document.activeElement !== chkUp) chkUp.checked = acc.settings.autoHomeUpgrade === true;
+
+  // 4. Seeds Inventory List
+  const seedsListEl = document.getElementById(`home-seeds-list-${line_uid}`);
+  if (seedsListEl) {
+    const seedsObj = parseHomeSeeds(p.home_seeds);
+    const seedIds = Object.keys(seedsObj).map(Number).filter(id => id >= 1 && id <= 24 && (parseInt(seedsObj[id]) || 0) > 0).sort((a, b) => b - a);
+
+    if (seedIds.length === 0) {
+      seedsListEl.innerHTML = `<div style="font-size: 0.78rem; color: #9ca3af; text-align: center; padding: 10px 0;">Chưa có hạt giống nào trong kho (Hạt giống tự động rớt khi săn quái trên bản đồ)</div>`;
+    } else {
+      seedsListEl.innerHTML = seedIds.map(id => {
+        const qty = parseInt(seedsObj[id]) || 0;
+        const isGold = seedGold(id);
+        const tier = seedTier(id);
+        const name = seedLabel(id);
+        const price = seedPrice(id);
+        return `
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 4px 0; border-bottom: 1px dashed rgba(255,255,255,0.06);">
+            <span style="font-size: 0.7rem; font-weight: 800; color: #fff; background: ${isGold ? '#b45309' : '#16a34a'}; border-radius: 4px; padding: 1px 5px; flex: none;">T${tier}</span>
+            <span style="font-size: 0.8rem; color: #f3f4f6; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${name}">${name}</span>
+            <b style="font-size: 0.8rem; color: #fbbf24; flex: none;">×${qty}</b>
+            <span style="font-size: 0.72rem; color: #94a3b8; flex: none;">(${price.toLocaleString()}G)</span>
+            <button onclick="triggerHomePlant('${line_uid}', ${id}, 0)" style="font-size: 0.72rem; font-weight: 700; border: none; border-radius: 4px; background: #16a34a; color: #fff; padding: 2px 6px; cursor: pointer; flex: none;">×1</button>
+            <button onclick="triggerHomePlant('${line_uid}', ${id}, 1)" style="font-size: 0.72rem; font-weight: 700; border: none; border-radius: 4px; background: #0891b2; color: #fff; padding: 2px 6px; cursor: pointer; flex: none;">Hết</button>
+          </div>
+        `;
+      }).join('');
+    }
+  }
+
+  // 5. Planted Crops Grid & Countdown List
+  const cropsListEl = document.getElementById(`home-crops-list-${line_uid}`);
+  if (cropsListEl) {
+    if (crops.length === 0) {
+      cropsListEl.innerHTML = `<div style="font-size: 0.78rem; color: #9ca3af; text-align: center; padding: 10px 0;">Tất cả luống đất đang trống</div>`;
+    } else {
+      cropsListEl.innerHTML = crops.map(c => {
+        const seedId = c.s || 1;
+        const holeIdx = (c.i != null) ? c.i : 0;
+        const left = seedGrowS(seedId) - (nowS - c.t);
+        const isRipe = c.r || left <= 0;
+        const name = seedLabel(seedId);
+        const isGold = seedGold(seedId);
+        const tier = seedTier(seedId);
+
+        let statusText = '';
+        if (isRipe) {
+          statusText = `<span style="color: #4ade80; font-weight: 700;">✅ Đã chín</span>`;
+        } else {
+          const minLeft = Math.max(1, Math.ceil(left / 60));
+          statusText = `<span style="color: #fbbf24;">⏳ ~${minLeft} phút nữa chín</span>`;
+        }
+
+        return `
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 4px 0; border-bottom: 1px dashed rgba(255,255,255,0.06); font-size: 0.76rem;">
+            <span style="font-weight: 700; color: #94a3b8; flex: none;">Luống #${holeIdx + 1}</span>
+            <span style="font-weight: 800; color: #fff; background: ${isGold ? '#b45309' : '#16a34a'}; border-radius: 4px; padding: 1px 5px; font-size: 0.68rem; flex: none;">T${tier}</span>
+            <span style="color: #f3f4f6; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${name}">${name}</span>
+            <span style="flex: none;">${statusText}</span>
+          </div>
+        `;
+      }).join('');
+    }
+  }
+}
+
+window.triggerHomeHarvest = async function(line_uid) {
+  try {
+    const res = await fetch(`/api/accounts/${line_uid}/action`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'home_harvest' })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      const hv = data.hv || {};
+      showToast(`🌾 Thu hoạch ${hv.n || 0} luống (+${(hv.g || 0).toLocaleString()} Gold)`);
+    } else {
+      showToast(`❌ Thu hoạch thất bại: ${data.error || 'Lỗi không xác định'}`, true);
+    }
+  } catch (e) {
+    showToast(`❌ Lỗi kết nối: ${e.message}`, true);
+  }
+};
+
+window.triggerHomePlant = async function(line_uid, seedId, all = 1) {
+  try {
+    const res = await fetch(`/api/accounts/${line_uid}/action`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'home_plant', extra: { seed: seedId, all: all ? 1 : 0 } })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      showToast(`🌱 Trồng hạt #${seedId} thành công`);
+    } else {
+      showToast(`❌ Trồng cây thất bại: ${data.error || 'Lỗi không xác định'}`, true);
+    }
+  } catch (e) {
+    showToast(`❌ Lỗi kết nối: ${e.message}`, true);
+  }
+};
+
+window.triggerHomeUpgrade = async function(line_uid) {
+  try {
+    const res = await fetch(`/api/accounts/${line_uid}/action`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'home_up' })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      showToast(`⬆️ Nâng cấp nhà thành công!`);
+    } else {
+      showToast(`❌ Nâng cấp nhà thất bại: ${data.error || 'Tài nguyên chưa đủ'}`, true);
+    }
+  } catch (e) {
+    showToast(`❌ Lỗi kết nối: ${e.message}`, true);
+  }
+};
+
+// 🐾 Pet Stats & Upgrade Helper
+function expNextPet(lv) {
+  if (lv >= 41) return 100000000 + (lv - 41) * 15000000;
+  let e = 100;
+  for (let k = 2; k <= lv; k++) {
+    const b = k <= 10 ? 1.50 : k <= 20 ? 1.45 : k <= 30 ? 1.40 : 1.35;
+    e = Math.round(e * b);
+  }
+  return e;
+}
+
+function _petLvInfoCalc(exp) {
+  let lv = 1, e = Math.max(0, Math.floor(Number(exp) || 0));
+  while (lv < 99) {
+    const need = expNextPet(lv);
+    if (e < need) break;
+    e -= need;
+    lv++;
+  }
+  return { lv, cur: e, need: expNextPet(lv) };
+}
+
+function renderPetSection(acc) {
+  const p = acc.player || {};
+  const line_uid = acc.line_uid;
+  const mid = (p.pet_mid | 0);
+
+  const elPts = document.getElementById(`pet-pts-${line_uid}`);
+  const elAtk = document.getElementById(`pet-atk-val-${line_uid}`);
+  const elDef = document.getElementById(`pet-def-val-${line_uid}`);
+  const elHp = document.getElementById(`pet-hp-val-${line_uid}`);
+  const elRegen = document.getElementById(`pet-regen-val-${line_uid}`);
+
+  const elUpAtkLv = document.getElementById(`pet-up-atk-lv-${line_uid}`);
+  const elUpHpLv = document.getElementById(`pet-up-hp-lv-${line_uid}`);
+  const elUpRecoLv = document.getElementById(`pet-up-reco-lv-${line_uid}`);
+
+  if (mid <= 0) {
+    if (elPts) elPts.textContent = 0;
+    if (elAtk) elAtk.textContent = '--';
+    if (elDef) elDef.textContent = '--';
+    if (elHp) elHp.textContent = '--';
+    if (elRegen) elRegen.textContent = '--';
+    if (elUpAtkLv) elUpAtkLv.textContent = 0;
+    if (elUpHpLv) elUpHpLv.textContent = 0;
+    if (elUpRecoLv) elUpRecoLv.textContent = 0;
+
+    ['atk', 'hp', 'reco'].forEach(st => {
+      const btn = document.getElementById(`btn-petup-${st}-${line_uid}`);
+      if (btn) {
+        btn.disabled = true;
+        btn.style.opacity = '0.5';
+        btn.style.cursor = 'not-allowed';
+      }
+    });
+    return;
+  }
+
+  // Lookup Pet Monster master info
+  const mm = (acc.mon_masters && acc.mon_masters[mid]) || (window.cachedMonMasters && window.cachedMonMasters[mid]) || {};
+
+  const monLv = mm.lv || (p.pet_olv | 0) || 1;
+  const batk = (p.pet_batk | 0) || (mm.batk | 0) || (monLv * 10) || 50;
+  const bhp = (p.pet_bhp | 0) || (mm.bhp | 0) || (monLv * 100) || 500;
+
+  // Calculate Pet level & EXP info from pet_exp
+  const petExp = parseInt(p.pet_exp) || 0;
+  const getPetLvInfo = (exp) => {
+    let lv = 1, req = 100, total = 0;
+    while (total + req <= exp && lv < 100) {
+      total += req;
+      lv++;
+      req = Math.floor(req * 1.15);
+    }
+    return { lv, cur: exp - total, need: req };
+  };
+
+  const info = getPetLvInfo(petExp);
+  const petLv = info.lv;
+  const mvp = (+p.pet_mvp || 0) ? 2 : 1;
+
+  const upAtk = p.pet_up_atk | 0;
+  const upHp = p.pet_up_hp | 0;
+  const upReco = p.pet_up_reco | 0;
+
+  const atk = Math.max(1, Math.round(batk * (2 + 0.20 * petLv + 0.30 * upAtk) * mvp));
+  const hpMax = Math.max(1, Math.round(0.5 * bhp * (1 + 0.25 * petLv) * mvp));
+  const def = Math.max(0, Math.round(((p.pet_olv | 0) + petLv + 2 * upHp) * mvp));
+  const regen = 1.0 + 0.20 * upReco;
+  const pts = Math.max(0, (petLv - 1) - upAtk - upHp - upReco);
+
+  // Update DOM
+  if (elPts) elPts.textContent = pts;
+  if (elAtk) elAtk.textContent = atk.toLocaleString();
+  if (elDef) elDef.textContent = def.toLocaleString();
+  if (elHp) elHp.textContent = hpMax.toLocaleString();
+  if (elRegen) elRegen.textContent = `${regen.toFixed(2)}%/s`;
+
+  if (elUpAtkLv) elUpAtkLv.textContent = upAtk;
+  if (elUpHpLv) elUpHpLv.textContent = upHp;
+  if (elUpRecoLv) elUpRecoLv.textContent = upReco;
+
+  // Enable/Disable buttons based on unallocated points
+  ['atk', 'hp', 'reco'].forEach(st => {
+    const btn = document.getElementById(`btn-petup-${st}-${line_uid}`);
+    if (btn) {
+      btn.disabled = pts <= 0;
+      btn.style.opacity = pts > 0 ? '1' : '0.5';
+      btn.style.cursor = pts > 0 ? 'pointer' : 'not-allowed';
+    }
+  });
+}
+
+window.upgradePetStat = async function(line_uid, stat) {
+  try {
+    const res = await fetch(`/api/accounts/${line_uid}/action`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'pet_up', extra: { stat: stat } })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      showToast(`✨ Cộng điểm Pet (${stat.toUpperCase()}) thành công!`);
+      if (window.fetchAccounts) window.fetchAccounts();
+    } else {
+      showToast(`❌ Cộng điểm Pet thất bại: ${data.error || 'Điểm không đủ'}`, true);
+    }
+  } catch (e) {
+    showToast(`❌ Lỗi kết nối: ${e.message}`, true);
+  }
+};
+
+
+

@@ -48,12 +48,15 @@ npm test
 ```
 
 ## Current Requirements
-1. Multi-account headless dashboard interface mimicking 100% of game panels (Core stats, Skills, Airship, Followers).
-2. Automation rules (Auto-Stats, Auto-Gear, Auto-Skills with priorities, Auto-Refills, Auto-Titan recharging).
+1. Multi-account headless dashboard interface mimicking 100% of game panels (Core stats, Skills, Airship, Followers, Home Farm, Pet Stats).
+2. Automation rules (Auto-Stats, Auto-Gear, Auto-Skills with priorities, Auto-Refills, Auto-Titan recharging, Auto-Home Farm harvest/plant/upgrade).
 3. Live terminal activities log per bot instance.
 4. Server-Side Idle Guard Bypass & Natural Act-Flag Jitter Engine (Anti-AFK & Anti-Bot Protection).
+5. Home Farm Engine: Tự động thu hoạch cây chín (`home_harvest`), trồng hạt theo ưu tiên (`home_plant`), và nâng nhà (`home_up`).
+6. Pet System: Hiển thị cấp độ, thanh EXP, chỉ số chiến đấu ATK/DEF/HP/RECO, và hỗ trợ cộng điểm Pet trực tiếp (`pet_up`).
 
 ## Hosting & Deployment Architecture
 - **Dynamic Domain Support**: The backend Express app uses `app.set('trust proxy', 1)` to automatically detect the client's real IP and HTTPS protocol behind reverse proxies (Nginx, Render, Heroku, Cloudflare). All client API calls use relative paths, and Bookmarklets fetch domain info dynamically using `window.location.origin` at the time of creation.
 - **Fail-safe Fallback Mechanics**: In case the game server blocks the backend proxy (e.g. returning Cloudflare captcha/challenge HTML pages) or the assets cannot be retrieved, the server automatically detects if the payload is HTML (using `starts with '<'`) or doesn't contain game scripts, and throws an error to fall back to serving local, pre-patched static files (`xhrpg_canvas.js`, `sdk.js`, `play.html`).
+
 

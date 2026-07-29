@@ -3,6 +3,16 @@
 > Work Breakdown Structure. Update task states immediately upon changes.
 > Statuses: todo | doing | blocked | review | done
 
+### [ ] T48 - Vấn đề Trứng Thú Cưng (Pet Eggs) chưa hiển thị / chưa giải quyết
+- Description: Tạm thời lưu vết vấn đề danh sách Trứng Thú Cưng (Pet Eggs) trong kho chưa đồng bộ/chưa hiển thị đầy đủ theo phản hồi từ người dùng để tiếp tục nghiên cứu và xử lý ở phiên làm việc tiếp theo.
+- Files related: `server.js`, `public/app.js`
+- Acceptance criteria:
+  - [ ] Nghiên cứu thêm cơ chế trả về dữ liệu `eggs` từ game server (API `xhrpg_game.php` / `xhrpg_pet.php` / `xhrpg_egg.php`).
+  - [ ] Đảm bảo dữ liệu trứng trong kho được bóc tách và hiển thị chuẩn danh sách các loại trứng.
+- Status: todo
+
+
+
 ### [x] T27 - Tự động hóa đồng bộ game script và dịch log tiếng Việt tự động
 - Description: Tự động tải file game script (xhrpg_canvas.js) mới nhất từ server game để cập nhật map/zone/skill khi khởi động hoặc đồng bộ, đồng thời tự động dịch log combat và nhặt đồ từ tiếng Thái sang tiếng Việt.
 - Files related: `server.js`
@@ -535,5 +545,17 @@
   - [x] Test: `node -c server.js`, `npm test` -> PASS 100%.
 - Status: done
 
-
-
+### [x] T47 - Cache Busting Tự Động Khi Update Code (Content Hash)
+- Description: Thay thế version tĩnh `?v=9.0` bằng cơ chế Content Hash tự động. Server tính MD5 hash 8 ký tự của `app.js` và `app.css` mỗi khi browser tải `/`, inject vào href/src trước khi trả về HTML. Chỉ bust cache khi file thực sự thay đổi.
+- Files related: `server.js`, `public/index.html`, `.agent/SKILL.md`
+- Acceptance criteria:
+  - [x] Thêm hàm `computeFileHash(filePath)` dùng MD5 trong `server.js`.
+  - [x] Đổi `express.static` sang `index: false` để tắt auto-serve `index.html`.
+  - [x] Thêm route `app.get('/')` inject hash vào `href="/app.css?v=..."` và `src="/app.js?v=..."` trước khi gửi HTML về browser.
+  - [x] `index.html` được set `Cache-Control: no-cache, no-store, must-revalidate`.
+  - [x] Tăng `maxAge` static files từ `7d` lên `30d`.
+  - [x] Xóa `?v=9.0` tĩnh khỏi `index.html`.
+  - [x] Hash tính lại mỗi request (hỗ trợ hot-reload).
+  - [x] Ghi lại quy trình deploy vào `.agent/SKILL.md`.
+  - [x] `node -c server.js`, `node -c public/app.js` → PASS 100%.
+- Status: done

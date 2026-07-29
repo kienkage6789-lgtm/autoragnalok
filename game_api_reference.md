@@ -124,6 +124,81 @@ Dưới đây là danh sách các API và Endpoint nội bộ của Server Bot M
 
 ---
 
+## 🏡 7. Hệ Thống Nông Trại (Home Farm System)
+
+Nông trại quản lý thông qua file PHP trung chuyển `/xhrpg_upgrade.php` (hoặc `/xhrpg_home.php` cho việc tham quan).
+
+### Cấu Trúc Dữ Liệu Player
+* `home_lv`: Cấp độ nhà nông trại (Lv.1 = 1 Plot = 16 ô đất).
+* `home_crops`: Mảng thông tin các luống đất đang trồng:
+  ```json
+  [
+    { "p": 0, "i": 0, "s": 7, "t": 1785335276 },
+    { "p": 0, "i": 1, "s": 4, "t": 1785335975 }
+  ]
+  ```
+  * `p`: Chỉ số Plot (0..4).
+  * `i`: Chỉ số ô đất trong Plot (0..15).
+  * `s`: Seed ID (1..24).
+  * `t`: Unix timestamp (giây) lúc gieo hạt.
+* `home_seeds`: Object số lượng hạt giống trong kho:
+  ```json
+  { "1": 72, "2": 13, "3": 80 }
+  ```
+* `home_return`: Vị trí bản đồ gốc khi rời Nông trại `{ map: 7, x: 999.25, y: 1040.85 }`.
+
+### Thời Gian Tăng Trưởng Cây Trồng theo Seed ID (`s`)
+* Tier 1 (ID 1-4): 1 giờ (3.600s)
+* Tier 2 (ID 5-8): 2 giờ (7.200s)
+* Tier 3 (ID 9-12): 4 giờ (14.400s)
+* Tier 4 (ID 13-16): 8 giờ (28.800s)
+* Tier 5 (ID 17-20): 16 giờ (57.600s)
+* Tier 6 (ID 21-24): 24 giờ (86.400s)
+
+### Endpoints Nông Trại (`/xhrpg_upgrade.php`)
+* **Thu hoạch & Bán**: `{ action: 'home_harvest' }`
+* **Gieo hạt**: `{ action: 'home_plant', seed: target_seed_id, all: 1 | 0 }`
+* **Nâng cấp nhà**: `{ action: 'home_up' }`
+
+---
+
+## 🐾 8. Hệ Thống Thú Cưng (Pet & Egg System)
+
+Tất cả các thao tác nâng cấp chỉ số Pet gửi POST tới `/xhrpg_upgrade.php`.
+
+### Cấu Trúc Dữ Liệu Player
+* `pet_mid`: ID quái vật Pet đang theo sau (`0` = chưa xuất chiến).
+* `pet_exp`: Tổng điểm kinh nghiệm Pet tích lũy (BIGINT).
+* `pet_mvp`: Cờ MVP của Pet (`1` = MVP, `0` = Thường).
+* `pet_olv`: Level quái vật gốc.
+* `pet_up_atk`, `pet_up_hp`, `pet_up_reco`: Số điểm đã cộng vào ATK, DEF/HP, Phục Hồi.
+* `pet_batk`, `pet_bhp`: Chỉ số ATK & HP cơ bản.
+
+### Công Thức Cốt Lõi Pet
+* **Công thức EXP Lên Cấp Pet (`expNextPet`)**:
+  ```javascript
+  function expNextPet(lv) {
+    if (lv >= 41) return 100000000 + (lv - 41) * 15000000;
+    let e = 100;
+    for (let k = 2; k <= lv; k++) {
+      const b = k <= 10 ? 1.50 : k <= 20 ? 1.45 : k <= 30 ? 1.40 : 1.35;
+      e = Math.round(e * b);
+    }
+    return e;
+  }
+  ```
+* **Số Điểm Nâng Cấp Khả Dụng (`st.pts`)**:
+  $$\text{st.pts} = \max\left(0, (\text{Pet Level} - 1) - (\text{pet\_up\_atk} + \text{pet\_up\_hp} + \text{pet\_up\_reco})\right)$$
+* **Chỉ Số Chiến Đấu**:
+  * $\text{ATK} = \max\left(1, \text{Math.round}(\text{pet\_batk} \times (2 + 0.20 \times \text{petLv} + 0.30 \times \text{pet\_up\_atk}) \times \text{mvp})\right)$
+  * $\text{DEF} = \max\left(0, \text{Math.round}((\text{pet\_olv} + \text{petLv} + 2 \times \text{pet\_up\_hp}) \times \text{mvp})\right)$
+  * $\text{HP Max} = \max\left(1, \text{Math.round}(0.5 \times \text{pet\_bhp} \times (1 + 0.25 \times \text{petLv}) \times \text{mvp})\right)$
+  * $\text{Regen} = 1.0 + 0.20 \times \text{pet\_up\_reco}\quad (\%/\text{giây})$
+
+### Endpoints Thú Cưng (`/xhrpg_upgrade.php`)
+* **Cộng điểm Pet**: `{ action: 'pet_up', stat: 'atk' | 'hp' | 'reco' }`
+
+---
 
 ## 🔍 Nơi tìm kiếm thông tin khi thiếu sót
 

@@ -2,6 +2,87 @@
 
 > Changelog of actual changes implemented.
 
+## 2026-07-29 - Sửa Triệt Để Root Cause Lọc Mất Dữ Liệu Nông Trại (`home_crops`, `home_seeds`) & Pet Info trong `server.js`
+- File đã đổi: [server.js](file:///C:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/autoragnalok/server.js).
+- Đã làm:
+  - Cập nhật handler `GET /api/accounts` trong `server.js`: Sử dụng `{ ...p, ...calculatedStats }` bảo toàn 100% thuộc tính của `p` từ game server `xhrpg_game.php`.
+  - Khắc phục triệt để lỗi lọc bỏ `home_crops`, `home_seeds`, `home_lv`, `home_guards`, `home_return`, `pet_mid`, `pet_exp`, `pet_mvp`, `pet_olv`, `pet_up_atk`, `pet_up_hp`, `pet_up_reco`, `pet_batk`, `pet_bhp`, `eggs` khi truyền dữ liệu lên Dashboard.
+- Đã test bằng: `npm test` → PASS 100%.
+
+---
+
+
+## 2026-07-29 - Tối ưu & Hoàn thiện Chức năng Home Nông Trại theo dữ liệu JSON thực tế (`home_crops`, `home_seeds`)
+- File đã đổi: [public/app.js](file:///C:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/autoragnalok/public/app.js).
+- Đã làm:
+  - **Bóc tách dữ liệu JSON Nông trại thực tế (`home_seeds` & `home_crops`)**:
+    - Hỗ trợ kho hạt dạng Object `{ 1: 72, 2: 13, 3: 80 }`: hiển thị đúng số lượng hạt tồn kho.
+    - Bóc tách mảng luống đất `home_crops` `[{ p: 0, i: 0, s: 7, t: 1785335276 }, ...]`: hiển thị danh sách chi tiết các luống `#1..#16` đang trồng kèm đếm ngược phút chín.
+  - **Chuẩn hóa thời gian tăng trưởng cây trồng**:
+    - Áp dụng thời gian tăng trưởng dựa theo Seed ID `s` (T1 = 1h, T2 = 2h, T3 = 4h, T4 = 8h, T5 = 16h, T6 = 24h).
+- Đã test bằng: `npm test` → PASS 100%.
+
+---
+
+
+## 2026-07-29 - Sửa lỗi & Hoàn thiện hiển thị Thông tin Pet (Cấp độ, Điểm `pts`, Chỉ số) và Kho Hạt Giống Nông Trại (`home_seeds`)
+- File đã đổi: [public/app.js](file:///C:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/autoragnalok/public/app.js).
+- Đã làm:
+  - **Khắc phục hiển thị Thông tin Pet (`renderPetSection`)**:
+    - Xử lý các trường hợp chưa ấp Pet (`pet_mid <= 0`): Tự động thông báo chưa có Pet và khóa các nút bấm cộng điểm.
+    - Xử lý khi có Pet active (`pet_mid > 0`): Tự động fallback tra cứu base stats `pet_batk` & `pet_bhp` từ `mon_masters` nếu server chưa trả về trong `player`. Tính toán chuẩn Pet Level (`lv`), % EXP, và điểm khả dụng `st.pts = (petLv - 1) - upAtk - upHp - upReco`.
+    - Đồng bộ hiển thị số điểm Pet khả dụng `st.pts`, chỉ số ATK/DEF/HP/RECO và 3 nút `+1 ATK`, `+1 DEF`, `+1 RECO`.
+  - **Khắc phục parse Kho Hạt Giống (`parseHomeSeeds`)**:
+    - Xây dựng hàm parser an toàn `parseHomeSeeds(raw)` bóc tách dữ liệu hạt giống kho `home_seeds` (hỗ trợ JSON string, object, double stringified JSON).
+    - Hiển thị danh sách hạt giống với đầy đủ phân loại Tier (T1-T6), hạt ⭐ Gold, tên hạt tiếng Việt, số lượng tồn kho và các nút gieo trồng `Trồng ×1` / `Trồng hết`.
+- Đã test bằng: `npm test` → PASS 100%.
+
+---
+
+
+## 2026-07-29 - Triển khai Cộng Điểm Pet (Pet Stat Upgrade) & Tăng 15-25% Cỡ Chữ Thẻ Bài / Trứng Thú Cưng
+- File đã đổi: [public/app.js](file:///C:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/autoragnalok/public/app.js), [public/app.css](file:///C:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/autoragnalok/public/app.css).
+- Đã làm:
+  - **Chức năng Cộng Điểm Pet (`public/app.js`)**:
+    - Thêm khung **🐾 Nâng Cấp Thú Cưng (Pet Stats)** vào sub-pane `subpane-eggs-*` (Tab `👤 Nhân Vật` ➔ `🥚 Trứng`).
+    - Tính toán & hiển thị chỉ số Pet theo server logic: ⚔️ **ATK**, 🛡️ **DEF**, ❤️ **HP Max**, 💚 **Phục hồi/s**, cùng số **Điểm Pet khả dụng (`st.pts`)**.
+    - Bổ sung 3 nút cộng điểm trực tiếp: `+1 ATK`, `+1 DEF`, `+1 RECO` gửi action `pet_up` tới API `/api/accounts/:line_uid/action`.
+    - Viết hàm `renderPetSection(acc)` và `upgradePetStat(line_uid, stat)` để đồng bộ trạng thái UI.
+  - **Tăng Cỡ Chữ Thẻ Bài & Trứng (+15% đến +25%) (`public/app.css`)**:
+    - Điều chỉnh font-size cho các selector `.card-mon-emoji` (0.78rem), `.card-mon-name` (0.62rem), `.card-mon-lv` (0.52rem), `.card-progress-badge` (0.52rem), `.card-type-subbox` (0.52rem), `.btn-exchange-mvp` (0.56rem), giúp hiển thị thông tin to rõ nét hơn.
+- Đã test bằng: `npm test` → PASS 100%.
+
+---
+
+
+## 2026-07-29 - Triển khai Bảng điều khiển Home (Nông Trại & Trồng Cây, Thu Hoạch & Auto Bot)
+- File đã đổi: [server.js](file:///C:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/autoragnalok/server.js), [public/app.js](file:///C:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/autoragnalok/public/app.js), [public/app.css](file:///C:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/autoragnalok/public/app.css).
+- Đã làm:
+  - **Auto Home Farm Engine (`server.js`)**:
+    - Bổ sung cấu hình mặc định: `autoHomeHarvest: true`, `autoHomePlant: true`, `homePlantPriority: 'highest_tier'`, `autoHomeUpgrade: false`.
+    - Bổ sung Step 8 trong `BotInstance.prototype.poll()` xử lý tự động thu hoạch cây chín (`home_harvest`), tự động gieo hạt khả dụng (`home_plant`) theo ưu tiên (Highest Tier T6➔T1, Gold First ⭐, Lowest Tier), và tự động nâng cấp nhà (`home_up`) khi tích đủ tài nguyên.
+  - **Giao diện Dashboard Nông Trại (`public/app.js`)**:
+    - Thêm Tab **`🏡 Nông Trại`** trên card tài khoản với thẻ Overview Nông trại: Hiển thị level nhà (`home_lv`), số ô plots mở (`plots/6`), số luống đã trồng (`used/total`), số cây chín sẵn sàng thu hoạch, thời gian cây tiếp theo chín.
+    - Bảng danh sách hạt giống trong kho: hiển thị các loại hạt (T1-T6, Gold ⭐), số lượng tồn kho, giá bán Gold, cùng các nút bấm `Trồng ×1` và `Trồng hết`.
+    - Thao tác thủ công: `🌾 Thu hoạch & Bán`, `⬆️ Nâng nhà`, `Trồng ×1` / `Trồng hết`.
+  - **Mở rộng giao diện (+10%) (`public/app.css`)**: Tăng `max-width` của `.app-main` từ `1600px` lên `1760px` (+10% diện tích) giúp tăng không gian hiển thị thông tin các thẻ tài khoản.
+- Đã test bằng: `npm test` → PASS 100%.
+
+---
+
+
+## 2026-07-29 - Cache Busting Tự Động Cho app.js và app.css (T47)
+- File đã đổi: [server.js](file:///C:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/autoragnalok/server.js), [public/index.html](file:///C:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/autoragnalok/public/index.html), [.agent/SKILL.md](file:///C:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/autoragnalok/.agent/SKILL.md).
+- Đã làm:
+  - **Hàm Tính Hash Content (`computeFileHash`)**: Triển khai hàm đọc file và băm MD5 cho `app.js` và `app.css` để sinh chuỗi hash ngắn (8 ký tự).
+  - **Tích Hợp Dynamic Inject Link/Script vào Route `/`**: Thay thế auto-serve tĩnh `index.html` của Express bằng route custom. Khi người dùng truy cập trang chủ, server đọc `index.html` gốc, regex thay thế các đường dẫn `/app.css` và `/app.js` thành link động kèm tham số phiên bản `?v=<hash>` (ví dụ: `app.js?v=a3f9c2`), đảm bảo luôn render HTML chứa phiên bản mới nhất.
+  - **Cấu hình Cache Control Cho index.html**: Thêm các header vô hiệu hóa cache (`no-cache, no-store, must-revalidate`) cho route `/` để trình duyệt không lưu lại bản sao cũ của HTML.
+  - **Tối Ưu Browser Cache Cho Assets**: Nâng thời hạn cache (`maxAge`) của static resources lên `30d` để tối ưu tải trang và băng thông, do cơ chế băm nội dung đã loại trừ rủi ro bị stale cache.
+  - **Cập Nhật SKILL.md**: Ghi nhận cơ chế và quy trình cache busting tự động vào tài liệu phát triển nội bộ để hướng dẫn dev tiếp theo.
+- Đã test bằng: `node -c server.js` và `node -c public/app.js` → PASS 100%.
+
+---
+
 ## 2026-07-29 - Tự động tải game script, Dịch log tiếng Việt, Sửa lỗi Cloudflare cdn-cgi & Tự cập nhật fallback
 - File đã đổi: [server.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/autoragnalok/server.js).
 - Đã làm:

@@ -62,3 +62,27 @@ Không cần tạo đủ 4 file `.agent/`, nhưng vẫn bắt buộc:
 - Trước khi sửa file, luôn `view` lại bản mới nhất — không dựa vào bản đã xem từ nhiều lượt trước (có thể đã đổi).
 - Khi không chắc yêu cầu, ghi giả định vào `DECISIONS.md` thay vì im lặng đoán.
 - Mỗi lượt trả lời cho task lớn nên kết thúc bằng việc cập nhật `TASKS.md`/`CHANGELOG.md` — đừng để đến "cuối cùng mới ghi", vì phiên có thể bị ngắt bất cứ lúc nào.
+
+## Cache Busting Tự Động (Quy Trình Deploy)
+
+Dự án dùng **Content Hash tự động** — không cần thao tác thủ công khi update code.
+
+### Cơ chế hoạt động
+- Khi user truy cập `/`, server đọc `public/app.js` và `public/app.css`, tính MD5 hash 8 ký tự, rồi inject vào HTML trước khi trả về:
+  ```html
+  <link rel="stylesheet" href="/app.css?v=b81d44">
+  <script src="/app.js?v=a3f9c2"></script>
+  ```
+- `app.js`/`app.css` được serve với `maxAge: 30d` (cache dài) — hash khác nhau = URL khác nhau = browser tự tải lại.
+- `index.html` luôn trả về `Cache-Control: no-cache` — browser không bao giờ cache HTML.
+
+### Quy trình khi deploy code mới
+1. Sửa code (`app.js`, `app.css`, `server.js`, ...).
+2. Restart server (`npm start`).
+3. **Xong** — browser user tự nhận code mới khi tải lại trang. Không cần Ctrl+F5, không cần sửa version tay.
+
+### Lưu ý khi sửa code
+- **Không** thêm `?v=xxx` thủ công vào `<script>` hay `<link>` trong `index.html` — server tự làm.
+- Hàm thực thi: `computeFileHash()` trong `server.js` (~dòng 586).
+- Route xử lý: `app.get('/', ...)` trong `server.js` (ngay sau `express.static`).
+- Nếu dùng **nodemon**: hash được tính lại mỗi request (không cần lo stale hash).

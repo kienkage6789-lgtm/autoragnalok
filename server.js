@@ -583,11 +583,53 @@ app.use(compression({
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(express.static(path.join(__dirname, 'public'), {
-  maxAge: '7d',
+const PUBLIC_DIR = path.join(__dirname, 'public');
+
+// Cache Busting: tính MD5 hash nội dung file — chỉ bust cache khi file thực sự thay đổi
+function computeFileHash(filePath) {
+  try {
+    const content = fs.readFileSync(filePath);
+    return crypto.createHash('md5').update(content).digest('hex').slice(0, 8);
+  } catch {
+    return Date.now().toString(36); // fallback nếu không đọc được file
+  }
+}
+
+// Static files (JS/CSS/assets) với maxAge dài — hash đảm bảo cache bust tự động
+// index: false để route bên dưới xử lý việc inject hash vào index.html
+app.use(express.static(PUBLIC_DIR, {
+  maxAge: '30d',
   etag: true,
-  lastModified: true
+  lastModified: true,
+  index: false,
 }));
+
+// Serve index.html với asset version hash được inject động vào href/src
+// Hash được tính lại mỗi request để hỗ trợ hot-reload (nodemon, v.v.)
+app.get('/', (req, res) => {
+  try {
+    const cssHash = computeFileHash(path.join(PUBLIC_DIR, 'app.css'));
+    const jsHash  = computeFileHash(path.join(PUBLIC_DIR, 'app.js'));
+    let html = fs.readFileSync(path.join(PUBLIC_DIR, 'index.html'), 'utf8');
+    html = html.replace(
+      /href="\/app\.css(\?[^"]*)?"/g,
+      `href="/app.css?v=${cssHash}"`
+    );
+    html = html.replace(
+      /src="\/app\.js(\?[^"]*)?"/g,
+      `src="/app.js?v=${jsHash}"`
+    );
+    // index.html không bao giờ được cache — luôn trả về hash mới nhất
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
+  } catch (err) {
+    console.error('[Cache] Lỗi khi serve index.html:', err.message);
+    res.status(500).send('Server error loading dashboard');
+  }
+});
 
 // Path to storage files
 const ACCOUNTS_FILE = path.join(__dirname, 'accounts.json');
@@ -862,7 +904,11 @@ class BotInstance {
       mvpPriorityMode: 'distance',
       mvpNamePriority: '',
       mvpNameBlacklist: '',
-      autoArena: false
+      autoArena: false,
+      autoHomeHarvest: true,
+      autoHomePlant: true,
+      homePlantPriority: 'highest_tier',
+      autoHomeUpgrade: false
     };
   }
 
@@ -1736,6 +1782,129 @@ class BotInstance {
         }
       } catch (err) {
         console.error(`Auto Arena error for ${this.name}:`, err);
+      }
+    }
+
+    // 8. Auto Home (Nông trại: Harvest, Plant, Upgrade)
+    if (this.player && (this.settings.autoHomeHarvest || this.settings.autoHomePlant || this.settings.autoHomeUpgrade)) {
+      try {
+        const lv = Math.max(1, this.player.home_lv | 0);
+        const HOME_PLOT_LV = [20, 40, 60, 80, 100];
+        const plots = 1 + HOME_PLOT_LV.filter(q => lv >= q).length;
+        const totalHoles = plots * 16;
+        
+        let crops = [];
+        try {
+          const c = this.player.home_crops;
+          crops = Array.isArray(c) ? c : (typeof c === 'string' ? (JSON.parse(c || '[]') || []) : []);
+        } catch (e) {}
+
+        const nowS = Date.now() / 1000;
+        const SEED_GROW_H = [1, 2, 4, 8, 16, 24];
+        const seedGrowS = id => (SEED_GROW_H[((((id - 1) / 4) | 0))] || 1) * 3600;
+
+        // A. Auto Harvest
+        if (this.settings.autoHomeHarvest && crops.length > 0) {
+          const ripeCount = crops.filter(c => {
+            if (c.r === true) return true;
+            const left = seedGrowS(c.s) - (nowS - c.t);
+            return left <= 0;
+          }).length;
+
+          if (ripeCount > 0) {
+            this.addLog('SYSTEM', `🌾 [Auto Home] Thu hoạch ${ripeCount} luống cây đã chín`);
+            const res = await this.sendRequest('https://ragnalok.online/human/xhrpg_upgrade.php', {
+              line_uid: this.line_uid,
+              session_token: this.session_token,
+              action: 'home_harvest'
+            });
+            if (res && res.ok) {
+              this.player = res.player || this.player;
+              const hv = res.hv || {};
+              this.addLog('SUCCESS', `Thu hoạch thành công: ${hv.n || ripeCount} luống (+${(hv.g || 0).toLocaleString()} Gold)`);
+            }
+          }
+        }
+
+        // B. Auto Plant
+        if (this.settings.autoHomePlant) {
+          try {
+            const c = this.player.home_crops;
+            crops = Array.isArray(c) ? c : (typeof c === 'string' ? (JSON.parse(c || '[]') || []) : []);
+          } catch (e) {}
+
+          const usedHoles = crops.filter(c => c.p < plots).length;
+          if (usedHoles < totalHoles) {
+            let seeds = {};
+            try {
+              const s = this.player.home_seeds;
+              seeds = (s && typeof s === 'object' && !Array.isArray(s)) ? s : (typeof s === 'string' ? (JSON.parse(s || '{}') || {}) : {});
+            } catch (e) {}
+
+            const availSeedIds = Object.keys(seeds).map(Number).filter(id => id >= 1 && id <= 24 && seeds[id] > 0);
+            if (availSeedIds.length > 0) {
+              const priority = this.settings.homePlantPriority || 'highest_tier';
+              const seedTier = id => (((id - 1) / 4) | 0) + 1;
+              const seedGold = id => ((id - 1) & 1) === 1;
+
+              availSeedIds.sort((a, b) => {
+                if (priority === 'gold_first') {
+                  if (seedGold(a) !== seedGold(b)) return seedGold(b) ? 1 : -1;
+                  return seedTier(b) - seedTier(a);
+                } else if (priority === 'lowest_tier') {
+                  return seedTier(a) - seedTier(b);
+                } else {
+                  if (seedTier(a) !== seedTier(b)) return seedTier(b) - seedTier(a);
+                  return b - a;
+                }
+              });
+
+              const targetSeed = availSeedIds[0];
+              this.addLog('SYSTEM', `🌱 [Auto Home] Trồng tự động hạt giống ID #${targetSeed}`);
+              const res = await this.sendRequest('https://ragnalok.online/human/xhrpg_upgrade.php', {
+                line_uid: this.line_uid,
+                session_token: this.session_token,
+                action: 'home_plant',
+                seed: targetSeed,
+                all: 1
+              });
+              if (res && res.ok) {
+                this.player = res.player || this.player;
+                this.addLog('SUCCESS', `Trồng thành công hạt giống ID #${targetSeed}`);
+              }
+            }
+          }
+        }
+
+        // C. Auto Upgrade Home
+        if (this.settings.autoHomeUpgrade) {
+          const lv = Math.max(1, this.player.home_lv | 0);
+          if (lv < 100 && lv < ((this.player.lv | 0) + 5)) {
+            const t = lv + 1;
+            const tierRes = (lvl) => Math.min(20, Math.ceil(lvl / 5));
+            const tierGold = (lvl) => Math.min(20, Math.ceil(lvl / 5)) * 100;
+            const upgMult = (lvl) => 1 + (lvl - 1) * 0.15;
+            const m = upgMult(t);
+            const r = Math.ceil(tierRes(t) * m) * 10;
+            const costGold = Math.ceil(tierGold(t) * m) * 10;
+
+            if ((this.player.gold|0) >= costGold && (this.player.wood|0) >= r && (this.player.stone|0) >= r &&
+                (this.player.iron|0) >= r && (this.player.copper|0) >= r && (this.player.herb|0) >= r) {
+              this.addLog('SYSTEM', `⬆️ [Auto Home] Nâng cấp nhà lên Lv.${lv + 1}`);
+              const res = await this.sendRequest('https://ragnalok.online/human/xhrpg_upgrade.php', {
+                line_uid: this.line_uid,
+                session_token: this.session_token,
+                action: 'home_up'
+              });
+              if (res && res.ok) {
+                this.player = res.player || this.player;
+                this.addLog('SUCCESS', `Nâng cấp nhà lên Lv.${this.player.home_lv} thành công!`);
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.error(`Auto Home error for ${this.name}:`, err);
       }
     }
   }
@@ -2815,13 +2984,9 @@ app.get('/api/accounts', requireAuth, (req, res) => {
             const dodge_pct = Math.min(75, Math.floor(agiEff / 3));
 
             return {
-              lv: p.lv,
-              hp: p.hp,
-              hp_max: p.hp_max,
+              ...p,
               hp_max_eff,
-              mp: p.mp,
               mp_max_calc,
-              armor: p.armor,
               armor_max_calc,
               str: p.str ?? 5,
               agi: p.agi ?? 5,
@@ -2842,21 +3007,6 @@ app.get('/api/accounts', requireAuth, (req, res) => {
               crit_pct,
               def_calc,
               dodge_pct,
-              exp: p.exp,
-              gold: p.gold,
-              wood: p.wood,
-              stone: p.stone,
-              iron: p.iron,
-              copper: p.copper,
-              herb: p.herb,
-              x: p.x,
-              y: p.y,
-              map: p.map,
-              armor_lv: p.armor_lv,
-              stat_pts: p.stat_pts,
-              skill_pts: p.skill_pts,
-              mine_lv: p.mine_lv,
-              house_lv: p.house_lv,
               skills: p.skills || '{}',
               skill_auto: p.skill_auto || '{}',
               cards: p.cards || '{}',

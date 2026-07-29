@@ -7,7 +7,20 @@ const xhrpg = (() => {
   const TILE    = 16;
   const GUN_RANGE_BONUS_PX = 18; // +6m ระยะปืนทุกชนิด (sync กับ PHP XHRPG_GUN_RANGE_BONUS_PX)
   const AXE_AOE_N = 6;           // 🪓 ขวานไททันโดนพร้อมกันกี่ตัว (sync PHP XHRPG_AOE_MAX)
-  const AXE_AOE_M = 15;          // 🪓 รัศมี AOE ขวาน (m) — คงที่ทุกเลเวล (sync PHP XHRPG_AXE_AOE_M)
+  // 🎯 สูตร AOE กลางของทั้งเกม — sync PHP xhrpg_aoe_m() (15m + 0.1m/Lv ทุกแหล่ง)
+  //    ⚠️ ทุกจุดที่โชว์รัศมี AOE ต้องเรียก aoeM() ห้ามเขียนสูตรซ้ำ (เดิมกระจาย 5 ที่ แก้ทีต้องไล่ครบ)
+  const AOE_BASE_M = 15, AOE_PER_LV_M = 0.1;
+  const aoeM = lv => AOE_BASE_M + Math.max(0, (lv | 0) - 1) * AOE_PER_LV_M;
+  const axeAoeM = lv => aoeM(lv);   // 🪓 ขวานไททันใช้สูตรเดียวกับ Premium (เจ้าของเคาะ 2026-07-29)
+  // 🧲 ดึงมอน — sync PHP XHRPG_PULL_R_M / XHRPG_PULL_N (100m · สูงสุด 6 ตัว ทุกแหล่ง)
+  //    ⚠️ ทุกป้ายที่โชว์ตัวเลขนี้ต้องอ่านจากตรงนี้ ห้ามพิมพ์เลขดิบ (การ์ดอัศวินเคยค้าง "12" หลังลดเหลือ 6)
+  const PULL_R_M = 100, PULL_N = 6;
+  const ROBOT_ENERGY_PER_LV = 26; // ⚡ พลังงานไททันที่ได้ต่อเลเวล (sync PHP XHRPG_ROBOT_ENERGY_PER_LV · 20→26 เจ้าของสั่ง 2026-07-29)
+  // 🍀 LUK เพิ่มอัตราดรอปของหายาก — ทุก 10 LUK = +1% บวกรวมถังเดียวกับ VIP/PREMIUM (sync PHP xhrpg_drop_mult)
+  const LUK_DROP_PER = 10, LUK_DROP_PCT = 1;
+  const lukDropPct = luk => Math.floor(Math.max(0, luk | 0) / LUK_DROP_PER) * LUK_DROP_PCT;
+  // ⏱️ AGI ลดคูลดาวน์สกิล — AGI/6 % เพดาน 50% (sync PHP: min(0.5, agi/600))
+  const agiCdPct = agi => Math.min(50, Math.max(0, agi | 0) / 6);
   const AMMO_YIELD = 3;         // ผลิต 1 หน่วย → ได้ 3 นัด (sync กับ PHP XHRPG_AMMO_YIELD)
   const AMMO_YIELD_PISTOL = 5;  // ปืนสั้น 5 นัด/หน่วย (sync กับ PHP XHRPG_AMMO_YIELD_BY_GUN)
   const AMMO_YIELD_T1 = 10;     // T1 ทุกปืน 10 นัด/หน่วย (sync กับ PHP XHRPG_AMMO_YIELD_T1)
@@ -298,6 +311,21 @@ const xhrpg = (() => {
     { key:'hs05', g:'shinobi', name:'นักเวทแมวราตรี',    price:3399 }, // หูแมว+หางดำ มีท่าร่ายเวท
     { key:'hs04', g:'shinobi', name:'จิ้งจอกคลั่ง',       price:3499 }, // หูจิ้งจอก+หางทองพลิ้วใหญ่
   ];
+  // ══ 📏 สกิน Premium วาดใหญ่กว่าสกินเริ่มต้น 10-30% ตามราคา (เจ้าของสั่ง 2026-07-29) ══
+  //    3,499 P (แพงสุดที่ระบบอนุญาต) = +30% · 100 P (ถูกสุดที่ระบบอนุญาต) = +10% · ระหว่างนั้นไล่เป็นเส้นตรง
+  //    สกินฟรี (key '') = ×1 เสมอ — เป็นตัวเทียบ · ตัวคูณนี้เป็น "คอสเมติกล้วน" ไม่แตะ hitbox/ระยะ/ดาเมจ
+  //    ⚠️ helper กลางตัวเดียวใช้ทั้งไททัน/ฮีโร่/คู่หู — เพิ่มสกินใหม่แค่ใส่ราคาใน DEFS ก็ได้ขนาดเอง ไม่ต้องแก้โค้ดวาด
+  const SKIN_BIG_LO = 0.10, SKIN_BIG_HI = 0.30, SKIN_PRICE_LO = 100, SKIN_PRICE_HI = 3499;
+  function _skinBigMul(price) {
+    const p = +price || 0;
+    if (p <= 0) return 1;
+    const t = Math.max(0, Math.min(1, (p - SKIN_PRICE_LO) / (SKIN_PRICE_HI - SKIN_PRICE_LO)));
+    return 1 + SKIN_BIG_LO + (SKIN_BIG_HI - SKIN_BIG_LO) * t;
+  }
+  const _skinBigOf = (defs, key) => { if (!key) return 1; const d = defs.find(x => x.key === key); return d ? _skinBigMul(d.price) : 1; };
+  const _robotBig = key => _skinBigOf(SKIN_DEFS, key);      // 🤖 ไททัน
+  const _heroBig  = key => _skinBigOf(HERO_SKIN_DEFS, key); // 🥋 ฮีโร่
+  const _petBig   = key => _skinBigOf(PET_SKIN_DEFS, key);  // 🐾 คู่หู (คูณทับ _PET_SIZE_MUL ที่ปรับชีทให้เท่ากันก่อนแล้ว)
   const TH_STATES = ['idle','walk','run','attack','walk_atk','run_atk','hurt','death']; // 8 ท่าของชีท thrower (th_* และ hs_{skin}_*)
   function _heroRollOf(key) { return _rollGlobal(player?.hero_skin_stats); }
   function _petRollOf(key) { return _rollGlobal(player?.pet_skin_stats); }
@@ -1731,11 +1759,11 @@ const xhrpg = (() => {
   //    (ตอนขยาย 10 → 15 ต้องไล่แก้ min(10,…) ถึง 15 จุดฝั่ง server — const นี้กันไม่ให้เกิดซ้ำ · docs/vip-11-15-design.md)
   const VIP_MAX = 15;
   // 😴 เพดานพักจอเป็น "นาที" ต่อระดับ VIP — ดัชนี = ระดับ (0..VIP_MAX) · มิเรอร์ XHRPG_VIP_IDLE_MIN ฝั่ง server
-  //    เจ้าของปรับรอบ 5 (2026-07-28): เส้นไม่เป็นสูตรเดียว (VIP1-5 ทีละ +5 · VIP6-9 ทีละ +10 · VIP10 กระโดด 90 · VIP11+ ทีละ +30) → เก็บเป็นตาราง
-  const VIP_IDLE_MIN = [10, 15, 20, 25, 30, 35, 45, 55, 65, 75, 90, 120, 150, 180, 210, 240];
+  //    เจ้าของปรับรอบ 7 (2026-07-29): บวกอีก +15 นาทีให้ทุกระดับ VIP0-15 (รูปเส้นเดิม แค่ยกทั้งแถบขึ้น)
+  const VIP_IDLE_MIN = [30, 35, 40, 45, 50, 55, 65, 75, 85, 95, 105, 135, 165, 195, 225, 255];
   // 🪓 เอฟเฟกต์วง AOE ขวานไททัน — ปิดชั่วคราว (เจ้าของสั่ง 2026-07-28 "ขวานหมุนๆ บนแผนที่ มันแปลกๆ")
   //    ปิดแค่ภาพเท่านั้น ดาเมจ AOE ยังทำงานครบ (คิดฝั่ง server) · เปิดคืน = เปลี่ยนเป็น true
-  const AXE_AOE_FX = false;
+  const AXE_AOE_FX = true;  // ▶️ เปิดคืน 2026-07-29 — ย้ายจาก "ขวานหมุนกลางแมพ" มาเป็น "ขวานหมุนรอบตัวหุ่น" (เจ้าของสั่ง)
   function _idleCutMin(vipLv) {
     const v = Math.max(0, Math.min(VIP_MAX, vipLv | 0));
     return VIP_IDLE_MIN[v] !== undefined ? VIP_IDLE_MIN[v] : VIP_IDLE_MIN[0];
@@ -2211,7 +2239,7 @@ const xhrpg = (() => {
     const sheet = (moving && dw && dw.complete && dw.naturalWidth) ? dw : (di && di.complete && di.naturalWidth ? di : dw);
     const fh = sheet.naturalHeight, frames = Math.max(1, Math.round(sheet.naturalWidth / fh));
     const fi = Math.floor(Date.now() / (moving ? 140 : 240)) % frames; // จังหวะขาช้าลง = เดินเทียบผู้เล่น ไม่เหมือนสปรินต์
-    const sz = 22 * 1.43 * scale * (_PET_SIZE_MUL[_psk] || 1); // ขนาดสัตว์เลี้ยง (+43%) · linhui ×2
+    const sz = 22 * 1.43 * scale * (_PET_SIZE_MUL[_psk] || 1) * _petBig(_psk); // ขนาดสัตว์เลี้ยง (+43%) · linhui ×2
     ctx.save(); ctx.imageSmoothingEnabled = false; ctx.translate(s.x, s.y);
     if (_dogFace < 0) ctx.scale(-1, 1); // sprite หันขวา default → พลิกเมื่อวิ่งไปซ้าย
     ctx.drawImage(sheet, fi * fh, 0, fh, fh, -sz / 2, -sz / 2, sz, sz);
@@ -2240,7 +2268,7 @@ const xhrpg = (() => {
     const sheet = (moving && dw && dw.complete && dw.naturalWidth) ? dw : (di && di.complete && di.naturalWidth ? di : dw);
     const fh = sheet.naturalHeight, frames = Math.max(1, Math.round(sheet.naturalWidth / fh));
     const fi = Math.floor(Date.now() / (moving ? 140 : 240)) % frames;
-    const sz = 22 * 1.43 * scale * (_PET_SIZE_MUL[_psk] || 1); // เท่า pet เราเอง (+43%) · linhui ×2
+    const sz = 22 * 1.43 * scale * (_PET_SIZE_MUL[_psk] || 1) * _petBig(_psk); // เท่า pet เราเอง (+43%) · linhui ×2
     ctx.save(); ctx.globalAlpha = o.is_dead ? 0.35 : 1.0; ctx.imageSmoothingEnabled = false; ctx.translate(s.x, s.y);
     if (st.face < 0) ctx.scale(-1, 1);
     ctx.drawImage(sheet, fi * fh, 0, fh, fh, -sz / 2, -sz / 2, sz, sz);
@@ -2544,7 +2572,7 @@ const xhrpg = (() => {
     const _tp = smoothed('knight', _kx, _ky);
     const s = toScreen(_tp.x, _tp.y);
     // 💠 Frost Aura — วงกลมฟ้าอ่อนติดตัวตลอด (รัศมีจริง 10m + 0.1m/Lv · sync server $_knAoe) · pulse เบาๆ (วาดใต้ตัว)
-    const _knAoePx = (10 + 0.1 * ((parseInt(player.knight_lv) || 1) - 1)) * 3; // เดิม 90px คงที่
+    const _knAoePx = aoeM(parseInt(player.knight_lv) || 1) * 3;   // 🎯 สูตร AOE กลาง
     ctx.save();
     ctx.globalAlpha = 0.14 + 0.08 * Math.abs(Math.sin(Date.now() / 450));
     ctx.fillStyle = '#7dd3fc';
@@ -2962,7 +2990,7 @@ const xhrpg = (() => {
     ctx.font = `${fs}px serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    _drawTagName(_robotSkinName(player.robot_skin), player.display_name, s.x, s.y - 33 * scale, true, scale); // ชื่อหุ่น + เจ้าของ (เรา = ขาว)
+    _drawTagName(_robotSkinName(player.robot_skin), player.display_name, s.x, s.y - 33 * scale * _robotBig(player.robot_skin), true, scale); // ชื่อหุ่น + เจ้าของ (เรา = ขาว)
     // วาดไททันเมค่า (sprite) หันหน้าเข้าเป้า + idle animation · fallback 🤖
     const _drawMech = (alpha) => {
       // ขยับอยู่ไหม (จาก smoothed robot: ยังไหลเข้าหาเป้า = เดิน)
@@ -2981,7 +3009,7 @@ const xhrpg = (() => {
       }
       const fh = sheet.naturalHeight, frames = Math.max(1, Math.round(sheet.naturalWidth / fh));
       const fi = Math.floor(Date.now() / (_atk ? 52 : (rmoving ? 90 : 180))) % frames; // โจมตีเฟรมเร็วสุด (เล่น swing ให้ครบใน ~700ms)
-      const sz = 62 * scale; // +30% อีก (เดิม 48)
+      const sz = 62 * scale * _robotBig(_skin); // +30% อีก (เดิม 48) × ตัวคูณสกิน Premium ตามราคา
       // หันหน้า: หามอนใกล้ไททันสุด (ไม่มี → ตามผู้เล่น) — sprite หันซ้ายเป็น default
       let tgx = player.x;
       let best = Infinity;
@@ -3449,7 +3477,7 @@ const xhrpg = (() => {
       } else { _strideT = 0; tfi = Math.floor(_now / _thLoop) % tcols; }
       const _isAtkSheet = (_thKey === 'th_attack' || _thKey === 'th_walk_atk' || _thKey === 'th_run_atk'); // ชีทท่าโจมตีของ sw7-9 เรียงแถวปกติ (ห้าม swap) · เช็คจาก _thKey สุดท้าย (หลังอาจถูกสลับกลับเป็น walk/run)
       const trow = Math.min(_thRowSwap(_thRow(ang), _thLastSkin, _isAtkSheet), trows - 1); // แถวทิศจากมุมหัน + สลับซ้าย/ขวาตามชีทสกิน lvl7-9 (เฉพาะ walk/idle/run · กันชีทแถวขาด)
-      const dth  = TH_FRAME * TH_SCALE * scale * (HERO_SIZE_MUL[player.hero_skin] || 1); // กล่องวาด 64×TH_SCALE × ตัวคูณสกิน (sw4-6 +15% · sw7-9 +30%) — เท้าคงตรึงพื้น (topY สเกลตาม dth)
+      const dth  = TH_FRAME * TH_SCALE * scale * _heroBig(player.hero_skin); // กล่องวาด 64×TH_SCALE × ตัวคูณสกิน (Premium +10-30% ตามราคา) — เท้าคงตรึงพื้น (topY สเกลตาม dth)
       const topY = TH_FEET_GROUND * scale - (TH_FEET_Y / TH_FRAME) * dth;     // ตรึง "เท้า" ที่จุดพื้นเดิมของนักธนู → กลางลำตัว ≈ จุดยึด (เส้นแดงแตะกลางตัว)
       const bcY  = topY + ((TH_FEET_Y - TH_BODY_H / 2) / TH_FRAME) * dth;     // กลางลำตัว = แกนหมุน (เอียง/ควงกลิ้ง)
       const _mir = Math.cos(ang) < 0 ? -1 : 1;                                // ชีทมีแถวซ้ายจริง ไม่ flip ภาพ — แต่มุมเอียง/ควงต้องกลับทิศตามหน้า (นักธนูได้ฟรีจาก facing-flip)
@@ -3513,7 +3541,7 @@ const xhrpg = (() => {
     }
     // name
     ctx.fillStyle = '#d1fae5'; ctx.font = `${Math.max(5, Math.round(5.6 * scale))}px monospace`; ctx.textAlign = 'center';
-    const _nmY = s.y - 15 * scale * (HERO_SIZE_MUL[player.hero_skin] || 1); // ดันชื่อขึ้นตามสไปรต์ที่ใหญ่ขึ้น (กันชื่อทับตัว)
+    const _nmY = s.y - 15 * scale * _heroBig(player.hero_skin); // ดันชื่อขึ้นตามสไปรต์ที่ใหญ่ขึ้น (กันชื่อทับตัว)
     _drawNameFlag(player.display_name || 'me', s.x, _nmY, _myCC(), scale, player.vip_lv | 0, _svGm, _svCl); // 🏴👑🛡️💠 ธง+VIP+GM+CL ตัวเองหน้าชื่อ
     ctx.fillText((player.display_name || 'me').slice(0, 10), s.x, _nmY);
     if (player.guild_tag) _drawGuildLine(player.guild_tag, s.x, _nmY - 6.8 * scale, scale); // 🏰 【ตรา+ชื่อกิล】 เหนือชื่อ
@@ -3594,7 +3622,7 @@ const xhrpg = (() => {
         const trows = Math.max(1, Math.round(_fth.naturalHeight / TH_FRAME));
         const tfi  = Math.floor(Date.now() / (_oAtk ? 70 : (omoving ? 87 : 130))) % tcols; // ยิง = เล่นเร็วขึ้น (ท่าขว้างลื่น)
         const trow = Math.min(_thRowSwap(_thRow(ang), _fthSk, _oAtk), trows - 1); // ยิง = ชีท attack (sw7-9 ไม่ swap)
-        const dth  = TH_FRAME * TH_SCALE * scale * (HERO_SIZE_MUL[o.hero_skin] || 1); // ขนาด/จุดยึดเดียวกับตัวเรา + ตัวคูณสกินเพื่อน (sw4-6 +15% · sw7-9 +30%)
+        const dth  = TH_FRAME * TH_SCALE * scale * _heroBig(o.hero_skin); // ขนาด/จุดยึดเดียวกับตัวเรา + ตัวคูณสกินเพื่อน (Premium +10-30% ตามราคา)
         const topY = TH_FEET_GROUND * scale - (TH_FEET_Y / TH_FRAME) * dth;
         const bcY  = topY + ((TH_FEET_Y - TH_BODY_H / 2) / TH_FRAME) * dth;
         // เอียงเพื่อนแบบเดียวกับเรา: เดิน → โน้มตัวไปหน้า · ยืนหันเข้ามอนใกล้ → เอียงเข้าหาเป้า (เกลี่ยต่อเฟรม key เดิม) — แถวหน้า/หลังลดเหลือ 30%
@@ -3638,7 +3666,7 @@ const xhrpg = (() => {
       // ชื่อ
       ctx.globalAlpha = 1; ctx.fillStyle = o.is_ghost ? '#94a3b8' : '#1d4ed8';
       ctx.font = `bold ${Math.max(5, Math.round(5.6 * scale))}px monospace`; ctx.textAlign = 'center';
-      const _onmY = s.y - 12 * scale * (HERO_SIZE_MUL[o.hero_skin] || 1); // ดันชื่อขึ้นตามขนาดสกินเพื่อน
+      const _onmY = s.y - 12 * scale * _heroBig(o.hero_skin); // ดันชื่อขึ้นตามขนาดสกินเพื่อน
       if (!o.is_ghost) _drawNameFlag(o.name, s.x, _onmY, o.cc, scale, o.vip | 0, !!o.gm, !!o.cl); // 🏴👑🛡️💠 ธง+VIP+GM+CL เพื่อนหน้าชื่อ (ghost ไม่มี presence สด)
       ctx.fillText((o.name || '?').slice(0, 10), s.x, _onmY);
       if (!o.is_ghost && o.gd) _drawGuildLine(o.gd, s.x, _onmY - 6.8 * scale, scale); // 🏰 【ตรา+ชื่อกิล】 เหนือชื่อเพื่อน
@@ -3657,7 +3685,7 @@ const xhrpg = (() => {
         const robSheet = (_rmoving && _walk && _walk.complete && _walk.naturalWidth) ? _walk : _robotSheet('idle', _oskin); // เดิน → เฟรมเดิน
         if (robSheet && robSheet.complete && robSheet.naturalWidth) {
           const fh = robSheet.naturalHeight, frames = Math.max(1, Math.round(robSheet.naturalWidth / fh));
-          const fi = Math.floor(Date.now() / (_rmoving ? 90 : 180)) % frames, sz = 62 * scale; // เท่าไททันเรา (+30%)
+          const fi = Math.floor(Date.now() / (_rmoving ? 90 : 180)) % frames, sz = 62 * scale * _robotBig(_oskin); // เท่าไททันเรา (+30%) × ตัวคูณสกินเพื่อน
           const rang = _rmoving ? Math.atan2(_rvy, _rvx) : _nearMonAng(o.rx, o.ry);
           ctx.save(); ctx.globalAlpha = o.is_dead ? 0.35 : 1; ctx.imageSmoothingEnabled = false;
           ctx.translate(rs.x, rs.y); if (Math.cos(rang) < 0) ctx.scale(-1, 1); // หันเข้าเป้า
@@ -3666,7 +3694,7 @@ const xhrpg = (() => {
           ctx.globalAlpha = o.is_dead ? 0.35 : 1; ctx.font = `${Math.round(14 * scale)}px serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
           ctx.fillText('🤖', rs.x, rs.y); ctx.textBaseline = 'alphabetic'; ctx.globalAlpha = 1;
         }
-        _drawTagName(_robotSkinName(_oskin), o.name, rs.x, rs.y - 33 * scale, false, scale); // ชื่อหุ่นเพื่อน + เจ้าของ (ฟ้า)
+        _drawTagName(_robotSkinName(_oskin), o.name, rs.x, rs.y - 33 * scale * _robotBig(_oskin), false, scale); // ชื่อหุ่นเพื่อน + เจ้าของ (ฟ้า)
       }
     });
   }
@@ -4061,7 +4089,7 @@ const xhrpg = (() => {
   };
   const SLASH_TH = 0.40, SLASH_SPREAD = 1.30; // ความหนา(×R)/ครึ่งมุมกาง — จูนจาก ztest render (ใบดาบโค้ง)
   // ขยายขนาดฮีโร่ในแมพตามสกิน (แสดงผลล้วน — ไม่กระทบ hitbox/gameplay ที่ใช้จุด x/y) · sw4-6 +15% · sw7-9 +30%
-  const HERO_SIZE_MUL = {}; // สกินฮีโร่ทุกตัววาดขนาดเท่านักรบฝึกหัด (Free) — เดิม sw4-6 +15% · sw7-9 +30% (ผู้ใช้ขอกลับเท่าตัวแรก)
+  // (ตัวคูณขนาดสกินฮีโร่ย้ายไป _heroBig() — คิดจากราคาแทนตารางรายตัว · ดู SKIN_BIG_LO/HI)
   // path เสี้ยวดาบรอบจุด (0,0) พุ่งไป +x: arc นอกโค้ง + bezier เว้าใน (ต้อง translate/rotate มาก่อน)
   function _slashPath(R, th, spread) {
     const t1x = R * Math.cos(-spread), t1y = R * Math.sin(-spread); // ปลายล่าง (-spread)
@@ -4458,7 +4486,16 @@ const xhrpg = (() => {
     const haveFx = frames[0] && frames[0].complete && frames[0].naturalWidth;
     explosions.forEach(ex => {
       const p = (now - ex.born) / 480;
-      const s = toScreen(ex.x, ex.y);
+      // 🤖 ex.follow = 'robot' → เกาะตัวหุ่นทุกเฟรม · ไม่มี follow = จุดคงที่ตามเดิม
+      // ⚠️ ต้องใช้ smoothed('robot',…) คีย์เดียวกับ drawRobot — **ห้ามอ่าน player.robot_x ดิบ**
+      //    พิกัดดิบคือเป้าจาก server (กระโดดเป็นช่วงตาม snapshot) ส่วนตัวหุ่นที่วาดจริงถูก interpolate ให้ไหลลื่น
+      //    ใช้ค่าดิบ = วงขวานวิ่งนำหน้าหุ่นคนละที่ (เคสจริง 2026-07-29 "ขวานหมุนกับตัวหุ่นเดินคนละที่")
+      let _fx = ex.x, _fy = ex.y;
+      if (ex.follow === 'robot' && player && player.robot_x != null) {
+        const _rp = smoothed('robot', parseFloat(player.robot_x), parseFloat(player.robot_y));
+        _fx = _rp.x; _fy = _rp.y;
+      }
+      const s = toScreen(_fx, _fy);
       if (haveFx && !ex.ring) { // sprite ระเบิด 4 เฟรม · ex.ring = บังคับวงสี (จุดชิ่งสกิลม่วง — ไม่ใช้ไฟระเบิดส้ม)
         const fi = Math.min(3, Math.floor(p * 4));
         const img = frames[fi];
@@ -4871,7 +4908,7 @@ const xhrpg = (() => {
   function robotAmmoMax() { return _ammoCarryCap(0, player, 'robot');  }
   function robotEnergyMax() {
     const lv = player.robot_lv || 1;
-    let max = 300 + (lv - 1) * 20;
+    let max = 300 + (lv - 1) * ROBOT_ENERGY_PER_LV; // sync PHP XHRPG_ROBOT_ENERGY_PER_LV
     const hw = Array.isArray(player.hardware) ? player.hardware : JSON.parse(player.hardware || '[]');
     HARDWARE_MASTER.forEach(h => { if (hw.includes(h.id) && h.desc.includes('Energy MAX')) {
       const m = h.desc.match(/\+(\d+)/); if (m) max += parseInt(m[1]);
@@ -5204,6 +5241,7 @@ const xhrpg = (() => {
     const _dodgePt = { stat:(player.agi||5), mod:(modBonus.agi||0), item:_itemOf('agi')-_e2Of('agi'), opt:_e2Of('agi') }; // 💨 หลบ = floor(AGI/3)% (sync xhrpg_dodge_roll)
     const _dodgeT  = Math.min(75, Math.floor((totals.agi||5) / 3));             // เพดานส่วน AGI 75% (มอนเลเวลสูงลดโอกาสตอนสู้จริง)
     const _fmtD   = v => '+' + (v / 3).toFixed(1) + '%';                        // ชิปหลบ: ทุก 3 AGI = +1%
+    const _fmtCd  = v => '+' + (v / 6).toFixed(1) + '%';                        // ชิปลด CD: ทุก 6 AGI = +1%
     // ── ATK รายอาวุธ (sync สูตรเมนูอาวุธ + server): STAT=ฐาน+สเตต+สกิล · ตีบวก=Lv อาวุธ/เคลือบ · โมดูล=pool รวม · ✨=การ์ด MVP +ATK ──
     const _wSk  = getSkills();
     const _crSk = (parseInt(_wSk.crit_shot) || 0) * 5;            // สกิลยิงจุดตาย +5/Lv (เฉพาะมีดขว้าง)
@@ -5221,6 +5259,8 @@ const xhrpg = (() => {
       _wRow('🗼',         'ATK ' + T('ป้อมปืน'), 20 + (player.intel || 5) * 3 + _tSkC * 5, (_tCoat - 1) * 2, (modBonus.intel || 0) * 3, _itemOf('intel') * 3, _e2Of('intel') * 3),
       { ic: '💥', c: '#f59e0b', name: T('CRIT (คริ ×2)'), total: `${_critT}%`, fmt: _fmtC, b: { stat:_critPt.stat, enh:null, mod:_critPt.mod, item:_critPt.item, opt:_critPt.opt }, note: T('ทุก 10 pt (LUK+STR) = คริ +1% · เพดาน 50%') },
       { ic: '💨', c: '#14b8a6', name: T('หลบหลีก'),      total: `${_dodgeT}%`, fmt: _fmtD, b: { stat:_dodgePt.stat, enh:null, mod:_dodgePt.mod, item:_dodgePt.item, opt:_dodgePt.opt }, note: T('ทุก 3 AGI = หลบ +1% · เพดาน 75% · มอนเลเวลสูงลดโอกาส') },
+      // ⏱️ ลด CD สกิลจาก AGI — แหล่ง AGI ชุดเดียวกับหลบหลีก แค่คนละสูตร (มีอยู่ในเกมแล้ว แค่ไม่เคยโชว์รวมตรงนี้)
+      { ic: '⏱️', c: '#0284c7', name: T('ลด CD สกิล'),   total: `${agiCdPct(totals.agi || 5).toFixed(1)}%`, fmt: _fmtCd, b: { stat:_dodgePt.stat, enh:null, mod:_dodgePt.mod, item:_dodgePt.item, opt:_dodgePt.opt }, note: T('ทุก 6 AGI = ลดคูลดาวน์ +1% · เพดาน 50% (AGI 300)') },
       { ic: '🔰', c: '#0ea5e9', name: 'DEF',             total: `+${_defB.stat+_defB.enh+_defB.mod+_defB.item+_defB.opt}`, b: _defB },
       { ic: '❤️', c: '#22c55e', name: T('HP สูงสุด'),     total: `${_hpB.stat+_hpB.mod+_hpB.item+_hpB.opt}`, b: { stat:_hpB.stat, enh:null, mod:_hpB.mod, item:_hpB.item, opt:_hpB.opt } },
       { ic: '🔷', c: '#6366f1', name: T('MP สูงสุด'),     total: `${_mpB.stat+_mpB.mod+_mpB.item+_mpB.opt}`, b: { stat:_mpB.stat, enh:null, mod:_mpB.mod, item:_mpB.item, opt:_mpB.opt } },
@@ -5236,17 +5276,20 @@ const xhrpg = (() => {
     const _bnPD = (player.premium_drop_expires || 0) > _bnNow;
     const _bnChip = (lbl, val, on, c, sub) => `<span style="flex:1;min-width:0;text-align:center;font-size:9.5px;color:${on?c:'#64748b'};background:${on?c+'14':'#eef2f7'};border-radius:6px;padding:3px 2px;overflow:hidden">${lbl}<br><b style="font-size:11px;color:${on?c:'#cbd5e1'}">${val}</b>${sub?`<br><span style="font-size:8px;color:#94a3b8">${sub}</span>`:''}</span>`;
     const _bnVipLbl   = 'VIP' + (_bnVip || '');
+    const _bnLukD = lukDropPct(totals.luk || 5); // 🍀 ทุก 10 LUK = +1% ดรอป (mirror xhrpg_drop_mult)
     const _bnRows = [
       { ic:'⚡', c:'#7c3aed', name:T('โบนัส EXP'), total:'+' + ((_bnPE ? 35 : 0) + _bnVip * 5) + '%',
         chips: _bnChip('PREMIUM', _bnPE ? '+35%' : '—', _bnPE, '#7c3aed', _bnPE ? T('หมด {a} วัน', {a: _bnDays('premium_exp_expires')}) : null)
              + _bnChip(_bnVipLbl, _bnVip ? '+' + (_bnVip * 5) + '%' : '—', _bnVip > 0, '#b45309')
              + _bnChip('=', T('บวกกัน'), true, '#64748b'),
         note:T('แสดงใน Log: บรรทัดปกติ = ฐาน · บรรทัด 🅿️ = โบนัส') },
-      { ic:'💎', c:'#0891b2', name:T('โบนัสดรอปของหายาก'), total:'+' + ((_bnPD ? 100 : 0) + _bnVip * 5) + '%',
+      // 🍀 LUK เข้าถังเดียวกับ PREMIUM/VIP (เจ้าของสั่ง 2026-07-29) — บวกกันทั้งแถว ไม่คูณซ้อน
+      { ic:'💎', c:'#0891b2', name:T('โบนัสดรอปของหายาก'), total:'+' + ((_bnPD ? 100 : 0) + _bnVip * 5 + _bnLukD) + '%',
         chips: _bnChip('PREMIUM', _bnPD ? '+100%' : '—', _bnPD, '#0891b2', _bnPD ? T('หมด {a} วัน', {a: _bnDays('premium_drop_expires')}) : null)
              + _bnChip(_bnVipLbl, _bnVip ? '+' + (_bnVip * 5) + '%' : '—', _bnVip > 0, '#b45309')
+             + _bnChip('🍀 LUK', _bnLukD ? '+' + _bnLukD + '%' : '—', _bnLukD > 0, '#16a34a', 'LUK ' + (totals.luk | 0))
              + _bnChip('=', T('บวกกัน'), true, '#64748b'),
-        note:T('การ์ด/ไข่/โมดูล/เพชร/กล่อง/ของ MVP — ไม่รวมแร่/พืช/ยา') },
+        note:T('การ์ด/ไข่/โมดูล/เพชร/กล่อง/ของ MVP — ไม่รวมแร่/พืช/ยา · ทุก 10 LUK = +1%') },
       { ic:'💰', c:'#b45309', name:T('โบนัส G'), total:'+' + (_bnPG ? 35 : 0) + '%',
         chips: _bnChip('PREMIUM', _bnPG ? '+35%' : '—', _bnPG, '#b45309', _bnPG ? T('หมด {a} วัน', {a: _bnDays('premium_gold_expires')}) : null)
              + _bnChip('VIP', '—', false, '#b45309')
@@ -5936,7 +5979,11 @@ const xhrpg = (() => {
 
   // ── 🪨 แร่อวกาศ (หน้า ITEM ใต้แผงกล่องไข่) — ได้จากยานบุกอวกาศ · ใช้บริจาคอัพเลเวลกิล (docs/guild-ore-upgrade-design.md) ──
   //    นิยามแร่ใช้ MKT_ORE_DEFS ชุดเดียวกับตลาด (ชื่อ/ไอคอนต้องตรงกันทุกหน้า) — แร่ที่มี 0 ชิ้นก็โชว์ ผู้เล่นจะได้รู้ว่ามีกี่ชนิด
+  // 🪨 สวิตช์รวมระบบแร่หายาก — มิเรอร์ XHRPG_ORE_ON ฝั่ง server (ด่านจริงอยู่ที่ server)
+  //    ปิด = ซ่อนแผงแร่ในหน้า ITEM + ซ่อนหมวด 🪨 ในตลาด/เทรด · ของเดิมของผู้เล่นไม่หาย แค่ไม่โชว์
+  const ORE_UI = false; // ⏸️ ปิด 2026-07-29 (เจ้าของสั่ง "ซ่อนไปก่อน")
   function _renderOrePanel() {
+    if (!ORE_UI) return '';                                      // ⏸️ ระบบแร่ปิดอยู่ — ไม่โชว์แผง
     let total = 0;
     const chip1 = o => {
       const n = player[o.slot] | 0; total += n;
@@ -6250,18 +6297,21 @@ const xhrpg = (() => {
 
   // ── แถบอัพเกรดเต็มความกว้าง (design A) — ใช้ร่วมทุกระบบ ──
   // costs: [{icon:'🪵', need:360, have:player.wood||0}, ...]
-  function _upgBar(onclick, nextLabel, costs, maxed, maxText) {
+  //  rightIco = สัญลักษณ์มุมขวาตอนจ่ายไหว (ไม่ส่ง = ⬆ ตามเดิม) · c.html = markup ไอคอนเอง (เพชร/ทรัพยากร SVG ที่ไม่มีใน ICO)
+  function _upgBar(onclick, nextLabel, costs, maxed, maxText, rightIco) {
     if (maxed) return '<div style="background:#f1f5f9;border:1px solid #cbd5e1;border-radius:8px;padding:7px 12px;margin-top:6px;text-align:center;font-size:12px;font-weight:700;color:#64748b">🏆 ' + (maxText || 'MAX') + '</div>';
     const ok = costs.every(c => (c.have || 0) >= c.need);
     // ไอคอนทรัพยากรในแถบราคา → pixel-art ผ่าน _icoHtml (ไม่พบใน map = emoji เดิม) — logic เทียบ need/have ไม่แตะ
+    const _ic = c => c.html || _icoHtml(c.icon, 12);
     const costHtml = costs.map(c => (c.have || 0) >= c.need
-      ? '<span style="white-space:nowrap">' + _icoHtml(c.icon, 12) + c.need.toLocaleString() + '</span>'
-      : '<span style="white-space:nowrap;color:#dc2626;font-weight:700">' + _icoHtml(c.icon, 12) + (c.have || 0).toLocaleString() + '/' + c.need.toLocaleString() + '</span>'
+      ? '<span style="white-space:nowrap">' + _ic(c) + c.need.toLocaleString() + '</span>'
+      : '<span style="white-space:nowrap;color:#dc2626;font-weight:700">' + _ic(c) + (c.have || 0).toLocaleString() + '/' + c.need.toLocaleString() + '</span>'
     ).join(' ');
+    const _rI = rightIco || '⬆';
     // เลย์เอาต์บรรทัดเดียว: ไม่มีคำ "อัพเกรด" — resource ชิดซ้าย + สัญลักษณ์ ⬆› (พอ) / 🔒 (ไม่พอ) ขวาสุด
     return ok
-      ? '<button onclick="' + onclick + '" style="display:flex;justify-content:space-between;align-items:center;gap:6px;width:100%;box-sizing:border-box;background:#ecfdf5;border:1px solid #34d399;border-radius:8px;padding:7px 10px;margin-top:6px;cursor:pointer;font-family:inherit"><span style="font-size:11px;color:#047857;display:flex;gap:7px;flex-wrap:nowrap;overflow:hidden;justify-content:flex-start;align-items:center;flex:1;text-align:left">' + costHtml + '</span><span style="font-size:13px;font-weight:700;color:#065f46;white-space:nowrap">⬆<span style="color:#059669">›</span></span></button>'
-      : '<button disabled style="display:flex;justify-content:space-between;align-items:center;gap:6px;width:100%;box-sizing:border-box;background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;padding:7px 10px;margin-top:6px;cursor:not-allowed;font-family:inherit"><span style="font-size:11px;color:#a16207;display:flex;gap:7px;flex-wrap:nowrap;overflow:hidden;justify-content:flex-start;align-items:center;flex:1;text-align:left">' + costHtml + '</span><span style="font-size:13px;white-space:nowrap">🔒</span></button>';
+      ? '<button onclick="' + onclick + '" style="display:flex;justify-content:space-between;align-items:center;gap:6px;width:100%;box-sizing:border-box;background:#ecfdf5;border:1px solid #34d399;border-radius:8px;padding:7px 10px;margin-top:6px;cursor:pointer;font-family:inherit"><span style="font-size:11px;color:#047857;display:flex;gap:7px;flex-wrap:wrap;row-gap:3px;justify-content:flex-start;align-items:center;flex:1;text-align:left">' + costHtml + '</span><span style="font-size:13px;font-weight:700;color:#065f46;white-space:nowrap">' + _rI + '<span style="color:#059669">›</span></span></button>'
+      : '<button disabled style="display:flex;justify-content:space-between;align-items:center;gap:6px;width:100%;box-sizing:border-box;background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;padding:7px 10px;margin-top:6px;cursor:not-allowed;font-family:inherit"><span style="font-size:11px;color:#a16207;display:flex;gap:7px;flex-wrap:wrap;row-gap:3px;justify-content:flex-start;align-items:center;flex:1;text-align:left">' + costHtml + '</span><span style="font-size:13px;white-space:nowrap">🔒</span></button>';
   }
 
   function renderGuns() {
@@ -7793,7 +7843,9 @@ const xhrpg = (() => {
   }
 
   // ── Leaderboard ───────────────────────────────────────────
-  let rankCurrentTab = 'lv'; // default = อันดับผู้เล่น (Lv/EXP) · MVP ย้ายไปแท็บสอง
+  // 🙈 2026-07-29 เจ้าของสั่งซ่อนแท็บ "ผู้เล่น"(lv) + "Gold" ชั่วคราว (index.php คอมเมนต์ปุ่มไว้) → default ต้องเป็น mvp
+  //    ไม่งั้นเปิดแผงมาแล้วเป็นแท็บที่ไม่มีปุ่ม = ไม่มีปุ่ม active + สลับกลับไม่ได้
+  let rankCurrentTab = 'mvp';
   let rankCC = 'ALL';        // 🌐 filter รายประเทศ (ISO2 · 'ALL' = ทุกประเทศ) — ใช้ร่วมทุกแท็บที่กรองได้
 
   function rankTab(tab) {
@@ -9298,9 +9350,7 @@ const xhrpg = (() => {
   function schedulePoll() {
     if (pollTimer) clearTimeout(pollTimer);
     pollTimer = null;
-    if (_pollStopped || _inflight) return;
-    _lastInputAt = Date.now(); // Bypass idle timeout
-    _tabHiddenAt = 0; // Bypass hidden tab timeout // สลับ tab: poll ต่อในพื้นหลัง 10 นาทีแรก (ออนไลน์ต่อ · presence ไม่หาย) · browser อาจ throttle เป็น ~1/นาที
+    if (_pollStopped || _inflight) return; // สลับ tab: poll ต่อในพื้นหลัง 10 นาทีแรก (ออนไลน์ต่อ · presence ไม่หาย) · browser อาจ throttle เป็น ~1/นาที
     if (document.hidden && _tabHiddenAt && Date.now() - _tabHiddenAt > 600000) return; // ซ่อนครบ 10 นาที → หยุด poll ให้ gap สะสม → กลับมารับ offline catch-up (เกณฑ์ server 600s)
     if (_bmOn) return; // 🤖 อยู่จอเฝ้าบอท = ออฟไลน์เต็มตัว → หยุด poll เกมทุกกรณี (รวมแท็บพื้นหลัง) เหลือ sync 10 นาที/ครั้ง = เงียบ+ประหยัด
     if (!document.hidden && player && Date.now() - _lastInputAt > _idleCutMs()) {
@@ -9678,9 +9728,11 @@ const xhrpg = (() => {
             }
             // 🪓 วง AOE ขวานไททัน — วงส้มขอบชัด + ใบขวานหมุน (เจ้าของสั่ง 2026-07-26)
             // ⏸️ ปิดเอฟเฟกต์ชั่วคราว (เจ้าของสั่ง 2026-07-28 "ขวานหมุนๆ บนแผนที่ มันแปลกๆ")
-            //    ปิดแค่ภาพ — ดาเมจ AOE ยังทำงานปกติทุกอย่าง (คิดฝั่ง server) · เปิดคืน = AXE_AOE_FX = true
+            //    2026-07-29 เปิดคืนแล้ว แต่ย้ายจุดวาดมาที่ "ตัวหุ่น" (follow:'robot') แทนจุดเป้า ตามที่เจ้าของสั่ง
             if (e.type === 'axe_aoe' && AXE_AOE_FX) {
-              explosions.push({ x:+e.x, y:+e.y, r:+e.r, color:'#fb923c', ring:true, axe:true, born: performance.now() });
+              // 🤖 follow:'robot' = วาดรอบ "ตัวหุ่น" ไม่ใช่จุดเป้า (เจ้าของสั่ง 2026-07-29 "ใส่ effect รอบตัวหุ่น")
+              //    ยึดพิกัดสดทุกเฟรม → หุ่นขยับระหว่างขวานหมุน วงก็ตามไปด้วย ไม่ค้างอยู่ที่เดิม
+              explosions.push({ x:+e.x, y:+e.y, r:+e.r, color:'#fb923c', ring:true, axe:true, follow:'robot', born: performance.now() });
               startAnim();
             }
             // 🌀 แทงรอบตัว — ใบดาบกวาดรอบตัวสีส้ม (เจ้าของสั่ง 2026-07-28: ย้ายเอฟเฟกต์ที่ปิดจากขวานไททันมาใช้ที่สกิลนี้)
@@ -10724,9 +10776,9 @@ const xhrpg = (() => {
             <span style="font-size:13px">${T('🛸 ยาน Orion Lv.{a}/100', {a:'<b>'+lv+'</b>'})}</span>
           </div>
           ${(() => { const _hcap = (player.lv||1) + 5; return _upgBar("xhrpg.upgradeHouse()", 'Lv.'+(lv+1), houseUpCosts, lv>=100 || lv>=_hcap, lv>=100 ? 'MAX Lv.100' : T('ยานสูงสุด Lv.{a} ที่ผู้เล่น Lv.{b} — อัพเลเวลผู้เล่นก่อน', {a:_hcap, b:(player.lv||1)})); })()}
-          ${(()=>{ // ── 🛸⚡ Rail Gun ยิงสนับสนุน — DMG 50+50×Lv + ผู้เล่นLv×50 · AOE 10+0.1×Lv m · ระยะ 150m+ · CD 15s · 20⚡/นัด · ปลดล็อกยาน Lv.20 ──
+          ${(()=>{ // ── 🛸⚡ Rail Gun ยิงสนับสนุน — DMG 50+50×Lv + ผู้เล่นLv×50 · AOE 10+0.1×Lv m · ระยะ 150m+ · CD 10s · 20⚡/นัด · ปลดล็อกยาน Lv.20 ──
             const oglv = Math.max(1, Math.min(100, player.orion_gun_lv|0 || 1));
-            const ogAtk = 50 + 50*oglv + 50*(player.lv||1) + _modTotalAtk() + (_cardCB().atk||0) + _e2FxSum('hda'), ogAoe = (10 + 0.1*(oglv-1)).toFixed(1), ogRng = Math.round(150 + 0.25*(oglv-1)); // AOE 10m+0.1/Lv · ระยะ 150m+0.25/Lv (sync server 2026-07-24)
+            const ogAtk = 50 + 50*oglv + 50*(player.lv||1) + _modTotalAtk() + (_cardCB().atk||0) + _e2FxSum('hda'), ogAoe = aoeM(oglv).toFixed(1), ogRng = Math.round(150 + 0.25*(oglv-1)); // AOE 10m+0.1/Lv · ระยะ 150m+0.25/Lv (sync server 2026-07-24)
             if (lv < 20) return `<div style="background:#fafaf9;border:1px dashed #d6d3d1;border-radius:8px;padding:7px 8px;margin-bottom:8px">
               <div style="display:flex;justify-content:space-between;align-items:center">
                 <span style="font-size:12px;font-weight:700;color:#78716c">🛸⚡ Rail Gun</span>
@@ -10741,7 +10793,7 @@ const xhrpg = (() => {
                 <span style="font-size:12px;font-weight:700;color:#a16207">🛸⚡ Rail Gun <span style="font-size:10px;color:#ca8a04;font-weight:400">Lv.${oglv}/100</span></span>
                 <span style="font-size:10px;color:#854d0e">DMG ${ogAtk.toLocaleString()} · AOE ${ogAoe}m</span>
               </div>
-              <div style="font-size:9.5px;color:#a16207;margin:2px 0 4px">${T('ยิงสนับสนุนอัตโนมัติ · ระยะ {r}m · CD 15s · ใช้ 20⚡/นัด', {r: ogRng})}</div>
+              <div style="font-size:9.5px;color:#a16207;margin:2px 0 4px">${T('ยิงสนับสนุนอัตโนมัติ · ระยะ {r}m · CD 10s · ใช้ 20⚡/นัด', {r: ogRng})}</div>
               <div style="margin-bottom:5px">${_gunToggleBtn('ใช้งาน', player.orion_rail_on??1, "xhrpg.toggleOrionRail()")}</div>
               ${oglv >= 100 ? '<div style="background:#f1f5f9;border-radius:7px;padding:5px;text-align:center;font-size:11px;font-weight:700;color:#64748b">🏆 MAX Lv.100</div>'
                 : (()=>{ const _oc=(player.lv||1)+5; return _upgBar("xhrpg.orionGunUp()", 'Lv.'+_ogTo, ogCosts, oglv>=_oc, oglv>=_oc?T('สูงสุด Lv.{a} ที่ผู้เล่น Lv.{b}', {a:_oc, b:player.lv||1}):''); })()}
@@ -10764,7 +10816,7 @@ const xhrpg = (() => {
             return `<div style="background:#fff7ed;border:1px solid #fdba74;border-radius:8px;padding:7px 8px;margin-bottom:8px">
               <div style="display:flex;justify-content:space-between;align-items:center">
                 <span style="font-size:12px;font-weight:700;color:#c2410c">${_ICO_CANNON(15)} Premium Auto Cannon <span style="font-size:8.5px;font-weight:800;color:#fff;background:linear-gradient(90deg,#f59e0b,#d97706);padding:1px 6px;border-radius:5px;vertical-align:1px">PREMIUM</span> <span style="font-size:10px;color:#ea580c;font-weight:400">Lv.${oclv}/100 · ⏳${_ocDays}d</span></span>
-                <span style="font-size:10px;color:#9a3412">DMG ${ocAtk.toLocaleString()} · AOE ${Math.round((10 + 0.1*(oclv-1))*10)/10}m</span>
+                <span style="font-size:10px;color:#9a3412">DMG ${ocAtk.toLocaleString()} · AOE ${Math.round(aoeM(oclv)*10)/10}m</span>
               </div>
               <div style="font-size:9.5px;color:#c2410c;margin:2px 0 4px">${T('ปืนกลหนัก 3 นัดติด · ระยะ {r}m · CD 5s · 5⚡/ชุด', {r: Math.round(150 + 0.25*(oclv-1))})}</div>
               <div style="margin-bottom:5px">${_gunToggleBtn('ใช้งาน', player.orion_cannon_on??1, "xhrpg.toggleOrionCannon()")}</div>
@@ -11323,7 +11375,7 @@ const xhrpg = (() => {
     const cost = archerUpgCost(arLv);
     const dmg = Math.round((80 + (arLv - 1) * 30) * 1.8) + _modTotalAtk() + (_cardCB().atk||0); // + ⚔️ ค่ากลาง (sync server 2026-07-16 · ก่อนคูณ Ragnalok — แผงโชว์ฐาน)
     const rng = Math.round((150 + 0.25 * (arLv - 1)) * 10) / 10;
-    const aoe = Math.round((10 + 0.1 * (arLv - 1)) * 10) / 10; // 10m + 0.1m/Lv (มาตรฐาน AOE รวม · sync server)
+    const aoe = Math.round(aoeM(arLv) * 10) / 10;   // 🎯 สูตร AOE กลาง
     const on = (p.archer_on ?? 1) ? 1 : 0;
     return `<div style="border:1.5px solid #16a34a55;border-radius:10px;padding:10px;margin-bottom:8px;background:#16a34a08">
       <div style="font-size:10px;color:#16a34a;font-weight:600;margin-bottom:5px;letter-spacing:.5px">⭐ PREMIUM</div>
@@ -11439,8 +11491,8 @@ const xhrpg = (() => {
           <span class="gun-icon">🪓</span>
           <div class="gun-info">
             <div class="gun-name">${T('ขวาน')} <span class="gun-lv">Lv.${alv}</span></div>
-            <div class="gun-sub">${T('ATK {a} | ระยะ {b}m | ไม่ใช้มีดสั้น', {a:(30+(alv-1)*10 + axModAtk + axAllStat)+axModTxt+axStatTxt, b:axReach})}</div>
-            <div class="gun-sub" style="color:#c2410c">${T('💥 ฟันวงกว้าง — โดนพร้อมกัน {n} ตัว ในระยะ {m}m', {n:AXE_AOE_N, m:AXE_AOE_M})}</div>
+            <div class="gun-sub">${T('ATK {a} | ไม่ใช้มีดสั้น', {a:(30+(alv-1)*10 + axModAtk + axAllStat)+axModTxt+axStatTxt})}</div>
+            <div class="gun-sub" style="color:#c2410c">${T('💥 ฟันวงกว้าง — โดนพร้อมกัน {n} ตัว ในระยะ {m}m', {n:AXE_AOE_N, m:axeAoeM(player.robot_axe_lv).toFixed(1)})}</div>
           </div>
           <div style="width:100%">${_upgBar("xhrpg.upgradeRobot('axe')", 'Lv.'+(alv+1), [{icon:'💰',need:acost,have:player.gold||0},{icon:'🪨',need:acostStone,have:player.stone||0}], alv>=100, 'MAX Lv.100')}</div>
         </div>
@@ -11603,8 +11655,8 @@ const xhrpg = (() => {
         <div style="font-size:11px;color:${daysLeft <= 2 ? '#dc2626' : '#16a34a'}">${T('หมด {a} วัน', {a: daysLeft})}</div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-bottom:6px">
-        <div style="background:#fff;border-left:3px solid #38bdf8;border-radius:0 6px 6px 0;padding:4px 8px;font-size:10.5px;color:#334155">💠 Frost Aura ${Math.round((10 + 0.1 * ((parseInt(player.knight_lv) || 1) - 1)) * 10) / 10}m <b style="float:right;color:#0284c7">${_aura.toLocaleString()}</b></div>
-        <div style="background:#fff;border-left:3px solid #16a34a;border-radius:0 6px 6px 0;padding:4px 8px;font-size:10.5px;color:#334155">🧲 ${T('ดึงมอนทุก 5 วิ')} <b style="float:right;color:#16a34a">12</b></div>
+        <div style="background:#fff;border-left:3px solid #38bdf8;border-radius:0 6px 6px 0;padding:4px 8px;font-size:10.5px;color:#334155">💠 Frost Aura ${Math.round(aoeM(parseInt(player.knight_lv) || 1) * 10) / 10}m <b style="float:right;color:#0284c7">${_aura.toLocaleString()}</b></div>
+        <div style="background:#fff;border-left:3px solid #16a34a;border-radius:0 6px 6px 0;padding:4px 8px;font-size:10.5px;color:#334155">🧲 ${T('ดึงมอนทุก 5 วิ')} <b style="float:right;color:#16a34a">${PULL_N}</b></div>
         <div style="background:#fff;border-left:3px solid #7dd3fc;border-radius:0 6px 6px 0;padding:4px 8px;font-size:10.5px;color:#334155">🛡️ DEF 30s <b style="float:right;color:#38bdf8">+${_sv('def')}</b></div>
         <div style="background:#fff;border-left:3px solid #0ea5e9;border-radius:0 6px 6px 0;padding:4px 8px;font-size:10.5px;color:#334155">🔰 ${T('เกราะ')} <b style="float:right;color:#0ea5e9">+${_sv('armor')}</b></div>
       </div>
@@ -11775,7 +11827,7 @@ const xhrpg = (() => {
       { key:'orion_gun',      icon:_ICO_CANNON(20), name:'Premium Orion Gun', desc:T('ปลดล็อก Auto Cannon ยานบิน — ปืนกลหนัก AOE ยิงชุดละ 3 นัดติด | DMG 1.25× Rail Gun | CD 5s | อัพเกรดได้ Lv.1-100'), field:'orion_gun_expires', price:79, color:'#ea580c', offAtk:1 },
       { key:'priest',         icon:'⛪', name:'Premium Priest', desc:T('นักบวชเดินตาม — ทุกวินาที เลือกสกิลตามที่พร่อง (Heal ก่อน): 💚Heal HP / 💧Heal MP / 🛡️บัฟ DEF 30s (เรา+หุ่น+สัตว์เลี้ยง) / 🔰ฟื้นเกราะ / ⚡เติมพลังหุ่น / 🧱บัฟ MAX เกราะ | อัพเกรดได้ Lv.1-100'), field:'priest_expires', price:149, color:'#7c3aed', offAtk:1 },
       { key:'archer',         icon:'🏹', name:'Premium Elf Legolas Archer', desc:T('นักธนูเดินตาม — ยิงธนูใส่มอนทุกวินาที · DMG = Premium Titan Beam · 💥 ธนูระเบิดทุก 3 นัด DMG×3 AOE | ระยะ 150m +0.25m/Lv | อัพเกรดได้ Lv.1-100'), field:'archer_expires', price:149, color:'#16a34a', offAtk:1 },
-      { key:'knight',         icon:'⚔️', name:'Premium Skeleton Knight', desc:T('อัศวินสาย TANK — บุกประชิดมอน · 🧲 ดึงมอน 12 ตัวมากองทุก 5 วิ · 💠 Frost Aura 30m ทุกวินาที · 🛡️ บัฟ DEF + 🔰 เสริมเกราะให้ Hero (ค่าเท่านักบวช ซ้อนกันได้) | อัพเกรดได้ Lv.1-100 (⚙️เหล็ก+🟫ทองแดง+💰G)'), field:'knight_expires', price:149, color:'#0284c7', offAtk:1 },
+      { key:'knight',         icon:'⚔️', name:'Premium Skeleton Knight', desc:T('อัศวินสาย TANK — บุกประชิดมอน · 🧲 ดึงมอน 6 ตัวมากองทุก 6 วิ · 💠 Frost Aura 30m ทุกวินาที · 🛡️ บัฟ DEF + 🔰 เสริมเกราะให้ Hero (ค่าเท่านักบวช ซ้อนกันได้) | อัพเกรดได้ Lv.1-100 (⚙️เหล็ก+🟫ทองแดง+💰G)'), field:'knight_expires', price:149, color:'#0284c7', offAtk:1 },
     ];
     const cards = items.map(it => {
       const exp = fmtExpiry(player[it.field] || 0);
@@ -12296,7 +12348,7 @@ const xhrpg = (() => {
       'รูปแบบโค้ดไม่ถูกต้อง — ต้องขึ้นต้นด้วย RGK- หรือ RGV-':'That code format is not valid — it must start with RGK- or RGV-',
       'ได้รับ {n} P แล้ว!':'You received {n} P!', 'แต้มจะเข้ากระเป๋าภายในไม่กี่วินาที':'The points land in your wallet within a few seconds',
       'แต้มเข้ากระเป๋าเรียบร้อยแล้ว':'The points are already in your wallet', 'ตกลง':'OK',
-      'อัศวินสาย TANK — บุกประชิดมอน · 🧲 ดึงมอน 12 ตัวมากองทุก 5 วิ · 💠 Frost Aura 30m ทุกวินาที · 🛡️ บัฟ DEF + 🔰 เสริมเกราะให้ Hero (ค่าเท่านักบวช ซ้อนกันได้) | อัพเกรดได้ Lv.1-100 (⚙️เหล็ก+🟫ทองแดง+💰G)':'TANK knight — charges into monsters · 🧲 pulls 12 monsters into a pile every 5s · 💠 Frost Aura 30m every second · 🛡️ DEF buff + 🔰 armor restore for your Hero (same values as Priest, stacks) | Upgradeable Lv.1-100 (⚙️iron+🟫copper+💰G)',
+      'อัศวินสาย TANK — บุกประชิดมอน · 🧲 ดึงมอน 6 ตัวมากองทุก 6 วิ · 💠 Frost Aura 30m ทุกวินาที · 🛡️ บัฟ DEF + 🔰 เสริมเกราะให้ Hero (ค่าเท่านักบวช ซ้อนกันได้) | อัพเกรดได้ Lv.1-100 (⚙️เหล็ก+🟫ทองแดง+💰G)':'TANK knight — charges into monsters · 🧲 pulls 6 monsters into a pile every 6s · 💠 Frost Aura 30m every second · 🛡️ DEF buff + 🔰 armor restore for your Hero (same values as Priest, stacks) | Upgradeable Lv.1-100 (⚙️iron+🟫copper+💰G)',
       '✨ ของวิเศษ = สกิน · การ์ด · ของสะสม — 🛡️ Option = จากของสวมใส่ที่ใส่อยู่':'✨ Bonus = skins · cards · collectibles — 🛡️ Option = from worn Equipment',
       'โบนัส % รวม (Ragnalok · Option)':'Total % bonuses (Ragnalok · Option)',
       '% คูณท้ายสุด · แต้ม Ragnalok + Option ของสวมใส่ บวกกัน · EXP/GOLD/DROP มาจาก Option เท่านั้น':'Final multiplier % · Ragnalok points + Equipment options stack · EXP/GOLD/DROP come from options only',
@@ -12363,7 +12415,7 @@ const xhrpg = (() => {
       'อัพแล้วได้เลย ไม่ต้องกด ไม่ใช้ MP\nHP สูงสุด +30 ต่อ Lv. (Lv.10 = +300 HP)':'Takes effect instantly, no button, no MP\nMax HP +30 per Lv. (Lv.10 = +300 HP)',
       'ต้องการ ร่างกายแกร่ง Lv.3\nPassive บวกติดตัว: เกราะสูงสุด +5/Lv + ♻️ ฟื้นเกราะ +1/Lv ต่อวินาที (ไม่ใช้ MP)':'Requires Tough Body Lv.3\nPermanent passive: max armor +5/Lv + ♻️ armor regen +1/Lv per second (no MP)',
       'ต้องการ ร่างกายแกร่ง Lv.5\nPassive บวกติดตัว: ฟื้น HP +1/Lv ต่อวินาที (บวกกับ regen ปกติ ไม่ใช้ MP)':'Requires Tough Body Lv.5\nPermanent passive: HP regen +1/Lv per second (stacks with normal regen, no MP)',
-      'ปลดล็อก Lv.30 + ฟื้น HP Lv.5 + เพิ่มเกราะ Lv.5 · Auto · MP 10 · CD ~10s\nดึงมอนทุกตัวในระยะให้วิ่งเข้าหาผู้เล่น เข้าครึ่งระยะต่อครั้ง (รวม MVP)\nระยะดึง 75m +5m ต่อ Lv (Lv.1=80m … Lv.10=125m)':'Unlocks at Lv.30 + HP Regen Lv.5 + Armor Up Lv.5 · Auto · MP 10 · CD ~10s\nPulls every monster in range toward the player, half the distance per pull (incl. MVP)\nPull range 75m +5m per Lv (Lv.1=80m … Lv.10=125m)',
+      'ปลดล็อก Lv.30 + ฟื้น HP Lv.5 + เพิ่มเกราะ Lv.5 · Auto · MP 10 · CD ~10s\nดึงมอนทุกตัวในระยะให้วิ่งเข้าหาผู้เล่น เข้าครึ่งระยะต่อครั้ง (รวม MVP)\nระยะดึง 100m':'Unlocks at Lv.30 + HP Regen Lv.5 + Armor Up Lv.5 · Auto · MP 10 · CD ~10s\nPulls every monster in range toward the player, half the distance per pull (incl. MVP)\nPull range 100m',
       'ได้ 1 point ทุกครั้งที่ Level Up\nใช้อัพ Skill ได้ที่นี่ แยกจาก STAT Point':'Gain 1 point every Level Up\nSpend it on Skills here, separate from STAT Points',
       // อาวุธ (renderGuns/modules)
       // แท็บ + การ์ดอาวุธ
@@ -12961,7 +13013,7 @@ const xhrpg = (() => {
       '🤖 ไททัน Lv.{a}/100':'🤖 Titan Lv.{a}/100',
       '⛔ Disabled — กำลังฟื้น (ต้องถึง 30%)':'⛔ Disabled — recovering (needs 30%)',
       '⚡ {a}/{b} · ขวาน -10 · ARM/Rail -5 · recover +{c}/s':'⚡ {a}/{b} · Axe -10 · ARM/Rail -5 · recover +{c}/s',
-      'ขวาน':'Axe', 'ATK {a} | ระยะ {b}m | ไม่ใช้มีดสั้น':'ATK {a} | Range {b}m | uses no daggers',
+      'ขวาน':'Axe', 'ATK {a} | ไม่ใช้มีดสั้น':'ATK {a} | uses no daggers',
       'ขวานฟันโดน → มอนมึน {a}s (ยกเว้น MVP) · -15⚡':'Axe hits stun monsters {a}s (except MVP) · -15⚡',
       'ธนูไททัน (ARM)':'Titan Bow (ARM)',
       '⚡ ช็อต {a}s (+0.2s/tier) · ไม่ทำ DMG | ระยะ {b}m':'⚡ Shock {a}s (+0.2s/tier) · no DMG | Range {b}m',
@@ -12977,7 +13029,7 @@ const xhrpg = (() => {
       'เต็ม':'Full', 'ปิดผลิต':'Production off', 'คลังเต็ม':'Stock full', 'รอบล่าสุด: {a}':'Last cycle: {a}',
       '🔒 ปลดล็อกยาน Lv.20':'🔒 Unlocks at ship Lv.20',
       'ยิงสนับสนุน AOE อัตโนมัติ — อัพยาน Orion ถึง Lv.20 เพื่อเปิดใช้งาน (อีก {a} Lv.)':'Automatic AOE fire support — upgrade the Orion ship to Lv.20 to enable ({a} Lv. to go)',
-      'ยิงสนับสนุนอัตโนมัติ · ระยะ {r}m · CD 15s · ใช้ 20⚡/นัด':'Automatic fire support · range {r}m · CD 15s · 20⚡/shot',
+      'ยิงสนับสนุนอัตโนมัติ · ระยะ {r}m · CD 10s · ใช้ 20⚡/นัด':'Automatic fire support · range {r}m · CD 10s · 20⚡/shot',
       '🔒 ต้องมี Premium Orion Gun':'🔒 Requires Premium Orion Gun',
       'ปืนกลหนัก AOE ยิงชุดละ 3 นัดติด · DMG 1.25× Rail Gun · CD 5s — ปลดล็อกในร้าน Premium (10 วัน)':'Heavy AOE gatling, 3-round burst · DMG 1.25x Rail Gun · CD 5s — unlock in Premium shop (10 days)',
       'DMG {a}/ชุด · ⏳ {b} วัน':'DMG {a}/burst · ⏳ {b} days',
@@ -13128,7 +13180,84 @@ const xhrpg = (() => {
       'อัศวินเหล็กราชา':'Royal Iron Knight', 'ผู้กล้า':'Hero', 'ผู้กล้าระดับสูง':'Elite Hero', 'ผู้กล้าในตำนาน':'Legendary Hero',
       'P Point คงเหลือ':'P Points balance', '📋 ประวัติ':'📋 History', '▲ ปิด':'▲ Close',
       'ซื้อสะสมได้ — บวกเวลาต่อจากที่เหลืออยู่':'Purchases stack — time is added onto what remains',
+      'ขวานไททันมีเอฟเฟกต์หมุนรอบตัวหุ่น และรัศมีวงกว้างขึ้นตามระดับขวาน':'Titan axe now spins around the robot itself · cleave radius grows with axe level',
+      'ไททันดึงมอนเข้าหาตัวได้แล้ว — ทุก 6 วินาที (ใช้ได้ทุกคน ไม่ต้องซื้อ)':'Titan can now pull monsters in — every 6 seconds (free for everyone)',
+      'รัศมี AOE กว้างขึ้นทุกแหล่ง — นักธนู · Rail Gun · Auto Cannon · ออร่าอัศวิน · ขวานไททัน':'Wider AOE across the board — Archer · Rail Gun · Auto Cannon · Knight aura · Titan axe',
+      'Orion Rail Gun ยิงถี่ขึ้น (คูลดาวน์ 15 → 10 วินาที)':'Orion Rail Gun fires more often (cooldown 15 → 10s)',
+      'ระยะดึงมอนเท่ากัน 100m ทุกแหล่ง — สกิลผู้เล่น · อัศวิน · ไททัน':'Monster pull range unified at 100m — player skill · Knight · Titan',
+      'เพิ่มเวลาเปิดหน้าจอให้ VIP0-9 อีกระดับละ 5 นาที':'Idle screen time extended by 5 minutes for VIP0-9',
+      'ลดเพดานค่าดำเนินการแลกเปลี่ยน 1-1 เหลือ 30 P':'1-1 Trade fee cap lowered to 30 P',
+      'หน้าประวัติ P โชว์ยอดที่กำลังจะเข้ากระเป๋าแล้ว — ไม่ต้องเติมซ้ำ':'P history now shows points on the way to your wallet — no need to top up again',
+      // ⚒️ EQC — Equipment Craft
+      'ทรัพยากรไม่พอ — ต้องการ {k} ×{n}':'Not enough resources — need {k} ×{n}',
+      'ต้องการ 🔩 เศษ EQ ×{n} (ได้จากการทำลายของที่ดรอป)':'Need 🔩 EQ Scrap ×{n} (from destroying dropped gear)',
+      'ได้ 🔩 เศษ +{n}':'Got 🔩 Scrap +{n}',
+      'ข้ามของคราฟที่ล็อก {n} ชิ้น':'Skipped {n} locked crafted item(s)',
+      '🔒 ของคราฟถูกล็อกไว้ — กดปลดล็อกก่อนจึงทำลายได้':'🔒 Crafted gear is locked — unlock it before destroying',
+      '⚒️ ของคราฟขาย/เทรดไม่ได้ — ผูกกับผู้สร้าง':'⚒️ Crafted gear cannot be sold or traded — bound to its maker',
+      '⚒️ สร้าง {i} สำเร็จ! (LV.1 · T1)':'⚒️ Crafted {i}! (LV.1 · T1)',
+      'ถึง T6 สูงสุดแล้ว':'Already at max T6',
+      '⚒️⬆️ อัพเป็น T{n} แล้ว — ช่อง option เปิด {n} ช่อง':'⚒️⬆️ Upgraded to T{n} — {n} option slots open',
+      'LV ของห้ามเกิน LV ผู้เล่น ({n})':'Item LV cannot exceed your LV ({n})',
+      '⚒️📈 อัพเป็น Lv.{n} แล้ว':'⚒️📈 Upgraded to Lv.{n}',
+      'ช่อง {n} ยังไม่เปิด — ต้องอัพ T ก่อน':'Slot {n} not open yet — upgrade T first',
+      'สุ่มไม่สำเร็จ ลองใหม่อีกครั้ง':'Roll failed, try again',
+      '🎲 สุ่มช่อง {n} สำเร็จ!':'🎲 Rolled slot {n}!',
+      '🔓 ปลดล็อกแล้ว — ทำลายได้ภายใน 5 นาที':'🔓 Unlocked — can be destroyed within 5 minutes',
+      'แก้ไขได้เฉพาะของคราฟที่อยู่ในกระเป๋า (ถอดออกก่อน)':'Only crafted gear in your bag can be modified (unequip first)',
+      'ไม้':'Wood',
+      'หิน':'Stone',
+      'เหล็ก':'Iron',
+      'คราฟของสวมใส่ (EQC)':'Craft Equipment (EQC)',
+      'คราฟ':'Craft',
+      'ของคราฟของฉัน':'My Crafted Gear',
+      'ช่องออปชัน (สุ่มใหม่ได้)':'Option Slots (re-rollable)',
+      'สร้างของใหม่':'Create New',
+      'คำอธิบาย':'Help',
+      '⬆️ T = อัพเทียร์ · เปิดช่องออปชันเพิ่ม 1 ช่องต่อ 1 ขั้น และค่าที่สุ่มได้แรงขึ้น':'⬆️ T = tier up · +1 option slot per step, and rolled values get stronger',
+      '📈 LV = อัพเลเวลของชิ้นนี้ (ห้ามเกิน LV ผู้เล่น) · LV สูงขึ้น DEF และค่าออปชันสูงขึ้น':'📈 LV = level up this piece (cannot exceed your LV) · higher LV = higher DEF and option values',
+      '🎲 สุ่ม = สุ่มออปชันช่องนั้นใหม่ทับของเดิม · ช่องอื่นไม่กระทบ':'🎲 Roll = re-roll that slot, overwriting it · other slots are untouched',
+      'ยังไม่มีของคราฟ — กดสร้างจากปุ่มด้านบน':'No crafted gear yet - create one with the buttons above',
+      'ทำลายของที่ดรอปเพื่อสะสม 🔩 เศษ แล้วคราฟของที่อัพเกรดเองได้ (เริ่ม LV.1 T1)':'Destroy dropped gear to collect 🔩 Scrap, then craft gear you can upgrade yourself (starts LV.1 T1)',
+      'ค่าคราฟ':'Craft cost',
+      'ของคราฟขาย/เทรดไม่ได้ · ทำลายต้องปลดล็อกก่อน · แก้ไขได้เฉพาะตอนอยู่ในกระเป๋า':'Crafted gear cannot be sold/traded · unlock before destroying · modify only while in bag',
+      'ช่องว่าง (ยังไม่สุ่ม)':'Empty slot (not rolled)',
+      'เท่า LV ผู้เล่น':'Same as your LV',
+      'ปลดล็อกอยู่ — ทำลายได้ชั่วคราว':'Unlocked — can be destroyed temporarily',
+      'ปลดล็อกเพื่อทำลาย (5 นาที)':'Unlock to destroy (5 min)',
+      'ของคราฟ — อัพเกรด/สุ่ม option ได้ · ขาย/เทรดไม่ได้':'Crafted — upgradeable & rollable · cannot be sold/traded',
+      'ถอดออกก่อน จึงอัพเกรด/สุ่ม option ได้':'Unequip first to upgrade or roll options',
+      'ระบบใหม่ EQC — ทำลายของสวมใส่ได้เศษ เอาไปคราฟของที่อัพเกรด T/LV และสุ่ม option เองได้':'New EQC system — destroying gear gives Scrap; craft gear you can upgrade T/LV and roll options yourself',
+      'ปรับสมดุลอัตราดรอปของสวมใส่ ทั้งมอนปกติและบอส MVP':'Rebalanced equipment drop rates from both normal monsters and MVP bosses',
+      'ลดพลังป้องกันของมอนสเตอร์ลง — ดาเมจของคุณเข้าถึงตัวมอนมากขึ้น':'Lowered monster defense — more of your damage now reaches the monster',
+      'มอนสเตอร์แมพหลังแรงขึ้น — ทะเลทราย · เยือกแข็ง · ใต้ทะเล · ป่ามังกร (ทุ่งกลางเท่าเดิม)':'Monsters on later maps hit harder — Desert · Frozen Land · Deep Sea · Dragon Forest (Central Field unchanged)',
+      'บอส MVP เกิดในแมพผู้เล่นใหม่แล้ว — ของที่ดรอปเหมือนแมพปกติทุกอย่าง':'MVP bosses now spawn on the newbie maps — same drops as the normal maps',
+      'แก้บั๊กบางโซนมอนไม่เกิดใหม่ยาวเป็นสิบนาที':'Fixed a bug where some zones stopped respawning monsters for ten minutes',
+      'ดึงมอนได้สูงสุด 6 ตัวเท่ากันทุกแหล่ง — สกิลผู้เล่น · อัศวิน · ไททัน':'Monster pull is capped at 6 targets everywhere — player skill · Knight · Titan',
+      'Titan Bow ยิงพร้อมขวานได้แล้ว — ลำแสงเหลืองที่ไม่เคยโผล่กลับมาแล้ว':'Titan Bow now fires alongside the axe — the yellow beam that never showed up is back',
+      'เพิ่มเวลาเปิดหน้าจอให้ทุกระดับ VIP — VIP0-9 เพิ่ม 20 นาที · VIP10 ขึ้นไปเพิ่ม 15 นาที':'More screen-on time for every VIP level — VIP0-9 +20 min · VIP10 and above +15 min',
+      'ค่าธรรมเนียมขายผ่านตลาด ปรับเป็น 15% ของราคาขาย':'Market selling fee is now 15% of the sale price',
+      'โอนทองผ่านการแลกเปลี่ยน 1-1 ถูกลง 3 เท่า — จ่าย P น้อยลงมากเวลาส่งทองก้อนใหญ่':'Sending gold through 1-1 trade is 3x cheaper — far less P for big gold transfers',
+      'ปิด/เปิดนักบวชและอัศวินได้เองแล้ว (ค่าเริ่มต้นเปิด)':'You can now turn the Priest and the Knight on or off yourself (on by default)',
+      'สกิน Premium ตัวใหญ่ขึ้นกว่าสกินฟรี — ยิ่งราคาสูงยิ่งใหญ่ (ไททัน · ฮีโร่ · คู่หู)':'Premium skins are drawn larger than free ones — the pricier the skin, the bigger (Titan · Hero · Buddy)',
+      'ซ่อนอันดับผู้เล่นและอันดับ Gold ชั่วคราว — กำลังออกแบบวิธีจัดอันดับใหม่':'Player and Gold rankings are hidden for now — a new ranking system is being designed',
+      'เศษ EQ คืออะไร':'What is EQ Scrap?',
+      'ได้จากการทำลายของสวมใส่ที่ดรอปมา ยิ่ง T สูงยิ่งได้เศษเยอะ (T1 = 1 · T2 = 2 · T3 = 4 · T4 = 8 · T5 = 16 · T6 = 32) · ทำลายของที่คราฟเองไม่ได้เศษคืน':'You get it by destroying dropped gear — the higher the T, the more scrap (T1 = 1 · T2 = 2 · T3 = 4 · T4 = 8 · T5 = 16 · T6 = 32) · Destroying crafted gear returns no scrap',
+      'คราฟยังไง':'How do I craft?',
+      'เปิดหน้า Equipment → แท็บ ⚒️ คราฟ → กดสร้างของใหม่ แล้วเลือกชนิด (หมวก / เกราะ / รองเท้า / สร้อย / แหวน) · ของที่คราฟเริ่มที่ LV.1 T1 เสมอ':'Open Equipment → the Craft tab → Create New, then pick a type (Helmet / Armor / Boots / Amulet / Ring) · Crafted gear always starts at LV.1 T1',
+      'อัพ T (เทียร์)':'Tier up (T)',
+      'เพิ่มขั้นของชิ้นนั้น ทุกขั้นเปิดช่อง option เพิ่มอีก 1 ช่อง และค่าที่สุ่มได้แรงขึ้น · สูงสุด T6 · ใช้ทรัพยากร 4 ชนิด + ทอง + เพชร + เศษ EQ (ดูราคาบนปุ่มในเกม)':'Raises the piece one tier. Each tier opens one more option slot and the values you roll get stronger · Max T6 · Costs all 4 resources + gold + diamonds + EQ Scrap (see the price on the button in game)',
+      'อัพ LV':'Level up (LV)',
+      'คนละแกนกับตีบวก — เพิ่ม LV ของชิ้นนั้นทีละขั้น ยิ่ง LV สูง DEF และค่า option ยิ่งสูง · ห้ามเกิน LV ผู้เล่น · ใช้ทรัพยากรตามชนิดของ + ทอง + เศษ EQ ขั้นละ 1':'A separate axis from enhancing — raises the piece one level at a time. Higher LV means higher DEF and higher option values · Cannot exceed your own LV · Costs the resources for that gear type + gold + 1 EQ Scrap per level',
+      'สุ่ม option':'Rolling options',
+      'สุ่มทีละช่อง ทับค่าเดิมของช่องนั้น ช่องอื่นไม่กระทบ · option จะไม่ซ้ำกับช่องอื่นบนชิ้นเดียวกัน · ยิ่งช่องท้ายยิ่งแพง (เศษ EQ = เลขช่อง)':'Rolls one slot at a time, overwriting that slot only — other slots are untouched · An option never repeats on another slot of the same piece · Later slots cost more (EQ Scrap = the slot number)',
+      'ข้อจำกัด':'Limits',
+      'ของที่คราฟเอง ขายในตลาดและเทรด 1-1 ไม่ได้ · ล็อกกันทำลายพลาดไว้ ต้องกดปลดล็อกก่อน (มีเวลา 5 นาที) · แก้ไข/อัพเกรดได้เฉพาะตอนอยู่ในกระเป๋า ถอดออกก่อน':'Crafted gear cannot be sold on the market or traded 1-1 · It is locked against accidental destruction — you must unlock it first (5 minute window) · It can only be modified while in your bag, so unequip it first',
+      'ต่างจากตีบวกยังไง':'How is it different from enhancing?',
+      'ตีบวก (+1..+15) ใช้กับของทุกชิ้นและมีโอกาสล้มเหลว · ส่วนอัพ T / อัพ LV / สุ่ม option ของ EQC สำเร็จแน่นอนทุกครั้ง ไม่มีล้มเหลว':'Enhancing (+1..+15) works on any gear and can fail · Tier up / Level up / Rolling options on EQC always succeed — they never fail',
+      'ของที่ดรอปได้ LV สูงสุด 60 — สูงกว่านี้ต้องคราฟเอง (ดูบท ⚒️ คราฟของสวมใส่)':'Dropped gear caps at LV 60 — above that you must craft it yourself (see the Equipment Crafting chapter)',
       'เติมรวม':'Total topped up', 'ใช้ไปรวม':'Total spent', 'ยังไม่มีประวัติ':'No history yet',
+      'รอเข้ากระเป๋า':'Pending', 'เติมสำเร็จแล้ว กำลังเข้าอัตโนมัติ — ไม่ต้องเติมซ้ำ':'Payment received — arriving automatically, no need to top up again',
       // ซื้อ/รีโรล/สวมสกิน (buySkin/rerollSkin/setSkin + hero/pet)
       '🎨 สกิน {a}':'🎨 {a} Skin', '🗡️ สกินฮีโร่ {a}':'🗡️ Hero Skin {a}',
       'ซื้อครั้งเดียว ใช้ได้ตลอด — สวมให้ทันทีหลังซื้อ':'One-time purchase, yours forever — equipped right after buying',
@@ -13417,7 +13546,6 @@ const xhrpg = (() => {
       'อีเวนต์คูณ G (ทอง) — แอดมินตั้งคูณทองจากการฆ่ามอนได้แล้ว': 'Gold (G) multiplier events — admins can now boost gold earned from monster kills',
       'ปรับสมดุลอัตราดรอปของสวมใส่จากบอส MVP': 'Rebalanced equipment drop rates from MVP bosses',
       'โบนัสเติมเงินแบบใหม่ — รอบละ 3 สิทธิ์ ×1.5 → ×1.3 → ×1.1 (เดิมรอบละ 1 สิทธิ์)': 'New top-up bonus — 3 uses per cycle: ×1.5 → ×1.3 → ×1.1 (was 1 per cycle)',
-      'แร่หายากเพิ่มเป็น 6 ชนิด — 3 ชนิดใหม่ขุดเจอตอนเก็บเกี่ยวผักที่บ้าน': 'Rare ore expanded to 6 types — 3 new ones are found while harvesting crops at home',
       'อีเวนต์มีชื่อแล้ว — โชว์บนหน้าจอ เช่น WEEKEND · EXP ×2 · DROP ×2 · G ×1.5': 'Events now have names shown on screen, e.g. WEEKEND · EXP ×2 · DROP ×2 · G ×1.5',
       'ฮีโร่หันหน้าเข้าหาเป้าที่กำลังโจมตีแม่นขึ้น (เดิมบางจังหวะหันคนละทาง)': 'The hero now faces the monster it is attacking more accurately (it sometimes faced the wrong way)',
       'อัปเดตล่าสุด':'Latest updates', 'อัตราดรอป':'Drop rates', 'อัปเดตใหม่':'New update',
@@ -13646,6 +13774,9 @@ const xhrpg = (() => {
       'ATK ×{a}/หมัด (รวม ×{b})':'ATK ×{a}/hit (×{b} total)',
       'หลบหลีก':'Dodge',
       'ทุก 3 AGI = หลบ +1% · เพดาน 75% · มอนเลเวลสูงลดโอกาส':'Every 3 AGI = +1% dodge · cap 75% · higher-Lv monsters reduce it',
+      'ลด CD สกิล':'Skill CD reduction',
+      'ทุก 6 AGI = ลดคูลดาวน์ +1% · เพดาน 50% (AGI 300)':'Every 6 AGI = +1% cooldown reduction · cap 50% (AGI 300)',
+      'การ์ด/ไข่/โมดูล/เพชร/กล่อง/ของ MVP — ไม่รวมแร่/พืช/ยา · ทุก 10 LUK = +1%':'Cards/eggs/modules/diamonds/boxes/MVP loot — excludes resources/herbs/potions · every 10 LUK = +1%',
       '+1m รัศมี · +0.025 ตัวคูณ':'+1m radius · +0.025 multiplier',
       'ใช้ครั้งละ 49 P — คืนแต้ม Ragnalok ที่ลงไปทั้งหมด กลับมาอัพใหม่ได้ (ไม่มีฟรีรายวัน)':'49 P per use — refunds all allocated Ragnalok points so you can re-assign them (no free daily use)',
       '→ ได้รับ <b style="color:#b45309">{a} Ragnalok Points</b> คืน (Lv/EXP ไม่หาย)':'→ Get <b style="color:#b45309">{a} Ragnalok Points</b> back (Lv/EXP untouched)',
@@ -13694,7 +13825,7 @@ const xhrpg = (() => {
       'ดูรายการที่ตัวเองวางขายอยู่ กด "ยกเลิก" เพื่อดึงของกลับ':'View your own active listings. Press "Cancel" to take an item back.',
       'บันทึกทุก transaction ทั้งซื้อและขาย กรองดูแต่ละประเภทได้ แสดง Gold +/- ของแต่ละรายการ':'Records every transaction, both buys and sells. Filter by type; shows the Gold +/- of each entry.',
       'ค่า Fee':'Fees',
-      'ผู้ขายถูกหัก 10% ของราคาขาย เป็นค่าธรรมเนียมตลาด':'Sellers pay a 10% market fee on the sale price.',
+      'ผู้ขายถูกหัก 15% ของราคาขาย เป็นค่าธรรมเนียมตลาด':'Sellers pay a 15% market fee on the sale price.',
       'อายุ Listing':'Listing Lifetime',
       'ของที่วางขายจะหมดอายุใน 24 ชั่วโมง หากไม่มีคนซื้อต้อง cancel เพื่อรับของคืน':'Listings expire after 24 hours. If nothing sells, cancel the listing to get the item back.',
       'EXP ที่ได้จากการต่อสู้เพิ่มขึ้น เหมาะช่วงที่อยากเลเวลขึ้นเร็ว':'Increases EXP earned from combat — great when you want to level fast.',
@@ -13996,6 +14127,13 @@ const xhrpg = (() => {
             <div style="font-size:14px;font-weight:600;color:#7c3aed">${player.p_points || 0} P</div>
           </div>
         </div>
+        ${+d.pending > 0 ? `<div style="display:flex;align-items:center;gap:6px;background:#fff7ed;border:1px solid #fed7aa;border-radius:6px;padding:6px 8px;margin-bottom:8px">
+          <span style="font-size:14px">⏳</span>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:12px;font-weight:600;color:#c2410c">${T('รอเข้ากระเป๋า')} +${+d.pending} P</div>
+            <div style="font-size:10px;color:#9a3412">${T('เติมสำเร็จแล้ว กำลังเข้าอัตโนมัติ — ไม่ต้องเติมซ้ำ')}</div>
+          </div>
+        </div>` : ''}
         <div style="max-height:180px;overflow-y:auto">${rows || '<div style="color:#4b5563;text-align:center;padding:8px">' + T('ยังไม่มีประวัติ') + '</div>'}</div>`;
     });
   }
@@ -16018,7 +16156,9 @@ const xhrpg = (() => {
     t = document.createElement('div');
     t.id = 'arena-toast';
     t.textContent = msg;
-    _floatMount(t, 'top:16%;left:50%;transform:translateX(-50%);z-index:10005;background:rgba(153,27,27,.95);color:#fff;border:1px solid #f87171;border-radius:12px;padding:10px 18px;font-size:13px;font-weight:700;max-width:88%;box-sizing:border-box;text-align:center;box-shadow:0 8px 24px rgba(0,0,0,.45);transition:opacity .4s;pointer-events:none'); // 📌 เกาะกรอบเกม
+    // ⚠️ z-index ต้องสูงกว่า overlay ทุกตัว (การ์ด EQ2 = 10008 · popup อื่นถึง 10050) — เดิม 10005 ทำให้ toast ไปอยู่
+    //    "หลัง" ฉากดำของการ์ด = กดปุ่มแล้วเหมือนไม่มีอะไรเกิดขึ้น (เจอจริงกับปุ่มสุ่ม option EQC 2026-07-29)
+    _floatMount(t, 'top:16%;left:50%;transform:translateX(-50%);z-index:10060;background:rgba(153,27,27,.95);color:#fff;border:1px solid #f87171;border-radius:12px;padding:10px 18px;font-size:13px;font-weight:700;max-width:88%;box-sizing:border-box;text-align:center;box-shadow:0 8px 24px rgba(0,0,0,.45);transition:opacity .4s;pointer-events:none'); // 📌 เกาะกรอบเกม
     setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 450); }, 3000);
   }
   function _arenaGo(mid, mode, pay, name, lv, g, pc, count) {
@@ -16230,7 +16370,125 @@ const xhrpg = (() => {
   };
   const _eq2Kind = it => (it.s === 'ring1' || it.s === 'ring2') ? 'ring' : (it.s || 'head');
   const _eq2Ico  = (it, sz) => `<img src="assets/eq2/eq2_${_eq2Kind(it)}_t${Math.max(1, Math.min(6, it.t | 0))}.png" style="width:${sz | 0}px;height:${sz | 0}px;image-rendering:pixelated;vertical-align:middle">`;
-  const _eq2Name = it => T(EQ2_KIND_TH[_eq2Kind(it)] || 'ของสวมใส่') + ' T' + (it.t | 0);
+  const _eq2Name = it => (it && it.c ? '⚒️ ' : '') + T(EQ2_KIND_TH[_eq2Kind(it)] || 'ของสวมใส่') + ' T' + (it.t | 0);
+  // ══ ⚒️ EQC — Equipment Craft (docs/eqc-craft-design.md) · mirror ตารางต้นทุนฝั่ง server ต้องตรงเป๊ะ ══
+  const EQC_T_COST = { 1:{res:1000,gold:1000,b:0,r:0,g:0,sc:20}, 2:{res:10000,gold:10000,b:1,r:0,g:0,sc:50}, 3:{res:50000,gold:50000,b:3,r:0,g:0,sc:100},
+                       4:{res:100000,gold:100000,b:10,r:5,g:0,sc:200}, 5:{res:200000,gold:500000,b:30,r:10,g:1,sc:300}, 6:{res:300000,gold:1000000,b:30,r:10,g:10,sc:500} };
+  // 🔩 sc = เศษ EQ ตามเลขช่อง (ช่อง 1 ใช้ 1 … ช่อง 6 ใช้ 6) — มิเรอร์ XHRPG_EQC_ROLL_COST ฝั่ง PHP
+  const EQC_ROLL_COST = { 1:{b:1,r:0,g:0,gold:1000,sc:1}, 2:{b:3,r:0,g:0,gold:10000,sc:2}, 3:{b:5,r:1,g:0,gold:50000,sc:3},
+                          4:{b:5,r:5,g:0,gold:100000,sc:4}, 5:{b:5,r:5,g:1,gold:200000,sc:5}, 6:{b:10,r:10,g:5,gold:300000,sc:6} };
+  const EQC_LV_RES = { head:['iron','copper'], body:['stone','wood'], foot:['copper','stone'], neck:['iron','stone','copper'], ring:['iron','wood'] };
+  const _eqcIs = it => !!(it && it.c);
+  // 🔩 อัพ LV กิน 1 เศษต่อขั้น (มิเรอร์ XHRPG_EQC_LV_SCRAP ฝั่ง PHP)
+  const _eqcLvCost = to => ({ res: Math.ceil(tierRes(to) * _upgCostMult(to)), gold: Math.ceil(tierGold(to) * _upgCostMult(to)), sc: 1 });
+  // ── 🧾 ชิปราคามาตรฐาน EQC — ไอคอนจริง (SVG ทรัพยากร/เพชร + pixel เหรียญ) ไม่ใช่ emoji ดิบ ──
+  //    ของไม่พอ = ชิปแดง → ผู้เล่นเห็นสาเหตุก่อนกด (เดิมกดแล้วขึ้น toast อย่างเดียว)
+  const _EQC_FIELD = { gold: 'gold', b: 'diamond_blue', r: 'diamond_red', g: 'diamond_green', sc: 'eq2_scrap' };
+  function _eqcChip(ico, n, dark, lack) {
+    const bg = lack ? (dark ? 'rgba(254,202,202,.95)' : '#fee2e2') : (dark ? 'rgba(255,255,255,.22)' : '#f5f5f4');
+    const fg = lack ? '#991b1b' : (dark ? '#fff' : '#57534e');
+    return `<span style="display:inline-flex;align-items:center;gap:3px;background:${bg};color:${fg};border-radius:6px;padding:1px 5px;font-size:9.5px;font-weight:700;line-height:1.7;white-space:nowrap">${ico}${n}</span>`;
+  }
+  // 🧾 แปลงต้นทุน EQC → รูปแบบ costs ของ _upgBar ([{html,need,have}]) — ใช้แถบราคามาตรฐานเดียวกับแผงยาน/ปืน
+  //    ของไม่พอ _upgBar โชว์ "มี/ต้องการ" สีแดง + เปลี่ยนปุ่มเป็น 🔒 ให้เอง
+  function _eqcCostList(c, resKinds) {
+    const out = [];
+    // ทรัพยากรทุกชนิดราคาเท่ากัน → รวมเป็นชิปเดียว (🪵🪨⚙️🟫 ×N) — เดิมแยก 4 ชิปเลขซ้ำกันหมด อ่านรก
+    //   have = ตัวที่มีน้อยสุด (ขาดชนิดเดียวก็อัพไม่ได้อยู่ดี — _upgBar จะโชว์ตัวเลขแดงตัวนั้น)
+    if (c.res) {
+      const ks = resKinds && resKinds.length ? resKinds : ['wood', 'stone', 'iron', 'copper'];
+      out.push({ html: ks.map(k => _resSvg(k, 12)).join(''), need: c.res, have: Math.min(...ks.map(k => player[k] | 0)) });
+    }
+    if (c.gold) out.push({ icon: '💰', need: c.gold, have: player.gold | 0 });
+    if (c.b)  out.push({ html: _icoGemHtml('blue', 12),  need: c.b,  have: player.diamond_blue  | 0 });
+    if (c.r)  out.push({ html: _icoGemHtml('red', 12),   need: c.r,  have: player.diamond_red   | 0 });
+    if (c.g)  out.push({ html: _icoGemHtml('green', 12), need: c.g,  have: player.diamond_green | 0 });
+    if (c.sc) out.push({ html: '🔩', need: c.sc, have: player.eq2_scrap | 0 });
+    return out;
+  }
+  // c = {res,gold,b,r,g,sc} · resKinds = ชนิดทรัพยากรที่หักจริง (ไม่ส่ง = ทั้ง 4 ชนิด) · dark = วางบนปุ่มสีเข้ม
+  //   align: 'end' = ชิดขวา (แถวอัพเกรดเต็มความกว้าง — ตกบรรทัดแล้วยังเรียงขอบขวาตรงกัน) · ไม่ส่ง = กึ่งกลาง
+  function _eqcCostRow(c, resKinds, dark, align) {
+    const px = 11, out = [];
+    if (c.res) {
+      const ks = resKinds && resKinds.length ? resKinds : ['wood', 'stone', 'iron', 'copper'];
+      const lack = ks.some(k => (player[k] | 0) < c.res);
+      out.push(_eqcChip(ks.map(k => _resSvg(k, px)).join(''), '×' + c.res.toLocaleString(), dark, lack));
+    }
+    if (c.gold) out.push(_eqcChip(_icoHtml('💰', px), c.gold.toLocaleString(), dark, (player.gold | 0) < c.gold));
+    [['b', 'blue'], ['r', 'red'], ['g', 'green']].forEach(([k, col]) => {
+      if (c[k]) out.push(_eqcChip(_icoGemHtml(col, px), c[k], dark, (player[_EQC_FIELD[k]] | 0) < c[k]));
+    });
+    if (c.sc) out.push(_eqcChip('🔩', c.sc, dark, (player.eq2_scrap | 0) < c.sc));
+    return `<div style="display:flex;flex-wrap:wrap;gap:4px;row-gap:3px;justify-content:${align === 'end' ? 'flex-end' : 'center'}">${out.join('')}</div>`;
+  }
+  // 🗂️ แท็บแผง Equipment: 'gear' = ของสวมใส่ทั้งหมด · 'craft' = คราฟ + รายการเฉพาะของคราฟ (เจ้าของสั่งแยกแท็บ 2026-07-29)
+  let _eq2Tab = 'gear';
+  function _eq2SetTab(t) { _eq2Tab = (t === 'craft' ? 'craft' : 'gear'); _eq2Mng = false; _eq2Sel.clear(); _eq2Render(); }
+  const _eqcInv = () => _eq2Inv().filter(_eqcIs).sort((a, b) => (b.t | 0) - (a.t | 0) || (b.lv | 0) - (a.lv | 0));
+  // ⚔️ ของคราฟที่ "สวมอยู่" — ต้องโชว์ในแท็บคราฟด้วย ไม่งั้นพอสวมแล้วหายจากรายการ ผู้เล่นนึกว่าของหาย (เจอจริง 2026-07-29)
+  const _eqcWornList = () => { const w = _eq2Worn(); return EQ2_SLOTS.map(sl => ({ sl, it: w[sl] })).filter(x => x.it && typeof x.it === 'object' && _eqcIs(x.it)); };
+  let _eqcHelpOn = false, _eqcPickOn = false;
+  function _eqcHelpTog(src, key) { _eqcHelpOn = !_eqcHelpOn; _eq2Card(src, key); } // ❔ คำอธิบายในการ์ด
+  function _eqcPickTog() { _eqcPickOn = !_eqcPickOn; _eq2Render(); }               // ➕ เปิด/ปิดแถวเลือกชนิดที่จะคราฟ
+  // แตะชิ้นในกระเป๋าแท็บ "ของสวมใส่" — ถ้าเป็นของคราฟให้เด้งไปแท็บคราฟก่อน (เจ้าของสั่ง: จัดการของคราฟที่เดียว)
+  function _eq2PickInv(id) {
+    const it = _eq2Inv().find(x => String(x.id || '') === String(id));
+    if (it && _eqcIs(it) && _eq2Tab !== 'craft') { _eq2Tab = 'craft'; _eq2Render(); }
+    _eq2Card('i', String(id));
+  }
+  function _eqcCraft(kind) { _eq2Act('craft', { kind: kind }); }
+  // 🔁 อาร์กิวเมนต์ที่ 3 = เปิดการ์ดชิ้นเดิมกลับหลังสำเร็จ — อัพ T/Lv/สุ่มติดๆ กันได้โดยไม่ต้องกดเข้าใหม่ทุกครั้ง
+  function _eqcUpT(id)     { _eq2Act('upt', { id: id }, id); }
+  function _eqcUpLv(id)    { _eq2Act('uplv', { id: id }, id); }
+  function _eqcRoll(id, s) { _eq2Act('reroll_slot', { id: id, opt_slot: s }, id); }
+  function _eqcUnlock(id)  { _eq2Act('unlock', { id: id }, id); }
+  // ⚒️ เนื้อหาแท็บคราฟ — เศษสะสม + ปุ่มสร้าง 5 ชนิด + รายการ "เฉพาะของคราฟ" (เจ้าของสั่งแยกแท็บ 2026-07-29)
+  function _eqcTabBody() {
+    const scrap = (player.eq2_scrap | 0) || 0;
+    const c = EQC_T_COST[1];
+    const kinds = ['head', 'body', 'foot', 'neck', 'ring'];
+    // ➕ กด [+] ก่อน ค่อยเลือกชนิด — เดิมโชว์ปุ่ม 5 ชนิดค้างไว้ กดโดนแล้วสร้างเลย (เจ้าของสั่งแก้ 2026-07-29)
+    const btns = kinds.map(k => `<button onclick="xhrpg._eqcCraft('${k}')" style="border:1px solid #e7e5e4;background:#fff;border-radius:9px;padding:6px 2px;font-size:10px;cursor:pointer;text-align:center;font-family:inherit">
+        <div style="font-size:16px;line-height:1.2">${EQ2_KIND_EMO[k]}</div><div style="color:#57534e">${T(EQ2_KIND_TH[k]).split(' ')[0]}</div></button>`).join('');
+    const pickBox = _eqcPickOn
+      ? `<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:5px;margin-top:8px">${btns}</div>
+         <div style="font-size:9.5px;color:rgba(255,255,255,.8);margin-top:7px;text-align:center">${T('ค่าคราฟ')}</div>
+         <div style="margin-top:3px">${_eqcCostRow(c, null, true)}</div>` : '';
+    const mine = _eqcWornList().map(x => _eq2CellHtml(x.it, `xhrpg._eq2Card('w','${x.sl}')`, false, '⚔️'))
+      .concat(_eqcInv().map(it => _eq2CellHtml(it, `xhrpg._eq2Card('i','${String(it.id || '')}')`, false)));
+    const nMine = mine.length;
+    // 🟣 แบนเนอร์โรงคราฟ — gradient ม่วง (สีระบบคราฟ) · ตัวหนังสือขาว · ปุ่มสร้างเป็นการ์ดขาวเด่นกลาง
+    return `<div style="background:linear-gradient(135deg,#7c3aed,#5b21b6);border-radius:13px;padding:11px 12px;color:#fff;box-shadow:0 4px 14px rgba(124,58,237,.28)">
+        <div style="display:flex;align-items:center;gap:9px">
+          <span style="flex:none;font-size:22px;line-height:1;filter:drop-shadow(0 2px 3px rgba(0,0,0,.3))">⚒️</span>
+          <span style="flex:1;min-width:0;font-size:12px;font-weight:800;text-shadow:0 1px 2px rgba(0,0,0,.3)">${T('คราฟของสวมใส่ (EQC)')}</span>
+          <span style="flex:none;background:rgba(255,255,255,.94);color:#6d28d9;border-radius:8px;padding:3px 9px;font-size:11px;font-weight:800;box-shadow:0 1px 3px rgba(0,0,0,.2)">🔩 ${scrap.toLocaleString()}</span>
+        </div>
+        <div style="font-size:9.5px;color:rgba(255,255,255,.85);line-height:1.6;margin-top:5px">${T('ทำลายของที่ดรอปเพื่อสะสม 🔩 เศษ แล้วคราฟของที่อัพเกรดเองได้ (เริ่ม LV.1 T1)')}</div>
+        <div style="display:flex;justify-content:center;margin-top:8px">
+          <button onclick="xhrpg._eqcPickTog()" style="border:none;border-radius:10px;background:${_eqcPickOn ? 'rgba(255,255,255,.25)' : '#fff'};color:${_eqcPickOn ? '#fff' : '#6d28d9'};padding:7px 20px;font-size:11.5px;font-weight:800;cursor:pointer;font-family:inherit;box-shadow:0 2px 6px rgba(0,0,0,.2)">${_eqcPickOn ? T('ยกเลิก') : '➕ ' + T('สร้างของใหม่')}</button>
+        </div>
+        ${pickBox}
+        <div style="font-size:9px;color:rgba(255,255,255,.7);margin-top:7px;text-align:center;line-height:1.5">⚒️ ${T('ของคราฟขาย/เทรดไม่ได้ · ทำลายต้องปลดล็อกก่อน · แก้ไขได้เฉพาะตอนอยู่ในกระเป๋า')}</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:7px;margin-top:13px;margin-bottom:7px">
+        <span style="flex:none;width:3px;height:14px;border-radius:2px;background:#7c3aed"></span>
+        <span style="flex:none;font-size:11.5px;font-weight:700;color:#44403c">🎒 ${T('ของคราฟของฉัน')}</span>
+        <span style="flex:1"></span>
+        <span style="flex:none;background:#ede9fe;color:#6d28d9;border-radius:7px;padding:0 8px;font-size:10px;font-weight:800;line-height:1.8">${nMine}</span>
+      </div>
+      ${nMine ? `<div style="display:grid;grid-template-columns:repeat(8,1fr);gap:5px">${mine.join('')}</div>`
+              : `<div style="text-align:center;color:#a8a29e;font-size:11px;padding:18px 8px;line-height:1.6">${T('ยังไม่มีของคราฟ — กดสร้างจากปุ่มด้านบน')}</div>`}`;
+  }
+
+  // 🔲 ช่องกระเป๋า 1 ช่อง — ใช้ร่วมทั้งแท็บของสวมใส่และแท็บคราฟ (เดิมเขียนซ้ำ 2 ที่ = แก้แล้วหลุดง่าย)
+  function _eq2CellHtml(it, click, sel, cornerIco) {
+    const t = Math.max(1, Math.min(6, it.t | 0));
+    const bc = RARITY_BORDER[EQ2_TCOL[t - 1]];
+    return `<div onclick="${click}" style="position:relative;border:2px solid ${sel ? '#dc2626' : bc};background:${sel ? '#fee2e2' : RARITY_BG[EQ2_TCOL[t - 1]]};border-radius:9px;padding:3px 1px;text-align:center;cursor:pointer${!sel && t >= 4 ? `;box-shadow:0 0 0 2px ${bc}33` : ''}${_eq2Mng && !sel ? ';opacity:.75' : ''}">
+      ${_eq2Ico(it, 26)}<div style="font-size:8px;color:${RARITY_TEXT[EQ2_TCOL[t - 1]]};font-weight:700;line-height:1.1">${it.lv | 0}</div>${(it.p | 0) > 0 ? `<span style="position:absolute;bottom:-5px;left:-4px;background:${_eq2PlusClr(it.p|0)};color:#fff;font-size:8px;font-weight:800;border-radius:5px;padding:0 4px;line-height:1.5">+${it.p|0}</span>` : ''}${sel ? '<span style="position:absolute;top:-6px;right:-5px;background:#dc2626;color:#fff;font-size:9px;border-radius:7px;padding:0 4px">✓</span>' : (cornerIco ? `<span title="${T('สวมใส่อยู่')}" style="position:absolute;top:-6px;right:-5px;font-size:9px">${cornerIco}</span>` : '')}${_eqcIs(it) ? '<span style="position:absolute;top:-6px;left:-4px;font-size:9px">⚒️</span>' : ''}</div>`;
+  }
   const _eq2OptLine  = (k, v) => { const p = EQ2_OPT_TXT[k]; return p ? T(p, { v: EQ2_RAGK[k] ? (v / 100) : v }) : k + ' +' + v; };
   const _eq2OptShort = (k, v) => (EQ2_OPT_SHORT[k] || k.toUpperCase()) + '+' + (EQ2_RAGK[k] ? (v / 100) + '%' : v);
   function _eq2BonusSum() { // mirror xhrpg_eq2_bonus — สรุปโบนัสของที่สวม 6 ช่อง
@@ -16250,13 +16508,31 @@ const xhrpg = (() => {
   }
   function _eq2Post(data, cb) {
     $.post(baseUrl + 'xhrpg_eq2.php', Object.assign({ line_uid: player.line_uid, lang: LANG(), session_token: sessionToken || '' }, data))
-      .done(res => { let d; try { d = typeof res === 'string' ? JSON.parse(res) : res; } catch (e) { return; } if (cb) cb(d); })
+      // ⚠️ parse ไม่ผ่าน (PHP พ่น warning ปนมาก่อน JSON) เดิม return เงียบ = กดปุ่มแล้วไม่มีอะไรเกิดขึ้นและไม่เหลือร่องรอย
+      //    ตอนนี้ส่ง null ต่อให้ผู้เรียก + โยนต้นฉบับ 120 ตัวแรกเข้า log ไว้ไล่เหตุ
+      .done(res => {
+        let d = null;
+        try { d = typeof res === 'string' ? JSON.parse(res) : res; }
+        catch (e) { addLog([{ type: 'dead', msg: 'EQ2: ' + String(res).slice(0, 120) }]); }
+        if (cb) cb(d);
+      })
       .fail(() => { if (cb) cb(null); });
   }
-  function _eq2Act(action, extra) {
+  // ❗ ข้อความ error ของแผง Equipment — ถ้าการ์ดรายละเอียดเปิดอยู่ต้องขึ้น "ในการ์ด" ไม่ใช่ toast
+  //    การ์ดแปะบน document.body (z-index 10008) ส่วน _arenaToast เกาะกรอบเกม = คนละ stacking context
+  //    → toast จมอยู่ใต้ฉากดำเสมอ ไม่ว่าจะตั้ง z-index เท่าไร (เจอจริง 2026-07-29 "กดปุ่มแล้วเงียบ")
+  function _eq2Err(msg) {
+    const box = document.querySelector('#eq2-card > div');
+    if (!box) { _arenaToast(msg); return; }
+    let e = document.getElementById('eq2-card-err');
+    if (!e) { e = document.createElement('div'); e.id = 'eq2-card-err'; box.insertBefore(e, box.firstChild); }
+    e.style.cssText = 'background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;border-radius:9px;padding:6px 9px;font-size:11px;font-weight:700;margin-bottom:9px;text-align:center;line-height:1.45';
+    e.textContent = msg;
+  }
+  function _eq2Act(action, extra, reopenId) {
     _eq2Post(Object.assign({ action: action }, extra || {}), d => {
-      if (!d) { _arenaToast(T('❌ เชื่อมต่อไม่ได้')); return; }
-      if (!d.ok) { addLog([{ type: 'dead', msg: d.error || '?' }]); _arenaToast('❌ ' + (d.error || '?')); return; } // เด้งกลางจอ — แผง Equipment บัง log (เพชร/ทองไม่พอ) มิเรอร์โมดูล
+      if (!d) { _eq2Err(T('❌ เชื่อมต่อไม่ได้')); return; }
+      if (!d.ok) { addLog([{ type: 'dead', msg: d.error || '?' }]); _eq2Err('❌ ' + (d.error || '?')); return; } // เด้งกลางจอ — แผง Equipment บัง log (เพชร/ทองไม่พอ) มิเรอร์โมดูล
       if (d.player) {
         const prev = player;
         player = d.player;
@@ -16267,6 +16543,7 @@ const xhrpg = (() => {
       if (d.msg) addLog([{ type: d.win === 0 ? 'dead' : 'levelup', msg: d.msg }]); // ตีบวกล้มเหลว (win=0) = log แดง · action อื่นไม่ส่ง win = เขียว
       document.getElementById('eq2-card')?.remove();
       _eq2Render(); updateHUD();
+      if (reopenId) _eq2Card('i', String(reopenId)); // ⚒️ EQC: การ์ดเดิมเด้งกลับพร้อมค่าใหม่ (ไม่พบชิ้นแล้ว = ไม่เปิด — _eq2Card กัน null ให้)
     });
   }
   function _eq2Close() { document.getElementById('eq2-panel')?.remove(); document.getElementById('eq2-card')?.remove(); }
@@ -16467,17 +16744,22 @@ const xhrpg = (() => {
         <button onclick="xhrpg._eq2DestroySel()" ${_eq2Sel.size ? '' : 'disabled'} style="border:none;background:${_eq2Sel.size ? '#dc2626' : '#fca5a5'};color:#fff;border-radius:6px;padding:2px 9px;font-size:9.5px;font-weight:700;cursor:${_eq2Sel.size ? 'pointer' : 'default'}">${T('🗑️ ทำลายที่เลือก ({a})', { a: _eq2Sel.size })}</button>
       </div>` : ''}
     `;
-    // กริดกระเป๋า — T4+ มีวงเรือง · โหมดจัดการ: แตะ = เลือก (ขอบแดง+✓)
+    // กริดกระเป๋า — T4+ มีวงเรือง · โหมดจัดการ: แตะ = เลือก (ขอบแดง+✓) · ของคราฟแตะแล้วเด้งไปแท็บคราฟ
     const cells = inv.map(it => {
-      const t = Math.max(1, Math.min(6, it.t | 0));
-      const bc = RARITY_BORDER[EQ2_TCOL[t - 1]];
       const id = String(it.id || '');
       const sel = _eq2Mng && _eq2Sel.has(id);
-      const click = _eq2Mng ? `xhrpg._eq2SelTog('${id}')` : `xhrpg._eq2Card('i','${id}')`;
-      return `<div onclick="${click}" style="position:relative;border:2px solid ${sel ? '#dc2626' : bc};background:${sel ? '#fee2e2' : RARITY_BG[EQ2_TCOL[t - 1]]};border-radius:9px;padding:3px 1px;text-align:center;cursor:pointer${!sel && t >= 4 ? `;box-shadow:0 0 0 2px ${bc}33` : ''}${_eq2Mng && !sel ? ';opacity:.75' : ''}">
-        ${_eq2Ico(it, 26)}<div style="font-size:8px;color:${RARITY_TEXT[EQ2_TCOL[t - 1]]};font-weight:700;line-height:1.1">${it.lv | 0}</div>${(it.p | 0) > 0 ? `<span style="position:absolute;bottom:-5px;left:-4px;background:${_eq2PlusClr(it.p|0)};color:#fff;font-size:8px;font-weight:800;border-radius:5px;padding:0 4px;line-height:1.5">+${it.p|0}</span>` : ''}${sel ? '<span style="position:absolute;top:-6px;right:-5px;background:#dc2626;color:#fff;font-size:9px;border-radius:7px;padding:0 4px">✓</span>' : ''}</div>`;
+      const click = _eq2Mng ? `xhrpg._eq2SelTog('${id}')` : `xhrpg._eq2PickInv('${id}')`;
+      return _eq2CellHtml(it, click, sel);
     }).join('');
-    bd.innerHTML = `
+    // 🗂️ แถบแท็บ — ของสวมใส่ / คราฟ (ตัวเลขบนแท็บคราฟ = จำนวนของคราฟที่มี)
+    const nCraft = _eqcInv().length;
+    const tabBtn = (k, ico, label, badge) => `<button onclick="xhrpg._eq2SetTab('${k}')" style="flex:1;border:none;border-bottom:2.5px solid ${_eq2Tab === k ? '#7f1d1d' : '#f1ede9'};background:${_eq2Tab === k ? '#fff' : '#fafaf9'};color:${_eq2Tab === k ? '#7f1d1d' : '#a8a29e'};padding:7px 4px;font-size:11.5px;font-weight:${_eq2Tab === k ? '800' : '600'};cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:5px">${ico} ${label}${badge}</button>`;
+    const tabBar = `<div style="display:flex;margin:-10px -12px 9px">
+        ${tabBtn('gear', '🛡️', T('ของสวมใส่'), '')}
+        ${tabBtn('craft', '⚒️', T('คราฟ'), nCraft ? `<span style="background:${_eq2Tab === 'craft' ? '#7f1d1d' : '#e7e5e4'};color:${_eq2Tab === 'craft' ? '#fff' : '#78716c'};border-radius:7px;padding:0 6px;font-size:9.5px;line-height:1.7">${nCraft}</span>` : '')}
+      </div>`;
+    if (_eq2Tab === 'craft') { bd.innerHTML = tabBar + _eqcTabBody(); return; }
+    bd.innerHTML = tabBar + `
       <div style="font-size:11px;font-weight:700;color:#44403c;margin-bottom:4px">${T('สวมใส่อยู่')}</div>
       ${dollBox}
       ${sumBox}
@@ -16500,16 +16782,97 @@ const xhrpg = (() => {
     const ov = document.createElement('div');
     ov.id = 'eq2-card';
     ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:10008;display:flex;align-items:center;justify-content:center;padding:18px';
-    const lines = (it.af || []).map(a => `<div style="font-size:11.5px;color:#374151;padding:1px 0">✦ ${_eq2OptLine(a[0], +a[1] || 0)}</div>`).join('');
-    ov.innerHTML = `<div style="background:#fff;border:3px solid ${RARITY_BORDER[EQ2_TCOL[t - 1]]};border-radius:14px;padding:14px 16px;max-width:290px;width:100%;box-shadow:0 12px 40px rgba(2,8,23,.45)">
-      <div style="display:flex;align-items:center;gap:8px">
-        <div style="border:2px solid ${RARITY_BORDER[EQ2_TCOL[t - 1]]};background:${RARITY_BG[EQ2_TCOL[t - 1]]};border-radius:9px;padding:4px">${_eq2Ico(it, 34)}</div>
-        <div><div style="font-size:13.5px;font-weight:800;color:${RARITY_TEXT[EQ2_TCOL[t - 1]]}">${_eq2Name(it)}${_eq2PlusTag(it.p)}</div>
-        <div style="font-size:10px;color:#6b7280">Lv.${it.lv | 0}</div></div>
-      </div>
-      <div style="border-top:1px dashed #e7e5e4;margin:8px 0 6px"></div>
-      <div style="font-size:11.5px;color:#0f766e;font-weight:700">🛡️ DEF +${EQ2_DEF[t - 1] + Math.round(Math.floor(Math.max(1, Math.min(999, it.lv | 0)) / 10) * EQ2_DEF_LVF) + _eq2PlusDef(it.p)}${(it.p | 0) > 0 ? `<span style="font-weight:500;color:#7c3aed"> (${T('ตีบวก')} +${_eq2PlusDef(it.p)})</span>` : ''}</div>
+    // ⚒️ EQC: ช่อง option โชว์ครบตาม T (ช่องว่าง = ยังไม่สุ่ม) + ปุ่มสุ่มรายช่อง · ของดรอปโชว์แบบเดิม
+    //    ลำดับใหม่ (เจ้าของสั่ง 2026-07-29): อัพ T/LV ขึ้นบน → ช่องออปชัน+ปุ่มสุ่มลงล่าง
+    let lines;
+    if (_eqcIs(it)) {
+      const af = Array.isArray(it.af) ? it.af : [];
+      const rows = Array.from({ length: t }, (_, si) => {
+        const a = af[si], rc = EQC_ROLL_COST[si + 1], has = !!(a && a[0]);
+        const txt = has ? `✦ ${_eq2OptLine(a[0], +a[1] || 0)}` : `<span style="color:#a8a29e">${T('ช่องว่าง (ยังไม่สุ่ม)')}</span>`;
+        // 🎲 ปุ่มสุ่มรายช่อง — สีม่วงมาตรฐานระบบเดียวกับปุ่มตีบวกโมดูล · ราคาเป็นชิปไอคอนใต้ปุ่ม
+        // 🎴 การ์ดต่อช่อง — โครงเดียวกับแผงยาน Orion/Rail Gun (หัวข้อ + แถบราคาเต็มกว้าง + ›) เจ้าของสั่ง 2026-07-29
+        const bar = src === 'i' ? _upgBar(`xhrpg._eqcRoll('${String(it.id || '')}',${si + 1})`, '', _eqcCostList(rc), false, '', '🎲') : '';
+        return `<div style="border:1.5px solid ${has ? '#ddd6fe' : '#eee'};background:${has ? '#faf5ff' : '#fafaf9'};border-radius:11px;padding:7px 9px;margin-top:6px">
+            <div style="display:flex;align-items:center;gap:7px">
+              <span style="flex:none;width:19px;height:19px;border-radius:6px;background:${has ? '#ede9fe' : '#f5f5f4'};color:${has ? '#6d28d9' : '#a8a29e'};font-size:9.5px;font-weight:800;display:flex;align-items:center;justify-content:center">${si + 1}</span>
+              <span style="flex:1;min-width:0;font-size:11.5px;color:#374151;line-height:1.35">${txt}</span>
+            </div>${bar}</div>`;
+      }).join('');
+      // ❔ ปุ่มช่วยเหลือ — กดสลับคำอธิบายในการ์ด (ไม่บอกสูตร/เรตภายใน)
+      const hlp = src === 'i'
+        ? `<button onclick="xhrpg._eqcHelpTog('${src}','${String(it.id || '')}')" title="${T('คำอธิบาย')}" style="flex:none;width:18px;height:18px;border-radius:50%;border:1px solid ${_eqcHelpOn ? '#7c3aed' : '#ddd6fe'};background:${_eqcHelpOn ? '#7c3aed' : '#f5f3ff'};color:${_eqcHelpOn ? '#fff' : '#7c3aed'};font-size:10px;font-weight:800;cursor:pointer;font-family:inherit;line-height:1;padding:0">?</button>`
+        : '';
+      const help = (_eqcHelpOn && src === 'i')
+        ? `<div style="background:#faf7ff;border:1px solid #ede9fe;border-radius:9px;padding:7px 9px;margin-top:5px;font-size:9.5px;color:#57534e;line-height:1.75">
+             ${T('⬆️ T = อัพเทียร์ · เปิดช่องออปชันเพิ่ม 1 ช่องต่อ 1 ขั้น และค่าที่สุ่มได้แรงขึ้น')}<br>
+             ${T('📈 LV = อัพเลเวลของชิ้นนี้ (ห้ามเกิน LV ผู้เล่น) · LV สูงขึ้น DEF และค่าออปชันสูงขึ้น')}<br>
+             ${T('🎲 สุ่ม = สุ่มออปชันช่องนั้นใหม่ทับของเดิม · ช่องอื่นไม่กระทบ')}<br>
+             ⚒️ ${T('ของคราฟขาย/เทรดไม่ได้ · ทำลายต้องปลดล็อกก่อน · แก้ไขได้เฉพาะตอนอยู่ในกระเป๋า')}
+           </div>` : '';
+      lines = `<div style="display:flex;align-items:center;gap:6px;margin-top:9px">
+            <span style="flex:none;font-size:10.5px;font-weight:700;color:#44403c">✦ ${T('ช่องออปชัน (สุ่มใหม่ได้)')}</span>
+            <span style="flex:1"></span>${hlp}
+          </div>${help}${rows}`;
+    } else {
+      lines = (it.af || []).map(a => `<div style="font-size:11.5px;color:#374151;padding:1px 0">✦ ${_eq2OptLine(a[0], +a[1] || 0)}</div>`).join('');
+    }
+    // ⚒️ ปุ่มอัพเกรด EQC (เฉพาะชิ้นในกระเป๋า — สวมอยู่ต้องถอดก่อน sync server)
+    let eqcBox = '', lockBox = '';
+    if (_eqcIs(it) && src === 'i') {
+      const tN = Math.max(1, Math.min(6, it.t | 0)), iid = String(it.id || '');
+      // 🎴 การ์ดอัพเกรด — โครงเดียวกับแผงยาน Orion / Rail Gun (เจ้าของสั่ง 2026-07-29 "ขอ UI แบบนี้")
+      //    หัวการ์ด: ไอคอน + ชื่อแกน + ระดับปัจจุบัน/เพดาน  →  แถบราคา _upgBar เต็มความกว้าง + › มุมขวา
+      const upCard = (accent, bg, ico, name, cur, max, bar) =>
+        `<div style="border:1.5px solid ${accent}55;background:${bg};border-radius:11px;padding:7px 9px;margin-top:7px">
+           <div style="display:flex;align-items:baseline;gap:6px">
+             <span style="flex:none;font-size:13px;line-height:1">${ico}</span>
+             <span style="flex:none;font-size:11.5px;font-weight:800;color:${accent}">${name}</span>
+             <span style="flex:1;min-width:0;font-size:10px;color:#94a3b8;white-space:nowrap">${cur}<span style="opacity:.6">/${max}</span></span>
+           </div>${bar}</div>`;
+      const tMax = tN >= 6;
+      const upT = upCard('#0e7490', '#ecfeff', '⬆️', 'Tier', 'T' + tN, 'T6',
+        _upgBar(`xhrpg._eqcUpT('${iid}')`, '', tMax ? [] : _eqcCostList(EQC_T_COST[tN + 1]), tMax, 'T MAX'));
+      const lvNow = it.lv | 0, lvCap = player.lv | 0, lMax = lvNow >= lvCap;
+      const upLv = upCard('#15803d', '#f0fdf4', '📈', 'Level', 'Lv.' + lvNow, 'Lv.' + lvCap,
+        _upgBar(`xhrpg._eqcUpLv('${iid}')`, '', lMax ? [] : _eqcCostList(_eqcLvCost(lvNow + 1), EQC_LV_RES[_eq2Kind(it)] || []), lMax, T('เท่า LV ผู้เล่น')));
+      const ul = (it.ul | 0) > Math.floor(Date.now() / 1000);
+      lockBox = ul
+        ? `<div style="text-align:center;margin-top:9px;font-size:10px;color:#b91c1c;font-weight:700">🔓 ${T('ปลดล็อกอยู่ — ทำลายได้ชั่วคราว')}</div>`
+        : `<div style="display:flex;justify-content:center;margin-top:9px"><button onclick="xhrpg._eqcUnlock('${iid}')" style="border:1px solid #fecaca;background:#fff7f7;color:#b91c1c;border-radius:8px;padding:5px 12px;font-size:10px;font-weight:700;cursor:pointer;font-family:inherit">🔓 ${T('ปลดล็อกเพื่อทำลาย (5 นาที)')}</button></div>`;
+      // 📦 แถบคลัง — สไตล์เดียวกับหัวแผงยาน ("Storage: …") ให้ดูราคากับของที่มีพร้อมกันได้
+      const wal = (ico, n) => `<span style="white-space:nowrap">${ico}${(n | 0).toLocaleString()}</span>`;
+      const wallet = `<div style="display:flex;flex-wrap:wrap;gap:9px;align-items:center;font-size:10px;color:#78716c;background:#fafaf9;border:1px solid #f0eeec;border-radius:9px;padding:5px 8px;margin-bottom:2px">
+          ${wal(_icoHtml('💰', 12), player.gold)}${wal(_icoGemHtml('blue', 12), player.diamond_blue)}${wal(_icoGemHtml('red', 12), player.diamond_red)}${wal(_icoGemHtml('green', 12), player.diamond_green)}${wal('🔩', player.eq2_scrap)}
+        </div>`;
+      // หัวข้อสั้นระดับเดียวกับหัวข้อช่องออปชัน (รายละเอียดยาวย้ายไปอยู่ในกล่อง ? แล้ว)
+      eqcBox = `<div style="margin-top:2px">
+          <div style="font-size:10.5px;font-weight:700;color:#44403c;margin-bottom:5px">⚒️ ${T('อัพเกรด')}</div>
+          ${wallet}${upT}${upLv}
+        </div>`;
+    } else if (_eqcIs(it)) {
+      eqcBox = `<div style="border-top:1px dashed #e7e5e4;margin:8px 0 0;padding-top:6px;font-size:9.5px;color:#78716c;text-align:center">⚒️ ${T('ถอดออกก่อน จึงอัพเกรด/สุ่ม option ได้')}</div>`;
+    }
+
+    // 📐 การ์ดกว้างขึ้น + เลื่อนได้ — EQC มีช่อง option ถึง 6 แถว + การ์ดอัพเกรด 2 ใบ (ของดรอปยังพอดีเท่าเดิม)
+    // 🎨 หัวการ์ดเป็นแถบสี rarity เต็มความกว้าง (มิเรอร์หัวแผง Equipment สีแดง): รูปในกรอบขาว + ชื่อ + Lv·T + ชิป DEF ขวา
+    const _bc = RARITY_BORDER[EQ2_TCOL[t - 1]];
+    const _defV = EQ2_DEF[t - 1] + Math.round(Math.floor(Math.max(1, Math.min(999, it.lv | 0)) / 10) * EQ2_DEF_LVF) + _eq2PlusDef(it.p);
+    // ⚠️ ห้ามใช้ margin ลบดันขึ้นไปชนขอบการ์ด — การ์ดตัวนอกเป็น overflow-y:auto จะ "ตัดหัวทิ้ง" เลื่อนขึ้นไปดูไม่ได้
+    //    (เจอจริง 2026-07-29: ชื่อของกับชิป DEF โดนตัดครึ่ง) → วางเป็นการ์ดในการ์ดปกติ มุมมนครบ 4 ด้าน
+    const headBand = `<div style="margin:0 0 9px;padding:9px 11px;border-radius:11px;background:linear-gradient(135deg,${_bc},${_bc}cc);display:flex;align-items:center;gap:9px">
+        <div style="flex:none;background:#fff;border-radius:9px;padding:4px;box-shadow:0 2px 6px rgba(0,0,0,.28);display:flex">${_eq2Ico(it, 30)}</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:12.5px;font-weight:800;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.35);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_eq2Name(it)}${_eq2PlusTag(it.p)}</div>
+          <div style="font-size:9.5px;color:rgba(255,255,255,.88)">Lv.${it.lv | 0} · T${t}${_eqcIs(it) ? ' · ⚒️' : ''}</div>
+        </div>
+        <span style="flex:none;background:rgba(255,255,255,.94);color:#0f766e;border-radius:8px;padding:3px 9px;font-size:11px;font-weight:800;box-shadow:0 1px 3px rgba(0,0,0,.2)">🛡️+${_defV}</span>
+      </div>`;
+    ov.innerHTML = `<div style="background:#fff;border:3px solid ${_bc};border-radius:14px;padding:14px 16px;max-width:${_eqcIs(it) ? 356 : 290}px;width:100%;max-height:88vh;overflow-y:auto;box-shadow:0 12px 40px rgba(2,8,23,.45)">
+      ${headBand}
+      ${eqcBox}
       ${lines}
+      ${lockBox}
       <div style="display:flex;gap:7px;margin-top:11px">
         ${src === 'i'
           ? `<button onclick="xhrpg._eq2Act('equip',{id:'${String(it.id || '')}'})" style="flex:1;background:#b91c1c;color:#fff;border:none;border-radius:9px;padding:8px;font-size:12px;font-weight:700;cursor:pointer">⚔️ ${T('สวมใส่')}</button>
@@ -16916,7 +17279,7 @@ const xhrpg = (() => {
   // ⏸️ ปิดระบบบุกอวกาศชั่วคราว (เจ้าของสั่ง 2026-07-28 "นำระบบยานบินบุกอวกาศออกไปก่อน (ซ่อนไว้)")
   //    ต้องมิเรอร์ XHRPG_ORAID_ON ฝั่ง server (ด่านจริงอยู่ที่ endpoint) · เปิดคืน = true ทั้ง 2 ที่
   //    ✅ ภารกิจที่ค้างอยู่ยัง settle + เด้ง popup ผลตามปกติ — ซ่อนแค่แผงส่ง/เร่ง ไม่ได้ยึดของใคร
-  const ORAID_UI = true; // ▶️ เปิดคืน 2026-07-29 (เจ้าของสั่ง) — sync XHRPG_ORAID_ON
+  const ORAID_UI = false; // ⏸️ ปิด 2026-07-29 รอบ 2 (เจ้าของสั่งซ่อนระบบแร่ทั้งชุด) — sync XHRPG_ORAID_ON
   function _oraidCardHTML() {
     if (!ORAID_UI) return '';                                    // ⏸️ ปิดอยู่ — ไม่โชว์ และไม่ยิง _oraidFetch ให้เปลือง request
     const shipLv = player.house_lv | 0;
@@ -19161,7 +19524,7 @@ const xhrpg = (() => {
     { icon:'❤️', name:'ร่างกายแกร่ง (Passive)', desc:'อัพแล้วได้เลย ไม่ต้องกด ไม่ใช้ MP\nHP สูงสุด +30 ต่อ Lv. (Lv.10 = +300 HP)' },
     { icon:'🛡️', name:'เพิ่มเกราะ (Passive)', desc:'ต้องการ ร่างกายแกร่ง Lv.3\nPassive บวกติดตัว: เกราะสูงสุด +5/Lv + ♻️ ฟื้นเกราะ +1/Lv ต่อวินาที (ไม่ใช้ MP)' },
     { icon:'💚', name:'ฟื้น HP (Passive)',     desc:'ต้องการ ร่างกายแกร่ง Lv.5\nPassive บวกติดตัว: ฟื้น HP +1/Lv ต่อวินาที (บวกกับ regen ปกติ ไม่ใช้ MP)' },
-    { icon:'🧲', name:'ดึงมอน (Action)',        desc:'ปลดล็อก Lv.30 + ฟื้น HP Lv.5 + เพิ่มเกราะ Lv.5 · Auto · MP 10 · CD ~10s\nดึงมอนทุกตัวในระยะให้วิ่งเข้าหาผู้เล่น เข้าครึ่งระยะต่อครั้ง (รวม MVP)\nระยะดึง 75m +5m ต่อ Lv (Lv.1=80m … Lv.10=125m)' },
+    { icon:'🧲', name:'ดึงมอน (Action)',        desc:'ปลดล็อก Lv.30 + ฟื้น HP Lv.5 + เพิ่มเกราะ Lv.5 · Auto · MP 10 · CD ~10s\nดึงมอนทุกตัวในระยะให้วิ่งเข้าหาผู้เล่น เข้าครึ่งระยะต่อครั้ง (รวม MVP)\nระยะดึง 100m' },
     { icon:'⚡', name:'Skill Point', desc:'ได้ 1 point ทุกครั้งที่ Level Up\nใช้อัพ Skill ได้ที่นี่ แยกจาก STAT Point' },
   ];
   const toggleSkillHelp = () => _makeHelpToggler('skill-help-box', SKILL_HELP_DATA.map(s => ({ icon: s.icon, name: T(s.name), desc: T(s.desc) })), 'stat-help')(); // แปลตอนกดเปิด (ภาษาสลับได้ runtime)
@@ -19233,7 +19596,6 @@ const xhrpg = (() => {
   const MKT_CATS = [
     { key:'resource',    label:'ทรัพยากร' },
     { key:'diamond',     label:'💎 เพชร' },
-    { key:'ore',         label:'🪨 แร่อวกาศ' },
     { key:'ammo',        label:'🔫 กระสุน' },
     { key:'treasure',    label:'🗃️ ของวิเศษ ของล้ำค่า' },
     { key:'hardware',    label:'🗃️ ของวิเศษ ชิ้นส่วนไททัน' },
@@ -19365,6 +19727,7 @@ const xhrpg = (() => {
         }));
     }
     if (cat === 'ore') {
+      if (!ORE_UI) return [];                                    // ⏸️ ระบบแร่ปิดอยู่ — ลงขายไม่ได้ (server กันอีกชั้น)
       // 🪨 แร่อวกาศ — มิเรอร์ branch เพชรทุกจุด (fungible · จำนวนจาก player.ore1/2/3 · server verify อีกชั้นตอนขาย)
       return MKT_ORE_DEFS
         .filter(o => (player[o.slot] || 0) > 0)
@@ -20959,15 +21322,34 @@ const xhrpg = (() => {
   // ═══ 🆕 Release Note (เจ้าของสั่ง 2026-07-26) — ใหม่สุดอยู่บน · append-only ห้ามแก้ของเก่า ═══
   //   ทุกบรรทัดวิ่งผ่าน T() → เพิ่มเวอร์ชันใหม่ต้องเติมคีย์ครบ 8 ภาษาเสมอ (client 6 dict + EN inline)
   //   เลขเวอร์ชัน/วันที่ไม่ต้องแปล · เขียนย่อ ไม่ลงลึกตัวเลข (ตัวเลขจริงอยู่บท 📊 อัตราดรอป)
-  const XHRPG_VERSION = '1.036';
+  const XHRPG_VERSION = '1.037';
   const RELEASE_NOTES = [
     { v: '1.037', d: '2026-07-29', items: [
       '💰 อีเวนต์คูณ G (ทอง) — แอดมินตั้งคูณทองจากการฆ่ามอนได้แล้ว',
       '🏷️ อีเวนต์มีชื่อแล้ว — โชว์บนหน้าจอ เช่น WEEKEND · EXP ×2 · DROP ×2 · G ×1.5',
       '🎯 ฮีโร่หันหน้าเข้าหาเป้าที่กำลังโจมตีแม่นขึ้น (เดิมบางจังหวะหันคนละทาง)',
-      '🛡️ ปรับสมดุลอัตราดรอปของสวมใส่จากบอส MVP',
+      '🛡️ ปรับสมดุลอัตราดรอปของสวมใส่ ทั้งมอนปกติและบอส MVP',
+      '🛡️ ลดพลังป้องกันของมอนสเตอร์ลง — ดาเมจของคุณเข้าถึงตัวมอนมากขึ้น',
+      '⚔️ มอนสเตอร์แมพหลังแรงขึ้น — ทะเลทราย · เยือกแข็ง · ใต้ทะเล · ป่ามังกร (ทุ่งกลางเท่าเดิม)',
+      '⭐ บอส MVP เกิดในแมพผู้เล่นใหม่แล้ว — ของที่ดรอปเหมือนแมพปกติทุกอย่าง',
+      '🐛 แก้บั๊กบางโซนมอนไม่เกิดใหม่ยาวเป็นสิบนาที',
       '🎁 โบนัสเติมเงินแบบใหม่ — รอบละ 3 สิทธิ์ ×1.5 → ×1.3 → ×1.1 (เดิมรอบละ 1 สิทธิ์)',
-      '🪨 แร่หายากเพิ่มเป็น 6 ชนิด — 3 ชนิดใหม่ขุดเจอตอนเก็บเกี่ยวผักที่บ้าน',
+      '🪓 ขวานไททันมีเอฟเฟกต์หมุนรอบตัวหุ่น และรัศมีวงกว้างขึ้นตามระดับขวาน',
+      '🧲 ไททันดึงมอนเข้าหาตัวได้แล้ว — ทุก 6 วินาที (ใช้ได้ทุกคน ไม่ต้องซื้อ)',
+      '🎯 รัศมี AOE กว้างขึ้นทุกแหล่ง — นักธนู · Rail Gun · Auto Cannon · ออร่าอัศวิน · ขวานไททัน',
+      '⏱️ Orion Rail Gun ยิงถี่ขึ้น (คูลดาวน์ 15 → 10 วินาที)',
+      '🧲 ระยะดึงมอนเท่ากัน 100m ทุกแหล่ง — สกิลผู้เล่น · อัศวิน · ไททัน',
+      '🧲 ดึงมอนได้สูงสุด 6 ตัวเท่ากันทุกแหล่ง — สกิลผู้เล่น · อัศวิน · ไททัน',
+      '🏹 Titan Bow ยิงพร้อมขวานได้แล้ว — ลำแสงเหลืองที่ไม่เคยโผล่กลับมาแล้ว',
+      '😴 เพิ่มเวลาเปิดหน้าจอให้ทุกระดับ VIP — VIP0-9 เพิ่ม 20 นาที · VIP10 ขึ้นไปเพิ่ม 15 นาที',
+      '💜 ลดเพดานค่าดำเนินการแลกเปลี่ยน 1-1 เหลือ 30 P',
+      '💸 ค่าธรรมเนียมขายผ่านตลาด ปรับเป็น 15% ของราคาขาย',
+      '💰 โอนทองผ่านการแลกเปลี่ยน 1-1 ถูกลง 3 เท่า — จ่าย P น้อยลงมากเวลาส่งทองก้อนใหญ่',
+      '🔘 ปิด/เปิดนักบวชและอัศวินได้เองแล้ว (ค่าเริ่มต้นเปิด)',
+      '📏 สกิน Premium ตัวใหญ่ขึ้นกว่าสกินฟรี — ยิ่งราคาสูงยิ่งใหญ่ (ไททัน · ฮีโร่ · คู่หู)',
+      '🏆 ซ่อนอันดับผู้เล่นและอันดับ Gold ชั่วคราว — กำลังออกแบบวิธีจัดอันดับใหม่',
+      '⏳ หน้าประวัติ P โชว์ยอดที่กำลังจะเข้ากระเป๋าแล้ว — ไม่ต้องเติมซ้ำ',
+      '⚒️ ระบบใหม่ EQC — ทำลายของสวมใส่ได้เศษ เอาไปคราฟของที่อัพเกรด T/LV และสุ่ม option เองได้',
     ] },
     { v: '1.036', d: '2026-07-28', items: [
       '🌱 อีเวนต์คูณ EXP/DROP พิเศษสำหรับผู้เล่นใหม่ (แอดมินตั้งเพดานเลเวลได้)',
@@ -21117,7 +21499,9 @@ const xhrpg = (() => {
     mod:    [[1, 20, 1, 0.012], [21, 40, 2, 0.012], [41, 60, 3, 0.012], [61, 80, 4, 0.006], [81, 100, 5, 0.004]], // [lvLo, lvHi, rarity, %]
     modMvp: [[1, 20, 2, 2.5], [21, 40, 3, 2.5], [41, 60, 4, 2.5], [61, 80, 5, 1.25], [81, 100, 6, 0.625]],
     eq2:    [[1, 0.080], [2, 0.020], [3, 0.008], [4, 0.003], [5, 0.00075], [6, 0]], // [tier, % มอนปกติ] — sync XHRPG_EQ2_RATE_MON (ต่อ 10M) · T4-T6 −25% 2026-07-29
-    eq2Mvp: [[1, 50], [2, 30], [3, 20], [4, 10], [5, 5], [6, 1]],                    // [tier, % MVP]
+    // ⚠️ 2026-07-29 แถวนี้ค้างค่าเก่าอยู่ 2 รอบ (÷2 ทุก tier แล้วตามด้วย −25% เฉพาะ T4-T6 แก้แต่ eq2 ไม่ได้แก้ eq2Mvp)
+    //    = ตารางในคู่มือประกาศเรตสูงกว่าจริง 2-2.7 เท่า · sync XHRPG_EQ2_RATE_MVP (ต่อ 10M) แล้ว
+    eq2Mvp: [[1, 25], [2, 15], [3, 10], [4, 3.75], [5, 1.875], [6, 0.375]],          // [tier, % MVP]
     // ⬇️ กล่องทุกชนิด ×0.75 (เจ้าของสั่ง 2026-07-28) — มิเรอร์ xhrpg_module_box_by_level / xhrpg_card_box_by_level
     boxMod:  [[1, 20, 11.25], [21, 40, 6.75], [41, 60, 6.75], [61, 80, 6.75]],       // 📦 กล่องโมดูล MVP
     boxCard: [[1, 20, 11.25], [21, 40, 5.63], [41, 80, 3.38]],                       // 🎁🧰 กล่องการ์ด/ไข่ MVP
@@ -21232,6 +21616,20 @@ const xhrpg = (() => {
         { q:'ระดับสีของ Item', a:'ขาว < เขียว < ฟ้า < ม่วง < ทอง < แดง ยิ่งหายากยิ่งแรงและมีราคาสูงในตลาด' },
       ]
     },
+    // ⚒️ บทคราฟของสวมใส่ (EQC · 2026-07-29) — ต่อจากบท Equipment โดยตรง
+    //    🔒 ห้ามลงตัวคูณค่า option ลับ (XHRPG_EQC_OPT_MULT) ตาม secret-formulas-policy
+    {
+      icon:'⚒️', title:'คราฟของสวมใส่ (EQC)',
+      items:[
+        { q:'เศษ EQ คืออะไร', a:'ได้จากการทำลายของสวมใส่ที่ดรอปมา ยิ่ง T สูงยิ่งได้เศษเยอะ (T1 = 1 · T2 = 2 · T3 = 4 · T4 = 8 · T5 = 16 · T6 = 32) · ทำลายของที่คราฟเองไม่ได้เศษคืน' },
+        { q:'คราฟยังไง', a:'เปิดหน้า Equipment → แท็บ ⚒️ คราฟ → กดสร้างของใหม่ แล้วเลือกชนิด (หมวก / เกราะ / รองเท้า / สร้อย / แหวน) · ของที่คราฟเริ่มที่ LV.1 T1 เสมอ' },
+        { q:'อัพ T (เทียร์)', a:'เพิ่มขั้นของชิ้นนั้น ทุกขั้นเปิดช่อง option เพิ่มอีก 1 ช่อง และค่าที่สุ่มได้แรงขึ้น · สูงสุด T6 · ใช้ทรัพยากร 4 ชนิด + ทอง + เพชร + เศษ EQ (ดูราคาบนปุ่มในเกม)' },
+        { q:'อัพ LV', a:'คนละแกนกับตีบวก — เพิ่ม LV ของชิ้นนั้นทีละขั้น ยิ่ง LV สูง DEF และค่า option ยิ่งสูง · ห้ามเกิน LV ผู้เล่น · ใช้ทรัพยากรตามชนิดของ + ทอง + เศษ EQ ขั้นละ 1' },
+        { q:'สุ่ม option', a:'สุ่มทีละช่อง ทับค่าเดิมของช่องนั้น ช่องอื่นไม่กระทบ · option จะไม่ซ้ำกับช่องอื่นบนชิ้นเดียวกัน · ยิ่งช่องท้ายยิ่งแพง (เศษ EQ = เลขช่อง)' },
+        { q:'ข้อจำกัด', a:'ของที่คราฟเอง ขายในตลาดและเทรด 1-1 ไม่ได้ · ล็อกกันทำลายพลาดไว้ ต้องกดปลดล็อกก่อน (มีเวลา 5 นาที) · แก้ไข/อัพเกรดได้เฉพาะตอนอยู่ในกระเป๋า ถอดออกก่อน' },
+        { q:'ต่างจากตีบวกยังไง', a:'ตีบวก (+1..+15) ใช้กับของทุกชิ้นและมีโอกาสล้มเหลว · ส่วนอัพ T / อัพ LV / สุ่ม option ของ EQC สำเร็จแน่นอนทุกครั้ง ไม่มีล้มเหลว' },
+      ]
+    },
     {
       icon:'🛸', title:'ยานบิน (House)',
       items:[
@@ -21252,7 +21650,7 @@ const xhrpg = (() => {
         { q:'ซื้อของ', a:'ดูรายการของที่ผู้เล่นอื่นวางขาย กรองตามหมวดหรือค้นหาชื่อ Badge "ใหม่ ✨" = ของที่คุณยังไม่มี' },
         { q:'ของฉัน', a:'ดูรายการที่ตัวเองวางขายอยู่ กด "ยกเลิก" เพื่อดึงของกลับ' },
         { q:'ประวัติ', a:'บันทึกทุก transaction ทั้งซื้อและขาย กรองดูแต่ละประเภทได้ แสดง Gold +/- ของแต่ละรายการ' },
-        { q:'ค่า Fee', a:'ผู้ขายถูกหัก 10% ของราคาขาย เป็นค่าธรรมเนียมตลาด' },
+        { q:'ค่า Fee', a:'ผู้ขายถูกหัก 15% ของราคาขาย เป็นค่าธรรมเนียมตลาด' },
         { q:'อายุ Listing', a:'ของที่วางขายจะหมดอายุใน 24 ชั่วโมง หากไม่มีคนซื้อต้อง cancel เพื่อรับของคืน' },
       ]
     },
@@ -21330,7 +21728,8 @@ const xhrpg = (() => {
             AMMO_TIER_ICONS[e[0] - 1] + ' T' + e[0], _drPct(e[1]), _drPct(DR.eq2Mvp[i][1]),
           ])) +
           _drNote(T('ทอยไล่จากระดับสูงลงมา ได้มากสุด 1 ชิ้นต่อการฆ่า 1 ตัว')) +
-          _drNote(T('T6 หลุดจาก MVP เท่านั้น')) },
+          _drNote(T('T6 หลุดจาก MVP เท่านั้น')) +
+          _drNote(T('ของที่ดรอปได้ LV สูงสุด 60 — สูงกว่านี้ต้องคราฟเอง (ดูบท ⚒️ คราฟของสวมใส่)')) },
 
         { q:'MVP ดรอปอะไรบ้าง', a: () =>
           `<div style="font-size:11.5px;font-weight:700;color:#334155;margin-top:4px">📦🎁🧰 ${T('กล่องสุ่ม')}</div>` +
@@ -21387,12 +21786,13 @@ const xhrpg = (() => {
           _drNote(T('ใช้อัตราเดียวกันทั้งโมดูลและของสวมใส่')) +
           _drNote(T('ล้มเหลวแล้วระดับลดลง 1 ขั้น · ค่าใช้จ่ายหักทุกครั้งไม่คืน')) },
 
-        { q:'ภารกิจอวกาศ', a: () =>
+        // ⏸️ ภารกิจอวกาศถูกปิดทั้งระบบ (ORAID_UI=false) — ซ่อนหัวข้อนี้ไปด้วย ไม่งั้นคู่มือโฆษณาของที่กดไม่ได้
+        ...(ORAID_UI ? [{ q:'ภารกิจอวกาศ', a: () =>
           _drTable([T('ผลภารกิจ'), T('โอกาส')], [
             ['🌌 ' + T('สำเร็จ'), RND.oraid + '%'],
             ['🪨 ' + T('ล้มเหลว'), (100 - RND.oraid) + '%'],
           ]) +
-          _drNote(T('สำเร็จได้แร่อวกาศตามระดับภารกิจ · ล้มเหลวได้แร่ธรรมดากลับมาแทน')) },
+          _drNote(T('สำเร็จได้แร่อวกาศตามระดับภารกิจ · ล้มเหลวได้แร่ธรรมดากลับมาแทน')) }] : []),
 
         { q:'สกินสุ่มค่าไหม', a: () =>
           _drNote('✅ ' + T('ไม่สุ่ม — ผู้เล่นเลือก STAT เองและได้ค่าสูงสุดของสกินนั้นเสมอ (100%)')) },
@@ -21464,6 +21864,6 @@ const xhrpg = (() => {
     if (root) root.innerHTML = _guideBuild();
   }
 
-  return { init, startDemo, showOfflineReward, changeDisplayName, upgradeSolarCell, upgradeCat, toggleCat, upgradeDrone, toggleDrone, priestUp, togglePriest, knightUp, toggleKnight, migrateRedeem, archerUp, toggleArcher, stripeTopup, openCodashop, topupSetLang, toggleLang, openReportAdmin, togglePHistory, upgradeGun, upgradeKnife, upgradeRobot, upgradeRobotBody, upgradeHouse, orionGunUp, orionCannonUp, turretUp, buildHouse, houseToggle, toggleBurnWood, toggleHouseProdTier, toggleAmmTier, goToHouse, usePotion, switchGun, zoom, togglePanel, closePanel, logout, warpHome, warpToMap, openMapSelect, closeMapSelect, setDir, toggleBot, setExploreRadius, cycleExploreRadius, openOfflinePanel, _offClose, openBotMonitor, _bmBack, _bmZonePick, toggleMapClean, toggleMiniLog, toggleLock, toggleSfx, toggleAutoPotion, setAutoPotionThreshold, toggleAutoRefillPotion, togglePotionTier, toggleHousePotionProdTier, usePotionManual, toggleAutoRefill, toggleGunUse, setGunTab, upgradeArmor, mineBuild, mineUp, mineSelectOre, mineToggle, moduleEquip, moduleUnequip, moduleEnhance, openModuleBox, moduleDiscard, moduleManageToggle, moduleSelToggle, moduleSelectAll, moduleDiscardSelected, cardPickOpen, cardPickClose, cardSocket, cardUnsocket, _cardUnsockClose, _cardUnsockGo, cardMvpExchange, _cardMvpExClose, _cardMvpExGo, eggMvpExchange, _eggMvpExClose, _eggMvpExGo, showModCards, notYetOpen, toggleStatHelp, toggleRobotHelp, toggleGunHelp, toggleItemHelp, toggleHouseHelp, upgradeSkill, setSkillTab, job2Unlock, toggleSkillAuto, toggleSkillHelp, useSkill, goToSpot, goToBoss, toggleAutoRailgun, toggleAutoRobotRecharge, toggleOrionRail, toggleOrionCannon, ragUp, rankTab, _rankSetCC, _rankCCOpen, _rankCCClose, buyPremium, buySkin, setSkin, skinGrpOpen, skinGrpBack, buyPetSkin, setPetSkin, rerollPetSkin, rerollSkin, buyHeroSkin, setHeroSkin, rerollHeroSkin, confirmStatReset, confirmRagReset, togglePremiumHelp, renderMarket, _mktSetMode, _mktSetSellCat, _mktSellGo, _mktBuyGo, _mktSetBuyCat, _mktBuySearch, _mktPickItem, _mktPickListing, _mktCalcNet, _mktCalcBuyTotal, _mktDoSell, _mktDoBuy, _mktCancel, _mktSetHistFilter, _mktOpenSell, _mktCloseSell, _mktSellBack, _mktQtySell, _mktQtyBuy, _mktPickGroup, _mktGroupBack, _mktSetModFilter, renderGuide, _guideSetChap, _guideToggle, _rnPageGo, _offRnTog, _offRnGo, renderPet, petHatchAsk, petRecallAsk, petUpgrade, petResetUp, petCardPickOpen, petCardSocket, petCardUnsocket, _petCardUnsockGo, _petCardUnsockClose, _petResetGo, _petResetClose, _dvSetTab, dvAwaken, dvUp, dvResetUp, dvToggle, dvCardPickOpen, dvCardSocket, dvCardUnsocket, openCardBox, openEggBox, _godSetTab, godCardExchange, openVipPanel, _vipClose, vipBoxBuy, openPvpPanel, _pvpClose, _pvpTab, _pvpChallenge, _pvpAccept, _pvpDecline, _pvpForfeit, _pvpToggleOff, _pvpShadow, openArenaPanel, _arenaGo, _arenaHist, _arenaSetPage, renderChat, chatSend, chatEmojiToggle, chatOpenDm, chatOpenGuild, chatPickImage, _chatUploadImg, _chatClearPendingImg, renderLogPanel, openHomePanel, homeUp, homePlant, homeHarvest, homeVisit, homeEnterFriend, warpCenter, guardPick, guardSet, guardRemove, openRaidPanel, raidStart, openRaidHist, _raidPageGo, _trSearchInput, _trInvite, _trRespond, _trSetCat, _trPickItem, _trLock, _trUnlock, _trConfirm, _trCancel, _pvpPageGo, openEq2Panel, _eq2Close, _eq2Card, _eq2Act, _eq2Enhance, _eq2SetSort, _eq2Destroy, _eq2TogChips, _eq2TogList, _eq2MngTog, _eq2SelTog, _eq2SelAll, _eq2SelClear, _eq2DestroySel, _eq2SetAuto, openGachaPanel, _gachaClose, _gachaSpin, openAucPanel, _aucClose, _aucSetTab, _aucBid, _aucHist, openGuildPanel, _gdClose, _gdSetTab, _gdPick, _gdCreate, _gdJoin, _gdLeave, _gdKick, _gdPromote, _gdDemote, _gdTransfer, _gdDonate, _gdDonateCustom, _gdDonateOre, _gdEmEdit, _gdEmblemSave, _gdNoticeSave, _gdDisband, _gdLog, _gdSearch, _gdPageGo, _gdFetchMy, _gdDetail, _gtFund, _gtFundCustom, _gtBuy, _gtUp, _gtMoveOpen, _gtMvZones, _gtMvClose, _gtMvSave, _gtSlotOpen, _gtPopClose, _gtHistOpen, _aucBellTog, openVoucherPanel, _vcClose, _vcSetTab, _vcSetStat, _vcSetFace, _vcSetQ, _vcPageGo, _vcCopy, _vcBuy, _vcRedeem, castleEnter, castleExit, _ctMemberList, gdunEnter, gdunExit, oraidSend, oraidRush, lbShow, _lbShowClose, _lbShowTabSet };
+  return { init, startDemo, showOfflineReward, changeDisplayName, upgradeSolarCell, upgradeCat, toggleCat, upgradeDrone, toggleDrone, priestUp, togglePriest, knightUp, toggleKnight, migrateRedeem, archerUp, toggleArcher, stripeTopup, openCodashop, topupSetLang, toggleLang, openReportAdmin, togglePHistory, upgradeGun, upgradeKnife, upgradeRobot, upgradeRobotBody, upgradeHouse, orionGunUp, orionCannonUp, turretUp, buildHouse, houseToggle, toggleBurnWood, toggleHouseProdTier, toggleAmmTier, goToHouse, usePotion, switchGun, zoom, togglePanel, closePanel, logout, warpHome, warpToMap, openMapSelect, closeMapSelect, setDir, toggleBot, setExploreRadius, cycleExploreRadius, openOfflinePanel, _offClose, openBotMonitor, _bmBack, _bmZonePick, toggleMapClean, toggleMiniLog, toggleLock, toggleSfx, toggleAutoPotion, setAutoPotionThreshold, toggleAutoRefillPotion, togglePotionTier, toggleHousePotionProdTier, usePotionManual, toggleAutoRefill, toggleGunUse, setGunTab, upgradeArmor, mineBuild, mineUp, mineSelectOre, mineToggle, moduleEquip, moduleUnequip, moduleEnhance, openModuleBox, moduleDiscard, moduleManageToggle, moduleSelToggle, moduleSelectAll, moduleDiscardSelected, cardPickOpen, cardPickClose, cardSocket, cardUnsocket, _cardUnsockClose, _cardUnsockGo, cardMvpExchange, _cardMvpExClose, _cardMvpExGo, eggMvpExchange, _eggMvpExClose, _eggMvpExGo, showModCards, notYetOpen, toggleStatHelp, toggleRobotHelp, toggleGunHelp, toggleItemHelp, toggleHouseHelp, upgradeSkill, setSkillTab, job2Unlock, toggleSkillAuto, toggleSkillHelp, useSkill, goToSpot, goToBoss, toggleAutoRailgun, toggleAutoRobotRecharge, toggleOrionRail, toggleOrionCannon, ragUp, rankTab, _rankSetCC, _rankCCOpen, _rankCCClose, buyPremium, buySkin, setSkin, skinGrpOpen, skinGrpBack, buyPetSkin, setPetSkin, rerollPetSkin, rerollSkin, buyHeroSkin, setHeroSkin, rerollHeroSkin, confirmStatReset, confirmRagReset, togglePremiumHelp, renderMarket, _mktSetMode, _mktSetSellCat, _mktSellGo, _mktBuyGo, _mktSetBuyCat, _mktBuySearch, _mktPickItem, _mktPickListing, _mktCalcNet, _mktCalcBuyTotal, _mktDoSell, _mktDoBuy, _mktCancel, _mktSetHistFilter, _mktOpenSell, _mktCloseSell, _mktSellBack, _mktQtySell, _mktQtyBuy, _mktPickGroup, _mktGroupBack, _mktSetModFilter, renderGuide, _guideSetChap, _guideToggle, _rnPageGo, _offRnTog, _offRnGo, renderPet, petHatchAsk, petRecallAsk, petUpgrade, petResetUp, petCardPickOpen, petCardSocket, petCardUnsocket, _petCardUnsockGo, _petCardUnsockClose, _petResetGo, _petResetClose, _dvSetTab, dvAwaken, dvUp, dvResetUp, dvToggle, dvCardPickOpen, dvCardSocket, dvCardUnsocket, openCardBox, openEggBox, _godSetTab, godCardExchange, openVipPanel, _vipClose, vipBoxBuy, openPvpPanel, _pvpClose, _pvpTab, _pvpChallenge, _pvpAccept, _pvpDecline, _pvpForfeit, _pvpToggleOff, _pvpShadow, openArenaPanel, _arenaGo, _arenaHist, _arenaSetPage, renderChat, chatSend, chatEmojiToggle, chatOpenDm, chatOpenGuild, chatPickImage, _chatUploadImg, _chatClearPendingImg, renderLogPanel, openHomePanel, homeUp, homePlant, homeHarvest, homeVisit, homeEnterFriend, warpCenter, guardPick, guardSet, guardRemove, openRaidPanel, raidStart, openRaidHist, _raidPageGo, _trSearchInput, _trInvite, _trRespond, _trSetCat, _trPickItem, _trLock, _trUnlock, _trConfirm, _trCancel, _pvpPageGo, openEq2Panel, _eq2Close, _eq2Card, _eq2Act, _eq2Enhance, _eq2SetTab, _eq2PickInv, _eqcHelpTog, _eqcPickTog, _eqcCraft, _eqcUpT, _eqcUpLv, _eqcRoll, _eqcUnlock, _eq2SetSort, _eq2Destroy, _eq2TogChips, _eq2TogList, _eq2MngTog, _eq2SelTog, _eq2SelAll, _eq2SelClear, _eq2DestroySel, _eq2SetAuto, openGachaPanel, _gachaClose, _gachaSpin, openAucPanel, _aucClose, _aucSetTab, _aucBid, _aucHist, openGuildPanel, _gdClose, _gdSetTab, _gdPick, _gdCreate, _gdJoin, _gdLeave, _gdKick, _gdPromote, _gdDemote, _gdTransfer, _gdDonate, _gdDonateCustom, _gdDonateOre, _gdEmEdit, _gdEmblemSave, _gdNoticeSave, _gdDisband, _gdLog, _gdSearch, _gdPageGo, _gdFetchMy, _gdDetail, _gtFund, _gtFundCustom, _gtBuy, _gtUp, _gtMoveOpen, _gtMvZones, _gtMvClose, _gtMvSave, _gtSlotOpen, _gtPopClose, _gtHistOpen, _aucBellTog, openVoucherPanel, _vcClose, _vcSetTab, _vcSetStat, _vcSetFace, _vcSetQ, _vcPageGo, _vcCopy, _vcBuy, _vcRedeem, castleEnter, castleExit, _ctMemberList, gdunEnter, gdunExit, oraidSend, oraidRush, lbShow, _lbShowClose, _lbShowTabSet };
 })();
 
