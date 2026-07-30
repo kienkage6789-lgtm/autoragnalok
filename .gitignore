@@ -5,6 +5,7 @@ node_modules/
 accounts.json
 users.json
 proxies.json
+announcements.json
 
 # Cache and scratch files
 spots_cache.json

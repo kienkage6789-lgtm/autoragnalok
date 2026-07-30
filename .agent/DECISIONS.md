@@ -2,6 +2,38 @@
 
 > Captured architectural decisions and trade-offs.
 
+## 2026-07-30 - Thiết kế Hệ thống Thông báo và Quản lý Banners từ Admin tới Users (T50)
+
+- Bối cảnh:
+  - Hệ thống cần một cơ chế để Admin thông báo nhanh các thay đổi, bản cập nhật hoặc sự kiện bảo trì tới toàn bộ người dùng.
+- Quyết định:
+  - **Lưu trữ Persistent (`announcements.json`)**: Lưu danh sách thông báo dạng JSON, hỗ trợ backup/restore.
+  - **Giao diện Banners Phân Loại (Pills & Gradients)**: Dựng các banner thông báo đẹp mắt, sử dụng các dải màu gradient tương ứng với 4 mức độ: Info (xanh dương), Success (xanh lá), Warning (vàng), Critical (đỏ).
+  - **Lọc Thông báo Đã Đọc (Client-side Dismiss)**: Sử dụng localStorage (`dismissed_announcements`) để lưu các ID thông báo mà user đã tắt, lọc bỏ các ID này khi gọi API `/api/announcements` vẽ UI, tối ưu tải và tránh làm phiền người dùng.
+
+---
+
+## 2026-07-30 - Thiết kế định tuyến di chuyển nông vụ thông minh & Phân luồng ưu tiên (T49)
+
+- Bối cảnh:
+  1. Thao tác gieo hạt, thu hoạch và nâng cấp nhà yêu cầu nhân vật đứng ở Map Nông trại (Map 5).
+  2. Sự kiện đổi map thông thường sẽ tự động reset cấu hình Farm Zone của người dùng.
+  3. Có sự xung đột giữa tính năng tự động di chuyển bản đồ mục tiêu (`autoMap`) và hành động chăm sóc nông trại nếu không được kiểm soát chặt chẽ.
+- Quyết định:
+  1. **Tách biệt Map mục tiêu và Map hiện tại**: Giữ nguyên `targetMap` trong cấu hình khi nhân vật vào Map 5. Bằng cách này, bot biết chính xác cần quay về đâu sau khi làm vườn.
+  2. **Bảo toàn Farm Zone khi ra/vào Map 5**: Bỏ qua việc reset cấu hình zone (`autoZone`, `lock_zone_center`, `targetZone`) nếu bản đồ cũ hoặc bản đồ mới là Map 5.
+  3. **Phân luồng ưu tiên nghiêm ngặt**:
+     - *Độ ưu tiên 1: Săn Boss MVP / Boss Đấu trường*. Nếu bot đang bận đánh boss, mọi hoạt động nông trại và di chuyển làm vườn đều bị tạm ngưng.
+     - *Độ ưu tiên 2: Làm vườn (Home Farm)*. Nếu không có boss và phát hiện có việc cần làm (cây chín, đất trống có hạt, đủ tài nguyên nâng nhà), bot tự động warp vào Map 5 để làm việc và tự động rời khỏi Map 5 khi hoàn thành.
+     - *Độ ưu tiên 3: Train quái (Farm thường)*. Hoạt động khi cả 2 trạng thái trên đều rảnh rỗi.
+  4. **Giới hạn API**: Chỉ thực thi các lệnh POST nông trại tới game server khi nhân vật đã thực sự đứng ở Map 5.
+  5. **Bảo toàn Trạng thái Lạnh trong Poller**: Đưa `home_crops`, `home_seeds`, `home_lv`, `home_guards`, `home_return` cùng các trường Pet/PVP tương ứng vào `COLD_FIELDS`. Điều này loại bỏ hiện tượng dữ liệu bị xóa sạch ở các nhịp poll thường (`full=0`), đảm bảo dữ liệu nông nghiệp liên tục chính xác.
+  6. **Cơ chế Danh sách đen & Cooldown phục hồi**: Đưa hạt giống bị lỗi gieo trồng vào danh sách đen `failedSeeds` để ngăn ngừa bot cố gắng gieo trồng lại liên tục. Áp dụng cooldown 5 phút cho việc gặt và nâng cấp nhà bị lỗi nhằm tránh spam request và kẹt map.
+  7. **Đồng bộ Công thức Cấp độ và Điểm Thú cưng**: Sử dụng thuật toán `expNext` lũy tiến theo mốc cấp độ (Tiered) và tuyến tính (Linear) từ cấp 41 trở lên thay thế cho công thức lũy thừa x1.15 tự định nghĩa trước đó. Điều này đảm bảo tính chính xác cho thuộc tính cấp độ `petLv` và tính toán chuẩn xác số điểm chưa phân bổ `Points`, ngăn ngừa tình trạng hiển thị sai lệch điểm số Pet trên giao diện Dashboard so với game client gốc.
+
+---
+
+
 ## 2026-07-29 - Ghi nhận Vấn đề Trứng Thú Cưng (Pet Eggs) chưa giải quyết xong (Pending Issue T48)
 
 - Bối cảnh: Người dùng ghi nhận tính năng danh sách Trứng Thú Cưng (Pet Eggs) trong kho chưa hiển thị/chưa giải quyết xong trên giao diện Dashboard.

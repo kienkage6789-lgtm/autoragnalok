@@ -3,13 +3,36 @@
 > Work Breakdown Structure. Update task states immediately upon changes.
 > Statuses: todo | doing | blocked | review | done
 
-### [ ] T48 - Vấn đề Trứng Thú Cưng (Pet Eggs) chưa hiển thị / chưa giải quyết
+### [x] T50 - Chức năng thông báo của Admin tới các User
+- Description: Xây dựng hệ thống thông báo hiển thị banner thông tin (Info, Success, Warning, Critical) trên giao diện Dashboard của người dùng, tích hợp tab quản lý thông báo của Admin cho phép tạo và xóa thông báo.
+- Files related: `server.js`, `public/index.html`, `public/app.css`, `public/app.js`
+- Acceptance criteria:
+  - [x] Backend: Hỗ trợ load/save `announcements.json` và tích hợp `announcements.json` vào file zip backup/restore.
+  - [x] Backend API: Thêm endpoint `GET /api/announcements`, `POST /api/admin/announcements`, và `DELETE /api/admin/announcements/:id`.
+  - [x] Giao diện Admin: Thêm tab "📢 Thông Báo" cho phép Admin xem danh sách các thông báo đã gửi, tạo thông báo mới với các phân loại và xóa thông báo.
+  - [x] Giao diện Dashboard User: Hiển thị các thông báo ở vị trí nổi bật phía trên lưới tài khoản dưới dạng banner thiết kế premium.
+  - [x] Chức năng đóng thông báo: Khi người dùng bấm tắt thông báo, ID thông báo được lưu vào localStorage của trình duyệt để không hiển thị lại ở các phiên làm việc tiếp theo.
+  - [x] Đã kiểm thử cú pháp và unit tests chạy thành công.
+- Status: done
+
+### [x] T49 - Tự động hóa dịch chuyển Nông Trại và phân luồng ưu tiên
+- Description: Tự động hóa việc dịch chuyển nhân vật vào/ra Nông trại (Map 5) để thực hiện các nông vụ (thu hoạch, trồng trọt, nâng cấp nhà) và thiết lập thứ tự ưu tiên: Săn Boss (MVP/Arena) > Làm vườn (Home Farm) > Farm thường.
+- Files related: `server.js`
+- Acceptance criteria:
+  - [x] Tự động phát hiện có nông vụ cần xử lý (cây chín, đất trống có hạt giống, đủ tài nguyên nâng cấp nhà).
+  - [x] Tự động dịch chuyển nhân vật vào Map 5 để làm việc, và tự động rời khỏi Map 5 khi hoàn thành.
+  - [x] Không reset cấu hình Farm Zone của người dùng khi đi vào/ra Map 5.
+  - [x] Ưu tiên đánh Boss MVP hàng đầu, chỉ làm nông nghiệp khi không săn Boss, và chỉ farm thường khi rảnh rỗi.
+  - [x] Chạy unit test thành công.
+- Status: done
+
+### [x] T48 - Vấn đề Trứng Thú Cưng (Pet Eggs) chưa hiển thị / chưa giải quyết
 - Description: Tạm thời lưu vết vấn đề danh sách Trứng Thú Cưng (Pet Eggs) trong kho chưa đồng bộ/chưa hiển thị đầy đủ theo phản hồi từ người dùng để tiếp tục nghiên cứu và xử lý ở phiên làm việc tiếp theo.
 - Files related: `server.js`, `public/app.js`
 - Acceptance criteria:
-  - [ ] Nghiên cứu thêm cơ chế trả về dữ liệu `eggs` từ game server (API `xhrpg_game.php` / `xhrpg_pet.php` / `xhrpg_egg.php`).
-  - [ ] Đảm bảo dữ liệu trứng trong kho được bóc tách và hiển thị chuẩn danh sách các loại trứng.
-- Status: todo
+  - [x] Nghiên cứu thêm cơ chế trả về dữ liệu `eggs` từ game server (API `xhrpg_game.php` / `xhrpg_pet.php` / `xhrpg_egg.php`).
+  - [x] Đảm bảo dữ liệu trứng trong kho được bóc tách và hiển thị chuẩn danh sách các loại trứng.
+- Status: done
 
 
 

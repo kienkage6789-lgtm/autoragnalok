@@ -78,6 +78,11 @@ document.addEventListener('DOMContentLoaded', () => {
   const adminUsersTableBody = document.getElementById('admin-users-table-body');
 
   const appMain = document.querySelector('.app-main');
+  const announcementsContainer = document.getElementById('announcements-container');
+  const adminAnnouncementsTableBody = document.getElementById('admin-announcements-table-body');
+  const announcementTypeSelect = document.getElementById('announcement-type');
+  const announcementContentTextarea = document.getElementById('announcement-content');
+  const adminAnnouncementError = document.getElementById('admin-announcement-error');
 
   // State
   let currentUser = null;
@@ -270,7 +275,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Admin Tab Switching
   window.switchAdminTab = function(tab) {
     // Fix #2: Dùng class .admin-tab-panel/.active thay vì inline display style
-    ['users', 'proxies', 'backup', 'maps'].forEach(t => {
+    ['users', 'proxies', 'backup', 'maps', 'announcements'].forEach(t => {
       const panel = document.getElementById(`admin-tab-${t}`);
       const btn   = document.getElementById(`admin-tab-btn-${t}`);
       if (panel) {
@@ -289,6 +294,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (tab === 'proxies' || tab === 'backup') fetchAdminProxies();
     if (tab === 'maps') fetchAdminMapsZones();
+    if (tab === 'announcements') fetchAnnouncementsAdmin();
   };
 
   // Admin Fetch Stats Overview
@@ -3014,10 +3020,175 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ==================== END PROXY MANAGEMENT ====================
 
+  // ==================== ANNOUNCEMENTS LOGIC ====================
+
+  window.dismissAnnouncement = function(id) {
+    try {
+      const dismissed = JSON.parse(localStorage.getItem('dismissed_announcements') || '[]');
+      if (!dismissed.includes(id)) {
+        dismissed.push(id);
+        localStorage.setItem('dismissed_announcements', JSON.stringify(dismissed));
+      }
+      const element = document.getElementById(`ann-banner-${id}`);
+      if (element) {
+        element.style.opacity = '0';
+        element.style.transform = 'translateY(-10px)';
+        setTimeout(() => {
+          element.remove();
+          if (announcementsContainer.children.length === 0) {
+            announcementsContainer.style.display = 'none';
+          }
+        }, 200);
+      }
+    } catch (e) {
+      console.error('Error dismissing announcement:', e);
+    }
+  };
+
+  async function fetchAnnouncements() {
+    if (!currentUser) return;
+    try {
+      const res = await fetch('/api/announcements');
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.success && data.announcements) {
+        const dismissed = JSON.parse(localStorage.getItem('dismissed_announcements') || '[]');
+        const active = data.announcements.filter(ann => !dismissed.includes(ann.id));
+        
+        if (active.length === 0) {
+          announcementsContainer.innerHTML = '';
+          announcementsContainer.style.display = 'none';
+          return;
+        }
+
+        announcementsContainer.innerHTML = active.map(ann => {
+          let emoji = 'ℹ️';
+          let className = 'ann-info';
+          if (ann.type === 'success') { emoji = '✅'; className = 'ann-success'; }
+          if (ann.type === 'warning') { emoji = '⚠️'; className = 'ann-warning'; }
+          if (ann.type === 'critical') { emoji = '🚨'; className = 'ann-critical'; }
+
+          const timeStr = new Date(ann.createdAt).toLocaleString('vi-VN', {
+            hour: '2-digit',
+            minute: '2-digit',
+            day: '2-digit',
+            month: '2-digit'
+          });
+
+          return `
+            <div class="announcement-banner ${className}" id="ann-banner-${ann.id}">
+              <div class="ann-body">
+                <span class="ann-icon">${emoji}</span>
+                <div class="ann-content-wrapper">
+                  <div class="ann-message">${ann.message}</div>
+                  <div class="ann-meta">🕒 ${timeStr} bởi ${ann.createdBy}</div>
+                </div>
+              </div>
+              <button class="ann-close-btn" onclick="dismissAnnouncement('${ann.id}')" title="Đóng thông báo">&times;</button>
+            </div>
+          `;
+        }).join('');
+        
+        announcementsContainer.style.display = 'flex';
+      }
+    } catch (e) {
+      console.error('Error fetching announcements:', e);
+    }
+  }
+
+  async function fetchAnnouncementsAdmin() {
+    if (!currentUser || currentUser.role !== 'admin') return;
+    try {
+      const res = await fetch('/api/announcements');
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.success && data.announcements) {
+        if (data.announcements.length === 0) {
+          adminAnnouncementsTableBody.innerHTML = `
+            <tr><td colspan="5" style="padding: 12px; text-align: center; color: var(--text-muted);">Chưa có thông báo nào.</td></tr>
+          `;
+          return;
+        }
+
+        adminAnnouncementsTableBody.innerHTML = data.announcements.map(ann => {
+          let typeLabel = 'Thông tin';
+          let badgeClass = 'badge-ann-info';
+          if (ann.type === 'success') { typeLabel = 'Thành công'; badgeClass = 'badge-ann-success'; }
+          if (ann.type === 'warning') { typeLabel = 'Cảnh báo'; badgeClass = 'badge-ann-warning'; }
+          if (ann.type === 'critical') { typeLabel = 'Khẩn cấp'; badgeClass = 'badge-ann-critical'; }
+
+          const timeStr = new Date(ann.createdAt).toLocaleString('vi-VN');
+
+          return `
+            <tr style="border-bottom: 1px solid var(--border-color);">
+              <td style="padding: 8px; color: var(--text-muted);">${timeStr}</td>
+              <td style="padding: 8px;"><span class="${badgeClass}">${typeLabel}</span></td>
+              <td style="padding: 8px; font-weight: 600;">${ann.createdBy}</td>
+              <td style="padding: 8px; white-space: pre-wrap; line-height: 1.4;">${ann.message}</td>
+              <td style="padding: 8px; text-align: right;">
+                <button class="btn btn-danger" style="padding: 4px 8px; font-size: 0.75rem;" onclick="deleteAnnouncement('${ann.id}')">
+                  🗑️ Xóa
+                </button>
+              </td>
+            </tr>
+          `;
+        }).join('');
+      }
+    } catch (e) {
+      console.error('Error fetching admin announcements:', e);
+    }
+  }
+
+  window.deleteAnnouncement = async function(id) {
+    if (!confirm('Bạn có chắc chắn muốn xóa thông báo này?')) return;
+    try {
+      const res = await fetch(`/api/admin/announcements/${id}`, {
+        method: 'DELETE'
+      });
+      if (res.ok) {
+        fetchAnnouncementsAdmin();
+        fetchAnnouncements();
+      } else {
+        const data = await res.json();
+        alert(data.error || 'Lỗi khi xóa thông báo');
+      }
+    } catch (e) {
+      alert('Không thể kết nối đến máy chủ');
+    }
+  };
+
+  window.createAnnouncement = async function(event) {
+    if (event) event.preventDefault();
+    adminAnnouncementError.textContent = '';
+    
+    const type = announcementTypeSelect.value;
+    const message = announcementContentTextarea.value.trim();
+    if (!message) return;
+
+    try {
+      const res = await fetch('/api/admin/announcements', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type, message })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        announcementContentTextarea.value = '';
+        fetchAnnouncementsAdmin();
+        fetchAnnouncements();
+      } else {
+        adminAnnouncementError.textContent = data.error || 'Lỗi khi tạo thông báo';
+      }
+    } catch (e) {
+      adminAnnouncementError.textContent = 'Không thể kết nối đến máy chủ';
+    }
+  };
+
   // Initial Startup
   checkAuth().then(authed => {
     if (authed) {
       fetchAccounts();
+      fetchAnnouncements();
       if (currentUser && currentUser.role === 'admin') {
         fetchAdminProxies();
       }
@@ -3026,9 +3197,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Periodic account polling & live Admin table tick
   let adminProxyTick = 0;
+  let announcementTick = 0;
   setInterval(() => {
     if (currentUser) {
       fetchAccounts();
+      
+      announcementTick++;
+      if (announcementTick >= 20) { // Every 20 seconds
+        announcementTick = 0;
+        fetchAnnouncements();
+      }
       
       // Fetch admin proxies list every 5 seconds for cards selector mapping
       if (currentUser.role === 'admin') {
@@ -3097,7 +3275,7 @@ function updateHomeTabUI(acc) {
 
   const usedHoles = crops.filter(c => c.p < plots).length;
   const nowS = Date.now() / 1000;
-  const SEED_NAMES  = ['องุ่นป่า','ถั่วเลื้อย','พริกแดง','กะหล่ำปลี','ดอกมันเทศ','ใบหยก','ว่านหนาม','ข้าวสาลี','แอปเปิล','เลมอน','เชอร์รี่','มะพร้าว'];
+  const SEED_NAMES  = ['Nho dại', 'Đậu leo', 'Ớt đỏ', 'Bắp cải', 'Hoa khoai lang', 'Lá ngọc', 'Lô hội gai', 'Lúa mì', 'Táo', 'Chanh vàng', 'Anh đào', 'Dừa'];
   const SEED_GROW_H = [1, 2, 4, 8, 16, 24];
   const SEED_PRICE  = [80, 160, 400, 800, 1920, 3200];
   const seedTier   = id => (((id - 1) / 4) | 0) + 1;
@@ -3105,7 +3283,7 @@ function updateHomeTabUI(acc) {
   const seedSprite = id => ((((id - 1) / 4) | 0) * 2) + (((id - 1) >> 1) & 1) + 1;
   const seedPrice  = id => SEED_PRICE[seedTier(id) - 1] * (seedGold(id) ? 3 : 1);
   const seedGrowS  = id => SEED_GROW_H[seedTier(id) - 1] * 3600;
-  const seedLabel  = id => (seedGold(id) ? '⭐' : '') + (SEED_NAMES[seedSprite(id) - 1] || 'Cây') + (seedGold(id) ? ' (Gold)' : '');
+  const seedLabel  = id => (seedGold(id) ? '⭐ ' : '') + (SEED_NAMES[seedSprite(id) - 1] || 'Cây') + (seedGold(id) ? ' (Vàng)' : '');
 
   let ripeCount = 0, nextS = Infinity;
   crops.forEach(c => {
@@ -3183,6 +3361,8 @@ function updateHomeTabUI(acc) {
       cropsListEl.innerHTML = crops.map(c => {
         const seedId = c.s || 1;
         const holeIdx = (c.i != null) ? c.i : 0;
+        const plotIdx = (c.p != null) ? c.p : 0;
+        const globalHoleIdx = plotIdx * 16 + holeIdx;
         const left = seedGrowS(seedId) - (nowS - c.t);
         const isRipe = c.r || left <= 0;
         const name = seedLabel(seedId);
@@ -3199,7 +3379,7 @@ function updateHomeTabUI(acc) {
 
         return `
           <div style="display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 4px 0; border-bottom: 1px dashed rgba(255,255,255,0.06); font-size: 0.76rem;">
-            <span style="font-weight: 700; color: #94a3b8; flex: none;">Luống #${holeIdx + 1}</span>
+            <span style="font-weight: 700; color: #94a3b8; flex: none;">Luống #${globalHoleIdx + 1}</span>
             <span style="font-weight: 800; color: #fff; background: ${isGold ? '#b45309' : '#16a34a'}; border-radius: 4px; padding: 1px 5px; font-size: 0.68rem; flex: none;">T${tier}</span>
             <span style="color: #f3f4f6; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${name}">${name}</span>
             <span style="flex: none;">${statusText}</span>
@@ -3332,14 +3512,25 @@ function renderPetSection(acc) {
 
   // Calculate Pet level & EXP info from pet_exp
   const petExp = parseInt(p.pet_exp) || 0;
-  const getPetLvInfo = (exp) => {
-    let lv = 1, req = 100, total = 0;
-    while (total + req <= exp && lv < 100) {
-      total += req;
-      lv++;
-      req = Math.floor(req * 1.15);
+  const expNext = (lv) => {
+    if (lv >= 41) return 100000000 + (lv - 41) * 15000000;
+    let e = 100;
+    for (let k = 2; k <= lv; k++) {
+      const b = k <= 10 ? 1.50 : k <= 20 ? 1.45 : k <= 30 ? 1.40 : 1.35;
+      e = Math.round(e * b);
     }
-    return { lv, cur: exp - total, need: req };
+    return e;
+  };
+
+  const getPetLvInfo = (exp) => {
+    let lv = 1, e = Math.max(0, Math.floor(Number(exp) || 0));
+    while (lv < 99) {
+      const need = expNext(lv);
+      if (e < need) break;
+      e -= need;
+      lv++;
+    }
+    return { lv, cur: e, need: expNext(lv) };
   };
 
   const info = getPetLvInfo(petExp);

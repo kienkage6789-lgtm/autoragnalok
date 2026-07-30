@@ -3917,26 +3917,29 @@ const xhrpg = (() => {
   // ── ศพมอนค้าง/มอนจางออก: มอนหายจาก snapshot → วาดต่อสั้นๆ แทนดับวูบกลางจอ (แสดงผลล้วน ไม่แตะ logic เกม) ──
   //    dead=true (ตายจริง — รวมที่เพื่อนฆ่า ไม่ต้องพึ่ง event): ล้มตะแคง 90° ค้างไว้แล้วจางหาย ~800ms
   //    dead=false (แค่หลุดรัศมีส่งข้อมูล 500px): จางออกเร็ว ~220ms แทน pop-out วูบ
+  // 💀 ศพโชว์นานขึ้น 800ms → 2500ms ค่อยๆ จาง (เจ้าของสั่ง 2026-07-29 "คนกองเยอะ ไม่รู้ว่ามอนตาย")
+  //    ล้มเร็วเท่าเดิม (~260ms) แล้วนอนค้าง · เพดานศพพร้อมกัน 24→48 (ศพอยู่นานขึ้น ฝูงใหญ่ฆ่ารัว)
+  const GHOST_DEAD_MS = 2500;
   function _pushMonGhost(m, gx, gy, dead) {
-    if (monGhosts.length >= 24) monGhosts.shift(); // กันล้นตอนตายยกฝูง (สกิลระเบิด) — ตัวเก่าสุดหลุดก่อน
+    if (monGhosts.length >= 48) monGhosts.shift(); // กันล้นตอนตายยกฝูง (สกิลระเบิด) — ตัวเก่าสุดหลุดก่อน
     monGhosts.push({ x: gx, y: gy, lv: m.lv, emoji: m.sprite_emoji, mvp: !!m.is_mvp, dead: !!dead, born: performance.now() });
     startAnim();
   }
   function drawMonGhosts() {
     if (!monGhosts.length) return;
     const now = performance.now();
-    monGhosts = monGhosts.filter(g => now - g.born < (g.dead ? 800 : 220));
+    monGhosts = monGhosts.filter(g => now - g.born < (g.dead ? GHOST_DEAD_MS : 220));
     if (!monGhosts.length) return;
     const { scale } = getCameraTransform();
     monGhosts.forEach(g => {
       const s = toScreen(g.x, g.y);
       if (s.x < -30 || s.x > canvas.width + 30 || s.y < -30 || s.y > canvas.height + 30) return;
-      const p = (now - g.born) / (g.dead ? 800 : 220); // 0 → 1
+      const p = (now - g.born) / (g.dead ? GHOST_DEAD_MS : 220); // 0 → 1
       const fs = Math.round(15.4 * scale * (g.mvp ? 2 : 1) * (MAP_MON_SIZE_MUL[currentMap] || 1)); // ขนาดเดียวกับ drawMonsters (×แผนที่)
       ctx.save();
       ctx.globalAlpha = g.dead ? (p < 0.3 ? 1 : 1 - (p - 0.3) / 0.7) : (1 - p); // ตาย: ค้างเต็ม ~240ms แรก แล้วจาง · หลุดระยะ: จางเลย
       ctx.translate(s.x, s.y);
-      if (g.dead) ctx.rotate(Math.min(1, p * 3) * Math.PI / 2); // ล้มตะแคงช่วงต้น แล้วนอนนิ่ง
+      if (g.dead) ctx.rotate(Math.min(1, (now - g.born) / 260) * Math.PI / 2); // ล้มตะแคงเร็วเท่าเดิม (~260ms) แล้วนอนนิ่ง — ไม่ผูกกับระยะเวลาศพที่ยืดเป็น 2.5s
       ctx.imageSmoothingEnabled = false;
       const _rl = g.lv || 1;
       const _sk = MON_ANIM[_rl];
@@ -13551,6 +13554,14 @@ const xhrpg = (() => {
       'อัปเดตล่าสุด':'Latest updates', 'อัตราดรอป':'Drop rates', 'อัปเดตใหม่':'New update',
       // 🎲 บทเปิดเผยอัตราการสุ่ม (2026-07-27 — ข้อกำหนด compliance ของผู้ให้บริการชำระเงิน KR/JP/TW)
       'เพิ่มบทอัตราการสุ่มในคู่มือ':'Added a Random rates chapter to the guide',
+      // 🆕 Release Note v1.038 (2026-07-30) — คีย์ตัดอิโมจินำหน้าออกแล้วตาม _rnT()
+      'LUK เพิ่มอัตราการดรอปแล้ว — ทุก 10 LUK เพิ่มโอกาสได้ของ 1%':'LUK now boosts drop rate — every 10 LUK adds 1% chance to find items',
+      'แผงพลังรวมโชว์ % ลดคูลดาวน์ที่ได้จาก AGI แล้ว':'The combat panel now shows the cooldown reduction you get from AGI',
+      'พลังงานไททันที่ได้ต่อเลเวลเพิ่มขึ้น 30%':'Titan energy gained per level increased by 30%',
+      'ค้นหาในตลาดใช้ชื่อภาษาที่คุณเล่นอยู่ได้แล้ว':'Market search now matches item names in your own language',
+      'แก้ไอคอนเพชรแดง/เพชรเขียวในตลาดให้เป็นรูปเพชรที่ถูกต้อง':'Fixed the red/green gem icons in the market to show proper gems',
+      'หน้าค้นหากิลแสดงธงชาติและชื่อหัวหน้ากิลแล้ว':'Find Guild now shows the leader\'s country flag and name',
+      'ประวัติ P รายการคืนเงินประมูล แสดงยอดก่อน → หลัง แล้ว':'P history now shows before → after balances for auction refunds',
       'อัตราการสุ่ม':'Random rates',
       // 🏅 อวดของในหน้าอันดับ (2026-07-28)
       'ดูของที่สะสม':'View collection', 'ของหายาก':'Rare finds', 'ชิ้นส่วนไททัน':'Titan parts',
@@ -18377,7 +18388,10 @@ const xhrpg = (() => {
           <img src="${_gdEmURL(g.sh, g.co, g.ic, 72)}" style="flex:none;width:32px;height:32px">
           <div style="flex:1;min-width:0">
             <div style="font-size:12.5px;font-weight:700;color:#1e293b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_gdEsc(g.name)}</div>
-            <div style="font-size:10px;color:#94a3b8">Lv.${g.lv} · ${T('สมาชิก')} ${g.n}/${g.cap}</div>
+            <div style="display:flex;align-items:center;gap:5px;font-size:9.5px;color:#94a3b8">
+              <span style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Lv.${g.lv}${g.ld ? ` · 👑 ${g.ldcc ? _ccFlag(g.ldcc) : ''}${_gdEsc(g.ld)}` : ''}</span>
+              <span title="${T('สมาชิก')}" style="flex:none;color:#475569;font-weight:700">👥 ${g.n}/${g.cap}</span>
+            </div>
           </div>
           <div style="flex:none;display:flex;align-items:center;gap:4px">
             <button onclick="xhrpg._gdDetail(${g.id | 0})" title="${T('รายละเอียดกิล')}" style="${_GD_BTN};border:1px solid #e2e8f0;background:#fff;color:#64748b">ℹ️</button>
@@ -19968,7 +19982,7 @@ const xhrpg = (() => {
   }
   function _mktSellNormalCard(it) {
     return `<div class="mkt-icard ${_mktRarityClass(it.rarity)} ${mktSelItem?.id===it.id?'sel':''}" onclick="xhrpg._mktPickItem('${it.id}')">
-      <span class="ico">${_icoHtml(it.icon, 16)}</span><div class="nm">${_mktTName(it.name)}</div><div class="qt">×${it.qty}</div></div>`;
+      <span class="ico">${_mktIcoOf(it, 16)}</span><div class="nm">${_mktTName(it.name)}</div><div class="qt">×${it.qty}</div></div>`;
   }
   // แถบการ์ดที่เสียบในโมดูล (โชว์ตอนขาย/ซื้อโมดูล — การ์ดติดไปกับโมดูล)
   // รวม combat bonus จากการ์ด MVP ที่เสียบในโมดูลที่สวมอยู่ (mirror xhrpg_module_card_combat_bonus ฝั่ง PHP)
@@ -20087,6 +20101,35 @@ const xhrpg = (() => {
   function _escHtml(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
   function _mktTDesc(s)  { return _escHtml(_mktTDesc0(s)); }
   function _mktTName(n)  { return _escHtml(_mktTName0(n)); }
+  // 🔍 ค้นหาในตลาด: เทียบทั้ง "ชื่อดิบ (ไทย)" และ "ชื่อที่ผู้เล่นเห็นจริง" (ผ่าน dict ภาษาปัจจุบัน)
+  //    เดิมเทียบชื่อดิบอย่างเดียว → คนเล่น EN พิมพ์ Egg/Gem ไม่เจอเลย (ของชื่อ 'ไข่…' ในดิกต์)
+  //    ตัด emoji/ช่องว่างหัวท้ายก่อนเทียบ (label หมวดมี emoji นำหน้า)
+  function _mktQNorm(s) {
+    return String(s || '').toLowerCase()
+      .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{2B00}-\u{2BFF}]/gu, ' ')
+      .replace(/\s+/g, ' ').trim();
+  }
+  function _mktQHit(q, ...vals) {
+    if (!q) return true;
+    const nq = _mktQNorm(q);
+    if (!nq) return true;
+    for (const v of vals) {
+      const raw = String(v || '');
+      if (!raw) continue;
+      if (_mktQNorm(raw).includes(nq)) return true;          // ชื่อดิบ (ไทย)
+      if (_mktQNorm(_mktTName0(raw)).includes(nq)) return true; // ชื่อที่แปลแล้ว (ภาษาที่เลือก)
+      if (_mktQNorm(T(raw)).includes(nq)) return true;        // label หมวด (dict ตรง)
+    }
+    return false;
+  }
+  // 💎 ไอคอนเพชรในตลาด: item_icon ที่ค้างใน DB เป็น emoji (💎/🔴/🟢) → วาดด้วย SVG เพชรชุดเดียวกับหน้า ITEM/โมดูล
+  //    ⚠️ ห้ามแมป 🔴/🟢 ที่ _icoHtml กลาง — emoji ชุดนี้ถูกใช้เป็นชิป/ระดับ tier ที่อื่นด้วย
+  const _MKT_GEM_RAR = { 'เพชรฟ้า':'blue', 'เพชรแดง':'red', 'เพชรเขียว':'green' };
+  function _mktIcoOf(o, px) { // o = listing (item_name/item_icon) หรือ group (name/icon)
+    const nm = String((o && (o.item_name ?? o.name)) || ''), ic = String((o && (o.item_icon ?? o.icon)) || '');
+    const g  = _MKT_GEM_RAR[nm] || (ic === '💎' ? 'blue' : '');
+    return g ? _icoGemHtml(g, px || 14) : _icoHtml(ic, px);
+  }
   function _mktTDesc0(s) {
     s = String(s || '');
     if (!s) return s;
@@ -20147,7 +20190,7 @@ const xhrpg = (() => {
           <span style="font-size:11px;color:#4b5563;white-space:nowrap">/ ${it.qty}</span></div>`
       : '';
     return _mktSheetHead(T('🏷️ วางขาย — ตั้งราคา'), '_mktSellBack') +
-      `<div class="mkt-detail"><div class="dico">${it.isModule ? it.icon : _icoHtml(it.icon, 20)}</div><div><div class="dname">${_mktTName(it.name)}</div><div class="ddesc">${_mktTDesc(it.desc)}</div></div></div>` + // โมดูลคงไอคอนช่องเดิม (📏/🎯/⚙️ ฯลฯ) — กันชนกับ map เหล็ก
+      `<div class="mkt-detail"><div class="dico">${it.isModule ? it.icon : _mktIcoOf(it, 20)}</div><div><div class="dname">${_mktTName(it.name)}</div><div class="ddesc">${_mktTDesc(it.desc)}</div></div></div>` + // โมดูลคงไอคอนช่องเดิม (📏/🎯/⚙️ ฯลฯ) — กันชนกับ map เหล็ก
       qtyRow +
       `<div class="mkt-frow"><label>${T('ราคา/ชิ้น')}</label><input type="number" id="mkt-price" value="${mktSellPrice}" min="1" oninput="xhrpg._mktCalcNet()"><span style="font-size:13px;color:#4b5563">G</span></div>` +
       (minP != null ? `<div class="mkt2-mhint">${T('💡 ราคาตลาดตอนนี้: เริ่ม {a}G', {a: minP.toLocaleString()})}</div>` : '') +
@@ -20213,7 +20256,7 @@ const xhrpg = (() => {
       g.pieces += parseInt(l.qty)||1;
       const p = parseInt(l.price_per)||0;
       g.min = Math.min(g.min, p); g.max = Math.max(g.max, p);
-      g.names.push((l.item_name||'').toLowerCase());
+      g.names.push(String(l.item_name || '')); // เก็บชื่อดิบ (ไม่ lower) — _mktQHit ต้องใช้ค่าเดิมไปหา dict แปล
     });
     return by;
   }
@@ -20238,18 +20281,18 @@ const xhrpg = (() => {
     // fungible: การ์ดต่อชนิดของ — ของที่ไม่มีประกาศไม่แสดง
     _mktGroupsFungible()
       .filter(g => mktBuyCat==='all' || mktBuyCat===g.cat)
-      .filter(g => !q || (g.name||'').toLowerCase().includes(q))
+      .filter(g => _mktQHit(q, g.name)) // เทียบทั้งชื่อดิบ + ชื่อที่แปลแล้ว (พิมพ์ EN ก็เจอ)
       .sort((a,b) => (catOrder[a.cat]-catOrder[b.cat]) || (a.name<b.name?-1:1))
       .forEach(g => {
         cards += `<div class="mkt2-gcard" onclick="xhrpg._mktPickGroup('${g.key}')">
-          <div class="gi">${_icoHtml(g.icon, 16)}</div><div class="gn">${_mktTName(g.name)}</div>
+          <div class="gi">${_mktIcoOf(g, 16)}</div><div class="gn">${_mktTName(g.name)}</div>
           <div class="gm">${T('{a} ประกาศ', {a: g.count})}</div><div class="gp">${T('เริ่ม {a}G', {a: g.min.toLocaleString()})}</div></div>`;
       });
     // unique: การ์ดต่อหมวด — หมวดว่างแสดงการ์ดหรี่ "—"
     const uniq = _mktGroupsUnique();
     MKT_CATS.filter(c => !MKT_FUNGIBLE[c.key] && !c.locked)
       .filter(c => mktBuyCat==='all' || mktBuyCat===c.key)
-      .filter(c => !q || c.label.toLowerCase().includes(q) || (uniq[c.key] ? uniq[c.key].names.some(n => n.includes(q)) : false))
+      .filter(c => !q || _mktQHit(q, c.label) || (uniq[c.key] ? uniq[c.key].names.some(n => _mktQHit(q, n)) : false))
       .forEach(c => {
         const g  = uniq[c.key];
         const il = _mktCatIconLabel(c);
@@ -20288,7 +20331,7 @@ const xhrpg = (() => {
     const rows = _mktBuyable().filter(l => _mktListingKey(l) === key)
       .sort((a,b) => (parseInt(a.price_per)||0) - (parseInt(b.price_per)||0));
     const first = rows[0];
-    const head  = _mktDetHead(first ? `${_icoHtml(first.item_icon, 16)} ${_mktTName(first.item_name)}` : T('สินค้า'));
+    const head  = _mktDetHead(first ? `${_mktIcoOf(first, 16)} ${_mktTName(first.item_name)}` : T('สินค้า'));
     if (!rows.length) return head + `<div class="mkt2-loading">${T('ไม่มีประกาศขายแล้ว')}</div>`;
     return head + `<div class="mkt2-rows">` + rows.map(l => `
       <div class="mkt2-lrow">
@@ -20469,7 +20512,7 @@ const xhrpg = (() => {
     const rl  = _SPEC_RAR_TH[l.item_rarity] || '';
     const pTag = _mktPlusTagOf(l), dsc = _mktDescOf(l);
     return `<div class="mkt2-mcard" style="border-left:3px solid ${c}">
-      <div style="display:flex;align-items:center"><span style="font-size:16px">${_icoHtml(l.item_icon, 16)}</span>${rl?`<span style="margin-left:auto;font-size:8px;font-weight:800;color:#fff;background:${c};padding:0 4px;border-radius:4px">${T(rl)}</span>`:''}</div>
+      <div style="display:flex;align-items:center"><span style="font-size:16px">${_mktIcoOf(l, 16)}</span>${rl?`<span style="margin-left:auto;font-size:8px;font-weight:800;color:#fff;background:${c};padding:0 4px;border-radius:4px">${T(rl)}</span>`:''}</div>
       <div style="font-size:10px;font-weight:600;color:#111;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_mktTName(l.item_name)}${pTag}</div>
       <div style="font-size:9px;color:#16a34a;font-weight:600;margin-top:1px;min-height:22px;line-height:1.3;overflow:hidden">${dsc}</div>
       <div style="font-size:9px;font-weight:700;color:#7c3aed;min-height:11px">${qty>1?`×${qty}`:''}</div>
@@ -20605,7 +20648,7 @@ const xhrpg = (() => {
     _trItems = _mktInventory(_trCat) || [];
     const grid = _trItems.length ? _trItems.slice(0, 40).map((it, i) => `
       <button onclick="xhrpg._trPickItem(${i})" style="display:flex;align-items:center;gap:4px;border:1.5px solid ${i === _trSelIdx ? '#0d9488' : '#e2e8f0'};background:${i === _trSelIdx ? '#f0fdfa' : '#fff'};border-radius:8px;padding:4px 6px;font-size:10px;cursor:pointer;max-width:100%;overflow:hidden">
-        <span style="flex:none">${_icoHtml(it.icon, 14)}</span>
+        <span style="flex:none">${_mktIcoOf(it, 14)}</span>
         <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#1e293b">${_mktTName(it.name)}</span>
         <b style="flex:none;color:#0f172a">×${it.qty|0}</b>
       </button>`).join('')
@@ -20840,7 +20883,7 @@ const xhrpg = (() => {
       ? `<div class="mkt-crow"><span>${T('จำนวน')}</span><span class="cv"><input type="number" id="mkt-buy-qty" value="1" min="1" max="${l.qty}" style="width:52px;text-align:right;border:1px solid #d1d5db;border-radius:4px;padding:2px 4px" oninput="xhrpg._mktCalcBuyTotal()"> <button class="mkt2-qbtn" onclick="xhrpg._mktQtyBuy('add10')">+10</button> <button class="mkt2-qbtn" onclick="xhrpg._mktQtyBuy('max')">MAX</button> / ${l.qty}</span></div>`
       : `<div class="mkt-crow"><span>${T('จำนวน')}</span><span class="cv">${T('{a} ชิ้น', {a: 1})}</span></div>`;
     return `<div class="mkt2-dethead"><button class="mkt2-back" onclick="xhrpg._mktBuyGo(1)">${T('‹ กลับ')}</button><span class="ti">${T('ยืนยันการซื้อ')}</span></div>` +
-      `<div class="mkt-detail"><div class="dico">${_icoHtml(l.item_icon, 20)}</div><div><div class="dname">${_mktTName(l.item_name)}${_mktPlusTagOf(l)}</div><div class="ddesc">${_mktDescOf(l)}</div><div style="font-size:11px;color:#4b5563;margin-top:3px">${T('ขายโดย {a}', {a: l.seller_name})}</div></div></div>` +
+      `<div class="mkt-detail"><div class="dico">${_mktIcoOf(l, 20)}</div><div><div class="dname">${_mktTName(l.item_name)}${_mktPlusTagOf(l)}</div><div class="ddesc">${_mktDescOf(l)}</div><div style="font-size:11px;color:#4b5563;margin-top:3px">${T('ขายโดย {a}', {a: l.seller_name})}</div></div></div>` +
       banner +
       `<div class="mkt-crows">
         <div class="mkt-crow"><span>${T('ราคา')}</span><span class="cv">${T('{a} G / ชิ้น', {a: cost.toLocaleString()})}</span></div>
@@ -20865,7 +20908,7 @@ const xhrpg = (() => {
     if (!mktSelListing) { mktBuyStep = 1; return _mktBuyBody(); }
     const l = mktSelListing;
     return `<div class="mkt-big-ok"><div class="oi">🎉</div><div class="ot">${T('ซื้อสำเร็จ!')}</div><div class="od">${T('{a} จาก {b}', {a: _mktTName(l.item_name), b: l.seller_name})}</div></div>` +
-      `<div class="mkt-recv"><div class="rico">${_icoHtml(l.item_icon, 20)}</div><div><div class="rname">${_mktTName(l.item_name)}${_mktPlusTagOf(l)}</div><div class="rdesc">${_mktDescOf(l)}</div><span class="mkt-badge-ok">${T('เข้ากระเป๋าแล้ว')}</span></div></div>` +
+      `<div class="mkt-recv"><div class="rico">${_mktIcoOf(l, 20)}</div><div><div class="rname">${_mktTName(l.item_name)}${_mktPlusTagOf(l)}</div><div class="rdesc">${_mktDescOf(l)}</div><span class="mkt-badge-ok">${T('เข้ากระเป๋าแล้ว')}</span></div></div>` +
       `<button class="stat-btn" onclick="xhrpg._mktBuyGo(1)" style="width:100%;background:#eff6ff;color:#1d4ed8;border-color:#93c5fd">${T('ซื้อต่อ')}</button>`;
   }
 
@@ -20879,7 +20922,7 @@ const xhrpg = (() => {
       const c   = _CARD_RAR_C[l.item_rarity] || '#cbd5e1';               // สีขอบตามความหายาก (ถ้ารู้)
       const hrs = Math.max(0, Math.round((parseInt(l.expires_at) - now) / 3600));
       return `<div class="mkt2-mcard" style="border-left:3px solid ${c}">
-        <div style="display:flex;align-items:center"><span style="font-size:16px">${_icoHtml(l.item_icon, 16)}</span><span style="margin-left:auto;font-size:8px;font-weight:700;color:#64748b;background:#f1f5f9;padding:0 4px;border-radius:4px">${T('เหลือ {a} ชม.', {a: hrs})}</span></div>
+        <div style="display:flex;align-items:center"><span style="font-size:16px">${_mktIcoOf(l, 16)}</span><span style="margin-left:auto;font-size:8px;font-weight:700;color:#64748b;background:#f1f5f9;padding:0 4px;border-radius:4px">${T('เหลือ {a} ชม.', {a: hrs})}</span></div>
         <div style="font-size:10px;font-weight:600;color:#111;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_mktTName(l.item_name)}${_mktPlusTagOf(l)}</div>
         <div style="font-size:9px;color:#64748b;margin-top:1px;min-height:22px;line-height:1.3;overflow:hidden">${_mktDescOf(l)}</div>
         <div style="font-size:9px;font-weight:700;color:#7c3aed;min-height:11px">×${parseInt(l.qty).toLocaleString()}</div>
@@ -21097,7 +21140,7 @@ const xhrpg = (() => {
         ? (r.status==='sold' ? `← ${r.counterpart_name}` : `→ ${r.counterpart_name}`)
         : '';
       return `${dayHdr}<div class="mkt-hrow">
-        <div class="mkt-hico">${_icoHtml(r.item_icon, 16)}</div>
+        <div class="mkt-hico">${_mktIcoOf(r, 16)}</div>
         <div class="mkt-hmid">
           <div class="mkt-hname">${_mktTName(r.item_name)}</div>
           <div class="mkt-hmeta"><span class="mkt-hbadge ${HIST_STATUS_CLS[r.status]||''}">${HIST_STATUS_LABEL[r.status]?T(HIST_STATUS_LABEL[r.status]):r.status}</span>${cpLine ? ' · ' + cpLine : ''} · ${timeStr}</div>
@@ -21324,6 +21367,15 @@ const xhrpg = (() => {
   //   เลขเวอร์ชัน/วันที่ไม่ต้องแปล · เขียนย่อ ไม่ลงลึกตัวเลข (ตัวเลขจริงอยู่บท 📊 อัตราดรอป)
   const XHRPG_VERSION = '1.037';
   const RELEASE_NOTES = [
+    { v: '1.038', d: '2026-07-30', items: [
+      '🍀 LUK เพิ่มอัตราการดรอปแล้ว — ทุก 10 LUK เพิ่มโอกาสได้ของ 1%',
+      '⏱️ แผงพลังรวมโชว์ % ลดคูลดาวน์ที่ได้จาก AGI แล้ว',
+      '🤖 พลังงานไททันที่ได้ต่อเลเวลเพิ่มขึ้น 30%',
+      '🔍 ค้นหาในตลาดใช้ชื่อภาษาที่คุณเล่นอยู่ได้แล้ว',
+      '💎 แก้ไอคอนเพชรแดง/เพชรเขียวในตลาดให้เป็นรูปเพชรที่ถูกต้อง',
+      '👑 หน้าค้นหากิลแสดงธงชาติและชื่อหัวหน้ากิลแล้ว',
+      '🧾 ประวัติ P รายการคืนเงินประมูล แสดงยอดก่อน → หลัง แล้ว',
+    ] },
     { v: '1.037', d: '2026-07-29', items: [
       '💰 อีเวนต์คูณ G (ทอง) — แอดมินตั้งคูณทองจากการฆ่ามอนได้แล้ว',
       '🏷️ อีเวนต์มีชื่อแล้ว — โชว์บนหน้าจอ เช่น WEEKEND · EXP ×2 · DROP ×2 · G ×1.5',

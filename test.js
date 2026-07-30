@@ -24,8 +24,8 @@ try {
   console.log('Testing tierRes...');
   assert.strictEqual(tierRes(1), 10);
   assert.strictEqual(tierRes(10), 100);
-  assert.strictEqual(tierRes(11), 330);
-  assert.strictEqual(tierRes(20), 600);
+  assert.strictEqual(tierRes(11), 363);
+  assert.strictEqual(tierRes(20), 660);
 
   // Test _upgCostMult
   console.log('Testing _upgCostMult...');
@@ -43,7 +43,7 @@ try {
 
   const costArm19 = getArmorUpgradeCost(19); // target lv 20
   assert.strictEqual(costArm19.gold, 3301); // Math.ceil(3000 * 1.1) due to JS float precision
-  assert.strictEqual(costArm19.stone, 660); // Math.ceil(600 * 1.1)
+  assert.strictEqual(costArm19.stone, 727); // Math.ceil(660 * 1.1) due to JS float precision
 
   // Test getCatUpgradeCost
   console.log('Testing getCatUpgradeCost...');

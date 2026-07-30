@@ -65,6 +65,8 @@
   </div>
 
   <main class="app-main">
+    <div class="announcements-container" id="announcements-container" style="display: none;"></div>
+
     <div class="no-accounts" id="no-accounts-msg">
       <div class="no-accounts-icon">🎮</div>
       <h2>Chưa có tài khoản nào được quản lý</h2>
@@ -102,6 +104,9 @@
         </button>
         <button id="admin-tab-btn-maps" class="admin-tab-btn" onclick="switchAdminTab('maps')">
           🗺️ Bản Đồ & Zone
+        </button>
+        <button id="admin-tab-btn-announcements" class="admin-tab-btn" onclick="switchAdminTab('announcements')">
+          📢 Thông Báo
         </button>
       </div>
 
@@ -336,6 +341,54 @@
               </thead>
               <tbody id="admin-maps-table-body">
                 <tr><td colspan="5" style="padding: 12px; text-align: center; color: var(--text-muted);">Đang tải dữ liệu...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ TAB: ANNOUNCEMENTS ═══ -->
+      <div id="admin-tab-announcements" class="admin-tab-panel">
+        <form id="admin-create-announcement-form" class="admin-section-block" onsubmit="createAnnouncement(event)">
+          <h4 style="margin: 0 0 12px 0; font-size: 0.95rem; color: #e5e7eb;">📢 Tạo Thông Báo Mới</h4>
+          <div style="display: flex; flex-direction: column; gap: 12px;">
+            <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+              <label for="announcement-type" style="font-size: 0.85rem; color: var(--text-muted); min-width: 100px;">Loại thông báo:</label>
+              <select id="announcement-type" class="admin-input-text" style="width: auto; padding: 6px 12px; border-radius: 6px; background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); color: #fff; font-family: inherit;">
+                <option value="info">ℹ️ Thông tin (Info)</option>
+                <option value="success">✅ Thành công (Success)</option>
+                <option value="warning">⚠️ Cảnh báo (Warning)</option>
+                <option value="critical">🚨 Khẩn cấp (Critical)</option>
+              </select>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 6px;">
+              <label for="announcement-content" style="font-size: 0.85rem; color: var(--text-muted);">Nội dung thông báo:</label>
+              <textarea id="announcement-content" class="admin-input-text" placeholder="Nhập nội dung thông báo cần gửi tới tất cả người dùng..." required style="min-height: 80px; font-family: inherit; padding: 8px; border-radius: 6px; background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); color: #fff; resize: vertical;"></textarea>
+            </div>
+            <div style="display: flex; justify-content: flex-end;">
+              <button type="submit" class="btn btn-primary" style="padding: 8px 16px; font-size: 0.85rem; font-weight: bold; background: linear-gradient(135deg, #7c3aed, #db2777); border: none; border-radius: 6px; cursor: pointer; color: #fff;">
+                📢 Gửi Thông Báo
+              </button>
+            </div>
+            <span class="error-msg" id="admin-announcement-error" style="margin:0; text-align:left; font-size:0.8rem; color: #ef4444;"></span>
+          </div>
+        </form>
+
+        <div class="admin-section-block" style="margin-top: 16px;">
+          <h4 style="margin: 0 0 12px 0; font-size: 0.95rem; color: #e5e7eb;">📋 Danh Sách Thông Báo Đã Gửi</h4>
+          <div style="overflow-x: auto;">
+            <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem; text-align: left;">
+              <thead>
+                <tr style="border-bottom: 1px solid var(--border-color); color: var(--text-muted);">
+                  <th style="padding: 8px; width: 130px;">Thời Gian</th>
+                  <th style="padding: 8px; width: 100px;">Loại</th>
+                  <th style="padding: 8px; width: 100px;">Người Gửi</th>
+                  <th style="padding: 8px;">Nội Dung</th>
+                  <th style="padding: 8px; text-align: right; width: 80px;">Thao Tác</th>
+                </tr>
+              </thead>
+              <tbody id="admin-announcements-table-body">
+                <tr><td colspan="5" style="padding: 12px; text-align: center; color: var(--text-muted);">Chưa có thông báo nào.</td></tr>
               </tbody>
             </table>
           </div>

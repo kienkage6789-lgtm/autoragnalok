@@ -2,6 +2,32 @@
 
 > Changelog of actual changes implemented.
 
+## 2026-07-30 - Xây dựng Hệ thống Thông báo Admin & Banners Dashboard (T50) và Đồng bộ Trứng Thú Cưng (T48)
+- File đã đổi: [server.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [public/index.html](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/public/index.html), [public/app.css](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/public/app.css), [public/app.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/public/app.js), [announcements.json](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/announcements.json) (tạo mới).
+- Đã làm:
+  - **Hoàn thành T48**: Ghi nhận trạng thái Pet Eggs đã được xử lý ổn định trên Dashboard theo xác nhận của người dùng.
+  - **Hệ thống API Backend**: Định nghĩa các file path lưu trữ và các helper functions `loadAnnouncements()`, `saveAnnouncements()`. Mở các endpoint `GET /api/announcements` để User lấy thông báo, và `POST /api/admin/announcements` cùng `DELETE /api/admin/announcements/:id` cho quản trị viên Admin.
+  - **Tích hợp Backup**: Bổ sung `announcements.json` vào danh sách tệp lưu trữ và khôi phục khi tạo/up file backup.
+  - **UI Admin Tab**: Thiết kế tab "Thông báo" trong bảng điều khiển Admin, cung cấp form tạo thông báo (chọn loại và viết nội dung) và danh sách bảng liệt kê các thông báo đã gửi kèm nút Xóa.
+  - **UI Dashboard User Banners**: Thêm container chứa banner thông báo ở vị trí trên cùng, thiết kế gradient premium theo loại thông báo (Info, Success, Warning, Critical) tích hợp nút dismiss (×).
+  - **Lưu trạng thái dismiss ở LocalStorage**: Khi tắt thông báo, client ghi nhớ ID thông báo để ẩn đi vĩnh viễn ở các nhịp poll và các lượt tải trang sau này.
+
+## 2026-07-30 - Đồng bộ hóa Hệ thống Nông Trại: Việt hóa, Sửa trùng lặp luống đất, Tự động dịch chuyển vào/ra nhà & Phân luồng ưu tiên
+- File đã đổi: [server.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [public/app.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/public/app.js), [xhrpg_lang_vi.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/xhrpg_lang_vi.js), [test.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/test.js).
+- Đã làm:
+  - **Tự động dịch chuyển vào/ra Nông trại (Map 5)**: Bot tự động kiểm tra xem có nông vụ cần xử lý hay không (thu hoạch cây chín, gieo hạt giống khi đất trống, nâng cấp nhà). Nếu có, tự động warp vào Map 5 để làm việc, và tự động rời khỏi Map 5 (warp_exit) khi hoàn thành.
+  - **Phân luồng ưu tiên**: Thiết lập độ ưu tiên hoạt động: Săn Boss MVP > Làm vườn (Home Farm) > Farm thường. Bot chỉ đi làm vườn khi không bận săn Boss, và chỉ farm thường khi rảnh rỗi.
+  - **Giữ nguyên cấu hình Zone**: Ngăn chặn sự kiện đổi map reset zone settings (`autoZone`, `lock_zone_center`, `targetZone`) khi di chuyển đi/về từ Map 5.
+  - **Việt hóa & Sửa chỉ số luống đất**: Việt hóa 100% hạt giống, cây trồng, cướp nhà, lính gác trong tệp ngôn ngữ. Tính toán luống đất theo chỉ số toàn cục từ `#1` đến `#96` thay vì trùng lặp cục bộ `#1` đến `#16` trên mỗi Plot.
+  - **Cập nhật công thức chi phí**: Sửa hàm `tierRes` toàn cục trên server và chi phí nâng cấp nhà trong poller khớp 100% với game server (bao gồm nhân tử lũy tiến +10%/band và sai số dấu phẩy động của JS).
+  - **Sửa lỗi mất trạng thái Nông trại / Thú cưng / PVP**: Bổ sung toàn bộ các trường nông nghiệp, thú cưng và PVP vào `COLD_FIELDS` để giữ lại dữ liệu xuyên suốt các nhịp poll thường (`full=0`), ngăn ngừa dữ liệu bị xóa sạch cứ mỗi 5 giây khiến bot kẹt gieo trồng lại liên tục.
+  - **Xử lý lỗi gieo trồng & Blacklist**: Tích hợp log lỗi chi tiết khi thao tác nông nghiệp thất bại. Đưa hạt giống bị gieo trồng lỗi vào danh sách đen `failedSeeds` để dừng thử lại hạt giống đó, tránh kẹt vòng lặp warp. Áp dụng thời gian chờ (cooldown) 5 phút khi gặt cây hoặc nâng nhà bị lỗi.
+  - **Đồng bộ Công thức Điểm Thú cưng (Pet Level & Points)**: Đồng bộ thuật toán `expNext` và `getPetLvInfo` trong `public/app.js` khớp 100% với game client và server, loại bỏ công thức tự tính sai lệch trước đó, hiển thị chính xác cấp độ và điểm số phân bổ khả dụng.
+- Đã test bằng: `npm test` → PASS 100%.
+
+---
+
+
 ## 2026-07-29 - Sửa Triệt Để Root Cause Lọc Mất Dữ Liệu Nông Trại (`home_crops`, `home_seeds`) & Pet Info trong `server.js`
 - File đã đổi: [server.js](file:///C:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/autoragnalok/server.js).
 - Đã làm:

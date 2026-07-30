@@ -634,6 +634,7 @@ app.get('/', (req, res) => {
 // Path to storage files
 const ACCOUNTS_FILE = path.join(__dirname, 'accounts.json');
 const USERS_FILE = path.join(__dirname, 'users.json');
+const ANNOUNCEMENTS_FILE = path.join(__dirname, 'announcements.json');
 
 // In-memory session store: token -> { userId, username, role, maxAccounts }
 let userSessions = {};
@@ -662,6 +663,28 @@ function saveUsers(users) {
     fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2), 'utf8');
   } catch (err) {
     console.error('Error writing users file:', err);
+  }
+}
+
+// Load announcements
+function loadAnnouncements() {
+  try {
+    if (fs.existsSync(ANNOUNCEMENTS_FILE)) {
+      const data = fs.readFileSync(ANNOUNCEMENTS_FILE, 'utf8');
+      return JSON.parse(data || '[]');
+    }
+  } catch (err) {
+    console.error('Error reading announcements file:', err);
+  }
+  return [];
+}
+
+// Save announcements
+function saveAnnouncements(ann) {
+  try {
+    fs.writeFileSync(ANNOUNCEMENTS_FILE, JSON.stringify(ann, null, 2), 'utf8');
+  } catch (err) {
+    console.error('Error writing announcements file:', err);
   }
 }
 
@@ -748,7 +771,7 @@ function tierRes(lv) {
   lv = Math.max(1, lv);
   let b = Math.floor((lv - 1) / 10);
   if (b > 9) b = 9;
-  return lv * (10 + 20 * b);
+  return Math.ceil(lv * (10 + 20 * b) * (10 + b) / 10);
 }
 
 function _upgCostMult(t) {
@@ -867,10 +890,13 @@ class BotInstance {
     this.nextActInterval = 120000 + Math.random() * 180000; // jitter ngẫu nhiên 120s-300s
     this.pendingActFlag = false;
 
-    this.proxyId = account.proxyId || null;
+     this.proxyId = account.proxyId || null;
     const assigned = proxyPool.assignBot(this.line_uid, this.proxyId);
     this.proxyId = assigned;
     this.consecutiveErrors = 0;
+    this.failedSeeds = {}; // Danh sách hạt giống bị lỗi gieo trồng
+    this.lastHarvestFailedAt = 0;
+    this.lastHomeUpgradeFailedAt = 0;
     this.addLog('SYSTEM', `Khởi tạo bot cho tài khoản: ${this.name}`);
   }
 
@@ -1385,18 +1411,22 @@ class BotInstance {
     if (prevP && prevP.map !== this.player.map) {
       this.spots = null; // Force reload static zone details for the new map
       this.bosses = null; // Clear bosses list to refresh on new map
-      this.settings.autoZone = false;
-      this.settings.lock_zone_center = false;
-      this.settings.targetZone = 0;
       
-      // Save settings changes to accounts.json
-      const currentAccounts = loadAccounts();
-      const idx = currentAccounts.findIndex(acc => acc.line_uid === this.line_uid);
-      if (idx !== -1) {
-        currentAccounts[idx].settings = this.settings;
-        saveAccounts(currentAccounts);
+      // Do NOT reset zone settings if transitioning to/from Home map (map 5)
+      if (prevP.map !== 5 && this.player.map !== 5) {
+        this.settings.autoZone = false;
+        this.settings.lock_zone_center = false;
+        this.settings.targetZone = 0;
+        
+        // Save settings changes to accounts.json
+        const currentAccounts = loadAccounts();
+        const idx = currentAccounts.findIndex(acc => acc.line_uid === this.line_uid);
+        if (idx !== -1) {
+          currentAccounts[idx].settings = this.settings;
+          saveAccounts(currentAccounts);
+        }
       }
-      this.addLog('SYSTEM', `🗺️ Bản đồ thay đổi sang Map ${this.player.map}. Đã thiết lập lại mục tiêu khu vực.`);
+      this.addLog('SYSTEM', `🗺️ Bản đồ thay đổi sang Map ${this.player.map}.`);
     }
 
     // Carry forward cold fields if hot-only response
@@ -1406,7 +1436,10 @@ class BotInstance {
         'robot_module_inventory','robot_gun_module_inventory','railgun_module_inventory',
         'armor_module_inventory','house_module_inventory','turret_module_inventory',
         'cards','eggs','treasures','treasures_qty','hardware','hardware_qty','weapon_parts','weapon_parts_qty',
-        'house_parts','house_parts_qty','stat_parts','stat_parts_qty'
+        'house_parts','house_parts_qty','stat_parts','stat_parts_qty',
+        'home_crops','home_seeds','home_lv','home_guards','home_return',
+        'pet_mid','pet_exp','pet_mvp','pet_olv','pet_up_atk','pet_up_hp','pet_up_reco','pet_batk','pet_bhp',
+        'pvp_today','pvp_won','pvp_lost','pvp_pts'
       ];
       for (const f of COLD_FIELDS) {
         if (this.player[f] === undefined && prevP[f] !== undefined) {
@@ -1486,6 +1519,63 @@ class BotInstance {
 
   async runAutomation() {
     if (!this.player) return;
+
+    const isAtHome = (Number(this.player.map) === 5);
+
+    // Check if there are pending Home Farm actions
+    let hasPendingHomeAction = false;
+    const nowMs = Date.now();
+    const harvestCooldown = (nowMs - (this.lastHarvestFailedAt || 0)) < 300000;
+    const upgradeCooldown = (nowMs - (this.lastHomeUpgradeFailedAt || 0)) < 300000;
+
+    if (!this.targetedMvp && (this.settings.autoHomeHarvest || this.settings.autoHomePlant || this.settings.autoHomeUpgrade)) {
+      const lv = Math.max(1, this.player.home_lv | 0);
+      const HOME_PLOT_LV = [20, 40, 60, 80, 100];
+      const plots = 1 + HOME_PLOT_LV.filter(q => lv >= q).length;
+      const totalHoles = plots * 16;
+      
+      let crops = [];
+      try {
+        const c = this.player.home_crops;
+        crops = Array.isArray(c) ? c : (typeof c === 'string' ? (JSON.parse(c || '[]') || []) : []);
+      } catch (e) {}
+
+      const nowS = Date.now() / 1000;
+      const SEED_GROW_H = [1, 2, 4, 8, 16, 24];
+      const seedGrowS = id => (SEED_GROW_H[Math.max(0, Math.min(5, (((id - 1) / 4) | 0)))] || 1) * 3600;
+
+      // A. Check Harvest
+      if (!harvestCooldown && this.settings.autoHomeHarvest && crops.length > 0) {
+        const ripeCount = crops.filter(c => c.r === true || (seedGrowS(c.s) - (nowS - c.t)) <= 0).length;
+        if (ripeCount > 0) hasPendingHomeAction = true;
+      }
+
+      // B. Check Plant
+      if (this.settings.autoHomePlant) {
+        const usedHoles = crops.filter(c => c.p < plots).length;
+        if (usedHoles < totalHoles) {
+          let seeds = {};
+          try {
+            const s = this.player.home_seeds;
+            seeds = (s && typeof s === 'object' && !Array.isArray(s)) ? s : (typeof s === 'string' ? (JSON.parse(s || '{}') || {}) : {});
+          } catch (e) {}
+          const availSeedIds = Object.keys(seeds).map(Number).filter(id => id >= 1 && id <= 24 && seeds[id] > 0 && !this.failedSeeds[id]);
+          if (availSeedIds.length > 0) hasPendingHomeAction = true;
+        }
+      }
+
+      // C. Check Upgrade
+      if (!upgradeCooldown && this.settings.autoHomeUpgrade && lv < 100 && lv < ((this.player.lv | 0) + 5)) {
+        const t = lv + 1;
+        const m = _upgCostMult(t);
+        const r = Math.ceil(tierRes(t) * m) * 10;
+        const costGold = Math.ceil(tierGold(t) * m) * 10;
+        if ((this.player.gold|0) >= costGold && (this.player.wood|0) >= r && (this.player.stone|0) >= r &&
+            (this.player.iron|0) >= r && (this.player.copper|0) >= r && (this.player.herb|0) >= r) {
+          hasPendingHomeAction = true;
+        }
+      }
+    }
 
     // Pause all automation tasks (upgrades, mines, arena, map warp) while hunting MVP boss
     if (this.targetedMvp) {
@@ -1713,32 +1803,85 @@ class BotInstance {
     }
     } // End of temporarily disabled automation
 
-    // 6. Auto Map Warp
-    if (this.settings.autoMap && Number(this.player.map) !== Number(this.settings.targetMap)) {
-      const targetMapId = parseInt(this.settings.targetMap) || 1;
-      const mapDef = getMapDefs().find(m => m.id === targetMapId);
-      if (mapDef && (this.player.lv || 1) >= mapDef.req) {
-        this.addLog('SYSTEM', `🗺️ [Tự động] Di chuyển sang bản đồ: ${mapDef.name}`);
+    // 6. Phân luồng Định Tuyến Bản Đồ (Map Routing)
+    if (hasPendingHomeAction) {
+      // Đang có việc ở nông trại và chưa đứng ở nông trại -> Warp vào Map 5
+      if (!isAtHome) {
+        this.addLog('SYSTEM', `🏡 [Tự động] Đi vào Nông trại để chăm sóc cây trồng`);
         try {
           const res = await this.sendRequest('https://ragnalok.online/human/xhrpg_warp.php', {
             line_uid: this.line_uid,
             session_token: this.session_token,
-            target_map: targetMapId
+            target_map: 5
           });
           if (res && res.ok) {
             this.player = res.player;
-            this.addLog('SUCCESS', `Di chuyển sang bản đồ ${targetMapId} thành công`);
-          } else {
-            this.addLog('WARNING', `Di chuyển bản đồ thất bại: ${res.error || 'Lỗi không xác định'}`);
+            this.addLog('SUCCESS', `Đã vào Nông trại thành công`);
           }
         } catch (e) {
-          this.addLog('ERROR', `Lỗi di chuyển bản đồ: ${e.message}`);
+          this.addLog('ERROR', `Lỗi di chuyển vào Nông trại: ${e.message}`);
+        }
+        return; // Dừng nhịp này chờ map cập nhật
+      }
+    } else {
+      // Không có việc nông vụ mà vẫn kẹt ở nông trại -> Warp quay ra
+      if (isAtHome) {
+        this.addLog('SYSTEM', `↩️ [Tự động] Đã hoàn tất công việc làm vườn, rời Nông trại để quay lại farm`);
+        try {
+          const res = await this.sendRequest('https://ragnalok.online/human/xhrpg_warp.php', {
+            line_uid: this.line_uid,
+            session_token: this.session_token,
+            home_exit: 1
+          });
+          if (res && res.ok) {
+            this.player = res.player;
+            this.addLog('SUCCESS', `Rời Nông trại thành công`);
+          } else {
+            // Fallback nếu home_exit bị lỗi
+            const targetMapId = parseInt(this.settings.targetMap) || 1;
+            const resFallback = await this.sendRequest('https://ragnalok.online/human/xhrpg_warp.php', {
+              line_uid: this.line_uid,
+              session_token: this.session_token,
+              target_map: targetMapId
+            });
+            if (resFallback && resFallback.ok) {
+              this.player = resFallback.player;
+              this.addLog('SUCCESS', `Di chuyển về bản đồ mục tiêu ${targetMapId} thành công`);
+            }
+          }
+        } catch (e) {
+          this.addLog('ERROR', `Lỗi rời Nông trại: ${e.message}`);
+        }
+        return;
+      }
+
+      // Di chuyển bản đồ mục tiêu thường
+      if (this.settings.autoMap && Number(this.player.map) !== Number(this.settings.targetMap)) {
+        const targetMapId = parseInt(this.settings.targetMap) || 1;
+        const mapDef = getMapDefs().find(m => m.id === targetMapId);
+        if (mapDef && (this.player.lv || 1) >= mapDef.req) {
+          this.addLog('SYSTEM', `🗺️ [Tự động] Di chuyển sang bản đồ: ${mapDef.name}`);
+          try {
+            const res = await this.sendRequest('https://ragnalok.online/human/xhrpg_warp.php', {
+              line_uid: this.line_uid,
+              session_token: this.session_token,
+              target_map: targetMapId
+            });
+            if (res && res.ok) {
+              this.player = res.player;
+              this.addLog('SUCCESS', `Di chuyển sang bản đồ ${targetMapId} thành công`);
+            } else {
+              this.addLog('WARNING', `Di chuyển bản đồ thất bại: ${res.error || 'Lỗi không xác định'}`);
+            }
+          } catch (e) {
+            this.addLog('ERROR', `Lỗi di chuyển bản đồ: ${e.message}`);
+          }
         }
       }
     }
 
-    // 7. Auto Arena Mode
-    if (this.settings.autoArena && this.pollCount % 150 === 0) {
+    // 7. Auto Arena Mode (Chỉ chạy khi không ở Nông trại)
+    if (!isAtHome && this.settings.autoArena && this.pollCount % 150 === 0) {
       try {
         const info = await this.sendRequest('https://ragnalok.online/human/xhrpg_arena.php', {
           line_uid: this.line_uid,
@@ -1786,7 +1929,7 @@ class BotInstance {
     }
 
     // 8. Auto Home (Nông trại: Harvest, Plant, Upgrade)
-    if (this.player && (this.settings.autoHomeHarvest || this.settings.autoHomePlant || this.settings.autoHomeUpgrade)) {
+    if (isAtHome && this.player && (this.settings.autoHomeHarvest || this.settings.autoHomePlant || this.settings.autoHomeUpgrade)) {
       try {
         const lv = Math.max(1, this.player.home_lv | 0);
         const HOME_PLOT_LV = [20, 40, 60, 80, 100];
@@ -1804,7 +1947,7 @@ class BotInstance {
         const seedGrowS = id => (SEED_GROW_H[((((id - 1) / 4) | 0))] || 1) * 3600;
 
         // A. Auto Harvest
-        if (this.settings.autoHomeHarvest && crops.length > 0) {
+        if (!harvestCooldown && this.settings.autoHomeHarvest && crops.length > 0) {
           const ripeCount = crops.filter(c => {
             if (c.r === true) return true;
             const left = seedGrowS(c.s) - (nowS - c.t);
@@ -1822,6 +1965,11 @@ class BotInstance {
               this.player = res.player || this.player;
               const hv = res.hv || {};
               this.addLog('SUCCESS', `Thu hoạch thành công: ${hv.n || ripeCount} luống (+${(hv.g || 0).toLocaleString()} Gold)`);
+              this.failedSeeds = {}; // Reset blacklist on successful harvest
+            } else {
+              this.lastHarvestFailedAt = Date.now();
+              const errMsg = res ? (res.error || res.msg || 'Lỗi không xác định') : 'Không phản hồi';
+              this.addLog('ERROR', `Thu hoạch thất bại: ${errMsg}. Tạm dừng thu hoạch 5 phút.`);
             }
           }
         }
@@ -1841,7 +1989,7 @@ class BotInstance {
               seeds = (s && typeof s === 'object' && !Array.isArray(s)) ? s : (typeof s === 'string' ? (JSON.parse(s || '{}') || {}) : {});
             } catch (e) {}
 
-            const availSeedIds = Object.keys(seeds).map(Number).filter(id => id >= 1 && id <= 24 && seeds[id] > 0);
+            const availSeedIds = Object.keys(seeds).map(Number).filter(id => id >= 1 && id <= 24 && seeds[id] > 0 && !this.failedSeeds[id]);
             if (availSeedIds.length > 0) {
               const priority = this.settings.homePlantPriority || 'highest_tier';
               const seedTier = id => (((id - 1) / 4) | 0) + 1;
@@ -1871,20 +2019,21 @@ class BotInstance {
               if (res && res.ok) {
                 this.player = res.player || this.player;
                 this.addLog('SUCCESS', `Trồng thành công hạt giống ID #${targetSeed}`);
+              } else {
+                const errMsg = res ? (res.error || res.msg || 'Lỗi không xác định') : 'Không phản hồi';
+                this.addLog('ERROR', `Gieo hạt giống #${targetSeed} thất bại: ${errMsg}. Đưa hạt giống này vào danh sách đen.`);
+                this.failedSeeds[targetSeed] = true;
               }
             }
           }
         }
 
         // C. Auto Upgrade Home
-        if (this.settings.autoHomeUpgrade) {
+        if (!upgradeCooldown && this.settings.autoHomeUpgrade) {
           const lv = Math.max(1, this.player.home_lv | 0);
           if (lv < 100 && lv < ((this.player.lv | 0) + 5)) {
             const t = lv + 1;
-            const tierRes = (lvl) => Math.min(20, Math.ceil(lvl / 5));
-            const tierGold = (lvl) => Math.min(20, Math.ceil(lvl / 5)) * 100;
-            const upgMult = (lvl) => 1 + (lvl - 1) * 0.15;
-            const m = upgMult(t);
+            const m = _upgCostMult(t);
             const r = Math.ceil(tierRes(t) * m) * 10;
             const costGold = Math.ceil(tierGold(t) * m) * 10;
 
@@ -1899,6 +2048,10 @@ class BotInstance {
               if (res && res.ok) {
                 this.player = res.player || this.player;
                 this.addLog('SUCCESS', `Nâng cấp nhà lên Lv.${this.player.home_lv} thành công!`);
+              } else {
+                this.lastHomeUpgradeFailedAt = Date.now();
+                const errMsg = res ? (res.error || res.msg || 'Lỗi không xác định') : 'Không phản hồi';
+                this.addLog('ERROR', `Nâng cấp nhà thất bại: ${errMsg}. Tạm dừng nâng cấp nhà 5 phút.`);
               }
             }
           }
@@ -2105,6 +2258,50 @@ app.get('/api/admin/stats', requireAdmin, (req, res) => {
     directBots,
     proxyBots
   });
+});
+
+// ==================== ANNOUNCEMENTS API ROUTES ====================
+
+// Get announcements (Users & Admin)
+app.get('/api/announcements', requireAuth, (req, res) => {
+  const list = loadAnnouncements();
+  res.json({ success: true, announcements: list });
+});
+
+// Create announcement (Admin only)
+app.post('/api/admin/announcements', requireAdmin, (req, res) => {
+  const { type, message } = req.body;
+  if (!message || !message.trim()) {
+    return res.status(400).json({ error: 'Nội dung thông báo không được để trống' });
+  }
+  const validTypes = ['info', 'success', 'warning', 'critical'];
+  if (!type || !validTypes.includes(type)) {
+    return res.status(400).json({ error: 'Loại thông báo không hợp lệ' });
+  }
+  const list = loadAnnouncements();
+  const newAnn = {
+    id: 'ann_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+    type,
+    message: message.trim(),
+    createdAt: new Date().toISOString(),
+    createdBy: req.user.username
+  };
+  list.unshift(newAnn);
+  saveAnnouncements(list);
+  res.json({ success: true, announcement: newAnn });
+});
+
+// Delete announcement (Admin only)
+app.delete('/api/admin/announcements/:id', requireAdmin, (req, res) => {
+  const { id } = req.params;
+  let list = loadAnnouncements();
+  const initialLength = list.length;
+  list = list.filter(ann => ann.id !== id);
+  if (list.length === initialLength) {
+    return res.status(404).json({ error: 'Không tìm thấy thông báo' });
+  }
+  saveAnnouncements(list);
+  res.json({ success: true });
 });
 
 // Get all users (Admin only)
@@ -2470,7 +2667,7 @@ async function performTelegramBackup() {
   }
 
   const zip = new AdmZip();
-  const files = ['users.json', 'proxies.json', 'accounts.json'];
+  const files = ['users.json', 'proxies.json', 'accounts.json', 'announcements.json'];
   for (const file of files) {
     const filePath = path.join(__dirname, file);
     if (fs.existsSync(filePath)) {
@@ -2572,7 +2769,7 @@ app.get('/api/admin/backup-download', requireAuth, (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'Chỉ Admin mới có quyền truy cập' });
   try {
     const zip = new AdmZip();
-    const files = ['users.json', 'proxies.json', 'accounts.json'];
+    const files = ['users.json', 'proxies.json', 'accounts.json', 'announcements.json'];
     for (const file of files) {
       const filePath = path.join(__dirname, file);
       if (fs.existsSync(filePath)) {
