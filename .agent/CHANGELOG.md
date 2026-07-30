@@ -2,6 +2,15 @@
 
 > Changelog of actual changes implemented.
 
+## 2026-07-30 - Khắc phục Lỗi Nhấp nháy Giao diện Nông trại & Không Tự động Gieo/Gặt & Tắt Cài đặt Auto mặc định
+- File đã đổi: [server.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [test.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/test.js).
+- Đã làm:
+  - **Khắc phục lỗi Đè Trạng thái (State Wiping)**: Khắc phục triệt để lỗi mất dữ liệu các trường nông nghiệp/thú cưng (`COLD_FIELDS`) khi cập nhật `this.player` từ response sparse của các action (`stat_up`, `home_harvest`, `/action` API...).
+  - **Phương thức updatePlayerState**: Định nghĩa phương thức tập trung `updatePlayerState(newPlayer)` trong lớp `BotInstance` để tự động carry forward dữ liệu `COLD_FIELDS` từ trạng thái trước đó. Thay thế mọi chỗ gán trực tiếp `this.player` sang dùng hàm này.
+  - **Tắt auto mặc định**: Thay đổi cài đặt mặc định của `autoHomeHarvest` và `autoHomePlant` thành `false` trong `getDefaultSettings()` để tránh bot tự động làm việc khi người dùng chưa cấu hình.
+  - **Unit Test**: Bổ sung ca kiểm thử tự động cho `updatePlayerState` trong `test.js` đảm bảo dữ liệu nông vụ không bị mất khi nhận sparse update.
+- Đã test bằng: `npm test` → PASS 100%.
+
 ## 2026-07-30 - Xây dựng Hệ thống Thông báo Admin & Banners Dashboard (T50) và Đồng bộ Trứng Thú Cưng (T48)
 - File đã đổi: [server.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [public/index.html](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/public/index.html), [public/app.css](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/public/app.css), [public/app.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/public/app.js), [announcements.json](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/announcements.json) (tạo mới).
 - Đã làm:

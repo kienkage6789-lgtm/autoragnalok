@@ -6,7 +6,8 @@ const {
   getArmorUpgradeCost,
   getCatUpgradeCost,
   getDroneUpgradeCost,
-  getMineUpgradeCost
+  getMineUpgradeCost,
+  BotInstance
 } = require('./server');
 
 console.log('🧪 Running Unit Tests...');
@@ -216,6 +217,41 @@ try {
   let minLv = 999;
   spotsList.forEach(s => { if (s.lv < minLv) minLv = s.lv; });
   assert.strictEqual(minLv, 80, 'Min level for Map 9 should be calculated as 80');
+
+  // Test updatePlayerState (Carrying forward COLD_FIELDS)
+  console.log('Testing updatePlayerState carrying forward cold fields...');
+  const mockAccount = {
+    line_uid: 'test_uid',
+    session_token: 'test_token',
+    name: 'Test Bot',
+    settings: {}
+  };
+  const instance = new BotInstance(mockAccount);
+  
+  // Set initial player state with cold fields
+  instance.player = {
+    lv: 10,
+    gold: 5000,
+    home_crops: [{ p: 0, i: 0, s: 5, t: 12345678 }],
+    home_seeds: { '5': 10 },
+    pet_mid: 2
+  };
+  
+  // Simulate a sparse/hot update response missing cold fields
+  const sparseUpdate = {
+    lv: 11,
+    gold: 6000
+  };
+  
+  instance.updatePlayerState(sparseUpdate);
+  
+  // Verify that lv and gold are updated
+  assert.strictEqual(instance.player.lv, 11);
+  assert.strictEqual(instance.player.gold, 6000);
+  // Verify that cold fields are carried forward and not wiped
+  assert.deepStrictEqual(instance.player.home_crops, [{ p: 0, i: 0, s: 5, t: 12345678 }]);
+  assert.deepStrictEqual(instance.player.home_seeds, { '5': 10 });
+  assert.strictEqual(instance.player.pet_mid, 2);
 
   console.log('✅ All Unit Tests Passed successfully!');
 } catch (error) {

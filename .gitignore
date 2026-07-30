@@ -10,8 +10,13 @@ announcements.json
 # Cache and scratch files
 spots_cache.json
 maps_cache.json
+mon_masters_cache.json
 scratch/
 .env
+
+# Dynamically downloaded game scripts
+xhrpg_canvas.js
+sdk.js
 
 # OS files
 .DS_Store

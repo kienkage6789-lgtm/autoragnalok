@@ -3,6 +3,16 @@
 > Work Breakdown Structure. Update task states immediately upon changes.
 > Statuses: todo | doing | blocked | review | done
 
+### [x] T51 - Đánh giá chức năng Nông trại & Sửa lỗi đè trạng thái
+- Description: Biên soạn báo cáo đánh giá chức năng Nông trại (Home Farm), sửa đổi cài đặt auto mặc định về false để đảm bảo an toàn, đồng thời khắc phục lỗi mất dữ liệu trạng thái nông nghiệp khi nhận sparse update từ game server.
+- Files related: `server.js`, `test.js`
+- Acceptance criteria:
+  - [x] Lập báo cáo đánh giá hệ thống nông trại (home_evaluation_report.md).
+  - [x] Triển khai hàm `updatePlayerState()` để bảo toàn cold fields khi cập nhật trạng thái nhân vật.
+  - [x] Chuyển đổi mặc định của các cấu hình `autoHomeHarvest` và `autoHomePlant` thành `false`.
+  - [x] Viết unit test tự động xác minh và kiểm thử thành công.
+- Status: done
+
 ### [x] T50 - Chức năng thông báo của Admin tới các User
 - Description: Xây dựng hệ thống thông báo hiển thị banner thông tin (Info, Success, Warning, Critical) trên giao diện Dashboard của người dùng, tích hợp tab quản lý thông báo của Admin cho phép tạo và xóa thông báo.
 - Files related: `server.js`, `public/index.html`, `public/app.css`, `public/app.js`

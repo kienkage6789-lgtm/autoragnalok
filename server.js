@@ -904,6 +904,30 @@ class BotInstance {
     this.pendingActFlag = true;
   }
 
+  updatePlayerState(newPlayer) {
+    if (!newPlayer) return;
+    if (!this.player) {
+      this.player = newPlayer;
+      return;
+    }
+    const COLD_FIELDS = [
+      'module_inventory','sniper_module_inventory','knife_module_inventory','axe_module_inventory',
+      'robot_module_inventory','robot_gun_module_inventory','railgun_module_inventory',
+      'armor_module_inventory','house_module_inventory','turret_module_inventory',
+      'cards','eggs','treasures','treasures_qty','hardware','hardware_qty','weapon_parts','weapon_parts_qty',
+      'house_parts','house_parts_qty','stat_parts','stat_parts_qty',
+      'home_crops','home_seeds','home_lv','home_guards','home_return',
+      'pet_mid','pet_exp','pet_mvp','pet_olv','pet_up_atk','pet_up_hp','pet_up_reco','pet_batk','pet_bhp',
+      'pvp_today','pvp_won','pvp_lost','pvp_pts'
+    ];
+    for (const f of COLD_FIELDS) {
+      if (newPlayer[f] === undefined && this.player[f] !== undefined) {
+        newPlayer[f] = this.player[f];
+      }
+    }
+    this.player = newPlayer;
+  }
+
   getDefaultSettings() {
     return {
       bot: 1,
@@ -931,8 +955,8 @@ class BotInstance {
       mvpNamePriority: '',
       mvpNameBlacklist: '',
       autoArena: false,
-      autoHomeHarvest: true,
-      autoHomePlant: true,
+      autoHomeHarvest: false,
+      autoHomePlant: false,
       homePlantPriority: 'highest_tier',
       autoHomeUpgrade: false
     };
@@ -1403,7 +1427,7 @@ class BotInstance {
 
     // Update player
     const prevP = this.player;
-    this.player = d.player;
+    this.updatePlayerState(d.player);
     this.lastUpdate = new Date().toISOString();
     this.error = null;
 
@@ -1427,25 +1451,6 @@ class BotInstance {
         }
       }
       this.addLog('SYSTEM', `🗺️ Bản đồ thay đổi sang Map ${this.player.map}.`);
-    }
-
-    // Carry forward cold fields if hot-only response
-    if (prevP) {
-      const COLD_FIELDS = [
-        'module_inventory','sniper_module_inventory','knife_module_inventory','axe_module_inventory',
-        'robot_module_inventory','robot_gun_module_inventory','railgun_module_inventory',
-        'armor_module_inventory','house_module_inventory','turret_module_inventory',
-        'cards','eggs','treasures','treasures_qty','hardware','hardware_qty','weapon_parts','weapon_parts_qty',
-        'house_parts','house_parts_qty','stat_parts','stat_parts_qty',
-        'home_crops','home_seeds','home_lv','home_guards','home_return',
-        'pet_mid','pet_exp','pet_mvp','pet_olv','pet_up_atk','pet_up_hp','pet_up_reco','pet_batk','pet_bhp',
-        'pvp_today','pvp_won','pvp_lost','pvp_pts'
-      ];
-      for (const f of COLD_FIELDS) {
-        if (this.player[f] === undefined && prevP[f] !== undefined) {
-          this.player[f] = prevP[f];
-        }
-      }
     }
 
     // Process events
@@ -1600,7 +1605,7 @@ class BotInstance {
             amount: amount
           });
           if (res.ok) {
-            this.player = res.player;
+            this.updatePlayerState(res.player);
             this.addLog('SUCCESS', `Tăng điểm ${targetStat.toUpperCase()} thành công`);
           } else {
             this.addLog('WARNING', `Tăng điểm thất bại: ${res.error}`);
@@ -1624,7 +1629,7 @@ class BotInstance {
             action: 'upgrade_armor'
           });
           if (res.ok) {
-            this.player = res.player;
+            this.updatePlayerState(res.player);
             this.addLog('SUCCESS', `Nâng cấp Armor lên Lv.${this.player.armor_lv} thành công`);
           } else {
             this.addLog('WARNING', `Nâng cấp Armor thất bại: ${res.error}`);
@@ -1657,7 +1662,7 @@ class BotInstance {
             skill_id: skillToUpgrade
           });
           if (res.ok) {
-            this.player = res.player;
+            this.updatePlayerState(res.player);
             this.addLog('SUCCESS', `Nâng cấp kỹ năng ${skillToUpgrade} thành công`);
           } else {
             this.addLog('WARNING', `Nâng cấp kỹ năng thất bại: ${res.error}`);
@@ -1683,7 +1688,7 @@ class BotInstance {
               action: 'upgrade_cat'
             });
             if (res.ok) {
-              this.player = res.player;
+              this.updatePlayerState(res.player);
               this.addLog('SUCCESS', `Nâng cấp Cat lên Lv.${this.player.cat_lv} thành công`);
             }
           } catch (e) {}
@@ -1703,7 +1708,7 @@ class BotInstance {
               action: 'upgrade_drone'
             });
             if (res.ok) {
-              this.player = res.player;
+              this.updatePlayerState(res.player);
               this.addLog('SUCCESS', `Nâng cấp Drone lên Lv.${this.player.drone_lv} thành công`);
             }
           } catch (e) {}
@@ -1750,7 +1755,7 @@ class BotInstance {
                 ore: selectOre
               });
               if (res.player) {
-                this.player = res.player;
+                this.updatePlayerState(res.player);
                 this.addLog('SUCCESS', `Xây dựng mỏ khai thác ô ${s + 1} thành công`);
               }
             } catch (e) {}
@@ -1775,7 +1780,7 @@ class BotInstance {
                 slot: s
               });
               if (res.player) {
-                this.player = res.player;
+                this.updatePlayerState(res.player);
                 this.addLog('SUCCESS', `Nâng cấp mỏ khai thác ô ${s + 1} thành công`);
               }
             } catch (e) {}
@@ -1793,7 +1798,7 @@ class BotInstance {
               slot: s
             });
             if (res.player) {
-              this.player = res.player;
+              this.updatePlayerState(res.player);
               this.addLog('SUCCESS', `Mỏ ô ${s + 1} hoạt động trở lại`);
             }
           } catch (e) {}
@@ -1815,7 +1820,7 @@ class BotInstance {
             target_map: 5
           });
           if (res && res.ok) {
-            this.player = res.player;
+            this.updatePlayerState(res.player);
             this.addLog('SUCCESS', `Đã vào Nông trại thành công`);
           }
         } catch (e) {
@@ -1834,7 +1839,7 @@ class BotInstance {
             home_exit: 1
           });
           if (res && res.ok) {
-            this.player = res.player;
+            this.updatePlayerState(res.player);
             this.addLog('SUCCESS', `Rời Nông trại thành công`);
           } else {
             // Fallback nếu home_exit bị lỗi
@@ -1845,7 +1850,7 @@ class BotInstance {
               target_map: targetMapId
             });
             if (resFallback && resFallback.ok) {
-              this.player = resFallback.player;
+              this.updatePlayerState(resFallback.player);
               this.addLog('SUCCESS', `Di chuyển về bản đồ mục tiêu ${targetMapId} thành công`);
             }
           }
@@ -1868,7 +1873,7 @@ class BotInstance {
               target_map: targetMapId
             });
             if (res && res.ok) {
-              this.player = res.player;
+              this.updatePlayerState(res.player);
               this.addLog('SUCCESS', `Di chuyển sang bản đồ ${targetMapId} thành công`);
             } else {
               this.addLog('WARNING', `Di chuyển bản đồ thất bại: ${res.error || 'Lỗi không xác định'}`);
@@ -1962,7 +1967,7 @@ class BotInstance {
               action: 'home_harvest'
             });
             if (res && res.ok) {
-              this.player = res.player || this.player;
+              this.updatePlayerState(res.player);
               const hv = res.hv || {};
               this.addLog('SUCCESS', `Thu hoạch thành công: ${hv.n || ripeCount} luống (+${(hv.g || 0).toLocaleString()} Gold)`);
               this.failedSeeds = {}; // Reset blacklist on successful harvest
@@ -2017,7 +2022,7 @@ class BotInstance {
                 all: 1
               });
               if (res && res.ok) {
-                this.player = res.player || this.player;
+                this.updatePlayerState(res.player);
                 this.addLog('SUCCESS', `Trồng thành công hạt giống ID #${targetSeed}`);
               } else {
                 const errMsg = res ? (res.error || res.msg || 'Lỗi không xác định') : 'Không phản hồi';
@@ -2046,7 +2051,7 @@ class BotInstance {
                 action: 'home_up'
               });
               if (res && res.ok) {
-                this.player = res.player || this.player;
+                this.updatePlayerState(res.player);
                 this.addLog('SUCCESS', `Nâng cấp nhà lên Lv.${this.player.home_lv} thành công!`);
               } else {
                 this.lastHomeUpgradeFailedAt = Date.now();
@@ -3674,7 +3679,7 @@ app.post('/api/accounts/:line_uid/action', requireAuth, async (req, res) => {
 
     const response = await bot.sendRequest(url, payload);
     if (response.player) {
-      bot.player = response.player;
+      bot.updatePlayerState(response.player);
       if (bot.player.map !== undefined) {
         const currentMapNum = Number(bot.player.map);
         bot.updateSettings({ targetMap: currentMapNum });
@@ -4246,5 +4251,6 @@ module.exports = {
   getArmorUpgradeCost,
   getCatUpgradeCost,
   getDroneUpgradeCost,
-  getMineUpgradeCost
+  getMineUpgradeCost,
+  BotInstance
 };
