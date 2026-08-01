@@ -1161,6 +1161,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 <span class="slider"></span>
               </label>
             </div>
+            <div class="toggle-control" style="margin-top: 4px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 8px;">
+              <span class="toggle-label" style="color: #fb923c;">⚡ Bypass Warp (Farm không cần vào map nhà)</span>
+              <label class="switch">
+                <input type="checkbox" id="chk-bypasshomewarp-${acc.line_uid}" onchange="toggleSetting('${acc.line_uid}', 'bypassHomeWarp')">
+                <span class="slider"></span>
+              </label>
+            </div>
           </div>
 
           <div style="font-size: 0.8rem; font-weight: 700; color: #4ade80; margin-bottom: 6px;">🌱 Danh Sách Hạt Giống Trong Kho</div>
@@ -3506,6 +3513,9 @@ function updateHomeTabUI(acc) {
 
   const chkUp = document.getElementById(`chk-autohomeup-${line_uid}`);
   if (chkUp && document.activeElement !== chkUp) chkUp.checked = acc.settings.autoHomeUpgrade === true;
+
+  const chkBypassWarp = document.getElementById(`chk-bypasshomewarp-${line_uid}`);
+  if (chkBypassWarp && document.activeElement !== chkBypassWarp) chkBypassWarp.checked = acc.settings.bypassHomeWarp === true;
 
   // 4. Seeds Inventory List
   const seedsListEl = document.getElementById(`home-seeds-list-${line_uid}`);

@@ -2,6 +2,18 @@
 
 > Changelog of actual changes implemented.
 
+## 2026-08-01 - Flag thử nghiệm Bypass Home Warp (bypassHomeWarp)
+- File đã đổi: [server.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [public/app.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/public/app.js).
+- Đã làm:
+  - **Thêm setting `bypassHomeWarp: false`** vào `defaultSettings` của `BotInstance`.
+  - **Sửa logic Map Routing (Step 6)**: Khi `bypassHomeWarp=true`, bỏ qua bước warp cưỡng bức vào Map 5. Logic thoát Map 5 nếu bị kẹt vẫn được giữ nguyên (an toàn cho cả 2 chế độ).
+  - **Sửa điều kiện Step 8 (Auto Home)**: Từ `isAtHome && ...` thành `(isAtHome || bypassHomeWarp) && ...` — cho phép thực thi `home_harvest`/`home_plant`/`home_up` ngay tại bản đồ farm hiện tại.
+  - **Thêm toggle UI** `⚡ Bypass Warp (Farm không cần vào map nhà)` vào tab 🏡 Nông Trại trên Dashboard, với sync trạng thái tự động.
+- Mục đích: Kiểm tra xem game server PHP có yêu cầu nhân vật phải đứng tại Map 5 trước khi gọi `home_harvest`/`home_plant`/`home_up` không. Nếu thành công → tiết kiệm 2–3 nhịp poll (4–6 giây) mỗi chu kỳ nông trại.
+- Đã test bằng: `node -c server.js` và `node -c public/app.js` → PASS 100%.
+
+---
+
 ## 2026-08-01 - Sửa lỗi chức năng Bơm Potion tự động (HP Threshold)
 - File đã đổi: [public/app.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/public/app.js).
 - Đã làm:

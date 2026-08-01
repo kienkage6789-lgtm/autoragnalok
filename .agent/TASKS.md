@@ -3,6 +3,26 @@
 > Work Breakdown Structure. Update task states immediately upon changes.
 > Statuses: todo | doing | blocked | review | done
 
+### [doing] T53 - Đánh giá & Test Flag Bypass Home Warp (bypassHomeWarp)
+- Description: Đánh giá xem bot có cần phải warp vào Map 5 (Nông Trại) trước khi gọi API home_harvest/home_plant/home_up không. Triển khai flag thử nghiệm `bypassHomeWarp` cho phép bot thực thi nông vụ ngay tại bản đồ hiện tại, bỏ qua 2–3 nhịp poll warp đi/về.
+- Files related: `server.js`, `public/app.js`
+- Acceptance criteria:
+  - [x] Phân tích code — xác nhận 3 API nông trại không truyền tham số map vào request body.
+  - [x] Lập tài liệu phân tích `home_farm_analysis.md` trình bày 2 phương án.
+  - [x] Thêm setting `bypassHomeWarp: false` vào `defaultSettings`.
+  - [x] Sửa logic Map Routing (Step 6): khi `bypassHomeWarp=true` bỏ qua warp cưỡng bức, giữ nguyên logic thoát Map 5 nếu bị kẹt.
+  - [x] Sửa điều kiện Step 8: `(isAtHome || bypassHomeWarp)` — chạy harvest/plant/upgrade tại bất kỳ map nào.
+  - [x] Thêm toggle **⚡ Bypass Warp** vào tab 🏡 Nông Trại trên Dashboard + sync trạng thái.
+  - [x] `node -c server.js`, `node -c public/app.js` → PASS 100%.
+  - [ ] **TEST THỰC TẾ**: Bật flag trên 1 bot đang farm → Quan sát log để xác nhận game server có check map không.
+  - [ ] Nếu test PASS → đổi default `bypassHomeWarp: true` để áp dụng toàn bộ.
+- Status: doing
+- Notes:
+  - Logic guard bên trong Step 8 vẫn đúng: chỉ harvest khi có cây chín, chỉ plant khi còn hạt giống và đất trống.
+  - Khi `bypassHomeWarp=true` mà bot đang bị kẹt ở Map 5: logic `isAtHome && !hasPendingHomeAction` vẫn chạy để warp thoát về bình thường.
+
+---
+
 ### [x] T52 - Sửa lỗi chức năng Bơm Potion tự động (HP Threshold)
 - Description: Thay thế ô nhập số tự do không hợp lệ bằng dropdown select các mốc hồi máu từ 30% đến 90% (bước nhảy 10%), đồng thời sửa lỗi sai lệch ID phần tử DOM và bổ sung cơ chế đồng bộ trạng thái cấu hình về giao diện.
 - Files related: `public/app.js`

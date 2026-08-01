@@ -969,6 +969,7 @@ class BotInstance {
       autoHomePlant: false,
       homePlantPriority: 'highest_tier',
       autoHomeUpgrade: false,
+      bypassHomeWarp: false,
       teamRole: 'none'
     };
   }
@@ -1994,8 +1995,10 @@ class BotInstance {
     } // End of temporarily disabled automation
 
     // 6. Phân luồng Định Tuyến Bản Đồ (Map Routing)
-    if (hasPendingHomeAction) {
-      // Đang có việc ở nông trại và chưa đứng ở nông trại -> Warp vào Map 5
+    const bypassHomeWarp = this.settings.bypassHomeWarp === true;
+
+    if (hasPendingHomeAction && !bypassHomeWarp) {
+      // [Chế độ cũ] Bắt buộc vào Map 5 trước khi làm nông vụ
       if (!isAtHome) {
         this.addLog('SYSTEM', `🏡 [Tự động] Đi vào Nông trại để chăm sóc cây trồng`);
         try {
@@ -2014,7 +2017,7 @@ class BotInstance {
         return; // Dừng nhịp này chờ map cập nhật
       }
     } else {
-      // Không có việc nông vụ mà vẫn kẹt ở nông trại -> Warp quay ra
+      // Không có việc nông vụ (hoặc bypassHomeWarp=true) mà vẫn kẹt ở nông trại -> Warp quay ra
       if (isAtHome) {
         this.addLog('SYSTEM', `↩️ [Tự động] Đã hoàn tất công việc làm vườn, rời Nông trại để quay lại farm`);
         try {
@@ -2110,7 +2113,9 @@ class BotInstance {
     }
 
     // 8. Auto Home (Nông trại: Harvest, Plant, Upgrade)
-    if (isAtHome && !this.isMvpCycling && this.player && (this.settings.autoHomeHarvest || this.settings.autoHomePlant || this.settings.autoHomeUpgrade)) {
+    // bypassHomeWarp=true: thực thi ngay tại map hiện tại mà không cần vào Map 5
+    // bypassHomeWarp=false (mặc định): chỉ thực thi khi đang ở Map 5 (isAtHome)
+    if ((isAtHome || bypassHomeWarp) && !this.isMvpCycling && this.player && (this.settings.autoHomeHarvest || this.settings.autoHomePlant || this.settings.autoHomeUpgrade)) {
       try {
         const lv = Math.max(1, this.player.home_lv | 0);
         const HOME_PLOT_LV = [20, 40, 60, 80, 100];
