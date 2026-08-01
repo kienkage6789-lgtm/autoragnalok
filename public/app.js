@@ -1484,6 +1484,7 @@ document.addEventListener('DOMContentLoaded', () => {
           <div class="subtabs-nav" style="display:flex; gap:6px; margin-bottom:10px; border-bottom:1px solid rgba(255,255,255,0.08); padding-bottom:6px; overflow-x:auto;">
             <button class="subtab-btn active" id="log-subtab-btn-act-${acc.line_uid}" onclick="switchLogSubTab('${acc.line_uid}', 'act')">📜 Hoạt Động</button>
             <button class="subtab-btn" id="log-subtab-btn-loot-${acc.line_uid}" onclick="switchLogSubTab('${acc.line_uid}', 'loot')">🎁 Vật Phẩm</button>
+            <button class="subtab-btn" id="log-subtab-btn-market-${acc.line_uid}" onclick="switchLogSubTab('${acc.line_uid}', 'market')">🏪 Chợ</button>
           </div>
           
           <!-- Sub-pane 1: Activity Logs -->
@@ -1501,6 +1502,17 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
             <div class="log-terminal loot-terminal" id="loot-terminal-${acc.line_uid}">
               <div class="log-line"><span class="log-text-content" style="font-size:0.6rem;">Chuyển sang tab này để tải lịch sử rơi đồ từ máy chủ.</span></div>
+            </div>
+          </div>
+
+          <!-- Sub-pane 3: Market History -->
+          <div id="log-subpane-market-${acc.line_uid}" style="display:none;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; padding:0 2px;">
+              <span style="font-size:0.8rem; color:var(--text-secondary); font-weight:600;">🏪 Lịch sử giao dịch Chợ</span>
+              <button class="btn btn-secondary btn-sm" onclick="fetchMarketHistory('${acc.line_uid}')" style="padding:2px 8px; font-size:0.75rem;">🔄 Cập nhật</button>
+            </div>
+            <div class="log-terminal market-terminal" id="market-terminal-${acc.line_uid}">
+              <div class="log-line"><span class="log-text-content" style="font-size:0.6rem;">Chuyển sang tab này để tải lịch sử chợ từ máy chủ.</span></div>
             </div>
           </div>
         </div>
@@ -2029,20 +2041,26 @@ document.addEventListener('DOMContentLoaded', () => {
     
     const btnAct = document.getElementById(`log-subtab-btn-act-${uid}`);
     const btnLoot = document.getElementById(`log-subtab-btn-loot-${uid}`);
+    const btnMarket = document.getElementById(`log-subtab-btn-market-${uid}`);
 
     const paneAct = document.getElementById(`log-subpane-act-${uid}`);
     const paneLoot = document.getElementById(`log-subpane-loot-${uid}`);
+    const paneMarket = document.getElementById(`log-subpane-market-${uid}`);
 
     if (btnAct) btnAct.classList.toggle('active', subTabId === 'act');
     if (btnLoot) btnLoot.classList.toggle('active', subTabId === 'loot');
+    if (btnMarket) btnMarket.classList.toggle('active', subTabId === 'market');
 
     if (paneAct) paneAct.style.display = subTabId === 'act' ? 'block' : 'none';
     if (paneLoot) paneLoot.style.display = subTabId === 'loot' ? 'block' : 'none';
+    if (paneMarket) paneMarket.style.display = subTabId === 'market' ? 'block' : 'none';
 
     if (subTabId === 'act') {
       fetchLogs(uid);
     } else if (subTabId === 'loot') {
       fetchDropLogs(uid);
+    } else if (subTabId === 'market') {
+      fetchMarketHistory(uid);
     }
   };
 
@@ -2472,6 +2490,80 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (err) {
       console.error('Error fetching droplogs:', err);
       lootTerm.innerHTML = `<div class="log-line"><span class="log-text-content" style="color:#ef4444; font-size:0.6rem;">❌ Lỗi kết nối máy chủ: ${err.message}</span></div>`;
+    }
+  };
+
+  // Fetch market history on-demand from game server
+  window.fetchMarketHistory = async function(uid) {
+    const marketTerm = document.getElementById(`market-terminal-${uid}`);
+    if (!marketTerm) return;
+
+    marketTerm.innerHTML = `<div class="log-line"><span class="log-text-content" style="color:#a7f3d0; font-size:0.6rem;">⏳ Đang tải lịch sử chợ từ máy chủ...</span></div>`;
+
+    try {
+      const response = await fetch(`/api/accounts/${uid}/market-history`);
+      const contentType = response.headers.get('content-type') || '';
+      
+      if (!response.ok || !contentType.includes('application/json')) {
+        throw new Error(!contentType.includes('application/json') 
+          ? 'Server chưa nạp API mới (Vui lòng khởi động lại server.js bằng Ctrl+C và npm start)' 
+          : `Lỗi HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      marketTerm.innerHTML = '';
+
+      // Render summary if available
+      if (data.summary) {
+        const sumLine = document.createElement('div');
+        sumLine.className = 'log-line';
+        sumLine.style.cssText = 'padding:4px 6px; background:rgba(255,255,255,0.03); border-bottom:1px solid rgba(255,255,255,0.08); font-weight:600; color:#fbbf24; font-size:0.65rem;';
+        sumLine.innerHTML = `📊 ${data.summary}`;
+        marketTerm.appendChild(sumLine);
+      }
+
+      // Render message if available
+      if (data.message) {
+        const msgLine = document.createElement('div');
+        msgLine.className = 'log-line';
+        msgLine.style.cssText = 'padding:4px 6px; font-size:0.62rem; color:var(--text-secondary);';
+        msgLine.innerHTML = `ℹ️ ${data.message}`;
+        marketTerm.appendChild(msgLine);
+      }
+
+      if (!data.history || data.history.length === 0) {
+        if (!data.summary && !data.message) {
+          marketTerm.innerHTML = `<div class="log-line"><span class="log-text-content" style="font-size:0.6rem;">Chưa có lịch sử giao dịch chợ nào trên máy chủ.</span></div>`;
+        }
+        return;
+      }
+
+      data.history.forEach(item => {
+        const line = document.createElement('div');
+        line.className = 'log-line';
+        line.style.cssText = 'display:flex; align-items:center; gap:8px; padding:4px 6px; border-bottom:1px solid rgba(255,255,255,0.05);';
+
+        let badgeStyle = 'background:rgba(100,116,139,0.2); color:#94a3b8; border:1px solid rgba(100,116,139,0.4);';
+        if (item.typeLabel === 'Đã bán') badgeStyle = 'background:rgba(16,185,129,0.2); color:#34d399; border:1px solid rgba(16,185,129,0.4);';
+        else if (item.typeLabel === 'Đã mua') badgeStyle = 'background:rgba(59,130,246,0.2); color:#60a5fa; border:1px solid rgba(59,130,246,0.4);';
+        else if (item.typeLabel === 'Hết hạn') badgeStyle = 'background:rgba(239,68,68,0.2); color:#f87171; border:1px solid rgba(239,68,68,0.4);';
+        else if (item.typeLabel === 'Đã hủy') badgeStyle = 'background:rgba(234,179,8,0.2); color:#facc15; border:1px solid rgba(234,179,8,0.4);';
+
+        const priceStr = item.price ? `${item.price.toLocaleString()}G` : '';
+        const timeDisplay = item.time ? `[${item.time}]` : '';
+
+        line.innerHTML = `
+          ${timeDisplay ? `<span style="color:var(--text-muted); font-size:0.6rem; min-width:115px;">${timeDisplay}</span>` : ''}
+          <span style="font-size:0.56rem; padding:1px 5px; border-radius:4px; ${badgeStyle}">${item.typeIcon} ${item.typeLabel}</span>
+          <span style="flex:1; font-size:0.68rem; color:#e2e8f0;">${item.name} ${item.quantity > 1 ? `(x${item.quantity})` : ''}</span>
+          ${priceStr ? `<span style="font-size:0.65rem; color:#fbbf24; font-weight:600;">${priceStr}</span>` : ''}
+        `;
+        marketTerm.appendChild(line);
+      });
+    } catch (err) {
+      console.error('Error fetching market history:', err);
+      marketTerm.innerHTML = `<div class="log-line"><span class="log-text-content" style="color:#ef4444; font-size:0.6rem;">❌ Lỗi kết nối máy chủ: ${err.message}</span></div>`;
     }
   };
 

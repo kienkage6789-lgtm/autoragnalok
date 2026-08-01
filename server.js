@@ -957,6 +957,8 @@ class BotInstance {
       lock_zone_center: false,
       targetZone: 0,
       autoMVP: false,
+      mvpRotateInterval: 0,
+      currentMvpMapIndex: 0,
       mvpPriorityMode: 'distance',
       mvpNamePriority: '',
       mvpNameBlacklist: '',
@@ -1027,6 +1029,46 @@ class BotInstance {
       goldPerMin: Math.round(totalGold / elapsedMin),
       expPerMin: Math.round(totalExp / elapsedMin)
     };
+  }
+
+  // Warp to specified map ID via game API
+  async warpToMap(mapId) {
+    const targetMapId = parseInt(mapId);
+    if (isNaN(targetMapId)) return false;
+    try {
+      const res = await this.sendRequest('https://ragnalok.online/human/xhrpg_warp.php', {
+        line_uid: this.line_uid,
+        session_token: this.session_token,
+        target_map: targetMapId
+      });
+      if (res && res.ok) {
+        if (res.player) this.updatePlayerState(res.player);
+        this.addLog('SUCCESS', `Di chuyển sang bản đồ ${targetMapId} thành công`);
+        return true;
+      } else {
+        this.addLog('WARNING', `Di chuyển bản đồ ${targetMapId} thất bại: ${(res && res.error) || 'Lỗi không xác định'}`);
+        return false;
+      }
+    } catch (e) {
+      this.addLog('ERROR', `Lỗi di chuyển bản đồ ${targetMapId}: ${e.message}`);
+      return false;
+    }
+  }
+
+  // Rotate to next MVP map in the configured list
+  async warpToNextMvpMap() {
+    const mapIds = (this.settings.mvpTargetMaps || '')
+      .split(',')
+      .map(s => parseInt(s.trim()))
+      .filter(Number.isInteger);
+    if (!mapIds.length) {
+      this.addLog('WARNING', '⚠️ Chưa cấu hình danh sách Map Săn Boss.');
+      return;
+    }
+    this.settings.currentMvpMapIndex = ((this.settings.currentMvpMapIndex || 0) + 1) % mapIds.length;
+    const targetMap = mapIds[this.settings.currentMvpMapIndex];
+    this.addLog('SYSTEM', `🗺️ [Auto MVP] Di chuyển sang Map Boss tiếp theo: Map ${targetMap}`);
+    await this.warpToMap(targetMap);
   }
 
   start() {
@@ -1198,7 +1240,9 @@ class BotInstance {
       return;
     }
 
-    this.mvpCycleOriginalMap = this.player ? Number(this.player.map) : (Number(this.settings.targetMap) || 1);
+    // Save original farm map (prefer targetMap if configured, else current player map)
+    const farmMap = this.settings.targetMap ? Number(this.settings.targetMap) : (this.player ? Number(this.player.map) : 1);
+    this.mvpCycleOriginalMap = farmMap;
     this.mvpCycleOriginalAutoMap = this.settings.autoMap;
 
     this.isMvpCycling = true;
@@ -1206,7 +1250,7 @@ class BotInstance {
     this.mvpCycleMapStayCount = 0;
     this.bosses = null; // Force reload bosses list on first map
 
-    this.addLog('SYSTEM', `🚀 [Auto MVP] Bắt đầu chu kỳ săn Boss xoay vòng. Bản đồ cần đi: ${maps.join(', ')}. Bản đồ gốc: Map ${this.mvpCycleOriginalMap}.`);
+    this.addLog('SYSTEM', `🚀 [Auto MVP] Bắt đầu chu kỳ săn Boss xoay vòng. Bản đồ cần đi: ${maps.join(', ')}. Bản đồ farm gốc: Map ${this.mvpCycleOriginalMap}.`);
   }
 
   updateMvpCycleStatus() {
@@ -1250,10 +1294,13 @@ class BotInstance {
       if (this.mvpCycleMapIndex < maps.length) {
         const nextMap = maps[this.mvpCycleMapIndex];
         this.addLog('SYSTEM', `🗺️ [Auto MVP] ${reason} tại Map ${currentMap}. Chuyển sang Map tiếp theo: Map ${nextMap}.`);
+        this.warpToMap(nextMap);
       } else {
         this.isMvpCycling = false;
         this.mvpCycleMapIndex = 0;
-        this.addLog('SYSTEM', `✅ [Auto MVP] ${reason} tại Map ${currentMap}. Hoàn thành chu kỳ săn Boss xoay vòng map.`);
+        const returnMap = this.mvpCycleOriginalMap || (parseInt(this.settings.targetMap) || 1);
+        this.addLog('SYSTEM', `✅ [Auto MVP] ${reason} tại Map ${currentMap}. Hoàn thành chu kỳ săn Boss xoay vòng map -> Quay về Map farm gốc (Map ${returnMap}).`);
+        this.warpToMap(returnMap);
       }
     }
   }
@@ -1999,27 +2046,17 @@ class BotInstance {
       }
 
       // Di chuyển bản đồ mục tiêu thường hoặc bản đồ săn Boss xoay vòng
-      const activeTargetMapId = this.isMvpCycling ? this.getCurrentMvpCycleMap() : (parseInt(this.settings.targetMap) || 1);
-      if ((this.settings.autoMap || this.isMvpCycling) && Number(this.player.map) !== Number(activeTargetMapId)) {
+      const isMvpReturning = (!this.isMvpCycling && this.mvpCycleOriginalMap !== null);
+      const activeTargetMapId = this.isMvpCycling 
+        ? this.getCurrentMvpCycleMap() 
+        : (isMvpReturning ? Number(this.mvpCycleOriginalMap) : (parseInt(this.settings.targetMap) || 1));
+
+      if ((this.settings.autoMap || this.isMvpCycling || isMvpReturning) && Number(this.player.map) !== Number(activeTargetMapId)) {
         const targetMapId = activeTargetMapId;
         const mapDef = getMapDefs().find(m => m.id === targetMapId);
         if (mapDef && (this.player.lv || 1) >= mapDef.req) {
           this.addLog('SYSTEM', `🗺️ [Tự động] Di chuyển sang bản đồ: ${mapDef.name}`);
-          try {
-            const res = await this.sendRequest('https://ragnalok.online/human/xhrpg_warp.php', {
-              line_uid: this.line_uid,
-              session_token: this.session_token,
-              target_map: targetMapId
-            });
-            if (res && res.ok) {
-              this.updatePlayerState(res.player);
-              this.addLog('SUCCESS', `Di chuyển sang bản đồ ${targetMapId} thành công`);
-            } else {
-              this.addLog('WARNING', `Di chuyển bản đồ thất bại: ${res.error || 'Lỗi không xác định'}`);
-            }
-          } catch (e) {
-            this.addLog('ERROR', `Lỗi di chuyển bản đồ: ${e.message}`);
-          }
+          await this.warpToMap(targetMapId);
         }
       }
     }
@@ -3729,6 +3766,116 @@ app.get('/api/accounts/:line_uid/droplogs', requireAuth, async (req, res) => {
     res.json({ ok: true, drops: [] });
   } catch (err) {
     res.status(500).json({ error: `Không thể tải lịch sử rơi đồ: ${err.message}` });
+  }
+});
+
+// Get market history from game server on-demand
+app.get('/api/accounts/:line_uid/market-history', requireAuth, async (req, res) => {
+  const { line_uid } = req.params;
+  const bot = botInstances[line_uid];
+  if (!checkAccountOwnership(req, res, bot)) return;
+
+  try {
+    const rawData = await bot.sendRequest('https://ragnalok.online/human/xhrpg_market.php', {
+      action: 'get_history',
+      line_uid: bot.line_uid,
+      session_token: bot.session_token
+    });
+
+    if (!rawData) {
+      return res.json({ ok: true, history: [], message: 'Không nhận được dữ liệu từ máy chủ game.' });
+    }
+
+    // Extract items array if possible
+    let list = [];
+    if (Array.isArray(rawData)) {
+      list = rawData;
+    } else if (typeof rawData === 'object') {
+      if (Array.isArray(rawData.history)) list = rawData.history;
+      else if (Array.isArray(rawData.list)) list = rawData.list;
+      else if (Array.isArray(rawData.logs)) list = rawData.logs;
+      else if (Array.isArray(rawData.data)) list = rawData.data;
+      else if (Array.isArray(rawData.items)) list = rawData.items;
+      else if (Array.isArray(rawData.rows)) list = rawData.rows;
+      else if (Array.isArray(rawData.records)) list = rawData.records;
+      else if (Array.isArray(rawData.h)) list = rawData.h;
+      else {
+        // Check if object keys are numeric or contain item objects
+        const values = Object.values(rawData).filter(v => v && typeof v === 'object' && (v.name || v.n || v.action || v.a || v.t || v.price || v.g));
+        if (values.length > 0) {
+          list = values;
+        }
+      }
+    }
+
+    // Extract summary stats if present (e.g. sell_cnt, buy_cnt)
+    let summaryText = '';
+    if (rawData.sell_cnt !== undefined || rawData.buy_cnt !== undefined) {
+      summaryText = `7 ngày qua: Đã bán ${rawData.sell_cnt || 0} món, Đã mua ${rawData.buy_cnt || 0} món`;
+    } else if (rawData.summary) {
+      summaryText = translateThaiText(String(rawData.summary));
+    }
+
+    const formatted = list.map(item => {
+      let timeStr = '';
+      if (item.t) {
+        const d = new Date(item.t * 1000);
+        const hours = String(d.getHours()).padStart(2, '0');
+        const mins = String(d.getMinutes()).padStart(2, '0');
+        const secs = String(d.getSeconds()).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        timeStr = `${hours}:${mins}:${secs} ${day}/${month}`;
+      } else if (item.time || item.created_at || item.date) {
+        timeStr = String(item.time || item.created_at || item.date);
+      }
+
+      let typeIcon = '📋';
+      let typeLabel = 'Giao dịch';
+      const rawAct = String(item.action || item.type || item.a || item.status || item.st || '').toLowerCase();
+      
+      if (rawAct.includes('sell') || rawAct.includes('sold') || rawAct.includes('ขายได้') || rawAct.includes('bán')) {
+        typeIcon = '🏷️'; typeLabel = 'Đã bán';
+      } else if (rawAct.includes('buy') || rawAct.includes('bought') || rawAct.includes('ซื้อมา') || rawAct.includes('mua')) {
+        typeIcon = '🛒'; typeLabel = 'Đã mua';
+      } else if (rawAct.includes('expire') || rawAct.includes('expired') || rawAct.includes('หมดอายุ') || rawAct.includes('hạn')) {
+        typeIcon = '⏰'; typeLabel = 'Hết hạn';
+      } else if (rawAct.includes('cancel') || rawAct.includes('hủy')) {
+        typeIcon = '❌'; typeLabel = 'Đã hủy';
+      } else if (rawAct.includes('list') || rawAct.includes('listed') || rawAct.includes('ลงขาย') || rawAct.includes('rao')) {
+        typeIcon = '📦'; typeLabel = 'Đã rao';
+      } else if (rawAct) {
+        typeLabel = translateThaiText(rawAct);
+      }
+
+      const rawName = item.name || item.n || item.item_name || item.title || item.item || 'Vật phẩm';
+      const translatedName = translateThaiText(String(rawName));
+
+      return {
+        name: translatedName,
+        quantity: parseInt(item.quantity || item.qty || item.q || item.c || item.count || 1) || 1,
+        price: parseInt(item.price || item.g || item.gold || item.p || 0) || 0,
+        time: timeStr,
+        timestamp: item.t || 0,
+        typeIcon,
+        typeLabel,
+        rawAction: rawAct
+      };
+    });
+
+    let message = '';
+    if (rawData.msg || rawData.message || rawData.info || rawData.error) {
+      message = translateThaiText(String(rawData.msg || rawData.message || rawData.info || rawData.error));
+    }
+
+    return res.json({
+      ok: true,
+      history: formatted,
+      summary: summaryText,
+      message: message
+    });
+  } catch (err) {
+    res.status(500).json({ error: `Không thể tải lịch sử chợ: ${err.message}` });
   }
 });
 

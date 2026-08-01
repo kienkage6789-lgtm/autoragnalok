@@ -25,7 +25,7 @@ Chúng ta đã xây dựng thành công một hệ thống **Headless Bot Manage
 ### C. Các tính năng nâng cấp nâng cao mới bổ sung
 *   **Sửa lỗi Khóa Vị Trí (Lock Position)**: Khắc phục lỗi sai lệch ID checkbox giữa frontend và backend, giúp bật/tắt chức năng Lock Position mượt mà, nhân vật đứng yên hoặc di chuyển đi farm chuẩn xác theo ý muốn.
 *   **Đồng bộ Map & Zone cực nhạy**: Tự động phát hiện thay đổi bản đồ (kể cả khi di chuyển bằng lệnh warp thủ công lúc bot đang dừng). Server tự động thực hiện tải ngầm (background fetch) danh sách spots/zones mới của bản đồ đó từ game server để cập nhật dropdown Zone ngay lập tức. Đồng thời, tự động bật cấu hình `autoMap = true` trên backend khi warp thành công.
-*   **Săn Boss MVP (Auto MVP)**: Tự động phát hiện Boss thế giới còn sống trên map hiện tại. Hỗ trợ cấu hình nâng cao trong thẻ **Săn Boss** riêng biệt: sắp xếp ưu tiên săn theo Khoảng cách gần nhất hoặc Cấp độ (thấp/cao), lọc bỏ Boss theo danh sách đen (Blacklist) và ưu tiên săn Boss theo danh sách trắng (Whitelist). Bot sẽ tự động di chuyển tiếp cận mục tiêu tối ưu, tự động hạ bán kính quét mục tiêu để tiêu diệt Boss, và sau khi Boss chết sẽ tự động quay lại farm Zone.
+*   **Săn Boss MVP Xoay Vòng Map (Auto MVP Rotation)**: Tự động phát hiện Boss thế giới còn sống trên map hiện tại. Hỗ trợ cấu hình danh sách Map xoay vòng (`mvpTargetMaps`), tự động chuyển sang Map tiếp theo ngay sau khi hạ Boss hoặc theo chu kỳ giờ tròn. Hỗ trợ cấu hình nâng cao: sắp xếp ưu tiên săn theo Khoảng cách gần nhất hoặc Cấp độ (thấp/cao), lọc bỏ Boss theo Blacklist và ưu tiên theo Whitelist. Bot tự di chuyển tiếp cận mục tiêu, tiêu diệt Boss, xoay vòng Map và tự quay lại farm Zone khi hoàn thành.
 *   **Tự động Đấu Trường (Auto Arena)**: Định kỳ quét đấu trường 1v1 mỗi 5 phút. Nếu còn lượt miễn phí (`free_runs > 0`), bot tự động thực hiện **Skip (Càn quét)** Boss đã từng thắng có cấp độ cao nhất để nhận thưởng lập tức, hoặc tự động **Enter (Khiêu chiến)** Boss cấp thấp nhất nếu là tài khoản mới.
 
 ### D. Hệ thống Kết Nối Chống Idle & Tránh CORS
@@ -80,6 +80,11 @@ Chúng ta đã xây dựng thành công một hệ thống **Headless Bot Manage
 *   **Phân loại & Định dạng Thời gian Thực**: Tự động phân loại biểu tượng (Thẻ bài `🎴`, Trứng `🥚`, Mô-đun `⚙️`, Trang bị `⚔️`, Đá quý `💎`), quy đổi Unix timestamp `t` sang ngày giờ Việt Nam `HH:mm:ss DD/MM` chính xác từng giây, và gắn nhãn phân biệt đồ nhặt khi `🟢 Online` vs `🌙 Offline`.
 *   **Cơ chế Tải Theo Yêu Cầu (On-Demand - Không Spam Server)**: Chỉ kích hoạt lệnh tải khi người dùng nhấp chọn tab **Vật Phẩm** hoặc bấm nút **`🔄 Cập nhật`**. Hoàn toàn không phát sinh bất kỳ request thừa nào trong vòng lặp chạy ngầm của bot.
 *   **Bảo vệ Content-Type**: Thêm bộ kiểm tra Content-Type phía frontend để cảnh báo trực quan khi server chưa khởi động lại, tránh tình trạng ném lỗi `SyntaxError` trên giao diện.
+
+### P. Tab Lịch Sử Giao Dịch Chợ (Market History) (2026-08-01)
+*   **Endpoint API `xhrpg_market.php`**: Xây dựng route `GET /api/accounts/:line_uid/market-history` gọi tới máy chủ game với `action: get_history` để lấy lịch sử mua/bán chợ.
+*   **Tab Con `🏪 Chợ` Trong Mục Log**: Thêm tab con thứ 3 vào pane Log bên cạnh `📜 Hoạt Động` và `🎁 Vật Phẩm`.
+*   **Nút Cập Nhật On-Demand & Giao Diện**: Nút `🔄 Cập nhật` cho phép tải dữ liệu theo yêu cầu, hiển thị nhãn trạng thái giao dịch (`🏷️ Đã bán`, `🛒 Đã mua`, `⏰ Hết hạn`, `❌ Đã hủy`, `📦 Đã rao`) kèm màu sắc trực quan và giá vàng tương ứng.
 
 ### M. Tự động nhận diện định dạng Proxy thô (Proxy Auto-Parsing) (2026-07-25)
 *   **Phân giải định dạng thô**: Backend tự động phát hiện và chuyển đổi các chuỗi proxy thô dạng `IP:PORT:USER:PASS` thành URL chuẩn `http://USER:PASS@IP:PORT` và dạng `IP:PORT` thành `http://IP:PORT`.
