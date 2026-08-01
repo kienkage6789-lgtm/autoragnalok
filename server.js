@@ -881,6 +881,12 @@ class BotInstance {
     this.arrivedAtZoneCenter = false;
     this.targetedMvp = false;
     this.lastTargetedBossId = null;
+    this.isMvpCycling = false;
+    this.mvpCycleMapIndex = 0;
+    this.mvpCycleMapStayCount = 0;
+    this.mvpCycleOriginalMap = null;
+    this.mvpCycleOriginalAutoMap = null;
+    this.lastMvpCycleCheckHour = -1;
     this.lootLogs = [];
     this.combatStatsHistory = [];
     this.startTime = null;
@@ -954,11 +960,14 @@ class BotInstance {
       mvpPriorityMode: 'distance',
       mvpNamePriority: '',
       mvpNameBlacklist: '',
+      mvpTargetMaps: '',
+      mvpHuntSchedule: '',
       autoArena: false,
       autoHomeHarvest: false,
       autoHomePlant: false,
       homePlantPriority: 'highest_tier',
-      autoHomeUpgrade: false
+      autoHomeUpgrade: false,
+      teamRole: 'none'
     };
   }
 
@@ -1161,6 +1170,94 @@ class BotInstance {
     }
   }
 
+  getCurrentMvpCycleMap() {
+    if (!this.settings.mvpTargetMaps) return 1;
+    const maps = this.settings.mvpTargetMaps.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+    return maps[this.mvpCycleMapIndex] || 1;
+  }
+
+  triggerMvpCycle(forced = false) {
+    if (!this.settings.mvpTargetMaps) {
+      if (forced) {
+        this.addLog('WARNING', `⚠️ Chưa cấu hình danh sách bản đồ săn Boss (mvpTargetMaps).`);
+      }
+      return;
+    }
+    const maps = this.settings.mvpTargetMaps.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+    if (maps.length === 0) {
+      if (forced) {
+        this.addLog('WARNING', `⚠️ Danh sách bản đồ săn Boss không hợp lệ.`);
+      }
+      return;
+    }
+
+    if (this.isMvpCycling) {
+      if (forced) {
+        this.addLog('WARNING', `⚠️ Chu kỳ săn Boss đang hoạt động.`);
+      }
+      return;
+    }
+
+    this.mvpCycleOriginalMap = this.player ? Number(this.player.map) : (Number(this.settings.targetMap) || 1);
+    this.mvpCycleOriginalAutoMap = this.settings.autoMap;
+
+    this.isMvpCycling = true;
+    this.mvpCycleMapIndex = 0;
+    this.mvpCycleMapStayCount = 0;
+    this.bosses = null; // Force reload bosses list on first map
+
+    this.addLog('SYSTEM', `🚀 [Auto MVP] Bắt đầu chu kỳ săn Boss xoay vòng. Bản đồ cần đi: ${maps.join(', ')}. Bản đồ gốc: Map ${this.mvpCycleOriginalMap}.`);
+  }
+
+  updateMvpCycleStatus() {
+    if (!this.player) return;
+    
+    const activeTargetMapId = this.getCurrentMvpCycleMap();
+    const currentMap = Number(this.player.map);
+    
+    if (currentMap !== activeTargetMapId) {
+      return;
+    }
+    
+    this.mvpCycleMapStayCount++;
+    
+    const aliveBosses = this.bosses ? this.bosses.filter(b => (b.hp || 0) > 0) : [];
+    
+    let aliveTargetBosses = aliveBosses;
+    if (this.settings.mvpNameBlacklist) {
+      const blacklist = this.settings.mvpNameBlacklist.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+      if (blacklist.length > 0) {
+        aliveTargetBosses = aliveTargetBosses.filter(b => {
+          const name = (b.name || '').toLowerCase();
+          return !blacklist.some(term => name.includes(term));
+        });
+      }
+    }
+    
+    const isDoneWithCurrentMap = (
+      (this.mvpCycleMapStayCount >= 3 && aliveTargetBosses.length === 0 && !this.targetedMvp) ||
+      (this.mvpCycleMapStayCount >= 40) // Timeout after ~ 80-120 seconds
+    );
+    
+    if (isDoneWithCurrentMap) {
+      const maps = this.settings.mvpTargetMaps.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+      const reason = this.mvpCycleMapStayCount >= 40 ? 'Hết thời gian chờ (Timeout)' : 'Đã dọn sạch Boss';
+      
+      this.mvpCycleMapIndex++;
+      this.mvpCycleMapStayCount = 0;
+      this.bosses = null;
+      
+      if (this.mvpCycleMapIndex < maps.length) {
+        const nextMap = maps[this.mvpCycleMapIndex];
+        this.addLog('SYSTEM', `🗺️ [Auto MVP] ${reason} tại Map ${currentMap}. Chuyển sang Map tiếp theo: Map ${nextMap}.`);
+      } else {
+        this.isMvpCycling = false;
+        this.mvpCycleMapIndex = 0;
+        this.addLog('SYSTEM', `✅ [Auto MVP] ${reason} tại Map ${currentMap}. Hoàn thành chu kỳ săn Boss xoay vòng map.`);
+      }
+    }
+  }
+
   async pollGame() {
     // Check if system user account is expired
     const users = loadUsers();
@@ -1174,6 +1271,22 @@ class BotInstance {
     }
 
     this.pollCount++;
+
+    // ⏰ Check scheduled MVP Boss Hunting Cycle (Round hours only, delay ~5 seconds)
+    const nowTime = new Date();
+    const currentHour = nowTime.getHours();
+    const currentMinute = nowTime.getMinutes();
+    const currentSecond = nowTime.getSeconds();
+    if (this.settings.autoMVP && this.settings.mvpTargetMaps) {
+      if (currentMinute === 0 && currentSecond >= 5) {
+        if (this.lastMvpCycleCheckHour !== currentHour) {
+          this.lastMvpCycleCheckHour = currentHour;
+          this.addLog('SYSTEM', `⏰ [Auto MVP] Đến giờ tròn (${currentHour}:00, delay ${currentSecond}s). Tự động kích hoạt chu kỳ săn Boss xoay vòng map...`);
+          this.triggerMvpCycle();
+        }
+      }
+    }
+
     // Request full payload on every 10th poll — khớp client gốc (canvas.js:7020: _pollN % 10)
     const isFull = (this.pollCount % 10 === 0) ? 1 : 0;
 
@@ -1431,13 +1544,38 @@ class BotInstance {
     this.lastUpdate = new Date().toISOString();
     this.error = null;
 
+    // Check if we just completed a cycle and need to restore autoMap
+    const wasMvpReturning = (!this.isMvpCycling && this.mvpCycleOriginalMap !== null);
+    if (!this.isMvpCycling && this.mvpCycleOriginalMap !== null) {
+      if (Number(this.player.map) === Number(this.mvpCycleOriginalMap)) {
+        this.settings.autoMap = this.mvpCycleOriginalAutoMap ?? false;
+        this.mvpCycleOriginalMap = null;
+        
+        const currentAccounts = loadAccounts();
+        const idx = currentAccounts.findIndex(acc => acc.line_uid === this.line_uid);
+        if (idx !== -1) {
+          currentAccounts[idx].settings = this.settings;
+          saveAccounts(currentAccounts);
+        }
+        this.addLog('SYSTEM', `🏠 [Auto MVP] Đã quay lại bản đồ farm gốc. Khôi phục trạng thái tự động.`);
+      } else {
+        if (!this.settings.autoMap) {
+          this.settings.autoMap = true;
+        }
+      }
+    }
+
+    if (this.isMvpCycling) {
+      this.updateMvpCycleStatus();
+    }
+
     // Detect map change
     if (prevP && prevP.map !== this.player.map) {
       this.spots = null; // Force reload static zone details for the new map
       this.bosses = null; // Clear bosses list to refresh on new map
       
-      // Do NOT reset zone settings if transitioning to/from Home map (map 5)
-      if (prevP.map !== 5 && this.player.map !== 5) {
+      // Do NOT reset zone settings if transitioning to/from Home map (map 5), if in MVP cycle, or if returning to the original map
+      if (prevP.map !== 5 && this.player.map !== 5 && !this.isMvpCycling && this.mvpCycleOriginalMap === null && !wasMvpReturning) {
         this.settings.autoZone = false;
         this.settings.lock_zone_center = false;
         this.settings.targetZone = 0;
@@ -1533,7 +1671,7 @@ class BotInstance {
     const harvestCooldown = (nowMs - (this.lastHarvestFailedAt || 0)) < 300000;
     const upgradeCooldown = (nowMs - (this.lastHomeUpgradeFailedAt || 0)) < 300000;
 
-    if (!this.targetedMvp && (this.settings.autoHomeHarvest || this.settings.autoHomePlant || this.settings.autoHomeUpgrade)) {
+    if (!this.targetedMvp && !this.isMvpCycling && (this.settings.autoHomeHarvest || this.settings.autoHomePlant || this.settings.autoHomeUpgrade)) {
       const lv = Math.max(1, this.player.home_lv | 0);
       const HOME_PLOT_LV = [20, 40, 60, 80, 100];
       const plots = 1 + HOME_PLOT_LV.filter(q => lv >= q).length;
@@ -1588,7 +1726,7 @@ class BotInstance {
     }
 
     // Enable automation routines based on individual user settings
-    const enableUpgrades = true;
+    const enableUpgrades = !this.isMvpCycling;
     if (enableUpgrades) {
       // 1. Auto allocation of stats
       if (this.settings.autoStats && this.player.stat_pts > 0) {
@@ -1860,9 +1998,10 @@ class BotInstance {
         return;
       }
 
-      // Di chuyển bản đồ mục tiêu thường
-      if (this.settings.autoMap && Number(this.player.map) !== Number(this.settings.targetMap)) {
-        const targetMapId = parseInt(this.settings.targetMap) || 1;
+      // Di chuyển bản đồ mục tiêu thường hoặc bản đồ săn Boss xoay vòng
+      const activeTargetMapId = this.isMvpCycling ? this.getCurrentMvpCycleMap() : (parseInt(this.settings.targetMap) || 1);
+      if ((this.settings.autoMap || this.isMvpCycling) && Number(this.player.map) !== Number(activeTargetMapId)) {
+        const targetMapId = activeTargetMapId;
         const mapDef = getMapDefs().find(m => m.id === targetMapId);
         if (mapDef && (this.player.lv || 1) >= mapDef.req) {
           this.addLog('SYSTEM', `🗺️ [Tự động] Di chuyển sang bản đồ: ${mapDef.name}`);
@@ -1886,7 +2025,7 @@ class BotInstance {
     }
 
     // 7. Auto Arena Mode (Chỉ chạy khi không ở Nông trại)
-    if (!isAtHome && this.settings.autoArena && this.pollCount % 150 === 0) {
+    if (!isAtHome && !this.isMvpCycling && this.settings.autoArena && this.pollCount % 150 === 0) {
       try {
         const info = await this.sendRequest('https://ragnalok.online/human/xhrpg_arena.php', {
           line_uid: this.line_uid,
@@ -1934,7 +2073,7 @@ class BotInstance {
     }
 
     // 8. Auto Home (Nông trại: Harvest, Plant, Upgrade)
-    if (isAtHome && this.player && (this.settings.autoHomeHarvest || this.settings.autoHomePlant || this.settings.autoHomeUpgrade)) {
+    if (isAtHome && !this.isMvpCycling && this.player && (this.settings.autoHomeHarvest || this.settings.autoHomePlant || this.settings.autoHomeUpgrade)) {
       try {
         const lv = Math.max(1, this.player.home_lv | 0);
         const HOME_PLOT_LV = [20, 40, 60, 80, 100];
@@ -3041,8 +3180,10 @@ app.get('/api/accounts', requireAuth, (req, res) => {
     res.setHeader('X-User-Expires-At', req.user.expiresAt || '');
     res.setHeader('X-User-Max-Accounts', req.user.maxAccounts || 1);
     const users = loadUsers();
-    const list = Object.values(botInstances)
-      .filter(bot => req.user.role === 'admin' || bot.userId === req.user.id)
+    const currentAccounts = loadAccounts();
+    const list = currentAccounts
+      .map(acc => botInstances[acc.line_uid])
+      .filter(bot => bot && (req.user.role === 'admin' || bot.userId === req.user.id))
       .map(bot => {
         const ownerUser = users.find(u => u.id === bot.userId);
         return {
@@ -3367,6 +3508,16 @@ app.put('/api/accounts/:line_uid', requireAuth, async (req, res) => {
           return res.status(400).json({ error: `Cấp độ không đủ! Bản đồ ${mapDef.name} yêu cầu Lv.${mapDef.req}+.` });
         }
       }
+      if (settings.teamRole === 'leader') {
+        Object.values(botInstances).forEach(otherBot => {
+          if (otherBot.userId === bot.userId && otherBot.line_uid !== bot.line_uid) {
+            if (otherBot.settings.teamRole === 'leader') {
+              otherBot.settings.teamRole = 'none';
+              otherBot.addLog('SYSTEM', 'Vai trò Leader đã được chuyển giao cho tài khoản khác.');
+            }
+          }
+        });
+      }
       bot.updateSettings(settings);
     }
 
@@ -3377,6 +3528,17 @@ app.put('/api/accounts/:line_uid', requireAuth, async (req, res) => {
       currentAccounts[index].name = bot.name;
       currentAccounts[index].settings = bot.settings;
       currentAccounts[index].proxyId = bot.proxyId;
+
+      if (settings.teamRole === 'leader') {
+        currentAccounts.forEach(acc => {
+          if (acc.userId === bot.userId && acc.line_uid !== bot.line_uid) {
+            if (acc.settings && acc.settings.teamRole === 'leader') {
+              acc.settings.teamRole = 'none';
+            }
+          }
+        });
+      }
+
       saveAccounts(currentAccounts);
     }
 
@@ -3401,6 +3563,86 @@ app.delete('/api/accounts/:line_uid', requireAuth, (req, res) => {
   saveAccounts(filtered);
 
   res.json({ success: true });
+});
+
+// Sync settings of Leader to Members
+app.post('/api/team/sync', requireAuth, (req, res) => {
+  const { leader_uid } = req.body;
+  const leaderBot = botInstances[leader_uid];
+  if (!leaderBot) {
+    return res.status(404).json({ error: 'Không tìm thấy tài khoản Leader' });
+  }
+  if (!checkAccountOwnership(req, res, leaderBot)) return;
+
+  if (leaderBot.settings.teamRole !== 'leader') {
+    return res.status(400).json({ error: 'Tài khoản này không phải là Leader của Team' });
+  }
+
+  const currentAccounts = loadAccounts();
+  let syncCount = 0;
+  const leaderSettings = { ...leaderBot.settings };
+  
+  // We should not copy teamRole to members, keeping their role as 'member'
+  delete leaderSettings.teamRole;
+
+  currentAccounts.forEach(acc => {
+    if (acc.userId === leaderBot.userId && acc.line_uid !== leaderBot.line_uid) {
+      if (acc.settings && acc.settings.teamRole === 'member') {
+        // Copy settings
+        acc.settings = {
+          ...leaderSettings,
+          teamRole: 'member' // preserve member role
+        };
+
+        // Sync in-memory botInstance too
+        const botInst = botInstances[acc.line_uid];
+        if (botInst) {
+          botInst.settings = { ...acc.settings };
+          botInst.addLog('SYSTEM', `📥 [Team] Nhận cấu hình đồng bộ từ Trưởng nhóm: ${leaderBot.name}`);
+        }
+        syncCount++;
+      }
+    }
+  });
+
+  if (syncCount > 0) {
+    saveAccounts(currentAccounts);
+  }
+
+  res.json({ ok: true, msg: `Đồng bộ cấu hình thành công cho ${syncCount} thành viên trong Team!` });
+});
+
+// Reorder accounts
+app.post('/api/accounts/reorder', requireAuth, (req, res) => {
+  const { line_uids } = req.body;
+  if (!Array.isArray(line_uids)) {
+    return res.status(400).json({ error: 'Mảng line_uids không hợp lệ' });
+  }
+
+  const currentAccounts = loadAccounts();
+  const orderedAccounts = [];
+  const accountMap = {};
+  currentAccounts.forEach(acc => {
+    accountMap[acc.line_uid] = acc;
+  });
+
+  // 1. Add the ones from line_uids in the exact order requested
+  line_uids.forEach(uid => {
+    if (accountMap[uid]) {
+      orderedAccounts.push(accountMap[uid]);
+      delete accountMap[uid];
+    }
+  });
+
+  // 2. Add any remaining accounts
+  currentAccounts.forEach(acc => {
+    if (accountMap[acc.line_uid]) {
+      orderedAccounts.push(accountMap[acc.line_uid]);
+    }
+  });
+
+  saveAccounts(orderedAccounts);
+  res.json({ ok: true, msg: 'Đã lưu thứ tự sắp xếp mới!' });
 });
 
 // Start bot loop
@@ -3638,6 +3880,15 @@ app.post('/api/accounts/:line_uid/action', requireAuth, async (req, res) => {
   const { action, param, extra } = req.body;
   const bot = botInstances[line_uid];
   if (!checkAccountOwnership(req, res, bot)) return;
+
+  if (action === 'force_mvp_hunt') {
+    try {
+      bot.triggerMvpCycle(true);
+      return res.json({ ok: true, msg: 'Đã kích hoạt chế độ đi săn Boss MVP xoay vòng map!' });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  }
 
   try {
     let payload = {

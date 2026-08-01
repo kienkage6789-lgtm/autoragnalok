@@ -253,6 +253,11 @@ try {
   assert.deepStrictEqual(instance.player.home_seeds, { '5': 10 });
   assert.strictEqual(instance.player.pet_mid, 2);
 
+  // Verify teamRole default setting
+  console.log('Testing teamRole default settings...');
+  const defaultSettings = instance.getDefaultSettings();
+  assert.strictEqual(defaultSettings.teamRole, 'none');
+
   console.log('✅ All Unit Tests Passed successfully!');
 } catch (error) {
   console.error('❌ Unit Tests Failed:', error);

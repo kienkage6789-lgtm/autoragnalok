@@ -93,6 +93,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let expandedUserGroups = new Set();
   let isUserGroupInitialized = false;
   let lastFetchedAccounts = [];
+  let isDraggingCard = false;
 
   window.toggleUserGroup = function(userId, event) {
     if (event) event.stopPropagation();
@@ -775,6 +776,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Fetch all accounts
   async function fetchAccounts() {
     if (!currentUser) return;
+    if (isDraggingCard) return;
     try {
       const response = await fetch('/api/accounts');
       if (response.status === 401) {
@@ -961,6 +963,10 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             updateCard(acc);
           });
+          if (!botGrid.dataset.dragInit) {
+            initDragAndDrop(botGrid);
+            botGrid.dataset.dragInit = "true";
+          }
         }
 
         // Clean up deleted bot cards within this user group
@@ -1006,6 +1012,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         updateCard(acc);
       });
+      if (!accountsGrid.dataset.dragInit) {
+        initDragAndDrop(accountsGrid);
+        accountsGrid.dataset.dragInit = "true";
+      }
 
       // Remove deleted cards
       const cardElements = accountsGrid.querySelectorAll('.account-card');
@@ -1024,6 +1034,7 @@ document.addEventListener('DOMContentLoaded', () => {
     cardEl.innerHTML = `
       <div class="card-header">
         <div class="acc-info-compact">
+          <span class="drag-handle" title="Kéo thả để sắp xếp">☰</span>
           <span class="acc-name" id="name-${acc.line_uid}">${acc.name}</span>
           <span class="acc-lv" id="lv-txt-${acc.line_uid}">Lv.--</span>
           <span class="badge badge-${acc.status}" id="status-badge-${acc.line_uid}">${acc.status}</span>
@@ -1191,8 +1202,16 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
           <div class="settings-group">
             <div class="input-control" style="grid-column: span 2;">
-              <label for="num-potion-${acc.line_uid}">🍷 Bơm Potion khi HP &lt; (%)</label>
-              <input type="number" id="num-potion-${acc.line_uid}" value="50" onchange="updateNumericSetting('${acc.line_uid}', 'auto_potion_threshold')">
+              <label for="sel-auto-potion-threshold-${acc.line_uid}">🍷 Bơm Potion khi HP &lt; (%)</label>
+              <select id="sel-auto-potion-threshold-${acc.line_uid}" onchange="updateNumericSetting('${acc.line_uid}', 'auto_potion_threshold')" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; padding: 4px 6px; font-family: inherit; font-size: 0.85rem; outline: none; margin-top:2px;">
+                <option value="30">30% HP</option>
+                <option value="40">40% HP</option>
+                <option value="50">50% HP (Mặc định)</option>
+                <option value="60">60% HP</option>
+                <option value="70">70% HP</option>
+                <option value="80">80% HP</option>
+                <option value="90">90% HP</option>
+              </select>
             </div>
           </div>
 
@@ -1240,6 +1259,20 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
           </div>
 
+          <div class="settings-group" style="border-top: 1px dashed rgba(255,255,255,0.05); padding-top: 10px; margin-top: 10px;">
+            <div class="input-control" style="grid-column: span 2;">
+              <label for="sel-team-role-${acc.line_uid}">👥 Vai trò nhóm (Team Role)</label>
+              <div style="display: flex; gap: 8px; align-items: center; margin-top: 2px;">
+                <select id="sel-team-role-${acc.line_uid}" onchange="updateStringSetting('${acc.line_uid}', 'teamRole')" style="flex: 1; background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; padding: 5px 6px; font-family: inherit; font-size: 0.85rem; outline: none;">
+                  <option value="none">🚫 Không tham gia (None)</option>
+                  <option value="leader">👑 Trưởng nhóm (Leader)</option>
+                  <option value="member">👥 Thành viên (Member)</option>
+                </select>
+                <button type="button" id="btn-sync-team-${acc.line_uid}" onclick="syncTeamSetup('${acc.line_uid}')" style="display: none; background: rgba(16,185,129,0.2); border: 1px solid rgba(16,185,129,0.4); color: #34d399; border-radius: 6px; padding: 5px 12px; font-size: 0.82rem; cursor: pointer; font-weight: 600; white-space: nowrap; transition: all 0.2s;" onmouseover="this.style.background='rgba(16,185,129,0.3)'" onmouseout="this.style.background='rgba(16,185,129,0.2)'">🔄 Đồng bộ cho Team</button>
+              </div>
+            </div>
+          </div>
+
           <div class="settings-group" id="admin-proxy-ctrl-${acc.line_uid}" style="display: none; border-top: 1px dashed rgba(255,255,255,0.05); padding-top: 10px; margin-top: 10px;">
             <div class="input-control" style="grid-column: span 2;">
               <label for="sel-proxy-${acc.line_uid}">🌐 Cấu hình Proxy (Chỉ Admin)</label>
@@ -1271,6 +1304,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 <span class="slider"></span>
               </label>
             </div>
+          </div>
+
+          <div class="settings-group" style="margin-top: 10px;">
+            <div class="input-control">
+              <label for="txt-mvp-target-maps-${acc.line_uid}">🗺️ Map săn Boss xoay vòng (VD: 1, 2, 3, 5, 6)</label>
+              <input type="text" id="txt-mvp-target-maps-${acc.line_uid}" placeholder="VD: 1, 2, 3, 5, 6" onchange="updateStringSetting('${acc.line_uid}', 'mvpTargetMaps')" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; padding: 6px; font-family: inherit; font-size: 0.85rem; outline: none; margin-top:2px;">
+              <span style="font-size: 0.72rem; color: #a3a3a3; margin-top: 4px; display: block; line-height: 1.3;">💡 Tự động đi săn vào mỗi giờ tròn (1:00, 2:00...) và delay 5s để đảm bảo Boss đã xuất hiện trên server.</span>
+            </div>
+          </div>
+
+          <div style="margin-top: 10px;">
+            <button type="button" onclick="forceMvpHunt('${acc.line_uid}')" style="background: rgba(220, 38, 38, 0.25); border: 1px solid rgba(220, 38, 38, 0.5); color: #fca5a5; border-radius: 6px; padding: 6px 12px; font-size: 0.85rem; cursor: pointer; width: 100%; font-weight: 600; text-align: center; transition: all 0.2s;" onmouseover="this.style.background='rgba(220, 38, 38, 0.4)'" onmouseout="this.style.background='rgba(220, 38, 38, 0.25)'">⚡ Kích hoạt đi săn ngay (Force Hunt)</button>
           </div>
 
           <div class="settings-group" style="margin-top: 10px;">
@@ -1461,6 +1506,13 @@ document.addEventListener('DOMContentLoaded', () => {
         </div>
       </div>
     `;
+    const handle = cardEl.querySelector('.drag-handle');
+    if (handle) {
+      handle.addEventListener('mousedown', () => { cardEl.draggable = true; });
+      handle.addEventListener('mouseup', () => { cardEl.draggable = false; });
+      handle.addEventListener('touchstart', () => { cardEl.draggable = true; });
+      handle.addEventListener('touchend', () => { cardEl.draggable = false; });
+    }
   }
 
   // Update card UI with fresh account data
@@ -1704,6 +1756,26 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const txtMvpBlacklist = document.getElementById(`txt-mvp-name-blacklist-${acc.line_uid}`);
     if (txtMvpBlacklist && document.activeElement !== txtMvpBlacklist) txtMvpBlacklist.value = acc.settings.mvpNameBlacklist || '';
+
+    const txtMvpTargetMaps = document.getElementById(`txt-mvp-target-maps-${acc.line_uid}`);
+    if (txtMvpTargetMaps && document.activeElement !== txtMvpTargetMaps) txtMvpTargetMaps.value = acc.settings.mvpTargetMaps || '';
+
+    // Team role settings sync
+    const selTeamRole = document.getElementById(`sel-team-role-${acc.line_uid}`);
+    if (selTeamRole && document.activeElement !== selTeamRole) {
+      selTeamRole.value = acc.settings.teamRole || 'none';
+    }
+    const btnSyncTeam = document.getElementById(`btn-sync-team-${acc.line_uid}`);
+    if (btnSyncTeam) {
+      btnSyncTeam.style.display = (acc.settings.teamRole === 'leader') ? 'block' : 'none';
+    }
+
+
+    // Auto Potion threshold sync
+    const selPotion = document.getElementById(`sel-auto-potion-threshold-${acc.line_uid}`);
+    if (selPotion && document.activeElement !== selPotion) {
+      selPotion.value = acc.settings.auto_potion_threshold !== undefined ? String(acc.settings.auto_potion_threshold) : '50';
+    }
 
     // Auto Map toggle & map select sync
     const chkAutoMap = document.getElementById(`chk-automap-${acc.line_uid}`);
@@ -2613,6 +2685,26 @@ document.addEventListener('DOMContentLoaded', () => {
         `・ Độ trễ (Latency): ${data.latencyMs}ms\n\n` +
         `✅ Gói tin của bot ĐÃ ĐƯỢC ĐỊNH TUYẾN CHUẨN XÁC qua Proxy!`
       );
+    } catch (e) {
+      alert(`❌ Lỗi kết nối: ${e.message}`);
+    }
+  };
+
+  // Trigger manual force MVP Boss Hunt Cycle
+  window.forceMvpHunt = async function(uid) {
+    try {
+      const res = await fetch(`/api/accounts/${uid}/action`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'force_mvp_hunt' })
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        alert('🟢 ' + data.msg);
+        fetchAccounts();
+      } else {
+        alert('🔴 Lỗi: ' + (data.error || 'Không thể kích hoạt săn Boss'));
+      }
     } catch (e) {
       alert(`❌ Lỗi kết nối: ${e.message}`);
     }
@@ -3585,6 +3677,94 @@ window.upgradePetStat = async function(line_uid, stat) {
     }
   } catch (e) {
     showToast(`❌ Lỗi kết nối: ${e.message}`, true);
+  }
+};
+
+let draggedCard = null;
+
+// Initialize drag and drop event listeners
+function initDragAndDrop(container) {
+  container.addEventListener('dragstart', (e) => {
+    const card = e.target.closest('.account-card');
+    if (!card) return;
+    draggedCard = card;
+    isDraggingCard = true;
+    card.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', card.id);
+  });
+
+  container.addEventListener('dragend', async (e) => {
+    if (!draggedCard) return;
+    draggedCard.classList.remove('dragging');
+    draggedCard.draggable = false; // Reset to false after drag
+    draggedCard = null;
+    isDraggingCard = false;
+    
+    await saveNewAccountOrder(container);
+  });
+
+  container.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    if (!draggedCard) return;
+    const card = e.target.closest('.account-card');
+    if (!card || card === draggedCard) return;
+
+    // Must be dragging within the same container
+    if (card.parentElement !== container) return;
+
+    const rect = card.getBoundingClientRect();
+    const next = (e.clientY - rect.top) > (rect.height / 2);
+    container.insertBefore(draggedCard, next ? card.nextSibling : card);
+  });
+}
+
+// Send reordered line_uids to server
+async function saveNewAccountOrder(container) {
+  const cardEls = container.querySelectorAll('.account-card');
+  const line_uids = Array.from(cardEls).map(el => el.id.replace('card-', ''));
+  if (line_uids.length === 0) return;
+  
+  try {
+    const res = await fetch('/api/accounts/reorder', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ line_uids })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      console.error('Lỗi lưu thứ tự:', data.error);
+    } else {
+      // Reload silently to sync settings
+      const response = await fetch('/api/accounts');
+      if (response.ok) {
+        lastFetchedAccounts = await response.json();
+      }
+    }
+  } catch (err) {
+    console.error('Không thể kết nối đến server để lưu thứ tự:', err);
+  }
+}
+
+// Sync Leader settings to all Members
+window.syncTeamSetup = async function(uid) {
+  if (!confirm('Bạn có chắc chắn muốn đồng bộ thiết lập của Leader này cho tất cả thành viên trong Team không?')) return;
+  
+  try {
+    const res = await fetch('/api/team/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ leader_uid: uid })
+    });
+    const data = await res.json();
+    if (res.ok && data.ok) {
+      alert('🟢 ' + data.msg);
+      if (window.fetchAccounts) window.fetchAccounts();
+    } else {
+      alert('🔴 Lỗi: ' + (data.error || 'Không thể đồng bộ thiết lập'));
+    }
+  } catch (e) {
+    alert(`❌ Lỗi kết nối: ${e.message}`);
   }
 };
 

@@ -3,6 +3,16 @@
 > Work Breakdown Structure. Update task states immediately upon changes.
 > Statuses: todo | doing | blocked | review | done
 
+### [x] T52 - Sửa lỗi chức năng Bơm Potion tự động (HP Threshold)
+- Description: Thay thế ô nhập số tự do không hợp lệ bằng dropdown select các mốc hồi máu từ 30% đến 90% (bước nhảy 10%), đồng thời sửa lỗi sai lệch ID phần tử DOM và bổ sung cơ chế đồng bộ trạng thái cấu hình về giao diện.
+- Files related: `public/app.js`
+- Acceptance criteria:
+  - [x] Đổi ô nhập Potion tự do sang `<select>` với ID chuẩn `sel-auto-potion-threshold-${uid}`.
+  - [x] Thêm các mốc hồi máu 30%, 40%, 50% (mặc định), 60%, 70%, 80%, 90% trong dropdown.
+  - [x] Đồng bộ giá trị cấu hình Potion từ backend về dropdown ở giao diện trong `updateCard`.
+  - [x] Đã kiểm thử thao tác cập nhật hoạt động tốt qua API.
+- Status: done
+
 ### [x] T51 - Đánh giá chức năng Nông trại & Sửa lỗi đè trạng thái
 - Description: Biên soạn báo cáo đánh giá chức năng Nông trại (Home Farm), sửa đổi cài đặt auto mặc định về false để đảm bảo an toàn, đồng thời khắc phục lỗi mất dữ liệu trạng thái nông nghiệp khi nhận sparse update từ game server.
 - Files related: `server.js`, `test.js`
@@ -567,7 +577,7 @@
   - [x] Test: `node -c server.js`, `node test.js` -> PASS 100%.
 - Status: done
 
-### [ ] T46 - Server-Side Idle Guard & Event-Driven Act-Flag Jitter Engine
+### [x] T46 - Server-Side Idle Guard & Event-Driven Act-Flag Jitter Engine
 - Description: Thiết lập cơ chế mô phỏng `act` flag tự nhiên kết hợp với Event-driven trigger từ các thao tác tự động của bot (di chuyển, học skill, dùng potion, đổi zone, nâng đồ) và tự động phục hồi khi nhận tín hiệu `d.idle = true` từ game server.
 - Files related: `server.js`, `public/app.js`
 - Acceptance criteria:
@@ -591,4 +601,15 @@
   - [x] Hash tính lại mỗi request (hỗ trợ hot-reload).
   - [x] Ghi lại quy trình deploy vào `.agent/SKILL.md`.
   - [x] `node -c server.js`, `node -c public/app.js` → PASS 100%.
+- Status: done
+
+### [x] T51 - Tự động hóa Săn Boss MVP vào mỗi Giờ Tròn (Không cần cấu hình hẹn giờ)
+- Description: Tự động đi săn Boss xoay vòng map vào mỗi giờ tròn (delay khoảng 5 giây) thay vì phải nhập cấu hình thời gian thủ công.
+- Files related: `server.js`, `public/app.js`
+- Acceptance criteria:
+  - [x] Loại bỏ hộp nhập `mvpHuntSchedule` khỏi tab Săn Boss và thay bằng ghi chú giải thích.
+  - [x] Cập nhật logic `pollGame()` để tự động kích hoạt `triggerMvpCycle()` ở phút `00` và giây `>= 5` của mỗi giờ tròn.
+  - [x] Khai báo và sử dụng `this.lastMvpCycleCheckHour` để hạn chế trigger trùng lặp trong cùng 1 giờ.
+  - [x] Bảo toàn cấu hình farm zone (`autoZone`, `lock_zone_center`, `targetZone`) khi di chuyển quay trở lại bản đồ farm gốc sau khi hoàn thành chu kỳ săn Boss thông qua cờ `wasMvpReturning`.
+  - [x] Test: `node test.js` -> PASS 100%.
 - Status: done

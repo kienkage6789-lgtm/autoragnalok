@@ -2,6 +2,38 @@
 
 > Changelog of actual changes implemented.
 
+## 2026-08-01 - Sửa lỗi chức năng Bơm Potion tự động (HP Threshold)
+- File đã đổi: [public/app.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/public/app.js).
+- Đã làm:
+  - Thay thế ô nhập số tự do không hợp lệ bằng dropdown select với các mốc HP từ 30% đến 90% (bước nhảy 10%).
+  - Chỉnh sửa ID phần tử DOM của select từ `num-potion` sang `sel-auto-potion-threshold` để tương thích hoàn toàn với cơ chế phân giải ID của hàm `updateNumericSetting`.
+  - Thêm cơ chế đồng bộ giá trị cấu hình `auto_potion_threshold` từ backend về lại dropdown select của frontend trong hàm `updateCard()`.
+- Đã test bằng: Manual code verification.
+
+## 2026-08-01 - Tích hợp tính năng Team Đồng Bộ & Kéo Thả Sắp Xếp Card Tài Khoản
+- File đã đổi: [server.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [public/app.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/public/app.js), [public/app.css](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/public/app.css), [test.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/test.js).
+- Đã làm:
+  - **Tích hợp Chức năng Team**:
+    - Thêm cấu hình mặc định `teamRole: 'none'` vào `getDefaultSettings()`.
+    - Hạn chế vai trò nhóm: Đảm bảo tối đa 1 Leader trên mỗi người dùng bằng cách tự động tắt vai trò Leader cũ khi gán Leader mới trong API `PUT /api/accounts/:line_uid`.
+    - Xây dựng API `/api/team/sync` để nhân bản cấu hình hàng loạt từ Leader sang tất cả Member cùng người dùng.
+    - Cập nhật giao diện card bot: Bổ sung dropdown cấu hình Vai trò nhóm (None, Leader, Member) và nút Đồng bộ cho Leader.
+  - **Kéo Thả Sắp Sếp Card**:
+    - Thêm biểu tượng handle `☰` vào card header để làm điểm nắm kéo thả, tránh xung đột chọn văn bản.
+    - Lập trình bộ lắng nghe Drag & Drop (HTML5 Drag Event) trên các container.
+    - Tạm ngừng poll refresh giao diện (`isDraggingCard = true`) trong lúc đang kéo thả để tránh xung đột DOM.
+    - Xây dựng API `/api/accounts/reorder` và sửa `GET /api/accounts` để đồng bộ và lưu trữ vĩnh viễn thứ tự card vào `accounts.json`.
+- Đã test bằng: `npm test` → PASS 100%.
+
+## 2026-08-01 - Tự động hóa Săn Boss MVP vào mỗi Giờ Tròn (Không cần cấu hình hẹn giờ)
+- File đã đổi: [server.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [public/app.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/public/app.js).
+- Đã làm:
+  - **Tự động kích hoạt vào giờ tròn**: Cập nhật logic `pollGame()` để tự động kích hoạt chu kỳ săn Boss xoay vòng map tại các giờ tròn (ví dụ: 1:00, 2:00, v.v.), có độ trễ khoảng 5 giây (phút 00, giây >= 5) giúp đảm bảo Boss đã xuất hiện trên server.
+  - **Đơn giản hóa giao diện**: Loại bỏ hộp nhập liệu hẹn giờ thủ công (`mvpHuntSchedule`) khỏi tab Săn Boss trong Dashboard, thay thế bằng chú thích hướng dẫn trực quan.
+  - **Khởi tạo và lưu trạng thái**: Chuyển đổi cờ kiểm tra thời gian từ phút (`lastMvpCycleCheckMinute`) sang giờ (`lastMvpCycleCheckHour`) trong `BotInstance` để tránh kích hoạt lặp lại nhiều lần trong cùng một giờ.
+  - **Bảo toàn vị trí farm cũ**: Sửa đổi logic phát hiện đổi map trong `server.js` sử dụng cờ `wasMvpReturning` để ngăn chặn việc reset cấu hình farm zone (`autoZone`, `lock_zone_center`, `targetZone`) khi bot tự động di chuyển quay trở lại bản đồ farm gốc sau khi kết thúc chu kỳ săn Boss.
+- Đã test bằng: `npm test` → PASS 100%.
+
 ## 2026-07-30 - Khắc phục Lỗi Nhấp nháy Giao diện Nông trại & Không Tự động Gieo/Gặt & Tắt Cài đặt Auto mặc định
 - File đã đổi: [server.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [test.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/test.js).
 - Đã làm:

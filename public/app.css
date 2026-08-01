@@ -2326,5 +2326,33 @@ input:checked + .slider:before {
   font-weight: 600;
 }
 
+/* Drag & Drop Reordering Styles */
+.drag-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  color: var(--text-secondary);
+  font-size: 1.1rem;
+  padding: 2px 4px;
+  user-select: none;
+  border-radius: 4px;
+  transition: all 0.2s;
+  margin-right: 4px;
+}
+.drag-handle:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+.drag-handle:active {
+  cursor: grabbing;
+}
+.account-card.dragging {
+  opacity: 0.3;
+  border: 1px dashed var(--primary-color) !important;
+  transform: scale(0.98);
+  box-shadow: 0 0 16px rgba(124, 58, 237, 0.2);
+}
+
 
 
