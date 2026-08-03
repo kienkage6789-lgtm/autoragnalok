@@ -2354,5 +2354,37 @@ input:checked + .slider:before {
   box-shadow: 0 0 16px rgba(124, 58, 237, 0.2);
 }
 
+/* Boss Hunt Journal Styles */
+.boss-stats-container {
+  margin-bottom: 6px;
+}
+.boss-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+  padding: 6px 8px;
+  background: rgba(192, 132, 252, 0.08);
+  border: 1px solid rgba(192, 132, 252, 0.2);
+  border-radius: 6px;
+}
+.boss-stat-item {
+  text-align: center;
+}
+.bsi-val {
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #e9d5ff;
+}
+.bsi-label {
+  font-size: 0.58rem;
+  color: var(--text-muted);
+}
+.boss-terminal {
+  max-height: 250px;
+  overflow-y: auto;
+}
+
+
 
 

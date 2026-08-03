@@ -1492,6 +1492,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <button class="subtab-btn active" id="log-subtab-btn-act-${acc.line_uid}" onclick="switchLogSubTab('${acc.line_uid}', 'act')">📜 Hoạt Động</button>
             <button class="subtab-btn" id="log-subtab-btn-loot-${acc.line_uid}" onclick="switchLogSubTab('${acc.line_uid}', 'loot')">🎁 Vật Phẩm</button>
             <button class="subtab-btn" id="log-subtab-btn-market-${acc.line_uid}" onclick="switchLogSubTab('${acc.line_uid}', 'market')">🏪 Chợ</button>
+            <button class="subtab-btn" id="log-subtab-btn-boss-${acc.line_uid}" onclick="switchLogSubTab('${acc.line_uid}', 'boss')">👾 Boss</button>
           </div>
           
           <!-- Sub-pane 1: Activity Logs -->
@@ -1520,6 +1521,18 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
             <div class="log-terminal market-terminal" id="market-terminal-${acc.line_uid}">
               <div class="log-line"><span class="log-text-content" style="font-size:0.6rem;">Chuyển sang tab này để tải lịch sử chợ từ máy chủ.</span></div>
+            </div>
+          </div>
+
+          <!-- Sub-pane 4: Boss Hunt Journal -->
+          <div id="log-subpane-boss-${acc.line_uid}" style="display:none;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; padding:0 2px;">
+              <span style="font-size:0.8rem; color:var(--text-secondary); font-weight:600;">👾 Nhật ký Săn Boss MVP</span>
+              <button class="btn btn-secondary btn-sm" onclick="fetchBossLog('${acc.line_uid}')" style="padding:2px 8px; font-size:0.75rem;">🔄 Cập nhật</button>
+            </div>
+            <div id="boss-stats-${acc.line_uid}" class="boss-stats-container"></div>
+            <div class="log-terminal boss-terminal" id="boss-terminal-${acc.line_uid}">
+              <div class="log-line"><span class="log-text-content" style="font-size:0.6rem;">Chưa có dữ liệu săn Boss.</span></div>
             </div>
           </div>
         </div>
@@ -2049,18 +2062,22 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnAct = document.getElementById(`log-subtab-btn-act-${uid}`);
     const btnLoot = document.getElementById(`log-subtab-btn-loot-${uid}`);
     const btnMarket = document.getElementById(`log-subtab-btn-market-${uid}`);
+    const btnBoss = document.getElementById(`log-subtab-btn-boss-${uid}`);
 
     const paneAct = document.getElementById(`log-subpane-act-${uid}`);
     const paneLoot = document.getElementById(`log-subpane-loot-${uid}`);
     const paneMarket = document.getElementById(`log-subpane-market-${uid}`);
+    const paneBoss = document.getElementById(`log-subpane-boss-${uid}`);
 
     if (btnAct) btnAct.classList.toggle('active', subTabId === 'act');
     if (btnLoot) btnLoot.classList.toggle('active', subTabId === 'loot');
     if (btnMarket) btnMarket.classList.toggle('active', subTabId === 'market');
+    if (btnBoss) btnBoss.classList.toggle('active', subTabId === 'boss');
 
     if (paneAct) paneAct.style.display = subTabId === 'act' ? 'block' : 'none';
     if (paneLoot) paneLoot.style.display = subTabId === 'loot' ? 'block' : 'none';
     if (paneMarket) paneMarket.style.display = subTabId === 'market' ? 'block' : 'none';
+    if (paneBoss) paneBoss.style.display = subTabId === 'boss' ? 'block' : 'none';
 
     if (subTabId === 'act') {
       fetchLogs(uid);
@@ -2068,6 +2085,8 @@ document.addEventListener('DOMContentLoaded', () => {
       fetchDropLogs(uid);
     } else if (subTabId === 'market') {
       fetchMarketHistory(uid);
+    } else if (subTabId === 'boss') {
+      fetchBossLog(uid);
     }
   };
 
@@ -2571,6 +2590,146 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (err) {
       console.error('Error fetching market history:', err);
       marketTerm.innerHTML = `<div class="log-line"><span class="log-text-content" style="color:#ef4444; font-size:0.6rem;">❌ Lỗi kết nối máy chủ: ${err.message}</span></div>`;
+    }
+  };
+
+  // Helper formatting for milliseconds
+  function fmtMs(ms) {
+    if (!ms || ms <= 0) return '—';
+    if (ms < 60000) return `${Math.round(ms / 1000)}s`;
+    const mins = Math.floor(ms / 60000);
+    const secs = Math.round((ms % 60000) / 1000);
+    return `${mins}m${secs}s`;
+  }
+
+  // Compute MVP Boss hunting statistics
+  function computeBossStats(log) {
+    const kills = log.filter(e => e.event === 'boss_killed');
+    const cycles = log.filter(e => e.event === 'cycle_done');
+    const mapCounts = {};
+    kills.forEach(k => {
+      if (k.mapId) mapCounts[k.mapId] = (mapCounts[k.mapId] || 0) + 1;
+    });
+    const mapEntries = Object.entries(mapCounts).sort((a, b) => b[1] - a[1]);
+    const hotMap = mapEntries.length > 0 ? mapEntries[0][0] : '-';
+    const hotMapCount = mapEntries.length > 0 ? mapEntries[0][1] : 0;
+    const totalMs = kills.reduce((s, k) => s + (k.durationMs || 0), 0);
+    const avgDurMs = kills.length > 0 ? Math.round(totalMs / kills.length) : 0;
+
+    return {
+      totalKills: kills.length,
+      totalCycles: cycles.length,
+      avgDurMs,
+      hotMap,
+      hotMapCount
+    };
+  }
+
+  // Render Boss Hunt Journal UI
+  function renderBossLog(uid, log) {
+    const statsContainer = document.getElementById(`boss-stats-${uid}`);
+    if (statsContainer) {
+      const st = computeBossStats(log);
+      statsContainer.innerHTML = `
+        <div class="boss-stats-grid">
+          <div class="boss-stat-item">
+            <span class="bsi-val">💀 ${st.totalKills}</span>
+            <span class="bsi-label">Boss đã hạ</span>
+          </div>
+          <div class="boss-stat-item">
+            <span class="bsi-val">🔄 ${st.totalCycles}</span>
+            <span class="bsi-label">Chu kỳ chạy</span>
+          </div>
+          <div class="boss-stat-item">
+            <span class="bsi-val">⏱️ ${fmtMs(st.avgDurMs)}</span>
+            <span class="bsi-label">TB / Boss</span>
+          </div>
+          <div class="boss-stat-item">
+            <span class="bsi-val">🗺️ Map ${st.hotMap}</span>
+            <span class="bsi-label">${st.hotMapCount} Boss</span>
+          </div>
+        </div>
+      `;
+    }
+
+    const term = document.getElementById(`boss-terminal-${uid}`);
+    if (!term) return;
+    if (!log || log.length === 0) {
+      term.innerHTML = `<div class="log-line"><span class="log-text-content" style="font-size:0.68rem; color:var(--text-muted);">Chưa có nhật ký sự kiện săn Boss.</span></div>`;
+      return;
+    }
+
+    // Show newest first
+    const reversed = [...log].reverse();
+    term.innerHTML = reversed.map(e => {
+      let icon = '📌';
+      let title = e.event;
+      let colorStyle = 'color:#94a3b8;';
+      let detail = '';
+
+      if (e.event === 'cycle_start') {
+        icon = '🚀';
+        title = 'Bắt đầu chu kỳ MVP';
+        colorStyle = 'color:#60a5fa; font-weight:600;';
+        detail = `Bản đồ: ${e.maps || ''} (Gốc: Map ${e.originMap || '?'})`;
+      } else if (e.event === 'boss_found') {
+        icon = '👁️';
+        title = 'Phát hiện Boss';
+        colorStyle = 'color:#fbbf24; font-weight:600;';
+        detail = `${e.bossEmoji || '👾'} <b>${e.bossName || 'Boss'}</b> Lv.${e.bossLv || 1} (HP: ${e.hpPct || 100}%) [Map ${e.mapId}]`;
+      } else if (e.event === 'boss_killed') {
+        icon = '💀';
+        title = 'Hạ gục Boss';
+        colorStyle = 'color:#4ade80; font-weight:700;';
+        detail = `${e.bossEmoji || '👾'} <b>${e.bossName || 'Boss'}</b> Lv.${e.bossLv || 1} [Map ${e.mapId}] — ⏱️ <b>${fmtMs(e.durationMs)}</b>`;
+      } else if (e.event === 'map_clear') {
+        icon = '✅';
+        title = 'Dọn sạch Boss Map';
+        colorStyle = 'color:#34d399; font-weight:600;';
+        detail = `<b>Map ${e.mapId}</b> — Hạ ${e.bossKilledCount || 0} Boss (⏱️ ${fmtMs(e.timeSpentMs)})`;
+      } else if (e.event === 'map_timeout') {
+        icon = '⏰';
+        title = 'Timeout Map';
+        colorStyle = 'color:#f87171; font-weight:600;';
+        detail = `<b>Map ${e.mapId}</b> — Hết thời gian chờ (⏱️ ${fmtMs(e.timeSpentMs)})`;
+      } else if (e.event === 'warp') {
+        icon = '🗺️';
+        title = 'Chuyển Map săn';
+        colorStyle = 'color:#818cf8;';
+        detail = `Sang <b>Map ${e.mapId}</b>`;
+      } else if (e.event === 'cycle_done') {
+        icon = '🏁';
+        title = 'Hoàn thành chu kỳ';
+        colorStyle = 'color:#c084fc; font-weight:700;';
+        detail = `Đã tiêu diệt <b>${e.totalBossKilled || 0} Boss</b> (⏱️ ${fmtMs(e.totalTimeMs)}) → Về Map ${e.returnMap}`;
+      }
+
+      return `
+        <div class="log-line boss-log-item" style="padding: 4px 6px; border-bottom: 1px dashed rgba(255,255,255,0.06); font-size: 0.72rem; display: flex; gap: 6px; align-items: center; background: rgba(0,0,0,0.15);">
+          <span style="color:var(--text-muted); font-size:0.62rem; min-width: 58px;">${e.time}</span>
+          <span style="font-size:0.8rem;">${icon}</span>
+          <span style="${colorStyle}; min-width: 120px;">${title}</span>
+          <span style="color:var(--text-secondary); flex: 1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${detail}</span>
+        </div>
+      `;
+    }).join('');
+  }
+
+  // Fetch boss log on-demand from server
+  window.fetchBossLog = async function(uid) {
+    const bossTerm = document.getElementById(`boss-terminal-${uid}`);
+    if (bossTerm) {
+      bossTerm.innerHTML = `<div class="log-line"><span class="log-text-content" style="color:#c084fc; font-size:0.65rem;">⏳ Đang tải nhật ký săn Boss...</span></div>`;
+    }
+    try {
+      const response = await fetch(`/api/accounts/${uid}/logs`);
+      const data = await response.json();
+      renderBossLog(uid, data.mvpHuntLog || []);
+    } catch (err) {
+      console.error('Error fetching boss logs:', err);
+      if (bossTerm) {
+        bossTerm.innerHTML = `<div class="log-line"><span class="log-text-content" style="color:#ef4444; font-size:0.65rem;">❌ Lỗi tải nhật ký: ${err.message}</span></div>`;
+      }
     }
   };
 
