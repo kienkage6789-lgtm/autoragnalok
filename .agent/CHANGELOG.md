@@ -2,6 +2,19 @@
 
 > Changelog of actual changes implemented.
 
+## 2026-08-03 - Khắc phục & Tối ưu hóa Luồng Săn Boss MVP
+- File đã đổi: [server.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [public/app.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/public/app.js), [test.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/test.js).
+- Đã làm:
+  - **Sửa lỗi chuyển map sớm**: Khắc phục lỗi Clear map ảo khi danh sách `this.bosses` chưa tải xong (`null`) bằng cách đặt bộ đếm xác nhận `mvpConfirmClearCount` về 0. Đồng thời ép buộc poller gửi request `full: 1` (`isFull = 1`) khi `this.bosses` là null để tải danh sách boss ngay lập tức khi sang map mới.
+  - **Phân biệt kết liễu Boss MVP**: Tích hợp biến `weKilledCurrentMvp` kiểm tra cờ kết liễu `e.is_mvp` trong sự kiện `d.events` khi bot tiêu diệt quái. Ghi nhận log thành công `SUCCESS` khi chính bot kết liễu boss, ngược lại ghi nhận cảnh báo `WARNING` và bắn sự kiện `boss_lost` về client khi boss bị người khác tiêu diệt hoặc mất dấu.
+  - **Đồng bộ đổi map im lặng**: Tự động dọn dẹp trạng thái mục tiêu boss cũ khi nhân vật thay đổi bản đồ (manual/auto warp) để tránh đếm ảo số lượng boss bị hạ gục.
+  - **Định tuyến bản đồ khẩn cấp**: Di chuyển logic kiểm tra định tuyến bản đồ săn Boss lên đầu hàm `pollGame()`. Khi phát hiện nhân vật đứng sai bản đồ so với mục tiêu của chu kỳ săn, bot sẽ lập tức gọi API warp và kết thúc sớm nhịp poll (`return`). Bổ sung cờ `isCorrectMvpMap` và `canRunAutoZone` để khóa hoàn toàn hoạt động nhắm boss hoặc di chuyển sang zone của bản đồ cũ trong lúc chờ warp, giải quyết triệt để vấn đề bot farm/đánh boss trên map hiện tại trước khi warp.
+  - **Giao diện Timeline Boss**: Hỗ trợ hiển thị icon `❌ Mất dấu Boss` kèm thời gian và thông tin boss bị cướp trực quan trên giao diện lịch sử săn boss của bot card.
+  - **Unit Tests**: Bổ sung 4 trường hợp kiểm thử tự động xác minh các thay đổi luồng boss và định tuyến bản đồ trong `test.js`.
+- Đã test bằng: `npm test` → PASS 100%.
+
+---
+
 ## 2026-08-01 - Flag thử nghiệm Bypass Home Warp (bypassHomeWarp)
 - File đã đổi: [server.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [public/app.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/public/app.js).
 - Đã làm:

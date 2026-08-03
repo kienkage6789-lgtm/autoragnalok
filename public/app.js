@@ -2682,6 +2682,11 @@ document.addEventListener('DOMContentLoaded', () => {
         title = 'Hạ gục Boss';
         colorStyle = 'color:#4ade80; font-weight:700;';
         detail = `${e.bossEmoji || '👾'} <b>${e.bossName || 'Boss'}</b> Lv.${e.bossLv || 1} [Map ${e.mapId}] — ⏱️ <b>${fmtMs(e.durationMs)}</b>`;
+      } else if (e.event === 'boss_lost') {
+        icon = '❌';
+        title = 'Mất dấu Boss';
+        colorStyle = 'color:#f87171; font-weight:600;';
+        detail = `${e.bossEmoji || '👾'} <b>${e.bossName || 'Boss'}</b> Lv.${e.bossLv || 1} [Map ${e.mapId}] bị cướp hoặc mất dấu — ⏱️ <b>${fmtMs(e.durationMs)}</b>`;
       } else if (e.event === 'map_clear') {
         icon = '✅';
         title = 'Dọn sạch Boss Map';

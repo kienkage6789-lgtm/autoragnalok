@@ -892,6 +892,7 @@ class BotInstance {
     this.mvpHuntLog = []; // Nhật ký sự kiện săn Boss MVP
     this.currentMvpBossInfo = null; // Thông tin Boss đang được nhắm { id, name, emoji, lv, mapId, startTs }
     this.mvpCycleStats = { cycleStartTs: 0, mapStartTs: 0, bossKilledInCycle: 0, bossKilledInMap: 0 };
+    this.weKilledCurrentMvp = false; // Đánh dấu bot kết liễu boss thành công
     this._bossSnipeActive = false;
     this._snipeLoggedOnce = false;
     this.combatStatsHistory = [];
@@ -1312,10 +1313,13 @@ class BotInstance {
     }
     
     // Cập nhật bộ đếm xác nhận map sạch boss
+    // - Chưa fetch được danh sách boss của map mới (this.bosses === null) → reset counter để đợi fetch
     // - Đang nhắm boss → reset counter (boss vẫn còn)
     // - Không còn boss nào sống → tăng counter
     // - Có boss nhưng không nhắm (targetedMvp=false do bosses chưa refresh) → reset counter để an toàn
-    if (this.targetedMvp) {
+    if (this.bosses === null) {
+      this.mvpConfirmClearCount = 0;
+    } else if (this.targetedMvp) {
       this.mvpConfirmClearCount = 0;
     } else if (aliveTargetBosses.length === 0) {
       this.mvpConfirmClearCount++;
@@ -1389,6 +1393,29 @@ class BotInstance {
 
     this.pollCount++;
 
+    // 🗺️ Định tuyến bản đồ khẩn cấp (Map Routing) ngay đầu nhịp poll
+    if (this.player) {
+      const isMvpReturning = (!this.isMvpCycling && this.mvpCycleOriginalMap !== null);
+      const activeTargetMapId = this.isMvpCycling 
+        ? this.getCurrentMvpCycleMap() 
+        : (isMvpReturning ? Number(this.mvpCycleOriginalMap) : (parseInt(this.settings.targetMap) || 1));
+
+      if ((this.settings.autoMap || this.isMvpCycling || isMvpReturning) && Number(this.player.map) !== Number(activeTargetMapId)) {
+        const targetMapId = activeTargetMapId;
+        const mapDef = getMapDefs().find(m => m.id === targetMapId);
+        if (mapDef && (this.player.lv || 1) >= mapDef.req) {
+          this.addLog('SYSTEM', `🗺️ [Tự động] Phát hiện sai bản đồ (Đang ở: Map ${this.player.map}, Cần đi: Map ${targetMapId}). Tiến hành di chuyển...`);
+          try {
+            await this.warpToMap(targetMapId);
+            // Warp thành công, kết thúc sớm nhịp poll hiện tại để nhịp tiếp theo chạy trên map mới
+            return;
+          } catch (e) {
+            this.addLog('ERROR', `Lỗi di chuyển bản đồ khẩn cấp: ${e.message}`);
+          }
+        }
+      }
+    }
+
     // ⏰ Check scheduled MVP Boss Hunting Cycle (Round hours only, delay ~5 seconds)
     const nowTime = new Date();
     const currentHour = nowTime.getHours();
@@ -1405,8 +1432,8 @@ class BotInstance {
     }
 
     // Request full payload every 10 polls OR on every poll while actively hunting a boss
-    // to ensure real-time HP and position tracking.
-    const isFull = ((this.pollCount % 10 === 0) || this.targetedMvp) ? 1 : 0;
+    // OR when bosses list is null (e.g. after map warp) to load the boss list immediately.
+    const isFull = ((this.pollCount % 10 === 0) || this.targetedMvp || this.bosses === null) ? 1 : 0;
 
     // 😴 Anti-idle: Tính act flag mô phỏng hành vi người dùng thật
     // - Poll đầu tiên = act=1 (giống user vừa load trang/F5)
@@ -1438,7 +1465,8 @@ class BotInstance {
     let lockPos = this.settings.lock_pos ? 1 : 0;
 
     // 1. Auto MVP Hunting (Priority 1)
-    if (this.settings.autoMVP && this.bosses && this.bosses.length > 0) {
+    const isCorrectMvpMap = !this.isMvpCycling || (this.player && Number(this.player.map) === Number(this.getCurrentMvpCycleMap()));
+    if (this.settings.autoMVP && isCorrectMvpMap && this.bosses && this.bosses.length > 0) {
       let aliveBosses = this.bosses.filter(b => (b.hp || 0) > 0);
 
       // Filter out blacklisted bosses
@@ -1554,33 +1582,55 @@ class BotInstance {
       }
     }
 
+    // Tự động hủy trạng thái nhắm boss trong im lặng nếu nhân vật đã đổi map (manual warp hoặc auto warp)
+    if (this.lastTargetedBossId !== null && this.player && this.currentMvpBossInfo && Number(this.player.map) !== Number(this.currentMvpBossInfo.mapId)) {
+      this.lastTargetedBossId = null;
+      this.currentMvpBossInfo = null;
+      this._bossSnipeActive = false;
+      this._snipeLoggedOnce = false;
+      this.weKilledCurrentMvp = false;
+    }
+
     // Clear targeted boss state and log when done
     if (!this.targetedMvp && this.lastTargetedBossId !== null) {
       const durationMs = this.currentMvpBossInfo ? (Date.now() - this.currentMvpBossInfo.startTs) : 0;
       const bInfo = this.currentMvpBossInfo || { name: 'Boss', emoji: '👾', lv: 1, mapId: Number(this.player ? this.player.map : 0) };
 
-      this.addLog('SYSTEM', `✅ [Auto MVP] Đã tiêu diệt hoặc mất dấu Boss MVP. Quay lại hoạt động tự động.`);
-      this.addMvpLog('boss_killed', {
-        bossName: bInfo.name,
-        bossEmoji: bInfo.emoji,
-        bossLv: bInfo.lv,
-        mapId: bInfo.mapId,
-        durationMs: durationMs
-      });
+      if (this.weKilledCurrentMvp) {
+        this.addLog('SUCCESS', `✅ [Auto MVP] Đã tiêu diệt Boss MVP: ${bInfo.emoji || '👾'} ${bInfo.name} (Lv.${bInfo.lv})!`);
+        this.addMvpLog('boss_killed', {
+          bossName: bInfo.name,
+          bossEmoji: bInfo.emoji,
+          bossLv: bInfo.lv,
+          mapId: bInfo.mapId,
+          durationMs: durationMs
+        });
 
-      if (this.mvpCycleStats) {
-        this.mvpCycleStats.bossKilledInCycle = (this.mvpCycleStats.bossKilledInCycle || 0) + 1;
-        this.mvpCycleStats.bossKilledInMap = (this.mvpCycleStats.bossKilledInMap || 0) + 1;
+        if (this.mvpCycleStats) {
+          this.mvpCycleStats.bossKilledInCycle = (this.mvpCycleStats.bossKilledInCycle || 0) + 1;
+          this.mvpCycleStats.bossKilledInMap = (this.mvpCycleStats.bossKilledInMap || 0) + 1;
+        }
+      } else {
+        this.addLog('WARNING', `❌ [Auto MVP] Boss MVP ${bInfo.emoji || '👾'} ${bInfo.name} đã bị người khác tiêu diệt hoặc mất dấu.`);
+        this.addMvpLog('boss_lost', {
+          bossName: bInfo.name,
+          bossEmoji: bInfo.emoji,
+          bossLv: bInfo.lv,
+          mapId: bInfo.mapId,
+          durationMs: durationMs
+        });
       }
 
       this.lastTargetedBossId = null;
       this.currentMvpBossInfo = null;
       this._bossSnipeActive = false;
       this._snipeLoggedOnce = false;
+      this.weKilledCurrentMvp = false;
     }
 
     // 2. Auto Zone checking (Priority 2, only runs if no MVP is being targeted)
-    if (!this.targetedMvp && this.settings.autoZone && this.spots) {
+    const canRunAutoZone = !this.isMvpCycling || (this.player && Number(this.player.map) === Number(this.getCurrentMvpCycleMap()));
+    if (!this.targetedMvp && canRunAutoZone && this.settings.autoZone && this.spots) {
       const spotsList = Object.values(this.spots);
       const targetIdx = parseInt(this.settings.targetZone) || 0;
       if (spotsList[targetIdx]) {
@@ -1771,6 +1821,9 @@ class BotInstance {
         // Count kills - strictly match kill events from game server
         if (e.type === 'kill') {
           pollKills++;
+          if (e.is_mvp) {
+            this.weKilledCurrentMvp = true;
+          }
         }
         
         // Count EXP

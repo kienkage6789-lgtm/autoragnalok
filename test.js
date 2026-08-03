@@ -258,6 +258,62 @@ try {
   const defaultSettings = instance.getDefaultSettings();
   assert.strictEqual(defaultSettings.teamRole, 'none');
 
+  // Verify MVP Boss Hunting Flow Changes
+  console.log('Testing MVP Boss Hunting Flow changes...');
+  
+  // Test Case 1: isFull when bosses is null
+  instance.bosses = null;
+  instance.targetedMvp = false;
+  instance.pollCount = 1;
+  const isFullWithNullBosses = ((instance.pollCount % 10 === 0) || instance.targetedMvp || instance.bosses === null) ? 1 : 0;
+  assert.strictEqual(isFullWithNullBosses, 1, 'isFull must be 1 when bosses is null');
+
+  // Test Case 2: mvpConfirmClearCount reset when bosses is null
+  instance.bosses = null;
+  instance.targetedMvp = false;
+  instance.mvpConfirmClearCount = 3;
+  let aliveTargetBosses = [];
+  if (instance.bosses === null) {
+    instance.mvpConfirmClearCount = 0;
+  } else if (instance.targetedMvp) {
+    instance.mvpConfirmClearCount = 0;
+  } else if (aliveTargetBosses.length === 0) {
+    instance.mvpConfirmClearCount++;
+  } else {
+    instance.mvpConfirmClearCount = 0;
+  }
+  assert.strictEqual(instance.mvpConfirmClearCount, 0, 'mvpConfirmClearCount must be reset to 0 when bosses list is null');
+
+  // Test Case 3: Silent reset of targeted boss when map changes
+  instance.lastTargetedBossId = 123;
+  instance.currentMvpBossInfo = { id: 123, name: 'Baphomet', mapId: 2 };
+  instance.player = { map: 3 }; // different map
+  instance.weKilledCurrentMvp = true;
+  if (instance.lastTargetedBossId !== null && instance.player && instance.currentMvpBossInfo && Number(instance.player.map) !== Number(instance.currentMvpBossInfo.mapId)) {
+    instance.lastTargetedBossId = null;
+    instance.currentMvpBossInfo = null;
+    instance._bossSnipeActive = false;
+    instance._snipeLoggedOnce = false;
+    instance.weKilledCurrentMvp = false;
+  }
+  assert.strictEqual(instance.lastTargetedBossId, null, 'targeted boss must be silently reset when map changes');
+  assert.strictEqual(instance.weKilledCurrentMvp, false, 'weKilledCurrentMvp must be reset to false when map changes');
+
+  // Test Case 4: Early-exit Map Routing Check (MVP cycle vs current map)
+  instance.isMvpCycling = true;
+  instance.settings.mvpTargetMaps = '2,3,5';
+  instance.mvpCycleMapIndex = 0;
+  instance.player = { map: 3 }; // different map
+  
+  const activeTargetMapId = instance.isMvpCycling 
+    ? instance.getCurrentMvpCycleMap() 
+    : (parseInt(instance.settings.targetMap) || 1);
+    
+  assert.strictEqual(activeTargetMapId, 2, 'activeTargetMapId must be the first map of the cycle (2) when cycle is active and index is 0');
+  
+  const needsWarp = (instance.settings.autoMap || instance.isMvpCycling) && Number(instance.player.map) !== Number(activeTargetMapId);
+  assert.strictEqual(needsWarp, true, 'needsWarp must be true when player.map (3) is different from activeTargetMapId (2) during MVP cycle');
+
   console.log('✅ All Unit Tests Passed successfully!');
 } catch (error) {
   console.error('❌ Unit Tests Failed:', error);

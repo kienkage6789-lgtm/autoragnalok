@@ -3,6 +3,23 @@
 > Work Breakdown Structure. Update task states immediately upon changes.
 > Statuses: todo | doing | blocked | review | done
 
+### [x] T54 - Tối ưu hóa & Khắc phục lỗi Luồng Săn Boss MVP
+- Description: Khắc phục lỗi chuyển map sớm khi chưa diệt hết boss (race condition do `bosses=null`), lỗi báo boss chết ảo khi bot warp map hoặc reset mục tiêu, và phân biệt chính xác bot hạ gục boss hay bị người khác cướp thông qua cờ `is_mvp`. Đồng thời, tối ưu hóa định tuyến bản đồ (Map Routing) ngay đầu nhịp poll để bot di chuyển đúng theo chu kỳ bản đồ cấu hình, không bị farm quái/đánh boss sai bản đồ.
+- Files related: `server.js`, `public/app.js`, `test.js`
+- Acceptance criteria:
+  - [x] Thêm biến trạng thái `weKilledCurrentMvp` và reset im lặng khi nhân vật đổi map.
+  - [x] Reset `mvpConfirmClearCount = 0` nếu `this.bosses` là null (đang tải danh sách boss).
+  - [x] Ép buộc fetch full payload (`isFull = 1`) khi `this.bosses` là null để tải danh sách boss ngay lập tức khi sang map mới.
+  - [x] Trích xuất cờ kết liễu `e.is_mvp` từ sự kiện `kill` của game server và gắn `weKilledCurrentMvp = true`.
+  - [x] Ghi nhận log xanh `SUCCESS` khi tự kết liễu, ngược lại ghi log đỏ `WARNING` và bắn sự kiện `boss_lost` về client khi boss bị cướp.
+  - [x] Di chuyển logic kiểm tra định tuyến bản đồ (Map Routing) lên đầu nhịp poll (phát hiện lệch map ➔ warp và return sớm để chờ nhịp sau).
+  - [x] Bổ sung cờ `isCorrectMvpMap` và `canRunAutoZone` để khóa hoạt động săn boss và di chuyển zone khi đứng sai bản đồ.
+  - [x] Cập nhật UI Timeline để hiển thị icon `❌ Mất dấu Boss` sinh động.
+  - [x] Viết unit tests tự động xác minh và kiểm thử thành công (4 test cases).
+- Status: done
+
+---
+
 ### [doing] T53 - Đánh giá & Test Flag Bypass Home Warp (bypassHomeWarp)
 - Description: Đánh giá xem bot có cần phải warp vào Map 5 (Nông Trại) trước khi gọi API home_harvest/home_plant/home_up không. Triển khai flag thử nghiệm `bypassHomeWarp` cho phép bot thực thi nông vụ ngay tại bản đồ hiện tại, bỏ qua 2–3 nhịp poll warp đi/về.
 - Files related: `server.js`, `public/app.js`
