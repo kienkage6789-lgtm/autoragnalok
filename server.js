@@ -892,6 +892,8 @@ class BotInstance {
     this.mvpHuntLog = []; // Nhật ký sự kiện săn Boss MVP
     this.currentMvpBossInfo = null; // Thông tin Boss đang được nhắm { id, name, emoji, lv, mapId, startTs }
     this.mvpCycleStats = { cycleStartTs: 0, mapStartTs: 0, bossKilledInCycle: 0, bossKilledInMap: 0 };
+    this._bossSnipeActive = false;
+    this._snipeLoggedOnce = false;
     this.combatStatsHistory = [];
     this.startTime = null;
     // 😴 Anti-idle & Event-Driven Act-Flag Jitter Engine
@@ -1151,7 +1153,8 @@ class BotInstance {
         this.isPolling = false;
         // Schedule next poll staggering
         if (this.status === 'running') {
-          this.timer = setTimeout(runPoll, 2000);
+          const isSnipe = this.targetedMvp && this._bossSnipeActive;
+          this.timer = setTimeout(runPoll, isSnipe ? 1000 : 2000);
         }
       }
     };
@@ -1401,8 +1404,9 @@ class BotInstance {
       }
     }
 
-    // Request full payload on every 10th poll — khớp client gốc (canvas.js:7020: _pollN % 10)
-    const isFull = (this.pollCount % 10 === 0) ? 1 : 0;
+    // Request full payload every 10 polls OR on every poll while actively hunting a boss
+    // to ensure real-time HP and position tracking.
+    const isFull = ((this.pollCount % 10 === 0) || this.targetedMvp) ? 1 : 0;
 
     // 😴 Anti-idle: Tính act flag mô phỏng hành vi người dùng thật
     // - Poll đầu tiên = act=1 (giống user vừa load trang/F5)
@@ -1510,22 +1514,36 @@ class BotInstance {
             const dx = this.player.x - activeBoss.x;
             const dy = this.player.y - activeBoss.y;
             const dist = Math.sqrt(dx * dx + dy * dy);
-            if (dist > 40) {
-              exploreCx = activeBoss.x;
-              exploreCy = activeBoss.y;
+
+            // Khoảng cách tiếp cận 5m để bù dung sai di chuyển theo yêu cầu của khách hàng
+            const approachDist = 5;
+
+            // Kiểm tra trạng thái kích hoạt Snipe Mode (HP <= 30%)
+            const bossHpPct = Math.round((activeBoss.hp || 0) / (activeBoss.hp_max || 1) * 100);
+            this._bossSnipeActive = (bossHpPct <= 30);
+
+            if (this._bossSnipeActive && !this._snipeLoggedOnce) {
+              this._snipeLoggedOnce = true;
+              this.addLog('SYSTEM', `⚡ [Snipe Mode] Boss ${activeBoss.emoji || '👾'} ${activeBoss.name || 'Boss'} HP xuống ${bossHpPct}% -> Kích hoạt tăng tốc tấn công!`);
+            }
+
+            // Luôn đặt tâm tìm mục tiêu vào vị trí Boss để không bị quái rác cướp lượt
+            exploreCx = activeBoss.x;
+            exploreCy = activeBoss.y;
+
+            if (dist > approachDist) {
               exploreRadius = 300;
               traveling = 1;
-              lockPos = 0; // Force unlock to allow movement
+              lockPos = 0;
               if (this.pollCount % 10 === 0) {
-                this.addLog('SYSTEM', `⚔️ [Auto MVP] Đang di chuyển săn Boss: ${activeBoss.emoji || '👾'} ${activeBoss.name || 'Boss'} (Khoảng cách: ${Math.round(dist)}m)`);
+                this.addLog('SYSTEM', `⚔️ [Auto MVP] Đang di chuyển săn Boss: ${activeBoss.emoji || '👾'} ${activeBoss.name || 'Boss'} (Khoảng cách: ${Math.round(dist)}m, Ngưỡng dừng: ${approachDist}m)`);
               }
             } else {
-              exploreCx = this.player.x;
-              exploreCy = this.player.y;
               exploreRadius = 100;
               traveling = 0;
+              lockPos = 1; // Khóa vị trí khi đã vào tầm bắn để dồn toàn bộ DPS
               if (this.pollCount % 10 === 0) {
-                this.addLog('SYSTEM', `⚔️ [Auto MVP] Đang tấn công Boss: ${activeBoss.emoji || '👾'} ${activeBoss.name || 'Boss'} (HP: ${Math.round((activeBoss.hp || 0) / (activeBoss.hp_max || 1) * 100)}%)`);
+                this.addLog('SYSTEM', `⚔️ [Auto MVP] Đang tấn công Boss: ${activeBoss.emoji || '👾'} ${activeBoss.name || 'Boss'} (HP: ${bossHpPct}%)`);
               }
             }
           } else {
@@ -1557,6 +1575,8 @@ class BotInstance {
 
       this.lastTargetedBossId = null;
       this.currentMvpBossInfo = null;
+      this._bossSnipeActive = false;
+      this._snipeLoggedOnce = false;
     }
 
     // 2. Auto Zone checking (Priority 2, only runs if no MVP is being targeted)
