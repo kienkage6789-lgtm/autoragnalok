@@ -32,6 +32,14 @@ class ProxyPool {
       connections: 50,
     });
     this._load();
+
+    // Start periodic proxy recovery loop
+    // Checks inactive proxies every 3 minutes (180 seconds)
+    setInterval(() => {
+      this.checkAndRecoverProxies().catch(err => {
+        console.error('[Proxy recovery interval error]:', err.message);
+      });
+    }, 3 * 60 * 1000);
   }
 
   _load() {
@@ -67,6 +75,130 @@ class ProxyPool {
       pipelining: 1,
       connections: 50,
     });
+  }
+
+  async testProxyConnection(url) {
+    const start = Date.now();
+    let dispatcher;
+    if (url === 'direct') {
+      dispatcher = this._directAgent;
+    } else {
+      dispatcher = this._createAgent(url);
+    }
+    
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 6000); // 6s timeout
+    
+    try {
+      const response = await fetch('https://ragnalok.online/human/index.php', {
+        method: 'GET',
+        headers: {
+          'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        },
+        dispatcher,
+        signal: controller.signal
+      });
+      return response.ok;
+    } catch (e) {
+      return false;
+    } finally {
+      clearTimeout(timeout);
+      if (url !== 'direct') {
+        try { dispatcher.destroy(); } catch (e) {}
+      }
+    }
+  }
+
+  async checkAndRecoverProxies() {
+    const inactiveProxies = this._proxies.filter(p => !p.active);
+    if (inactiveProxies.length === 0) return;
+
+    const counts = this._getCounts();
+    const directCount = counts['direct'] || 0;
+    const maxDirect = this._settings.maxBotsPerProxy || 10;
+    const isCongested = directCount > maxDirect;
+
+    console.log(`[Proxy Health Check] Direct: ${directCount}/${maxDirect} bots. Congested: ${isCongested}`);
+
+    let recoveredAny = false;
+    for (const p of inactiveProxies) {
+      console.log(`[Proxy Health Check] Testing inactive proxy "${p.label}"...`);
+      const isWorking = await this.testProxyConnection(p.url);
+      if (isWorking) {
+        console.log(`[Proxy Health Check] Proxy "${p.label}" has recovered! Re-enabling...`);
+        this.updateProxy(p.id, { active: true });
+        recoveredAny = true;
+      }
+    }
+
+    if (recoveredAny) {
+      console.log(`[Proxy Health Check] Proxy pool updated. Triggering load rebalancing...`);
+      this.rebalance();
+    }
+  }
+
+  rebalance() {
+    const activeProxies = this._proxies.filter(p => p.active && p.url);
+    const slots = [];
+    if (this._settings.useDirectConnection) slots.push('direct');
+    for (const p of activeProxies) slots.push(p.id);
+
+    if (slots.length === 0) return;
+
+    let accounts;
+    try {
+      accounts = loadAccounts();
+    } catch (e) {
+      console.error('[Rebalance] Failed to load accounts:', e.message);
+      return;
+    }
+
+    // Filter bots using Auto mode (isManualProxy !== true)
+    const autoBots = accounts.filter(acc => !acc.isManualProxy);
+    if (autoBots.length === 0) return;
+
+    // Count current load for manual assignments
+    const counts = { direct: 0 };
+    for (const s of slots) counts[s] = 0;
+    const manualBots = accounts.filter(acc => acc.isManualProxy);
+    for (const acc of manualBots) {
+      const slot = this._assignments[acc.line_uid] || acc.proxyId || 'direct';
+      if (counts[slot] !== undefined) counts[slot]++;
+    }
+
+    // Release old assignments for auto bots in RAM
+    for (const acc of autoBots) {
+      delete this._assignments[acc.line_uid];
+    }
+
+    const rebalanceLogs = [];
+    // Allocate auto bots to slots with the least current bot count (Round-Robin/Least-Loaded)
+    for (const acc of autoBots) {
+      slots.sort((a, b) => (counts[a] || 0) - (counts[b] || 0));
+      const chosenSlot = slots[0];
+      const oldProxyId = acc.proxyId;
+
+      this._assignments[acc.line_uid] = chosenSlot;
+      counts[chosenSlot] = (counts[chosenSlot] || 0) + 1;
+      acc.proxyId = chosenSlot;
+
+      if (typeof botInstances !== 'undefined' && botInstances[acc.line_uid]) {
+        botInstances[acc.line_uid].proxyId = chosenSlot;
+      }
+
+      if (oldProxyId !== chosenSlot) {
+        rebalanceLogs.push(`${acc.name || acc.line_uid}: ${oldProxyId} -> ${chosenSlot}`);
+      }
+    }
+
+    try {
+      saveAccounts(accounts);
+      if (rebalanceLogs.length > 0) {
+        console.log(`[Proxy Rebalance] Successfully rebalanced ${rebalanceLogs.length} bots:\n` + rebalanceLogs.join('\n'));
+      }
+    } catch (e) {
+      console.error('[Rebalance] Failed to save accounts:', e.message);
+    }
   }
 
   _getCounts() {
@@ -907,6 +1039,10 @@ class BotInstance {
     this.weKilledCurrentMvp = false; // Đánh dấu bot kết liễu boss thành công
     this._bossSnipeActive = false;
     this._snipeLoggedOnce = false;
+    this.proxyId = account.proxyId || null;
+    this.isManualProxy = account.isManualProxy || false;
+    const assigned = proxyPool.assignBot(this.line_uid, this.proxyId);
+    this.proxyId = assigned;
     this.combatStatsHistory = [];
     this.startTime = null;
     // 😴 Anti-idle & Event-Driven Act-Flag Jitter Engine
@@ -914,10 +1050,6 @@ class BotInstance {
     this.lastActSentAt = 0;
     this.nextActInterval = 120000 + Math.random() * 180000; // jitter ngẫu nhiên 120s-300s
     this.pendingActFlag = false;
-
-     this.proxyId = account.proxyId || null;
-    const assigned = proxyPool.assignBot(this.line_uid, this.proxyId);
-    this.proxyId = assigned;
     this.consecutiveErrors = 0;
     this.failedSeeds = {}; // Danh sách hạt giống bị lỗi gieo trồng
     this.lastHarvestFailedAt = 0;
@@ -1209,6 +1341,17 @@ class BotInstance {
             
             const newProxyInfo = proxyPool.getBotProxyInfo(this.line_uid);
             this.addLog('SYSTEM', `🔄 Proxy cũ gặp sự cố liên tiếp. Đã tự động đổi sang cấu hình IP mới: ${newProxyInfo.label}`);
+
+            // Trigger proxy recovery check immediately if direct is overloaded
+            const counts = proxyPool._getCounts();
+            const directCount = counts['direct'] || 0;
+            const maxDirect = proxyPool._settings.maxBotsPerProxy || 10;
+            if (directCount > maxDirect) {
+              console.log(`[Proxy Failover] Direct count (${directCount}) exceeded max (${maxDirect}). Triggering instant proxy recovery check...`);
+              setTimeout(() => {
+                proxyPool.checkAndRecoverProxies().catch(e => console.error(e));
+              }, 1000);
+            }
           }
         }
       } finally {
@@ -3864,6 +4007,7 @@ app.put('/api/accounts/:line_uid', requireAuth, async (req, res) => {
     if (proxyId !== undefined && req.user.role === 'admin') {
       const assigned = proxyPool.forceAssignBot(bot.line_uid, proxyId);
       bot.proxyId = assigned;
+      bot.isManualProxy = (proxyId !== 'auto');
     }
 
     if (Object.keys(settings).length > 0) {
@@ -3894,6 +4038,7 @@ app.put('/api/accounts/:line_uid', requireAuth, async (req, res) => {
       currentAccounts[index].name = bot.name;
       currentAccounts[index].settings = bot.settings;
       currentAccounts[index].proxyId = bot.proxyId;
+      currentAccounts[index].isManualProxy = bot.isManualProxy;
 
       if (settings.teamRole === 'leader') {
         currentAccounts.forEach(acc => {
@@ -4433,7 +4578,7 @@ app.post('/api/accounts/:line_uid/action', requireAuth, async (req, res) => {
 });
 
 // Proxy helper function
-async function proxyRequest(req, res, targetUrl) {
+async function proxyRequest(req, res, targetUrl, uid = null) {
   const headers = {
     'content-type': req.headers['content-type'] || 'application/x-www-form-urlencoded; charset=UTF-8',
     'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -4449,11 +4594,14 @@ async function proxyRequest(req, res, targetUrl) {
       body = new URLSearchParams(req.body).toString();
     }
 
+    // Use specific bot's dispatcher if uid is provided, to ensure matching outbound IP addresses
+    const dispatcher = uid ? proxyPool.getDispatcher(uid) : proxyPool.getDefaultDispatcher();
+
     const response = await fetch(targetUrl, {
       method: req.method,
       headers: headers,
       body: body,
-      dispatcher: proxyPool.getDefaultDispatcher()
+      dispatcher: dispatcher
     });
 
     res.status(response.status);
@@ -4891,7 +5039,7 @@ app.all(['/xhrpg_*.php', '/human/xhrpg_*.php'], async (req, res) => {
   const startTime = Date.now();
   console.log(`[Proxy Req Start] ${req.method} ${req.originalUrl} | uid: ${uid || 'N/A'}`);
   try {
-    await proxyRequest(req, res, targetUrl);
+    await proxyRequest(req, res, targetUrl, uid);
     console.log(`[Proxy Req Success] ${req.method} ${req.originalUrl} | Time: ${Date.now() - startTime}ms`);
   } catch (err) {
     console.log(`[Proxy Req Error] ${req.method} ${req.originalUrl} | Error: ${err.message} | Time: ${Date.now() - startTime}ms`);
