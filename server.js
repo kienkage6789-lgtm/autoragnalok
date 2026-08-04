@@ -161,6 +161,15 @@ class ProxyPool {
     return this.assignBot(line_uid);
   }
 
+  resetErrorCount(id) {
+    if (id && id !== 'direct' && id !== 'auto') {
+      const p = this._proxies.find(x => x.id === id);
+      if (p) {
+        p.errorCount = 0;
+      }
+    }
+  }
+
   releaseBot(line_uid) {
     delete this._assignments[line_uid];
   }
@@ -226,6 +235,9 @@ class ProxyPool {
     if (fields.active !== undefined) {
       const wasActive = p.active;
       p.active = !!fields.active;
+      if (p.active) {
+        p.errorCount = 0;
+      }
       if (p.active && p.url && !this._agents[id]) this._agents[id] = this._createAgent(p.url);
       if (!p.active && wasActive) {
         this._reassignFrom(id);
@@ -1170,6 +1182,9 @@ class BotInstance {
       try {
         await this.pollGame();
         this.consecutiveErrors = 0;
+        if (this.proxyId) {
+          proxyPool.resetErrorCount(this.proxyId);
+        }
       } catch (err) {
         console.error(`Poll error for ${this.name}:`, err);
         this.consecutiveErrors = (this.consecutiveErrors || 0) + 1;
