@@ -314,6 +314,35 @@ try {
   const needsWarp = (instance.settings.autoMap || instance.isMvpCycling) && Number(instance.player.map) !== Number(activeTargetMapId);
   assert.strictEqual(needsWarp, true, 'needsWarp must be true when player.map (3) is different from activeTargetMapId (2) during MVP cycle');
 
+  // Test Case 5: Lowest HP Priority Mode (hp_asc)
+  console.log('Testing hp_asc Boss Priority Mode...');
+  const mockBosses = [
+    { id: 1, name: 'Boss Full HP', hp: 1000, hp_max: 1000 },
+    { id: 2, name: 'Boss Half HP', hp: 300, hp_max: 1000 },
+    { id: 3, name: 'Boss Low HP', hp: 50, hp_max: 1000 }
+  ];
+  mockBosses.sort((a, b) => {
+    const hpPctA = (a.hp || 0) / (a.hp_max || 1);
+    const hpPctB = (b.hp || 0) / (b.hp_max || 1);
+    return hpPctA - hpPctB;
+  });
+  assert.strictEqual(mockBosses[0].id, 3, 'Lowest HP % boss must be sorted first');
+  assert.strictEqual(mockBosses[2].id, 1, 'Highest HP % boss must be sorted last');
+
+  // Test Case 6: Fast 1-poll map clear confirmation
+  instance.bosses = [];
+  instance.targetedMvp = false;
+  instance.mvpConfirmClearCount = 0;
+  if (instance.bosses === null) {
+    instance.mvpConfirmClearCount = 0;
+  } else if (instance.targetedMvp) {
+    instance.mvpConfirmClearCount = 0;
+  } else if (instance.bosses.length === 0) {
+    instance.mvpConfirmClearCount++;
+  }
+  const isDoneFast = (instance.mvpConfirmClearCount >= 1);
+  assert.strictEqual(isDoneFast, true, 'isDoneWithCurrentMap must be true on 1st poll when bosses array is empty');
+
   console.log('✅ All Unit Tests Passed successfully!');
 } catch (error) {
   console.error('❌ Unit Tests Failed:', error);

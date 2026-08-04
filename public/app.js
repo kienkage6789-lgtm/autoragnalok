@@ -1305,6 +1305,13 @@ document.addEventListener('DOMContentLoaded', () => {
               </label>
             </div>
             <div class="toggle-control">
+              <span class="toggle-label">🔄 Auto Xoay Map Săn Boss</span>
+              <label class="switch">
+                <input type="checkbox" id="chk-automvpcycle-${acc.line_uid}" onchange="toggleSetting('${acc.line_uid}', 'autoMvpCycle')">
+                <span class="slider"></span>
+              </label>
+            </div>
+            <div class="toggle-control">
               <span class="toggle-label">🏟️ Auto Đấu Trường</span>
               <label class="switch">
                 <input type="checkbox" id="chk-autoarena-${acc.line_uid}" onchange="toggleSetting('${acc.line_uid}', 'autoArena')">
@@ -1330,6 +1337,7 @@ document.addEventListener('DOMContentLoaded', () => {
               <label for="sel-mvp-priority-mode-${acc.line_uid}">🎯 Tiêu chí ưu tiên săn Boss</label>
               <select id="sel-mvp-priority-mode-${acc.line_uid}" onchange="updateStringSetting('${acc.line_uid}', 'mvpPriorityMode')" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; padding: 6px; font-family: inherit; font-size: 0.85rem; outline: none; margin-top:2px;">
                 <option value="distance">📍 Gần nhất (Khoảng cách)</option>
+                <option value="hp_asc">🩸 Ít máu nhất (HP % thấp nhất)</option>
                 <option value="level_asc">🐣 Cấp độ thấp nhất (Lv tăng dần)</option>
                 <option value="level_desc">🦅 Cấp độ cao nhất (Lv giảm dần)</option>
               </select>
@@ -1775,6 +1783,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const chkAutoMVP = document.getElementById(`chk-automvp-${acc.line_uid}`);
     if (chkAutoMVP && document.activeElement !== chkAutoMVP) chkAutoMVP.checked = acc.settings.autoMVP === true;
+
+    const chkAutoMvpCycle = document.getElementById(`chk-automvpcycle-${acc.line_uid}`);
+    if (chkAutoMvpCycle && document.activeElement !== chkAutoMvpCycle) chkAutoMvpCycle.checked = acc.settings.autoMvpCycle !== false;
 
     const chkAutoArena = document.getElementById(`chk-autoarena-${acc.line_uid}`);
     if (chkAutoArena && document.activeElement !== chkAutoArena) chkAutoArena.checked = acc.settings.autoArena === true;
@@ -2688,10 +2699,13 @@ document.addEventListener('DOMContentLoaded', () => {
         colorStyle = 'color:#f87171; font-weight:600;';
         detail = `${e.bossEmoji || '👾'} <b>${e.bossName || 'Boss'}</b> Lv.${e.bossLv || 1} [Map ${e.mapId}] bị cướp hoặc mất dấu — ⏱️ <b>${fmtMs(e.durationMs)}</b>`;
       } else if (e.event === 'map_clear') {
-        icon = '✅';
-        title = 'Dọn sạch Boss Map';
-        colorStyle = 'color:#34d399; font-weight:600;';
-        detail = `<b>Map ${e.mapId}</b> — Hạ ${e.bossKilledCount || 0} Boss (⏱️ ${fmtMs(e.timeSpentMs)})`;
+        const killed = e.bossKilledCount || 0;
+        icon = killed > 0 ? '✅' : '🔍';
+        title = killed > 0 ? 'Dọn sạch Boss Map' : 'Không có Boss';
+        colorStyle = killed > 0 ? 'color:#34d399; font-weight:600;' : 'color:#94a3b8; font-weight:600;';
+        detail = killed > 0 
+          ? `<b>Map ${e.mapId}</b> — Hạ ${killed} Boss (⏱️ ${fmtMs(e.timeSpentMs)})`
+          : `<b>Map ${e.mapId}</b> — Không có Boss mục tiêu (⏱️ ${fmtMs(e.timeSpentMs)})`;
       } else if (e.event === 'map_timeout') {
         icon = '⏰';
         title = 'Timeout Map';
@@ -2707,6 +2721,16 @@ document.addEventListener('DOMContentLoaded', () => {
         title = 'Hoàn thành chu kỳ';
         colorStyle = 'color:#c084fc; font-weight:700;';
         detail = `Đã tiêu diệt <b>${e.totalBossKilled || 0} Boss</b> (⏱️ ${fmtMs(e.totalTimeMs)}) → Về Map ${e.returnMap}`;
+      } else if (e.event === 'map_skip_level') {
+        icon = '⚠️';
+        title = 'Bỏ qua Map (Lv)';
+        colorStyle = 'color:#fb923c; font-weight:600;';
+        detail = `Bỏ qua <b>Map ${e.mapId}</b> — Yêu cầu Lv.${e.reqLv} (Lv hiện tại: Lv.${e.playerLv})`;
+      } else if (e.event === 'map_skip_warp_failed') {
+        icon = '⚠️';
+        title = 'Bỏ qua Map (Lỗi)';
+        colorStyle = 'color:#ef4444; font-weight:600;';
+        detail = `Không thể di chuyển đến <b>Map ${e.mapId}</b> sau 16s`;
       }
 
       return `
@@ -2818,7 +2842,23 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     if (!input) return;
 
-    const val = input.value;
+    let val = input.value;
+    
+    // Kiểm tra và định dạng danh sách bản đồ săn Boss xoay vòng
+    if (settingKey === 'mvpTargetMaps') {
+      const cleanVal = val.trim();
+      if (cleanVal !== '') {
+        const parts = cleanVal.split(',').map(s => s.trim()).filter(Boolean);
+        const invalid = parts.some(p => isNaN(parseInt(p)) || !/^\d+$/.test(p));
+        if (invalid) {
+          alert('⚠️ Danh sách bản đồ săn Boss không hợp lệ. Chỉ chấp nhận các số bản đồ ngăn cách bằng dấu phẩy (VD: 1, 2, 3).');
+          return;
+        }
+        val = parts.join(', ');
+        input.value = val;
+      }
+    }
+
     try {
       await fetch(`/api/accounts/${uid}`, {
         method: 'PUT',

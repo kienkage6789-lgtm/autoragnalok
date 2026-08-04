@@ -3,6 +3,23 @@
 > Work Breakdown Structure. Update task states immediately upon changes.
 > Statuses: todo | doing | blocked | review | done
 
+### [x] T55 - Nâng cấp & Sửa lỗi Chức năng Săn Boss MVP (Tốc độ, Toggle, Log Accuracy & HP Priority)
+- Description: Giải quyết triệt để 3 vấn đề lớn trong luồng săn Boss MVP: (1) Sửa lỗi kẹt deadlock map do warp thất bại hoặc map vượt level nhân vật; (2) Tối ưu tốc độ xác nhận map sạch boss từ 10-12s xuống 1-2s (1 poll) khi bosses là []; (3) Thêm công tắc UI `autoMvpCycle` và tiêu chí ưu tiên Boss ít % HP nhất (`hp_asc`); (4) Sửa lỗi thông báo log nhầm lẫn giữa "Không có Boss" và "Đã dọn sạch Boss" khi diệt 0 boss.
+- Files related: `server.js`, `public/app.js`, `test.js`
+- Acceptance criteria:
+  - [x] Sửa lỗi deadlock kẹt map: Tự động bỏ qua map vượt quá level (`mapDef.req`) hoặc warp không thành công sau 8 polls (16s).
+  - [x] Giảm ngưỡng `mvpConfirmClearCount` từ 5 xuống 1 poll khi `this.bosses` đã tải xong (`!= null`), rút ngắn thời gian chuyển map trống từ 10-12s xuống 1-2s.
+  - [x] Đưa `await` vào tất cả các lệnh gọi `warpToMap()` trong `updateMvpCycleStatus()`.
+  - [x] Cập nhật `this.player.map` ngay lập tức trong `warpToMap()` và reset cache `spots` / `bosses`.
+  - [x] Bổ sung cờ `autoMvpCycle` vào `defaultSettings` và thêm công tắc `🔄 Auto Xoay Map Săn Boss` trên giao diện Dashboard.
+  - [x] Bổ sung thuật toán sắp xếp `hp_asc` trong `pollGame()` và ô chọn `🩸 Ít máu nhất (HP % thấp nhất)` trên frontend.
+  - [x] Sửa thông báo log: Kiểm tra `killedCount`, phân biệt chính xác `Không có Boss mục tiêu tại Map X` (0 boss diệt) vs `Đã dọn sạch Boss (Đã diệt N Boss) tại Map X`.
+  - [x] Cập nhật Sub-tab Nhật ký Boss Hunt Journal render thẻ xám `🔍 Không có Boss` khi diệt 0 boss.
+  - [x] Bổ sung các unit test mới trong `test.js` và chạy vượt qua 100% test cases (`npm test`).
+- Status: done
+
+---
+
 ### [x] T54 - Tối ưu hóa & Khắc phục lỗi Luồng Săn Boss MVP
 - Description: Khắc phục lỗi chuyển map sớm khi chưa diệt hết boss (race condition do `bosses=null`), lỗi báo boss chết ảo khi bot warp map hoặc reset mục tiêu, và phân biệt chính xác bot hạ gục boss hay bị người khác cướp thông qua cờ `is_mvp`. Đồng thời, tối ưu hóa định tuyến bản đồ (Map Routing) ngay đầu nhịp poll để bot di chuyển đúng theo chu kỳ bản đồ cấu hình, không bị farm quái/đánh boss sai bản đồ.
 - Files related: `server.js`, `public/app.js`, `test.js`

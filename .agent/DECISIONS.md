@@ -2,6 +2,30 @@
 
 > Captured architectural decisions and trade-offs.
 
+## 2026-08-04 - Khắc phục Triệt để Lỗi Kẹt Xoay Map Săn Boss MVP & Tự động Kích hoạt Giờ tròn
+
+- Bối cảnh:
+  - Hệ thống săn Boss MVP gặp hiện tượng kẹt ngâm 80 giây/map khi map sạch boss do `this.bosses` giữ nguyên `null`. Ngoài ra, Map 5 ("Tàn tích Cổ đại") bị xung đột với Map Nông trại làm bot bị đẩy văng về Map 1, và điều kiện kích hoạt giờ tròn cũ dễ bị lỡ nhịp poll.
+- Quyết định:
+  1. **Khởi tạo `this.bosses = []` khi nhận `full: 1` không có boss**: Đảm bảo bot nhận biết map sạch boss lập tức và chuyển map trong 1-2 giây.
+  2. **Loại trừ cờ `isAtHome` khi `this.isMvpCycling = true`**: Đảm bảo bot có thể săn boss tại Map 5 bình thường mà không dính đòn `home_exit`.
+  3. **Mở rộng cửa sổ giờ tròn `currentMinute <= 2`**: Cho phép bot kích hoạt tự động ở bất kỳ nhịp poll nào trong 3 phút đầu giờ tròn, chống trượt nhịp do lag/proxy timeout.
+
+---
+
+## 2026-08-03 - Tối ưu hóa Tốc độ Chuyển Map Săn Boss & Khắc phục Lỗi Luồng MVP (T55)
+
+- Bối cảnh:
+  - Hệ thống săn Boss xoay vòng từng đứng quá lâu (10-12s / 5 polls) trên các map trống boss, đồng thời dính lỗi deadlock kẹt map khi warp thất bại hoặc map vượt level yêu cầu. Ngoài ra, thông báo log hệ thống bị nhầm lẫn giữa "Không có boss" và "Đã dọn sạch boss".
+- Quyết định:
+  1. **Xác nhận Map Sạch Boss Nhanh (1 Poll / ~1-2s)**: Khi `this.bosses` đã tải xong (`!= null`), nếu `aliveTargetBosses.length === 0`, chuyển map ngay ở poll tiếp theo.
+  2. **Chống Deadlock Kẹt Map**: Bổ sung tự động bỏ qua map khi `player.lv < mapDef.req` hoặc khi quá 8 polls (~16s) mà nhân vật chưa đến được map mục tiêu.
+  3. **Đồng bộ `async/await`**: Đưa `await` vào tất cả các lệnh gọi `warpToMap()` trong `updateMvpCycleStatus()` và cập nhật `player.map` ngay lập tức.
+  4. **Ưu tiên Boss Ít Máu (`hp_asc`)**: Bổ sung thuật toán sắp xếp % HP $\frac{\text{HP}}{\text{HP Max}}$ tăng dần giúp bot ưu tiên kết liễu Boss dở máu trước.
+  5. **Phân biệt Log Chính xác**: Kiểm tra `killedCount`, xuất thông báo `Không có Boss mục tiêu tại Map X` nếu diệt 0 boss và `Đã dọn sạch Boss (Đã diệt N Boss) tại Map X` khi diệt $\ge 1$ boss.
+
+---
+
 ## 2026-07-30 - Thiết kế Hệ thống Thông báo và Quản lý Banners từ Admin tới Users (T50)
 
 - Bối cảnh:

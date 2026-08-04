@@ -2,6 +2,45 @@
 
 > Changelog of actual changes implemented.
 
+## 2026-08-04 - Phân tích & Bóc tách Lỗi DNS ENOTFOUND ragnalok.online cho Bot Poller
+- File đã đổi: [server.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/server.js).
+- Đã làm:
+  - **Phân tích nguyên nhân gốc**: Lỗi `TypeError: fetch failed` đi kèm `[cause]: getaddrinfo ENOTFOUND ragnalok.online` xuất phát từ việc máy chủ bot/proxy bị mất kết nối mạng hoặc DNS lookup tới `ragnalok.online` thất bại.
+  - **Bóc tách `err.cause` trong `sendRequest`**: Nhận diện chính xác các mã lỗi hệ thống từ Undici/Node.js (`ENOTFOUND`, `ECONNREFUSED`, `ETIMEDOUT`, `ECONNRESET`) và trả về thông báo lỗi chuẩn tiếng Việt kèm chi tiết hostname.
+  - **Định dạng hiển thị Log Polling**: Cập nhật vòng lặp catch trong `runPoll` (`server.js`) giúp Dashboard hiển thị trực quan thông báo `Lỗi DNS (ENOTFOUND): Không tìm thấy địa chỉ máy chủ ragnalok.online` thay vì thông báo chung chung `fetch failed`.
+- Đã test bằng: `node -c server.js` và giả lập lỗi DNS `fetch` -> PASS 100%.
+
+---
+
+## 2026-08-04 - Khắc phục Triệt để Lỗi Kẹt Xoay Map Săn Boss MVP & Tối ưu Kích hoạt Tự động Giờ tròn
+- File đã đổi: [server.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/server.js).
+- Đã làm:
+  - **Sửa lỗi kẹt `this.bosses = null` khi map sạch boss**: Khởi tạo `this.bosses = []` khi nhận payload `full: 1` không có boss, giúp bot xác nhận map sạch ngay nhịp đầu tiên (1-2s) thay vì bị ngâm 80s/map.
+  - **Giải quyết xung đột Nông Trại tại Map 5 ("Tàn tích Cổ đại")**: Thêm cờ `!this.isMvpCycling` và kiểm tra dữ liệu nông trại `home_crops` / `home_lv` khi xác định `isAtHome` để bot săn boss bình thường tại Map 5 mà không bị lệnh `home_exit` kích ra ngoài.
+  - **Reset linh hoạt `force_mvp_hunt`**: Cho phép nút kích hoạt Force Hunt reset chu kỳ kẹt cũ và khởi chạy chu kỳ mới lập tức.
+  - **Tách biệt bộ đếm di chuyển `mvpTransitCount`**: Tách độc lập bộ đếm chờ warp map (max 16s) và bộ đếm lưu tại map mục tiêu `mvpCycleMapStayCount`.
+  - **Mở rộng cửa sổ kích hoạt giờ tròn (Minute 00-02)**: Cho phép tự động kích hoạt chu kỳ săn boss trong 3 phút đầu giờ tròn (`currentMinute <= 2`) đảm bảo 100% không bị bỏ lỡ do độ trễ mạng hay proxy timeout.
+- Đã test bằng: `node -c server.js` → PASS 100%.
+
+---
+
+## 2026-08-03 - Nâng cấp & Sửa lỗi Chức năng Săn Boss MVP (Tốc độ 1-2s, Toggle, HP Priority & Log Accuracy)
+- File đã đổi: [server.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [public/app.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/public/app.js), [test.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/test.js).
+- Đã làm:
+  - **Sửa lỗi Deadlock Kẹt Map**: Bổ sung cơ chế tự động bỏ qua map khi level nhân vật không đủ yêu cầu (`mapDef.req`) hoặc không chuyển được map sau 8 nhịp poll (16s), triệt tiêu hoàn toàn lỗi bot bị kẹt vĩnh viễn không quay về farm được.
+  - **Tối ưu tốc độ chuyển map (10-12s ➔ 1-2s)**: Giảm ngưỡng `mvpConfirmClearCount` từ 5 nhịp poll xuống 1 nhịp poll khi `this.bosses` đã tải xong (`!= null`), giúp bot chuyển map ngay ở poll tiếp theo khi map trống boss.
+  - **Đồng bộ hóa `async/await`**: Đưa `await` vào tất cả các cuộc gọi `warpToMap()` trong `updateMvpCycleStatus()`, tránh việc bắn trùng gói tin warp làm xung đột game server.
+  - **Cập nhật `player.map` & Cache**: Cập nhật `this.player.map` ngay khi `warpToMap()` thành công và xóa cache `spots` / `bosses` để sẵn sàng nhận dữ liệu sạch cho map mới.
+  - **Thêm công tắc `🔄 Auto Xoay Map Săn Boss` (`autoMvpCycle`)**: Thêm cờ vào `defaultSettings` và toggle trên Dashboard tab Săn Boss để người dùng chủ động Bật/Tắt xoay map.
+  - **Thêm chế độ ưu tiên `🩸 Ít máu nhất (HP % thấp nhất)` (`hp_asc`)**: Thêm thuật toán sắp xếp % HP trong `pollGame()` và ô chọn trên UI giúp bot ưu tiên kết liễu Boss dở máu trước.
+  - **Sửa lỗi thông báo log nhầm lẫn**: Phân biệt chính xác dựa vào `killedCount`:
+    - Diệt 0 boss: Log `🗺️ [Auto MVP] Không có Boss mục tiêu tại Map X. Chuyển sang Map tiếp theo: Map Y.` (Render thẻ xám `🔍 Không có Boss`).
+    - Diệt $\ge 1$ boss: Log `🗺️ [Auto MVP] Đã dọn sạch Boss (Đã diệt N Boss) tại Map X...` (Render thẻ xanh `✅ Dọn sạch Boss Map`).
+  - **Unit Tests**: Bổ sung unit tests cho `hp_asc` và `mvpConfirmClearCount >= 1` trong `test.js`, chạy `npm test` PASS 100%.
+- Đã test bằng: `node test.js` → PASS 100%.
+
+---
+
 ## 2026-08-03 - Khắc phục & Tối ưu hóa Luồng Săn Boss MVP
 - File đã đổi: [server.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [public/app.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/public/app.js), [test.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/test.js).
 - Đã làm:

@@ -964,6 +964,7 @@ class BotInstance {
       lock_zone_center: false,
       targetZone: 0,
       autoMVP: false,
+      autoMvpCycle: true,
       mvpRotateInterval: 0,
       currentMvpMapIndex: 0,
       mvpPriorityMode: 'distance',
@@ -982,8 +983,46 @@ class BotInstance {
   }
 
   updateSettings(newSettings) {
+    const oldAutoMvp = this.settings.autoMVP;
+    const oldMvpCycle = this.settings.autoMvpCycle;
+
     this.settings = { ...this.settings, ...newSettings };
     this.addLog('SYSTEM', 'Cập nhật cấu hình bot thành công');
+
+    // Nếu đang trong chu kỳ săn boss mà bị tắt autoMVP, autoMvpCycle, hoặc xóa/đổi danh sách map
+    if (this.isMvpCycling) {
+      const turnedOffMvp = (newSettings.autoMVP === false && oldAutoMvp !== false);
+      const turnedOffCycle = (newSettings.autoMvpCycle === false && oldMvpCycle !== false);
+      
+      let mapsCleared = false;
+      if (newSettings.mvpTargetMaps !== undefined) {
+        const maps = newSettings.mvpTargetMaps.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+        if (maps.length === 0) {
+          mapsCleared = true;
+        }
+      }
+
+      if (turnedOffMvp || turnedOffCycle || mapsCleared) {
+        this.isMvpCycling = false;
+        this.mvpCycleMapIndex = 0;
+        this.mvpCycleMapStayCount = 0;
+        this.mvpConfirmClearCount = 0;
+        this.bosses = null;
+        
+        // Khôi phục autoMap ban đầu
+        if (this.mvpCycleOriginalAutoMap !== null) {
+          this.settings.autoMap = this.mvpCycleOriginalAutoMap;
+          this.mvpCycleOriginalAutoMap = null;
+        }
+
+        if (this.mvpCycleOriginalMap !== null) {
+          const returnMap = this.mvpCycleOriginalMap;
+          this.addLog('SYSTEM', `⏹️ [Auto MVP] Cấu hình thay đổi -> Hủy chu kỳ săn Boss xoay vòng, tự động quay về Map farm gốc (Map ${returnMap}).`);
+        } else {
+          this.addLog('SYSTEM', `⏹️ [Auto MVP] Cấu hình thay đổi -> Hủy chu kỳ săn Boss xoay vòng.`);
+        }
+      }
+    }
   }
 
   addLog(type, msg) {
@@ -1063,7 +1102,13 @@ class BotInstance {
         target_map: targetMapId
       });
       if (res && res.ok) {
-        if (res.player) this.updatePlayerState(res.player);
+        if (res.player) {
+          this.updatePlayerState(res.player);
+        } else if (this.player) {
+          this.player.map = targetMapId;
+        }
+        this.spots = null; // Reset cache để tải dữ liệu zone mới ngay poll sau
+        this.bosses = null; // Reset cache để tải danh sách boss mới ngay poll sau
         this.addLog('SUCCESS', `Di chuyển sang bản đồ ${targetMapId} thành công`);
         return true;
       } else {
@@ -1128,8 +1173,9 @@ class BotInstance {
       } catch (err) {
         console.error(`Poll error for ${this.name}:`, err);
         this.consecutiveErrors = (this.consecutiveErrors || 0) + 1;
-        this.error = err.message;
-        this.addLog('ERROR', `Lỗi kết nối: ${err.message} (Lần ${this.consecutiveErrors}/3)`);
+        const formattedErr = err.message || (err.cause ? `${err.cause.code || err.cause.message}` : 'Lỗi kết nối');
+        this.error = formattedErr;
+        this.addLog('ERROR', `${formattedErr} (Lần ${this.consecutiveErrors}/3)`);
 
         if (this.consecutiveErrors >= 3) {
           const oldProxyId = this.proxyId;
@@ -1228,6 +1274,21 @@ class BotInstance {
       if (err.name === 'AbortError') {
         throw new Error('Yêu cầu kết nối quá hạn (Timeout 10s)');
       }
+      if (err.cause) {
+        if (err.cause.code === 'ENOTFOUND') {
+          const host = err.cause.hostname || 'ragnalok.online';
+          throw new Error(`Lỗi DNS (ENOTFOUND): Không tìm thấy địa chỉ máy chủ ${host}`);
+        }
+        if (err.cause.code === 'ECONNREFUSED') {
+          throw new Error(`Lỗi kết nối (ECONNREFUSED): Máy chủ từ chối kết nối`);
+        }
+        if (err.cause.code === 'ETIMEDOUT' || err.cause.code === 'UND_ERR_CONNECT_TIMEOUT') {
+          throw new Error(`Lỗi kết nối Timeout (${err.cause.code})`);
+        }
+        if (err.cause.code === 'ECONNRESET') {
+          throw new Error(`Lỗi kết nối bị ngắt đột ngột (ECONNRESET)`);
+        }
+      }
       throw err;
     } finally {
       clearTimeout(timeout);
@@ -1257,13 +1318,18 @@ class BotInstance {
 
     if (this.isMvpCycling) {
       if (forced) {
-        this.addLog('WARNING', `⚠️ Chu kỳ săn Boss đang hoạt động.`);
+        this.addLog('SYSTEM', `🔄 [Auto MVP] Reset chu kỳ săn Boss cũ để bắt đầu chu kỳ mới theo yêu cầu.`);
+        this.isMvpCycling = false;
+      } else {
+        return;
       }
-      return;
     }
 
-    // Save original farm map (prefer targetMap if configured, else current player map)
-    const farmMap = this.settings.targetMap ? Number(this.settings.targetMap) : (this.player ? Number(this.player.map) : 1);
+    // Ghi nhớ bản đồ farm gốc (Ưu tiên player.map hiện tại nếu không ở Nông trại, fallback theo settings.targetMap hoặc 1)
+    const currentMapNum = this.player ? Number(this.player.map) : null;
+    const configuredTargetMap = parseInt(this.settings.targetMap);
+    const farmMap = (currentMapNum && currentMapNum !== 5) ? currentMapNum : (configuredTargetMap || 1);
+    
     this.mvpCycleOriginalMap = farmMap;
     this.mvpCycleOriginalAutoMap = this.settings.autoMap;
 
@@ -1271,8 +1337,8 @@ class BotInstance {
     this.isMvpCycling = true;
     this.mvpCycleMapIndex = 0;
     this.mvpCycleMapStayCount = 0;
-    this.mvpConfirmClearCount = 0; // Reset confirm clear khi bắt đầu chu kỳ mới
-    this.bosses = null; // Force reload bosses list on first map
+    this.mvpConfirmClearCount = 0;
+    this.bosses = null; // Ép tải danh sách boss trên map mới ngay lập tức
     this.mvpCycleStats = {
       cycleStartTs: nowTs,
       mapStartTs: nowTs,
@@ -1287,18 +1353,82 @@ class BotInstance {
     });
   }
 
-  updateMvpCycleStatus() {
+  async updateMvpCycleStatus() {
     if (!this.player) return;
     
-    const activeTargetMapId = this.getCurrentMvpCycleMap();
-    const currentMap = Number(this.player.map);
-    
-    if (currentMap !== activeTargetMapId) {
+    const maps = (this.settings.mvpTargetMaps || '')
+      .split(',')
+      .map(s => parseInt(s.trim()))
+      .filter(n => !isNaN(n));
+
+    if (maps.length === 0 || !this.settings.autoMVP || !this.settings.autoMvpCycle) {
+      this.isMvpCycling = false;
       return;
     }
-    
+
+    // 1. Kiểm tra giới hạn mảng map (nếu vượt quá index -> kết thúc chu kỳ)
+    if (this.mvpCycleMapIndex >= maps.length) {
+      this.isMvpCycling = false;
+      this.mvpCycleMapIndex = 0;
+      const returnMap = this.mvpCycleOriginalMap || (parseInt(this.settings.targetMap) || 1);
+      this.addLog('SYSTEM', `✅ [Auto MVP] Đã đi hết danh sách bản đồ -> Quay về Map farm gốc (Map ${returnMap}).`);
+      await this.warpToMap(returnMap);
+      return;
+    }
+
+    const activeTargetMapId = maps[this.mvpCycleMapIndex];
+    const currentMap = Number(this.player.map);
+
+    // 2. Kiểm tra cấp độ nhân vật đối với bản đồ mục tiêu
+    const mapDef = getMapDefs().find(m => m.id === activeTargetMapId);
+    if (mapDef && (this.player.lv || 1) < mapDef.req) {
+      this.addLog('WARNING', `⚠️ [Auto MVP] Cấp độ nhân vật (Lv.${this.player.lv || 1}) không đủ yêu cầu của Map ${activeTargetMapId} (${mapDef.name}, Yêu cầu Lv.${mapDef.req}+). Tự động bỏ qua.`);
+      this.addMvpLog('map_skip_level', { mapId: activeTargetMapId, reqLv: mapDef.req, playerLv: this.player.lv || 1 });
+      
+      this.mvpCycleMapIndex++;
+      this.mvpCycleMapStayCount = 0;
+      this.mvpConfirmClearCount = 0;
+      this.bosses = null;
+      if (this.mvpCycleMapIndex < maps.length) {
+        await this.warpToMap(maps[this.mvpCycleMapIndex]);
+      } else {
+        this.isMvpCycling = false;
+        this.mvpCycleMapIndex = 0;
+        const returnMap = this.mvpCycleOriginalMap || (parseInt(this.settings.targetMap) || 1);
+        await this.warpToMap(returnMap);
+      }
+      return;
+    }
+
+    // 4. Nếu chưa đến được map mục tiêu sau 8 nhịp poll (~16 giây), tự động bỏ qua để tránh dính deadlock
+    if (currentMap !== activeTargetMapId) {
+      this.mvpTransitCount = (this.mvpTransitCount || 0) + 1;
+      if (this.mvpTransitCount >= 8) {
+        this.addLog('WARNING', `⚠️ [Auto MVP] Không thể di chuyển sang Map ${activeTargetMapId} sau 16s. Tự động bỏ qua map này.`);
+        this.addMvpLog('map_skip_warp_failed', { mapId: activeTargetMapId });
+        
+        this.mvpCycleMapIndex++;
+        this.mvpCycleMapStayCount = 0;
+        this.mvpTransitCount = 0;
+        this.mvpConfirmClearCount = 0;
+        this.bosses = null;
+        if (this.mvpCycleMapIndex < maps.length) {
+          await this.warpToMap(maps[this.mvpCycleMapIndex]);
+        } else {
+          this.isMvpCycling = false;
+          this.mvpCycleMapIndex = 0;
+          const returnMap = this.mvpCycleOriginalMap || (parseInt(this.settings.targetMap) || 1);
+          await this.warpToMap(returnMap);
+        }
+      }
+      return;
+    }
+
+    // Đã đến đúng map mục tiêu -> Reset bộ đếm di chuyển transit và tăng bộ đếm thời gian lưu lại trên map
+    this.mvpTransitCount = 0;
     this.mvpCycleMapStayCount++;
-    
+
+    // 5. Quản lý danh sách Boss khi đã đến đúng map mục tiêu
     const aliveBosses = this.bosses ? this.bosses.filter(b => (b.hp || 0) > 0) : [];
     
     let aliveTargetBosses = aliveBosses;
@@ -1313,11 +1443,8 @@ class BotInstance {
     }
     
     // Cập nhật bộ đếm xác nhận map sạch boss
-    // - Chưa fetch được danh sách boss của map mới (this.bosses === null) → reset counter để đợi fetch
-    // - Đang nhắm boss → reset counter (boss vẫn còn)
-    // - Không còn boss nào sống → tăng counter
-    // - Có boss nhưng không nhắm (targetedMvp=false do bosses chưa refresh) → reset counter để an toàn
     if (this.bosses === null) {
+      // Chưa tải xong danh sách boss từ server -> Chưa xác nhận
       this.mvpConfirmClearCount = 0;
     } else if (this.targetedMvp) {
       this.mvpConfirmClearCount = 0;
@@ -1328,14 +1455,19 @@ class BotInstance {
     }
 
     const isDoneWithCurrentMap = (
-      (this.mvpConfirmClearCount >= 5) || // Xác nhận sạch boss 5 polls liên tiếp (~10s)
+      (this.mvpConfirmClearCount >= 1) || // Tối ưu: Chuyển map NGAY (1 poll ~1-2s) khi bosses = [] hoặc sạch boss
       (this.mvpCycleMapStayCount >= 40)   // Timeout sau ~80s
     );
     
     if (isDoneWithCurrentMap) {
-      const maps = this.settings.mvpTargetMaps.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
       const isTimeout = this.mvpCycleMapStayCount >= 40;
-      const reason = isTimeout ? 'Hết thời gian chờ (Timeout)' : 'Đã dọn sạch Boss';
+      const killedCount = this.mvpCycleStats ? (this.mvpCycleStats.bossKilledInMap || 0) : 0;
+      let reason = 'Không có Boss mục tiêu';
+      if (isTimeout) {
+        reason = 'Hết thời gian chờ (Timeout)';
+      } else if (killedCount > 0) {
+        reason = `Đã dọn sạch Boss (Đã diệt ${killedCount} Boss)`;
+      }
       const timeSpentMs = Date.now() - (this.mvpCycleStats ? (this.mvpCycleStats.mapStartTs || Date.now()) : Date.now());
       
       if (isTimeout) {
@@ -1361,7 +1493,7 @@ class BotInstance {
         const nextMap = maps[this.mvpCycleMapIndex];
         this.addLog('SYSTEM', `🗺️ [Auto MVP] ${reason} tại Map ${currentMap}. Chuyển sang Map tiếp theo: Map ${nextMap}.`);
         this.addMvpLog('warp', { mapId: nextMap });
-        this.warpToMap(nextMap);
+        await this.warpToMap(nextMap);
       } else {
         this.isMvpCycling = false;
         this.mvpCycleMapIndex = 0;
@@ -1374,7 +1506,7 @@ class BotInstance {
           totalTimeMs,
           returnMap
         });
-        this.warpToMap(returnMap);
+        await this.warpToMap(returnMap);
       }
     }
   }
@@ -1416,18 +1548,15 @@ class BotInstance {
       }
     }
 
-    // ⏰ Check scheduled MVP Boss Hunting Cycle (Round hours only, delay ~5 seconds)
+    // ⏰ Check scheduled MVP Boss Hunting Cycle (Round hours only, first 3 minutes of the hour)
     const nowTime = new Date();
     const currentHour = nowTime.getHours();
     const currentMinute = nowTime.getMinutes();
-    const currentSecond = nowTime.getSeconds();
-    if (this.settings.autoMVP && this.settings.mvpTargetMaps) {
-      if (currentMinute === 0 && currentSecond >= 5) {
-        if (this.lastMvpCycleCheckHour !== currentHour) {
-          this.lastMvpCycleCheckHour = currentHour;
-          this.addLog('SYSTEM', `⏰ [Auto MVP] Đến giờ tròn (${currentHour}:00, delay ${currentSecond}s). Tự động kích hoạt chu kỳ săn Boss xoay vòng map...`);
-          this.triggerMvpCycle();
-        }
+    if (this.settings.autoMVP && (this.settings.autoMvpCycle !== false) && this.settings.mvpTargetMaps) {
+      if (currentMinute <= 2 && this.lastMvpCycleCheckHour !== currentHour) {
+        this.lastMvpCycleCheckHour = currentHour;
+        this.addLog('SYSTEM', `⏰ [Auto MVP] Đến giờ tròn (${currentHour}:00). Tự động kích hoạt chu kỳ săn Boss xoay vòng map...`);
+        this.triggerMvpCycle();
       }
     }
 
@@ -1503,6 +1632,12 @@ class BotInstance {
           targetPool.sort((a, b) => (a.lv || 0) - (b.lv || 0));
         } else if (this.settings.mvpPriorityMode === 'level_desc') {
           targetPool.sort((a, b) => (b.lv || 0) - (a.lv || 0));
+        } else if (this.settings.mvpPriorityMode === 'hp_asc') {
+          targetPool.sort((a, b) => {
+            const hpPctA = (a.hp || 0) / (a.hp_max || 1);
+            const hpPctB = (b.hp || 0) / (b.hp_max || 1);
+            return hpPctA - hpPctB;
+          });
         } else {
           // Default: distance
           targetPool.sort((a, b) => {
@@ -1747,6 +1882,8 @@ class BotInstance {
     // Save bosses list
     if (d.bosses) {
       this.bosses = d.bosses;
+    } else if (isFull) {
+      this.bosses = [];
     }
 
     // Save mon_masters list (crawled live from game server)
@@ -1783,7 +1920,7 @@ class BotInstance {
     }
 
     if (this.isMvpCycling) {
-      this.updateMvpCycleStatus();
+      await this.updateMvpCycleStatus();
     }
 
     // Detect map change
@@ -1883,7 +2020,7 @@ class BotInstance {
   async runAutomation() {
     if (!this.player) return;
 
-    const isAtHome = (Number(this.player.map) === 5);
+    const isAtHome = (!this.isMvpCycling && Number(this.player.map) === 5 && (this.player.home_crops !== undefined || this.player.home_lv !== undefined));
 
     // Check if there are pending Home Farm actions
     let hasPendingHomeAction = false;
