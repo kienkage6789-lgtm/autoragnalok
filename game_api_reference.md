@@ -107,13 +107,19 @@ Dưới đây là danh sách các API và Endpoint nội bộ của Server Bot M
     *   **Bảo mật**: Trường `proxyInfo` chỉ được trả về nếu người dùng đăng nhập có vai trò `admin`.
     *   **Thống kê hiệu suất**: Trả về trường `combatRates` chứa các chỉ số `{ killsPerMin, goldPerMin, expPerMin }` được tính toán thời gian thực theo cơ chế Sliding Window (cửa sổ trượt 5 phút).
 *   **API Cập nhật Cấu hình**: `PUT /api/accounts/:line_uid`
-    *   **Tham số**: `{ settings: { targetMap, ... }, proxyId }`
+    *   **Tham số**: `{ settings: { targetMap, bossHuntMode, mvpPriorityMode, mvpTargetMaps, ... }, proxyId }`
+    *   **Chi tiết Săn Boss**:
+        *   `bossHuntMode`: Chế độ săn boss (`'off'` = Tắt, `'type1'` = Săn tại map hiện tại, `'type2'` = Săn theo map chỉ định).
+        *   `mvpPriorityMode`: Tiêu chí ưu tiên của Loại 1 (`'distance'` = Gần nhất, `'level_asc'` = Cấp độ tăng dần, `'level_desc'` = Cấp độ giảm dần).
+        *   `mvpTargetMaps`: Chuỗi danh sách map chỉ định cho Loại 2 (ví dụ: `1, 2, 3, 5, 6`).
+        *   *Lưu ý*: Whitelist (`mvpNamePriority`) và Blacklist (`mvpNameBlacklist`) đã bị loại bỏ.
     *   **Cấu hình Proxy (Chỉ Admin)**: Hỗ trợ trường `proxyId` (`'auto'`, `'direct'`, hoặc ID proxy cụ thể) để thay đổi proxy gán cho bot và cập nhật cấu hình tài khoản.
-    *   **Cơ chế xác thực bản đồ**: Xác thực cấp độ yêu cầu của bản đồ đích. Trả về mã lỗi HTTP 400 nếu cấp độ của nhân vật (`bot.player.lv`) nhỏ hơn yêu cầu tối thiểu của bản đồ đó.
+    *   **Xác thực bản đồ**: Xác thực cấp độ yêu cầu của bản đồ đích. Trả về mã lỗi HTTP 400 nếu cấp độ của nhân vật (`bot.player.lv`) nhỏ hơn yêu cầu tối thiểu của bản đồ đó.
 *   **API Kích hoạt Hành động**: `POST /api/accounts/:line_uid/action`
     *   **Tham số**: 
         *   Dịch chuyển bản đồ: `{ action: 'warp', param: target_map_id }` (Xác thực cấp độ tương ứng).
         *   Bật/tắt kỹ năng tự động: `{ action: 'skill_toggle', extra: { skill_id: 'skill_id_string' } }` (Tự động chuyển tiếp yêu cầu đến `xhrpg_upgrade.php` của game server).
+        *   Kích hoạt săn Boss ngay (Force Hunt): `{ action: 'force_mvp_hunt' }`. Tự động thiết lập `bossHuntMode` thành `'type2'`, lưu cấu hình và kích hoạt chu kỳ săn Boss xoay vòng ngay lập tức.
 *   **API Thêm Proxy Pool**: `POST /api/admin/proxies` (Chỉ dành cho Admin)
     *   **Tham số**: `{ label, url }`
     *   **Cơ chế**: Backend tự động phân tích cú pháp nếu `url` là chuỗi dạng thô (không bắt đầu bằng http/socks):

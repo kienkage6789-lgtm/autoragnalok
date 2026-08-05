@@ -262,20 +262,18 @@ try {
   console.log('Testing MVP Boss Hunting Flow changes...');
   
   // Test Case 1: isFull when bosses is null
+  instance.settings.bossHuntMode = 'off';
   instance.bosses = null;
   instance.targetedMvp = false;
   instance.pollCount = 1;
-  const isFullWithNullBosses = ((instance.pollCount % 10 === 0) || instance.targetedMvp || instance.bosses === null) ? 1 : 0;
+  const isFullWithNullBosses = ((instance.pollCount % (instance.settings.bossHuntMode !== 'off' ? 5 : 10) === 0) || instance.targetedMvp || instance.bosses === null) ? 1 : 0;
   assert.strictEqual(isFullWithNullBosses, 1, 'isFull must be 1 when bosses is null');
 
   // Test Case 2: mvpConfirmClearCount reset when bosses is null
   instance.bosses = null;
-  instance.targetedMvp = false;
   instance.mvpConfirmClearCount = 3;
   let aliveTargetBosses = [];
   if (instance.bosses === null) {
-    instance.mvpConfirmClearCount = 0;
-  } else if (instance.targetedMvp) {
     instance.mvpConfirmClearCount = 0;
   } else if (aliveTargetBosses.length === 0) {
     instance.mvpConfirmClearCount++;
@@ -314,28 +312,21 @@ try {
   const needsWarp = (instance.settings.autoMap || instance.isMvpCycling) && Number(instance.player.map) !== Number(activeTargetMapId);
   assert.strictEqual(needsWarp, true, 'needsWarp must be true when player.map (3) is different from activeTargetMapId (2) during MVP cycle');
 
-  // Test Case 5: Lowest HP Priority Mode (hp_asc)
-  console.log('Testing hp_asc Boss Priority Mode...');
+  // Test Case 5: Absolute HP sorting (lowest HP first) for Type 2
+  console.log('Testing absolute HP sorting for Type 2...');
   const mockBosses = [
-    { id: 1, name: 'Boss Full HP', hp: 1000, hp_max: 1000 },
-    { id: 2, name: 'Boss Half HP', hp: 300, hp_max: 1000 },
-    { id: 3, name: 'Boss Low HP', hp: 50, hp_max: 1000 }
+    { id: 1, name: 'Boss Max HP', hp: 1000 },
+    { id: 2, name: 'Boss Half HP', hp: 300 },
+    { id: 3, name: 'Boss Low HP', hp: 50 }
   ];
-  mockBosses.sort((a, b) => {
-    const hpPctA = (a.hp || 0) / (a.hp_max || 1);
-    const hpPctB = (b.hp || 0) / (b.hp_max || 1);
-    return hpPctA - hpPctB;
-  });
-  assert.strictEqual(mockBosses[0].id, 3, 'Lowest HP % boss must be sorted first');
-  assert.strictEqual(mockBosses[2].id, 1, 'Highest HP % boss must be sorted last');
+  mockBosses.sort((a, b) => (a.hp || 0) - (b.hp || 0));
+  assert.strictEqual(mockBosses[0].id, 3, 'Lowest HP boss must be sorted first');
+  assert.strictEqual(mockBosses[2].id, 1, 'Highest HP boss must be sorted last');
 
   // Test Case 6: Fast 1-poll map clear confirmation
   instance.bosses = [];
-  instance.targetedMvp = false;
   instance.mvpConfirmClearCount = 0;
   if (instance.bosses === null) {
-    instance.mvpConfirmClearCount = 0;
-  } else if (instance.targetedMvp) {
     instance.mvpConfirmClearCount = 0;
   } else if (instance.bosses.length === 0) {
     instance.mvpConfirmClearCount++;

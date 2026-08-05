@@ -1297,21 +1297,16 @@ document.addEventListener('DOMContentLoaded', () => {
         <!-- Săn Boss Tab Pane -->
         <div class="tab-pane" id="pane-mvp-${acc.line_uid}">
           <div class="settings-group">
-            <div class="toggle-control">
-              <span class="toggle-label">👿 Auto Săn Boss MVP</span>
-              <label class="switch">
-                <input type="checkbox" id="chk-automvp-${acc.line_uid}" onchange="toggleSetting('${acc.line_uid}', 'autoMVP')">
-                <span class="slider"></span>
-              </label>
+            <div class="input-control" style="grid-column: span 2; margin-bottom: 6px;">
+              <label for="sel-boss-hunt-mode-${acc.line_uid}">👿 Chế độ Săn Boss</label>
+              <select id="sel-boss-hunt-mode-${acc.line_uid}" onchange="updateStringSetting('${acc.line_uid}', 'bossHuntMode')" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; padding: 6px; font-family: inherit; font-size: 0.85rem; outline: none; margin-top:2px; width: 100%;">
+                <option value="off">❌ Tắt tự động săn Boss</option>
+                <option value="type1">📍 Loại 1: Săn tại bản đồ hiện tại</option>
+                <option value="type2">🗺️ Loại 2: Săn theo bản đồ chỉ định</option>
+              </select>
             </div>
-            <div class="toggle-control">
-              <span class="toggle-label">🔄 Auto Xoay Map Săn Boss</span>
-              <label class="switch">
-                <input type="checkbox" id="chk-automvpcycle-${acc.line_uid}" onchange="toggleSetting('${acc.line_uid}', 'autoMvpCycle')">
-                <span class="slider"></span>
-              </label>
-            </div>
-            <div class="toggle-control">
+            
+            <div class="toggle-control" style="margin-top: 4px;">
               <span class="toggle-label">🏟️ Auto Đấu Trường</span>
               <label class="switch">
                 <input type="checkbox" id="chk-autoarena-${acc.line_uid}" onchange="toggleSetting('${acc.line_uid}', 'autoArena')">
@@ -1320,42 +1315,29 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
           </div>
 
-          <div class="settings-group" style="margin-top: 10px;">
-            <div class="input-control">
-              <label for="txt-mvp-target-maps-${acc.line_uid}">🗺️ Map săn Boss xoay vòng (VD: 1, 2, 3, 5, 6)</label>
-              <input type="text" id="txt-mvp-target-maps-${acc.line_uid}" placeholder="VD: 1, 2, 3, 5, 6" onchange="updateStringSetting('${acc.line_uid}', 'mvpTargetMaps')" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; padding: 6px; font-family: inherit; font-size: 0.85rem; outline: none; margin-top:2px;">
-              <span style="font-size: 0.72rem; color: #a3a3a3; margin-top: 4px; display: block; line-height: 1.3;">💡 Tự động đi săn vào mỗi giờ tròn (1:00, 2:00...) và delay 5s để đảm bảo Boss đã xuất hiện trên server.</span>
-            </div>
-          </div>
-
-          <div style="margin-top: 10px;">
-            <button type="button" onclick="forceMvpHunt('${acc.line_uid}')" style="background: rgba(220, 38, 38, 0.25); border: 1px solid rgba(220, 38, 38, 0.5); color: #fca5a5; border-radius: 6px; padding: 6px 12px; font-size: 0.85rem; cursor: pointer; width: 100%; font-weight: 600; text-align: center; transition: all 0.2s;" onmouseover="this.style.background='rgba(220, 38, 38, 0.4)'" onmouseout="this.style.background='rgba(220, 38, 38, 0.25)'">⚡ Kích hoạt đi săn ngay (Force Hunt)</button>
-          </div>
-
-          <div class="settings-group" style="margin-top: 10px;">
+          <!-- Section cho Loại 1 -->
+          <div id="group-boss-type1-${acc.line_uid}" class="settings-group" style="margin-top: 10px; display: none;">
             <div class="input-control" style="grid-column: span 2;">
               <label for="sel-mvp-priority-mode-${acc.line_uid}">🎯 Tiêu chí ưu tiên săn Boss</label>
-              <select id="sel-mvp-priority-mode-${acc.line_uid}" onchange="updateStringSetting('${acc.line_uid}', 'mvpPriorityMode')" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; padding: 6px; font-family: inherit; font-size: 0.85rem; outline: none; margin-top:2px;">
+              <select id="sel-mvp-priority-mode-${acc.line_uid}" onchange="updateStringSetting('${acc.line_uid}', 'mvpPriorityMode')" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; padding: 6px; font-family: inherit; font-size: 0.85rem; outline: none; margin-top:2px; width: 100%;">
                 <option value="distance">📍 Gần nhất (Khoảng cách)</option>
-                <option value="hp_asc">🩸 Ít máu nhất (HP % thấp nhất)</option>
                 <option value="level_asc">🐣 Cấp độ thấp nhất (Lv tăng dần)</option>
                 <option value="level_desc">🦅 Cấp độ cao nhất (Lv giảm dần)</option>
               </select>
             </div>
           </div>
 
-          <div class="settings-group" style="margin-top: 10px;">
+          <!-- Section cho Loại 2 -->
+          <div id="group-boss-type2-${acc.line_uid}" class="settings-group" style="margin-top: 10px; display: none;">
             <div class="input-control" style="grid-column: span 2;">
-              <label for="txt-mvp-name-priority-${acc.line_uid}">⭐ Tên Boss ưu tiên (cách nhau bởi dấu phẩy)</label>
-              <input type="text" id="txt-mvp-name-priority-${acc.line_uid}" placeholder="VD: Baphomet, Pharaoh (để trống nếu săn hết)" onchange="updateStringSetting('${acc.line_uid}', 'mvpNamePriority')" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; padding: 6px; font-family: inherit; font-size: 0.85rem; outline: none; margin-top:2px;">
+              <label for="txt-mvp-target-maps-${acc.line_uid}">🗺️ Bản đồ chỉ định (VD: 1, 2, 3, 5, 6)</label>
+              <input type="text" id="txt-mvp-target-maps-${acc.line_uid}" placeholder="VD: 1, 2, 3, 5, 6" onchange="updateStringSetting('${acc.line_uid}', 'mvpTargetMaps')" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; padding: 6px; font-family: inherit; font-size: 0.85rem; outline: none; margin-top:2px; width: 100%;">
+              <span style="font-size: 0.72rem; color: #34d399; margin-top: 4px; display: block; line-height: 1.3;">💡 Săn tất cả các boss theo thứ tự map. Sắp xếp: Máu ít diệt trước. Chu kỳ chạy mỗi giờ tròn hoặc kích hoạt thủ công.</span>
             </div>
           </div>
 
-          <div class="settings-group" style="margin-top: 10px;">
-            <div class="input-control" style="grid-column: span 2;">
-              <label for="txt-mvp-name-blacklist-${acc.line_uid}">🚫 Tên Boss bỏ qua (cách nhau bởi dấu phẩy)</label>
-              <input type="text" id="txt-mvp-name-blacklist-${acc.line_uid}" placeholder="VD: Slime King, Goblin Leader" onchange="updateStringSetting('${acc.line_uid}', 'mvpNameBlacklist')" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; padding: 6px; font-family: inherit; font-size: 0.85rem; outline: none; margin-top:2px;">
-            </div>
+          <div style="margin-top: 10px;">
+            <button type="button" onclick="forceMvpHunt('${acc.line_uid}')" style="background: rgba(220, 38, 38, 0.25); border: 1px solid rgba(220, 38, 38, 0.5); color: #fca5a5; border-radius: 6px; padding: 6px 12px; font-size: 0.85rem; cursor: pointer; width: 100%; font-weight: 600; text-align: center; transition: all 0.2s;" onmouseover="this.style.background='rgba(220, 38, 38, 0.4)'" onmouseout="this.style.background='rgba(220, 38, 38, 0.25)'">⚡ Kích hoạt đi săn ngay (Force Hunt)</button>
           </div>
         </div>
 
@@ -1781,11 +1763,19 @@ document.addEventListener('DOMContentLoaded', () => {
     const chkAutoGear = document.getElementById(`chk-autogear-${acc.line_uid}`);
     if (chkAutoGear && document.activeElement !== chkAutoGear) chkAutoGear.checked = acc.settings.autoGear === true;
 
-    const chkAutoMVP = document.getElementById(`chk-automvp-${acc.line_uid}`);
-    if (chkAutoMVP && document.activeElement !== chkAutoMVP) chkAutoMVP.checked = acc.settings.autoMVP === true;
+    const selBossHuntMode = document.getElementById(`sel-boss-hunt-mode-${acc.line_uid}`);
+    if (selBossHuntMode && document.activeElement !== selBossHuntMode) {
+      selBossHuntMode.value = acc.settings.bossHuntMode || 'off';
+    }
 
-    const chkAutoMvpCycle = document.getElementById(`chk-automvpcycle-${acc.line_uid}`);
-    if (chkAutoMvpCycle && document.activeElement !== chkAutoMvpCycle) chkAutoMvpCycle.checked = acc.settings.autoMvpCycle !== false;
+    const groupType1 = document.getElementById(`group-boss-type1-${acc.line_uid}`);
+    if (groupType1) {
+      groupType1.style.display = (acc.settings.bossHuntMode === 'type1') ? 'block' : 'none';
+    }
+    const groupType2 = document.getElementById(`group-boss-type2-${acc.line_uid}`);
+    if (groupType2) {
+      groupType2.style.display = (acc.settings.bossHuntMode === 'type2') ? 'block' : 'none';
+    }
 
     const chkAutoArena = document.getElementById(`chk-autoarena-${acc.line_uid}`);
     if (chkAutoArena && document.activeElement !== chkAutoArena) chkAutoArena.checked = acc.settings.autoArena === true;
@@ -1793,12 +1783,6 @@ document.addEventListener('DOMContentLoaded', () => {
     // MVP Boss settings sync
     const selMvpPriority = document.getElementById(`sel-mvp-priority-mode-${acc.line_uid}`);
     if (selMvpPriority && document.activeElement !== selMvpPriority) selMvpPriority.value = acc.settings.mvpPriorityMode || 'distance';
-
-    const txtMvpPriority = document.getElementById(`txt-mvp-name-priority-${acc.line_uid}`);
-    if (txtMvpPriority && document.activeElement !== txtMvpPriority) txtMvpPriority.value = acc.settings.mvpNamePriority || '';
-
-    const txtMvpBlacklist = document.getElementById(`txt-mvp-name-blacklist-${acc.line_uid}`);
-    if (txtMvpBlacklist && document.activeElement !== txtMvpBlacklist) txtMvpBlacklist.value = acc.settings.mvpNameBlacklist || '';
 
     const txtMvpTargetMaps = document.getElementById(`txt-mvp-target-maps-${acc.line_uid}`);
     if (txtMvpTargetMaps && document.activeElement !== txtMvpTargetMaps) txtMvpTargetMaps.value = acc.settings.mvpTargetMaps || '';
@@ -2680,7 +2664,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       if (e.event === 'cycle_start') {
         icon = '🚀';
-        title = 'Bắt đầu chu kỳ MVP';
+        title = 'Bắt đầu chu kỳ săn Boss';
         colorStyle = 'color:#60a5fa; font-weight:600;';
         detail = `Bản đồ: ${e.maps || ''} (Gốc: Map ${e.originMap || '?'})`;
       } else if (e.event === 'boss_found') {
@@ -2843,6 +2827,14 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!input) return;
 
     let val = input.value;
+    
+    // Instant visibility toggle for Săn Boss type sections
+    if (settingKey === 'bossHuntMode') {
+      const groupType1 = document.getElementById(`group-boss-type1-${uid}`);
+      const groupType2 = document.getElementById(`group-boss-type2-${uid}`);
+      if (groupType1) groupType1.style.display = (val === 'type1') ? 'block' : 'none';
+      if (groupType2) groupType2.style.display = (val === 'type2') ? 'block' : 'none';
+    }
     
     // Kiểm tra và định dạng danh sách bản đồ săn Boss xoay vòng
     if (settingKey === 'mvpTargetMaps') {
