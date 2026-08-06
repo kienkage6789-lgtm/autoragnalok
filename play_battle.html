@@ -665,6 +665,7 @@
             <thead>
               <tr>
                 <th>Người chơi</th>
+                <th>Cấp (Lv)</th>
                 <th>Bang Hội</th>
                 <th>Trạng thái</th>
                 <th>Khoảng cách</th>
@@ -673,7 +674,7 @@
             </thead>
             <tbody id="pk-table-body">
               <tr>
-                <td colspan="5" class="empty-msg">Chưa phát hiện người chơi khác nào.</td>
+                <td colspan="6" class="empty-msg">Chưa phát hiện người chơi khác nào.</td>
               </tr>
             </tbody>
           </table>
@@ -871,13 +872,23 @@ function updateBossTable(bosses, px, py) {
   }).join('');
 }
 
+function inspectPlayer(uid) {
+  event.stopPropagation(); // Ngăn target khi click inspect
+  if (typeof xhrpg !== 'undefined' && xhrpg.lbShow) {
+    addBattleLog(`🔍 Đang mở thông tin chi tiết của người chơi [UID: ${uid}]...`, 'SYSTEM');
+    xhrpg.lbShow(uid);
+  } else {
+    addBattleLog('❌ Không thể mở giao diện Inspect của game client.', 'ERROR');
+  }
+}
+
 // Cập nhật bảng PK
 function updatePkTable(players, px, py) {
   const tbody = document.getElementById('pk-table-body');
   if (!tbody) return;
   
   if (players.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="5" class="empty-msg">Chưa phát hiện người chơi khác nào.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="6" class="empty-msg">Chưa phát hiện người chơi khác nào.</td></tr>`;
     return;
   }
   
@@ -888,13 +899,31 @@ function updatePkTable(players, px, py) {
   players.sort((a, b) => a.dist - b.dist);
   
   tbody.innerHTML = players.map(p => {
+    const targetUid = p.uid || p.line_uid || p.id || p.name;
     const keyId = p.name || p.tid;
     const isTargeted = currentTargetType === 'player' && currentTargetId === keyId;
     const guildText = p.gd ? p.gd : 'Không bang';
+    const lvText = p.lv ? `Lv.${p.lv}` : '--';
+    
+    // Kiểm tra xem có dữ liệu HP của người chơi khác không
+    let hpHtml = '';
+    if (p.hp !== undefined && p.hp_max !== undefined) {
+      const pct = Math.max(0, Math.min(100, Math.round((p.hp / Math.max(1, p.hp_max)) * 100)));
+      const col = pct > 50 ? 'hp-high' : pct > 25 ? 'hp-med' : 'hp-low';
+      hpHtml = `
+        <span class="cell-hp-bar" style="margin-top:2px; display:block;">
+          <span class="cell-hp-fill ${col}" style="width: ${pct}%"></span>
+        </span>
+      `;
+    }
     
     return `
       <tr class="${isTargeted ? 'active-target' : ''}" onclick="setManualTarget('${keyId}', 'player', ${p.x}, ${p.y}, '${p.name}', '🧑')">
-        <td>🧑 ${p.name || 'Người chơi'}</td>
+        <td>
+          <div>🧑 ${p.name || 'Người chơi'}</div>
+          ${hpHtml}
+        </td>
+        <td><span style="color:#fbbf24; font-weight:700">${lvText}</span></td>
         <td style="color:#a855f7">🏰 ${guildText}</td>
         <td>
           <span class="badge ${p.is_dead ? 'badge-dead' : 'badge-live'}">
@@ -903,9 +932,12 @@ function updatePkTable(players, px, py) {
         </td>
         <td>📍 ${p.dist}m</td>
         <td>
-          <button class="target-btn ${isTargeted ? 'active' : ''}">
-            ${isTargeted ? '🎯 Đang Đuổi' : '⚔️ PK'}
-          </button>
+          <div style="display:flex; gap:4px">
+            <button class="target-btn" onclick="inspectPlayer('${targetUid}')" style="background:#4b5563" title="Xem trang bị & sức mạnh">🔍 Xem</button>
+            <button class="target-btn ${isTargeted ? 'active' : ''}">
+              ${isTargeted ? '🎯 Đang Đuổi' : '⚔️ PK'}
+            </button>
+          </div>
         </td>
       </tr>
     `;
