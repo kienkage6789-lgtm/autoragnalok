@@ -1639,7 +1639,25 @@ class BotInstance {
 
     // Đã đến đúng map mục tiêu -> Reset bộ đếm di chuyển transit và tăng bộ đếm thời gian lưu lại trên map
     this.mvpTransitCount = 0;
-    this.mvpCycleMapStayCount++;
+
+    let isAttackingMvp = false;
+    if (this.targetedMvp && this.lastTargetedBossId !== null && this.bosses) {
+      const activeBoss = this.bosses.find(b => b.id === this.lastTargetedBossId);
+      if (activeBoss) {
+        const dx = this.player.x - activeBoss.x;
+        const dy = this.player.y - activeBoss.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist <= 5) {
+          isAttackingMvp = true;
+        }
+      }
+    }
+
+    if (isAttackingMvp) {
+      this.mvpCycleMapStayCount = 0; // Đang tấn công -> reset timeout để luôn có đủ thời gian diệt boss
+    } else {
+      this.mvpCycleMapStayCount++;
+    }
 
     // 5. Quản lý danh sách Boss khi đã đến đúng map mục tiêu
     const aliveTargetBosses = this.bosses ? this.bosses.filter(b => (b.hp || 0) > 0) : [];

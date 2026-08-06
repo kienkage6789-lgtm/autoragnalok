@@ -1922,17 +1922,31 @@ document.addEventListener('DOMContentLoaded', () => {
               <span style="font-size: 0.65rem; color: #818cf8;">⏳ Quét Boss</span>
             </div>
           `;
-        } else {
-          // Hunt enabled but no boss alive on map (Type 1 or Type 2 idle)
+        } else if (acc.settings.bossHuntMode === 'type1') {
+          // Type 1: Canh boss tại map hiện tại
           banner.className = "boss-hunt-banner idle";
           banner.style.display = 'block';
-          banner.style.background = 'rgba(255, 255, 255, 0.05)';
-          banner.style.border = '1px solid rgba(255, 255, 255, 0.1)';
-          banner.style.color = '#94a3b8';
+          banner.style.background = 'rgba(34,197,94,0.1)';
+          banner.style.border = '1px solid rgba(34,197,94,0.25)';
+          banner.style.color = '#86efac';
+          const bossCount = acc.aliveBossCount || 0;
           banner.innerHTML = `
             <div style="display: flex; justify-content: space-between; align-items: center;">
-              <span>😈 Chế độ Săn Boss: Đang rà soát map...</span>
-              <span style="font-size: 0.65rem;">🔍 Chờ</span>
+              <span>📍 <b>[Loại 1]</b> Canh Boss tại Map ${p.map || '--'} — ${bossCount > 0 ? bossCount + ' Boss' : 'Chưa có Boss'}</span>
+              <span style="font-size: 0.65rem;">🔍 Đang quét</span>
+            </div>
+          `;
+        } else {
+          // Type 2: Đợi chu kỳ tiếp theo
+          banner.className = "boss-hunt-banner idle";
+          banner.style.display = 'block';
+          banner.style.background = 'rgba(99, 102, 241, 0.08)';
+          banner.style.border = '1px solid rgba(99, 102, 241, 0.2)';
+          banner.style.color = '#a5b4fc';
+          banner.innerHTML = `
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span>🗺️ <b>[Loại 2]</b> Chờ chu kỳ săn tiếp theo — Map ${p.map || '--'}</span>
+              <span style="font-size: 0.65rem;">⏳ Chờ chu kỳ</span>
             </div>
           `;
         }
@@ -1977,6 +1991,15 @@ document.addEventListener('DOMContentLoaded', () => {
               </div>
             `;
           }).join('');
+        }
+      } else if (acc.bossHuntActive) {
+        liveBossesSection.style.display = 'block';
+        const badgeEl = document.getElementById(`live-boss-count-badge-${acc.line_uid}`);
+        if (badgeEl) badgeEl.textContent = '0 Boss';
+        
+        const listEl = document.getElementById(`live-bosses-list-${acc.line_uid}`);
+        if (listEl) {
+          listEl.innerHTML = `<div style="text-align: center; padding: 12px 0; font-size: 0.72rem; color: var(--text-muted);">Chưa phát hiện Boss nào trên Map ${p.map || ''}</div>`;
         }
       } else {
         liveBossesSection.style.display = 'none';

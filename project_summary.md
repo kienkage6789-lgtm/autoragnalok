@@ -38,10 +38,11 @@ Chúng ta đã xây dựng thành công một hệ thống **Headless Bot Manage
     *   **Cập nhật HP Real-time**: Tự động gửi cờ `isFull = 1` ở mọi poll khi săn Boss để cập nhật liên tục vị trí và HP của Boss từng giây.
     *   **⚡ Snipe Mode**: Tăng tốc độ poll lên gấp đôi (delay $1000\text{ms}$ thay vì $2000\text{ms}$) và tạm ngừng mọi request phụ (Stats, Gear, Skill...) khi Boss dưới $30\%$ HP để đạt tần suất tấn công tối đa lấy Last-Hit.
 *   **Nâng cấp Trình theo dõi & Nhật ký Săn Boss MVP (Mới - 2026-08-06)**:
-    *   **Banner trạng thái Real-time**: Hiển thị banner màu sắc động ngay trên card bot Dashboard chính cho biết bot đang săn Boss nào (kèm timer giây thực tế), đang xoay vòng map tìm Boss hay đang rà soát map.
-    *   **Tự động cập nhật Boss Log**: Tự động làm mới dữ liệu tab log 👾 Boss mỗi 5 giây mà không cần bấm nút Refresh thủ công. Có cơ chế tự dọn dẹp (clear) timer thông minh khi tắt tab/ẩn card.
-    *   **Hiển thị Live Boss List**: Thêm phần "Boss Đang Sống Trên Map" hiển thị danh sách, tọa độ, thanh máu của tất cả boss trên map hiện tại, tính khoảng cách thời gian thực và highlight nhấp nháy boss mục tiêu chính.
-    *   **Nâng cấp Thống kê Journal**: Bổ sung chỉ số "Tỷ lệ diệt thành công %" (chống bị KS) và "Tổng thời gian săn" trong các chu kỳ vào grid 6 thẻ thống kê.
+    *   **Banner trạng thái Real-time (4 trạng thái)**: Hiển thị banner màu sắc động phân biệt rõ ràng: Đang Săn (Đỏ + timer giây thực tế), Đang xoay vòng tìm mục tiêu (Tím - Type 2), Canh Boss tại map (Xanh lá - Type 1), và Đợi chu kỳ tiếp theo (Tím nhạt - Type 2).
+    *   **Ngăn chặn Timeout 80s sớm**: Đối với chế độ Săn xoay vòng (Type 2), tự động reset bộ đếm thời gian lưu lại map về 0 khi bot đang cận chiến áp sát Boss (`dist <= 5m`). Tránh việc chuyển map lãng phí khi đang đánh dở boss trâu hoặc map có nhiều boss.
+    *   **Tự động cập nhật Boss Log**: Tự động làm mới dữ liệu tab log 👾 Boss mỗi 5 giây khi tab đang mở và tự động tắt (clear) timer thông minh khi chuyển tab hoặc đóng card.
+    *   **Hiển thị Live Boss List**: Thêm khu vực hiển thị danh sách, HP bar, tọa độ của tất cả boss trên map hiện tại, tính khoảng cách thực tế và highlight boss mục tiêu chính. Khi map trống, hiển thị thông điệp thân thiện thay vì ẩn hoàn toàn panel.
+    *   **Nâng cấp Thống kê Journal**: Bổ sung chỉ số "Tỷ lệ diệt thành công %" và "Tổng thời gian săn" trong chu kỳ vào bảng 6 thẻ.
     *   **Sửa lỗi log và dọn settings**: Sửa lỗi mất dấu khi map xuất hiện nhiều boss, đồng bộ hóa chu kỳ ghi log target boss về 5 giây thực, và dọn dẹp hoàn toàn 6 settings cũ di sản.
 *   **Tự động Đấu Trường (Auto Arena)**: Định kỳ quét đấu trường 1v1 mỗi 5 phút. Nếu còn lượt miễn phí (`free_runs > 0`), bot tự động thực hiện **Skip (Càn quét)** Boss đã từng thắng có cấp độ cao nhất để nhận thưởng lập tức, hoặc tự động **Enter (Khiêu chiến)** Boss cấp thấp nhất nếu là tài khoản mới.
 
