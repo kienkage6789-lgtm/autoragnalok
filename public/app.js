@@ -1041,6 +1041,7 @@ document.addEventListener('DOMContentLoaded', () => {
           <span id="proxy-badge-${acc.line_uid}" style="font-size:0.7rem; padding:1px 5px; border-radius:4px; background:rgba(99,102,241,0.15); color:#818cf8; border:1px solid rgba(99,102,241,0.3); white-space:nowrap; display: none;">🌐 —</span>
         </div>
         <div class="header-actions-compact">
+          <button class="btn-mini-action btn-battle" onclick="openBattleLink('${acc.line_uid}', '${acc.session_token}')" style="background:#7c3aed; border-color:#a855f7;" title="Mở Giao Diện Săn Boss & PK Chuyên Nghiệp">⚡ PK</button>
           <button class="btn-mini-action btn-play" onclick="openGameLink('${acc.line_uid}', '${acc.session_token}')" title="Mở trực tiếp Client Game">🎮 Play</button>
           <button class="btn-mini-action" onclick="openEditTokenModal('${acc.line_uid}')" title="Sửa Token">✏️</button>
           <button class="btn-mini-action btn-del" onclick="deleteAccount('${acc.line_uid}')" title="Xóa Tài Khoản">🗑️</button>
@@ -2932,6 +2933,12 @@ document.addEventListener('DOMContentLoaded', () => {
   // Open Client game window
   window.openGameLink = function(uid, token) {
     const url = `/play?line_uid=${uid}&session_token=${token}`;
+    window.open(url, '_blank');
+  };
+
+  // Open Battle Radar window
+  window.openBattleLink = function(uid, token) {
+    const url = `/battle?line_uid=${uid}&session_token=${token}`;
     window.open(url, '_blank');
   };
 

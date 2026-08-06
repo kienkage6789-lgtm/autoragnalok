@@ -1767,6 +1767,32 @@ class BotInstance {
       }
     }
 
+    // 👥 Nếu là Member, tự động đồng bộ Map và Trạng thái chu kỳ săn từ Leader
+    if (this.player && this.settings.teamRole === 'member') {
+      const leader = Object.values(botInstances).find(b => b.userId === this.userId && b.settings.teamRole === 'leader');
+      if (leader && leader.player && leader.settings.bossHuntMode !== 'off') {
+        const leaderMap = Number(leader.player.map);
+        // Đồng bộ trạng thái Cycle từ Leader
+        this.isMvpCycling = leader.isMvpCycling;
+        this.mvpCycleMapIndex = leader.mvpCycleMapIndex;
+        this.mvpCycleOriginalMap = leader.mvpCycleOriginalMap;
+        
+        // Nếu khác bản đồ với Leader, ép warp theo Leader ngay lập tức
+        if (Number(this.player.map) !== leaderMap) {
+          const mapDef = getMapDefs().find(m => m.id === leaderMap);
+          if (mapDef && (this.player.lv || 1) >= mapDef.req) {
+            this.addLog('SYSTEM', `👥 [Team Member] Đồng bộ di chuyển theo Trưởng nhóm (${leader.name}) sang Map ${leaderMap}`);
+            try {
+              await this.warpToMap(leaderMap);
+              return; // Kết thúc sớm poll để chạy trên map mới ở nhịp sau
+            } catch (e) {
+              this.addLog('ERROR', `Lỗi đồng bộ di chuyển theo Leader: ${e.message}`);
+            }
+          }
+        }
+      }
+    }
+
     // ⏰ Check scheduled MVP Boss Hunting Cycle (Round hours only, first 3 minutes of the hour)
     const nowTime = new Date();
     const currentHour = nowTime.getHours();
@@ -1846,16 +1872,34 @@ class BotInstance {
         }
 
         let activeBoss = null;
-        if (this.manualTargetBossId !== null) {
-          activeBoss = aliveBosses.find(b => b.id === this.manualTargetBossId);
-          if (!activeBoss) {
-            // Boss đã chết hoặc không còn trên map -> reset về tự động
-            this.manualTargetBossId = null;
-            this.addLog('SYSTEM', '🎯 [Manual Target] Boss chỉ định đã biến mất hoặc chết. Quay lại chế độ tự động.');
+
+        // 👥 Nếu là Member, ưu tiên tuyệt đối mục tiêu Boss của Leader
+        if (this.settings.teamRole === 'member') {
+          const leader = Object.values(botInstances).find(b => b.userId === this.userId && b.settings.teamRole === 'leader');
+          if (leader && leader.settings.bossHuntMode !== 'off') {
+            const leaderTargetId = leader.manualTargetBossId !== null ? leader.manualTargetBossId : leader.lastTargetedBossId;
+            if (leaderTargetId !== null) {
+              activeBoss = aliveBosses.find(b => b.id === leaderTargetId);
+              if (activeBoss) {
+                this.manualTargetBossId = leaderTargetId; // Đồng bộ luôn khóa mục tiêu thủ công nếu có
+              }
+            }
           }
         }
+
+        // Nếu không đồng bộ từ leader (hoặc leader không có target), chạy bình thường
         if (!activeBoss) {
-          activeBoss = targetPool[0];
+          if (this.manualTargetBossId !== null) {
+            activeBoss = aliveBosses.find(b => b.id === this.manualTargetBossId);
+            if (!activeBoss) {
+              // Boss đã chết hoặc không còn trên map -> reset về tự động
+              this.manualTargetBossId = null;
+              this.addLog('SYSTEM', '🎯 [Manual Target] Boss chỉ định đã biến mất hoặc chết. Quay lại chế độ tự động.');
+            }
+          }
+          if (!activeBoss) {
+            activeBoss = targetPool[0];
+          }
         }
         if (activeBoss) {
           this.targetedMvp = true;
@@ -2142,7 +2186,8 @@ class BotInstance {
       }
     }
 
-    if (this.isMvpCycling) {
+    // 👥 Chỉ có Trưởng nhóm (Leader) hoặc bot chạy độc lập mới quản lý tiến độ chu kỳ xoay map
+    if (this.isMvpCycling && this.settings.teamRole !== 'member') {
       await this.updateMvpCycleStatus();
     }
 
@@ -5022,6 +5067,28 @@ if (uid && token) {
 
     fallback = fallback.replace(/<script>[\s\S]*?LIFF_ID[\s\S]*?<\/script>/, customScript);
     res.send(fallback);
+  }
+});
+
+app.get('/battle', requireAuth, async (req, res) => {
+  const uid = req.query.line_uid;
+  if (uid && botInstances[uid]) {
+    if (req.user.role !== 'admin' && botInstances[uid].userId !== req.user.id) {
+      return res.status(403).send('<h2 style="color:#ef4444; font-family:sans-serif; text-align:center; margin-top:50px;">⚠️ Bạn không có quyền truy cập tài khoản game này!</h2>');
+    }
+  }
+  try {
+    let html = fs.readFileSync(path.join(__dirname, 'play_battle.html'), 'utf8');
+    const now = Date.now();
+    
+    // Áp dụng các thay thế và cache-buster
+    html = html.replace(/src="\/js\/xhrpg_canvas\.js[^"]*"/, `src="/js/xhrpg_canvas.js?v=${now}"`);
+    html = html.replace(/src="\/js\/xhrpg_lang_vi\.js[^"]*"/, `src="/js/xhrpg_lang_vi.js?v=${now}"`);
+    
+    res.send(html);
+  } catch (e) {
+    console.error('Serve battle html error:', e.message);
+    res.status(500).send('<h2 style="color:#ef4444; font-family:sans-serif; text-align:center; margin-top:50px;">⚠️ Không thể tải giao diện trận đấu!</h2>');
   }
 });
 
