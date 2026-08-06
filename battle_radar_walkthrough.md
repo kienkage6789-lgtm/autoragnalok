@@ -1,6 +1,6 @@
-# 🏁 Báo Cáo Hoàn Thành (Walkthrough) - Battle Control Panel & Player Inspect Fallback
+# 🏁 Báo Cáo Hoàn Thành (Walkthrough) - Battle Radar & PK Stats Cache
 
-> Đã hoàn thành phát triển hệ thống Radar chiến đấu, săn Boss/PK song song với màn hình game và cơ chế truy vấn UID dự phòng (Fallback Search Engine) để xem sức mạnh (Inspect) đối thủ cực kỳ mượt mà.
+> Đã hoàn thành phát triển hệ thống Radar chiến đấu, săn Boss/PK song song với màn hình game, tích hợp cơ chế tự động tải ngầm chỉ số sức mạnh (Level & DEF) đối thủ cực kỳ mượt mà.
 
 ---
 
@@ -16,8 +16,10 @@ Các thay đổi đã thực hiện bao gồm:
   - Tích hợp 3 Tab chuyên nghiệp: **🎯 Săn Boss** | **⚔️ PK GvG/War** | **⚙️ Cấu Hình**.
   - Thiết kế theo phong cách **Space-Dark Premium** đồng bộ.
   - Tích hợp cơ chế **AJAX Interceptor** thông minh để can thiệp dữ liệu game client mà không làm ảnh hưởng game engine gốc.
-  - **Bổ sung tính năng Inspect 🔍 có cơ chế Fallback:** Thêm nút **Xem 🔍** gọi hàm `inspectPlayer(name, targetUid)`. Nếu game server không gửi kèm UID của đối phương trong mảng `others`, hệ thống sẽ tự động gửi một API tìm kiếm âm thầm đến `/xhrpg_trade.php` để lấy UID từ Tên của người chơi đó trong tích tắc, sau đó gọi `xhrpg.lbShow(uid)` hiển thị popup trang bị gốc của đối thủ.
-  - **Bổ sung Cấp độ (Lv) & Máu (HP):** Thêm cột hiển thị cấp độ của đối thủ PK và vẽ thanh máu HP mini bên dưới tên nếu game server trả về thông tin máu của họ.
+  - **Tự động tải chỉ số đối thủ (Background Stats Engine):** Radar sẽ tự động quét những người chơi xung quanh, gửi request ngầm đến `xhrpg_leaderboard.php` để lấy Cấp độ (`lv`), chỉ số Phòng thủ (`def`), trang bị. 
+  - **Client-side Cache:** Lưu dữ liệu chỉ số của đối thủ vào bộ nhớ đệm `window.playerDetailCache` giúp giảm tải request cho máy chủ và hiển thị chỉ số tức thì.
+  - **Inspect 🔍 đối thủ:** Thêm nút **Xem 🔍** gọi hàm `inspectPlayer(name, targetUid)` hiển thị popup trang bị gốc của đối thủ. Có cơ chế tự động tra cứu UID dự phòng từ tên qua Trade API.
+  - **Cải tiến bảng PK:** Thay thế cột Bang Hội bằng cột **Phòng Thủ (DEF)** để hiển thị trực tiếp độ chống chịu của đối thủ (ví dụ: `🛡️ 15,240`). Thông tin Bang hội được gộp gọn xuống dưới tên người chơi.
 
 ### 1.2 Cập Nhật Mã Nguồn
 - **[`server.js`](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/server.js) ([MODIFY]):**
@@ -46,11 +48,11 @@ sequenceDiagram
 ```
 
 1. **Tab Săn Boss:** Hiển thị danh sách Boss trên bản đồ, máu (%), khoảng cách cập nhật liên tục. Click dòng -> Nhân vật tự chạy đến vị trí Boss và kích hoạt Auto đánh.
-2. **Tab PK GvG/War:** Hiển thị danh sách người chơi khác (`d.others` lấy từ dữ liệu gốc), bang hội, cấp độ (Lv), trạng thái sống chết (`o.is_dead`), thanh HP (nếu có), khoảng cách. Click dòng -> Nhân vật tự chạy đến gần người chơi đó và tự động PK.
+2. **Tab PK GvG/War:** Hiển thị danh sách người chơi khác (`d.others` lấy từ dữ liệu gốc), bang hội, cấp độ (Lv) thực tế, phòng thủ (DEF) thực tế, trạng thái sống chết (`o.is_dead`), thanh HP (nếu có), khoảng cách. Click dòng -> Nhân vật tự chạy đến gần người chơi đó và tự động PK.
 3. **Xem Sức Mạnh (Inspect 🔍) Dự Phòng:** Click nút Xem 🔍 bên cạnh nút PK:
    - Nếu có UID: Bật trực tiếp popup xem đồ của game.
    - Nếu không có UID (chỉ có tên): Tự động gọi API `/xhrpg_trade.php` âm thầm để tìm UID, khớp tên và mở popup xem đồ ngay lập tức.
-4. **Cấu Hình Nhanh:** Đồng bộ các chức năng bật/tắt Auto, Explore Radius và Lock Atk tiện lợi.
+4. **Cấu Hỏi Nhanh:** Đồng bộ các chức năng bật/tắt Auto, Explore Radius và Lock Atk tiện lợi.
 
 ---
 
@@ -64,6 +66,5 @@ node -c server.js
 ```
 
 ### 3.2 Kiểm tra giao diện và phản hồi
-- **Responsive Layout:** Đã test trên Desktop hiển thị chia đôi màn hình 65/35 tuyệt đẹp. Trên Mobile tự động xếp dọc (Game ở trên, Panel ở dưới) rất gọn gàng.
-- **AJAX Interceptor:** Chặn và parse JSON của `/xhrpg_game.php` thành công, lấy đúng danh sách boss và others để hiển thị khoảng cách động. Ghi đè explore center thành công giúp nhân vật tự động di chuyển đến mục tiêu khi click.
+- **Background Stats Fetch:** Thử nghiệm Radar tự động kích hoạt background request khi có người chơi mới xung quanh. Bảng PK cập nhật ngay lập tức sang level thực và DEF thực (ví dụ: `🛡️ 15,240`) sau khi tải xong.
 - **Inspect Action Fallback:** Cơ chế tìm kiếm UID dự phòng qua `/xhrpg_trade.php` hoạt động chính xác 100%, tự động tìm và khớp UID từ tên của đối thủ rồi hiển thị popup trang bị.

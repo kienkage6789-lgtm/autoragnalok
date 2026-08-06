@@ -664,9 +664,9 @@
           <table class="battle-table">
             <thead>
               <tr>
-                <th>Người chơi</th>
+                <th>Người chơi / Guild</th>
                 <th>Cấp (Lv)</th>
-                <th>Bang Hội</th>
+                <th>Phòng Thủ (DEF)</th>
                 <th>Trạng thái</th>
                 <th>Khoảng cách</th>
                 <th>Hành động</th>
@@ -787,6 +787,10 @@ function switchTab(tab) {
   document.getElementById('pane-' + tab).classList.add('active');
 }
 
+// Khởi tạo bộ nhớ đệm (Cache) chỉ số người chơi khác và dữ liệu game mới nhất
+window.playerDetailCache = {};
+window.lastGameData = null;
+
 // Bắt game data và cập nhật UI
 window.handleGameData = function(d) {
   const hudStatus = document.getElementById('bot-status-text');
@@ -795,6 +799,9 @@ window.handleGameData = function(d) {
   if (!d.player) return;
   const px = d.player.x;
   const py = d.player.y;
+  
+  // Lưu trữ dữ liệu game mới nhất vào biến toàn cục để hàm vẽ cache đọc được
+  window.lastGameData = d;
   
   // Đồng bộ trạng thái config panel với game client
   syncConfigPanel(d);
@@ -921,6 +928,70 @@ function inspectPlayer(name, providedUid) {
   });
 }
 
+// Tự động tải ngầm chỉ số sức mạnh đối thủ lưu vào cache
+function fetchPlayerDetailBackground(name, providedUid) {
+  // Nếu đã có trong cache (hoặc đang tải), bỏ qua
+  if (window.playerDetailCache[name]) return;
+  
+  // Đánh dấu đang tải
+  window.playerDetailCache[name] = { loading: true };
+  
+  const proceedWithUid = (targetUid) => {
+    $.getJSON('xhrpg_leaderboard.php', { show: targetUid })
+      .done(d => {
+        if (d && d.ok) {
+          window.playerDetailCache[name] = {
+            uid: targetUid,
+            lv: d.lv || 1,
+            def: d.def || 0,
+            stat: d.stat || {},
+            eqCount: d.eq ? d.eq.length : 0,
+            loading: false
+          };
+          
+          // Render lại bảng PK để hiển thị thông tin vừa cập nhật từ cache
+          if (window.lastGameData) {
+            updatePkTable(window.lastGameData.others || [], window.lastGameData.player.x, window.lastGameData.player.y);
+          }
+        } else {
+          // Lỗi -> cho phép quét lại sau
+          delete window.playerDetailCache[name];
+        }
+      })
+      .fail(() => {
+        delete window.playerDetailCache[name];
+      });
+  };
+
+  // Tra cứu UID dự phòng
+  if (providedUid && providedUid !== name && providedUid !== 'undefined') {
+    proceedWithUid(providedUid);
+  } else {
+    const urlParams = new URLSearchParams(window.location.search);
+    const uid = urlParams.get('line_uid');
+    const token = urlParams.get('session_token');
+    if (uid && token) {
+      $.post('/xhrpg_trade.php', {
+        line_uid: uid,
+        session_token: token,
+        lang: 'vi',
+        action: 'search',
+        q: name
+      }).done(res => {
+        const data = typeof res === 'string' ? JSON.parse(res) : res;
+        const found = data && data.players ? data.players.find(p => p.name === name) : null;
+        if (found && found.uid) {
+          proceedWithUid(found.uid);
+        } else {
+          delete window.playerDetailCache[name];
+        }
+      }).fail(() => {
+        delete window.playerDetailCache[name];
+      });
+    }
+  }
+}
+
 // Cập nhật bảng PK
 function updatePkTable(players, px, py) {
   const tbody = document.getElementById('pk-table-body');
@@ -941,10 +1012,22 @@ function updatePkTable(players, px, py) {
     const targetUid = p.uid || p.line_uid || p.id || p.name;
     const keyId = p.name || p.tid;
     const isTargeted = currentTargetType === 'player' && currentTargetId === keyId;
-    const guildText = p.gd ? p.gd : 'Không bang';
-    const lvText = p.lv ? `Lv.${p.lv}` : '--';
+    const guildText = p.gd ? `🏰 ${p.gd}` : 'Không bang';
     
-    // Kiểm tra xem có dữ liệu HP của người chơi khác không
+    // Đọc thông tin chỉ số từ Cache cục bộ
+    const cacheData = window.playerDetailCache[p.name];
+    let lvText = '--';
+    let defText = 'Đang quét...';
+    
+    if (cacheData && !cacheData.loading) {
+      lvText = `Lv.${cacheData.lv}`;
+      defText = `🛡️ ${cacheData.def.toLocaleString()}`;
+    } else {
+      // Nếu chưa có trong cache, kích hoạt tải ngầm
+      fetchPlayerDetailBackground(p.name, targetUid);
+    }
+    
+    // Vẽ thanh HP nếu có dữ liệu
     let hpHtml = '';
     if (p.hp !== undefined && p.hp_max !== undefined) {
       const pct = Math.max(0, Math.min(100, Math.round((p.hp / Math.max(1, p.hp_max)) * 100)));
@@ -959,11 +1042,12 @@ function updatePkTable(players, px, py) {
     return `
       <tr class="${isTargeted ? 'active-target' : ''}" onclick="setManualTarget('${keyId}', 'player', ${p.x}, ${p.y}, '${p.name}', '🧑')">
         <td>
-          <div>🧑 ${p.name || 'Người chơi'}</div>
+          <div style="font-weight:700">🧑 ${p.name || 'Người chơi'}</div>
+          <div style="font-size:10px; color:#a855f7">${guildText}</div>
           ${hpHtml}
         </td>
-        <td><span style="color:#fbbf24; font-weight:700">${lvText}</span></td>
-        <td style="color:#a855f7">🏰 ${guildText}</td>
+        <td><span style="color:#fbbf24; font-weight:800">${lvText}</span></td>
+        <td><span style="color:#38bdf8; font-weight:700">${defText}</span></td>
         <td>
           <span class="badge ${p.is_dead ? 'badge-dead' : 'badge-live'}">
             ${p.is_dead ? 'HỒN GHOST' : 'ĐANG SỐNG'}
@@ -972,7 +1056,7 @@ function updatePkTable(players, px, py) {
         <td>📍 ${p.dist}m</td>
         <td>
           <div style="display:flex; gap:4px">
-            <button class="target-btn" onclick="inspectPlayer('${p.name}', '${targetUid}')" style="background:#4b5563" title="Xem trang bị & sức mạnh">🔍 Xem</button>
+            <button class="target-btn" onclick="inspectPlayer('${p.name}', '${cacheData ? cacheData.uid : targetUid}')" style="background:#4b5563" title="Xem trang bị & sức mạnh">🔍 Xem</button>
             <button class="target-btn ${isTargeted ? 'active' : ''}">
               ${isTargeted ? '🎯 Đang Đuổi' : '⚔️ PK'}
             </button>
