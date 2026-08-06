@@ -2414,6 +2414,10 @@ input:checked + .slider:before {
 .live-boss-item {
   transition: all 0.2s ease;
 }
+.live-boss-item:hover {
+  background: rgba(255, 255, 255, 0.08) !important;
+  border-color: rgba(255, 255, 255, 0.15) !important;
+}
 .live-boss-item.target {
   animation: pulse-border 2s infinite alternate;
 }
@@ -2421,7 +2425,3 @@ input:checked + .slider:before {
   0% { border-color: rgba(251, 191, 36, 0.3); box-shadow: 0 0 2px rgba(251, 191, 36, 0.1); }
   100% { border-color: rgba(251, 191, 36, 0.8); box-shadow: 0 0 6px rgba(251, 191, 36, 0.3); }
 }
-
-
-
-

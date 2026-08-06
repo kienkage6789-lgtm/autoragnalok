@@ -1980,7 +1980,14 @@ document.addEventListener('DOMContentLoaded', () => {
               <div class="live-boss-item ${targetClass}" style="display: flex; flex-direction: column; gap: 4px; padding: 6px 8px; border-radius: 6px; border: 1px solid ${b.isTarget ? 'rgba(251,191,36,0.3)' : 'rgba(255,255,255,0.06)'}; background: ${b.isTarget ? 'rgba(251,191,36,0.08)' : 'rgba(0,0,0,0.2)'}; font-size: 0.72rem;">
                 <div style="display: flex; justify-content: space-between; align-items: center;">
                   <span style="font-weight: 600; color: ${b.isTarget ? '#fbbf24' : '#fff'};">${targetIcon}${b.emoji} ${b.name} <span style="font-size: 0.65rem; color: var(--text-muted);">Lv.${b.lv}</span></span>
-                  <span style="font-size: 0.65rem; color: ${b.isTarget ? '#fbbf24' : 'var(--text-secondary)'}; font-weight: 600;">📍 ${approachText} (${b.x}, ${b.y})</span>
+                  <div style="display: flex; align-items: center; gap: 6px;">
+                    <span style="font-size: 0.65rem; color: ${b.isTarget ? '#fbbf24' : 'var(--text-secondary)'}; font-weight: 600;">📍 ${approachText} (${b.x}, ${b.y})</span>
+                    <button type="button" onclick="selectBossTarget('${acc.line_uid}', ${b.isTarget ? 'null' : b.id})" 
+                      style="font-size: 0.65rem; font-weight: 700; padding: 2px 6px; border-radius: 4px; border: 1px solid ${b.isTarget ? 'rgba(34,197,94,0.4)' : 'rgba(255,255,255,0.15)'}; background: ${b.isTarget ? 'rgba(34,197,94,0.15)' : 'rgba(255,255,255,0.05)'}; color: ${b.isTarget ? '#4ade80' : '#e2e8f0'}; cursor: pointer; transition: all 0.2s;"
+                      title="${b.isTarget ? 'Nhấn để hủy ưu tiên săn boss này, quay lại tự động' : 'Click để ưu tiên săn boss này'}">
+                      ${b.isTarget ? '✅ Nhắm' : '🎯 Chọn'}
+                    </button>
+                  </div>
                 </div>
                 <div style="display: flex; align-items: center; gap: 8px;">
                   <div class="hp-bar-mini-container" style="flex: 1; height: 6px; background: rgba(0,0,0,0.3); border-radius: 3px; overflow: hidden;">
@@ -3175,6 +3182,24 @@ document.addEventListener('DOMContentLoaded', () => {
         fetchAccounts();
       } else {
         alert('🔴 Lỗi: ' + (data.error || 'Không thể kích hoạt săn Boss'));
+      }
+    } catch (e) {
+      alert(`❌ Lỗi kết nối: ${e.message}`);
+    }
+  };
+
+  window.selectBossTarget = async function(uid, bossId) {
+    try {
+      const res = await fetch(`/api/accounts/${uid}/action`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'set_boss_target', extra: { bossId } })
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        fetchAccounts();
+      } else {
+        alert('🔴 Lỗi: ' + (data.error || 'Không thể chọn Boss'));
       }
     } catch (e) {
       alert(`❌ Lỗi kết nối: ${e.message}`);

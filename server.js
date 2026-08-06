@@ -1032,6 +1032,7 @@ class BotInstance {
     this.arrivedAtZoneCenter = false;
     this.targetedMvp = false;
     this.lastTargetedBossId = null;
+    this.manualTargetBossId = null; // Boss ID do user chọn thủ công từ Dashboard
     this.bossSpawnTimes = {}; // Tracker for when each boss starts appearing: bossId -> timestamp
     this._bossNameCache = {}; // Cache boss names for logging when they disappear
     this._lastBossStatusLogAt = 0; // Track last time boss status log was sent to prevent spamming
@@ -1844,7 +1845,18 @@ class BotInstance {
           }
         }
 
-        const activeBoss = targetPool[0];
+        let activeBoss = null;
+        if (this.manualTargetBossId !== null) {
+          activeBoss = aliveBosses.find(b => b.id === this.manualTargetBossId);
+          if (!activeBoss) {
+            // Boss đã chết hoặc không còn trên map -> reset về tự động
+            this.manualTargetBossId = null;
+            this.addLog('SYSTEM', '🎯 [Manual Target] Boss chỉ định đã biến mất hoặc chết. Quay lại chế độ tự động.');
+          }
+        }
+        if (!activeBoss) {
+          activeBoss = targetPool[0];
+        }
         if (activeBoss) {
           this.targetedMvp = true;
           this.mvpConfirmClearCount = 0; // Reset confirm clear vì vẫn còn boss đang sống
@@ -4588,6 +4600,22 @@ app.post('/api/accounts/:line_uid/action', requireAuth, async (req, res) => {
     } catch (err) {
       return res.status(500).json({ error: err.message });
     }
+  }
+
+  if (action === 'set_boss_target') {
+    const bossId = extra && extra.bossId !== undefined ? Number(extra.bossId) : null;
+    if (bossId === null) {
+      bot.manualTargetBossId = null;
+      bot.addLog('SYSTEM', '🎯 [Manual Target] Đã hủy chỉ định boss thủ công. Quay lại chế độ tự động.');
+      return res.json({ ok: true, msg: 'Đã hủy chỉ định boss. Bot sẽ tự chọn mục tiêu.' });
+    }
+    const aliveBoss = bot.bosses ? bot.bosses.find(b => b.id === bossId && (b.hp || 0) > 0) : null;
+    if (!aliveBoss) {
+      return res.status(400).json({ error: 'Boss không tồn tại hoặc đã chết.' });
+    }
+    bot.manualTargetBossId = bossId;
+    bot.addLog('SYSTEM', `🎯 [Manual Target] User chỉ định mục tiêu: ${aliveBoss.emoji || '👾'} ${aliveBoss.name || 'Boss'} (Lv.${aliveBoss.lv || 1})`);
+    return res.json({ ok: true, msg: `Đã chỉ định mục tiêu: ${aliveBoss.emoji || '👾'} ${aliveBoss.name}` });
   }
 
   try {
