@@ -1119,15 +1119,9 @@ class BotInstance {
       lock_zone_center: false,
       targetZone: 0,
       bossHuntMode: 'off', // 'off' | 'type1' | 'type2'
-      autoMVP: false,
-      autoMvpCycle: true,
-      mvpRotateInterval: 0,
       currentMvpMapIndex: 0,
       mvpPriorityMode: 'distance',
-      mvpNamePriority: '',
-      mvpNameBlacklist: '',
       mvpTargetMaps: '',
-      mvpHuntSchedule: '',
       autoArena: false,
       autoHomeHarvest: false,
       autoHomePlant: false,
@@ -3924,7 +3918,22 @@ app.get('/api/accounts', requireAuth, (req, res) => {
               };
             }
             return formatted;
-          })()
+          })(),
+          isMvpCycling: bot.isMvpCycling || false,
+          currentMvpBossInfo: bot.currentMvpBossInfo || null,
+          aliveBossCount: bot.bosses ? bot.bosses.filter(b => (b.hp || 0) > 0).length : 0,
+          bossHuntActive: bot.settings.bossHuntMode !== 'off',
+          aliveBosses: (bot.bosses || []).filter(b => (b.hp || 0) > 0).map(b => ({
+            id: b.id,
+            name: b.name || 'Boss',
+            emoji: b.emoji || '👾',
+            lv: b.lv || 1,
+            hp: b.hp,
+            hp_max: b.hp_max,
+            x: b.x,
+            y: b.y,
+            isTarget: b.id === bot.lastTargetedBossId
+          }))
         };
       });
     res.json(list);

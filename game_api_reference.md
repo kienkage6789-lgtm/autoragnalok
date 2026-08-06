@@ -106,6 +106,12 @@ Dưới đây là danh sách các API và Endpoint nội bộ của Server Bot M
     *   **Mô tả**: Trả về danh sách tài khoản game của user hiện tại (hoặc tất cả nếu là admin).
     *   **Bảo mật**: Trường `proxyInfo` chỉ được trả về nếu người dùng đăng nhập có vai trò `admin`.
     *   **Thống kê hiệu suất**: Trả về trường `combatRates` chứa các chỉ số `{ killsPerMin, goldPerMin, expPerMin }` được tính toán thời gian thực theo cơ chế Sliding Window (cửa sổ trượt 5 phút).
+    *   **Thông tin săn Boss thời gian thực (Mới)**: Trả về thêm các trường phục vụ hiển thị banner trạng thái và live list:
+        *   `bossHuntActive`: Boolean (`true` nếu đang bật chế độ săn boss khác `'off'`).
+        *   `isMvpCycling`: Boolean (`true` nếu đang chạy chu kỳ xoay vòng map săn boss).
+        *   `currentMvpBossInfo`: Object `{ id, name, emoji, lv, mapId, startTs }` chứa thông tin chi tiết boss đang bị khóa mục tiêu di chuyển/tấn công (hoặc `null` nếu chưa có target).
+        *   `aliveBossCount`: Số lượng boss còn sống trên map hiện tại.
+        *   `aliveBosses`: Mảng chứa thông tin các boss đang sống trên map hiện tại: `[{ id, name, emoji, lv, hp, hp_max, x, y, isTarget }]`, trong đó `isTarget: true` cho biết boss đang được bot khóa mục tiêu tấn công.
 *   **API Cập nhật Cấu hình**: `PUT /api/accounts/:line_uid`
     *   **Tham số**: `{ settings: { targetMap, bossHuntMode, mvpPriorityMode, mvpTargetMaps, ... }, proxyId }`
     *   **Chi tiết Săn Boss**:

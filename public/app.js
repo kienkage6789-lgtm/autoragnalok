@@ -1086,6 +1086,8 @@ document.addEventListener('DOMContentLoaded', () => {
         </div>
       </div>
 
+      <div class="boss-hunt-banner" id="boss-hunt-banner-${acc.line_uid}" style="display: none; padding: 6px 10px; margin-bottom: 8px; border-radius: 8px; font-size: 0.75rem; line-height: 1.35;"></div>
+
       <div class="combat-rates-strip" onclick="toggleRateUnit('${acc.line_uid}')" style="cursor: pointer;" title="Click để chuyển đổi thống kê Phút (/m) ➔ Giờ (/h) ➔ Ngày (/d)">
         <span class="stat-pill" id="rate-pill-kills-${acc.line_uid}">⚔️ <strong id="rate-kills-${acc.line_uid}">0/m</strong></span>
         <span class="stat-pill" id="rate-pill-gold-${acc.line_uid}">💰 <strong id="rate-gold-${acc.line_uid}">+0/m</strong></span>
@@ -1338,6 +1340,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
           <div style="margin-top: 10px;">
             <button type="button" onclick="forceMvpHunt('${acc.line_uid}')" style="background: rgba(220, 38, 38, 0.25); border: 1px solid rgba(220, 38, 38, 0.5); color: #fca5a5; border-radius: 6px; padding: 6px 12px; font-size: 0.85rem; cursor: pointer; width: 100%; font-weight: 600; text-align: center; transition: all 0.2s;" onmouseover="this.style.background='rgba(220, 38, 38, 0.4)'" onmouseout="this.style.background='rgba(220, 38, 38, 0.25)'">⚡ Kích hoạt đi săn ngay (Force Hunt)</button>
+          </div>
+
+          <div class="live-bosses-section" id="live-bosses-section-${acc.line_uid}" style="margin-top: 12px; border-top: 1px dashed rgba(255,255,255,0.08); padding-top: 10px; display: none;">
+            <div style="font-size: 0.8rem; font-weight: 700; color: #fbbf24; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">
+              <span>👹 Boss Đang Sống Trên Map</span>
+              <span id="live-boss-count-badge-${acc.line_uid}" style="font-size: 0.65rem; background: rgba(251,191,36,0.15); color: #fbbf24; border: 1px solid rgba(251,191,36,0.3); border-radius: 10px; padding: 1px 6px; font-weight: 600;">0 Boss</span>
+            </div>
+            <div class="live-bosses-list" id="live-bosses-list-${acc.line_uid}" style="display: flex; flex-direction: column; gap: 4px; max-height: 150px; overflow-y: auto;">
+              <!-- Dynamically populated -->
+            </div>
           </div>
         </div>
 
@@ -1871,6 +1883,106 @@ document.addEventListener('DOMContentLoaded', () => {
     renderPetSection(acc);
     updateHomeTabUI(acc);
 
+    // Render real-time boss hunt banner
+    const banner = document.getElementById(`boss-hunt-banner-${acc.line_uid}`);
+    if (banner) {
+      if (acc.bossHuntActive) {
+        banner.style.display = 'block';
+        if (acc.currentMvpBossInfo) {
+          const b = acc.currentMvpBossInfo;
+          // Calculate elapsed time
+          const elapsedSecs = Math.round((Date.now() - b.startTs) / 1000);
+          const timeStr = elapsedSecs >= 60 ? `${Math.floor(elapsedSecs/60)}m ${elapsedSecs%60}s` : `${elapsedSecs}s`;
+          
+          let statusText = `⚔️ <b>Đang săn:</b> ${b.emoji || '👾'} <b>${b.name}</b> Lv.${b.lv}`;
+          if (acc.isMvpCycling) {
+            statusText = `🗺️ <b>Chu kỳ Săn:</b> ${statusText}`;
+          }
+          
+          banner.className = "boss-hunt-banner hunting";
+          banner.style.background = 'rgba(239, 68, 68, 0.15)';
+          banner.style.border = '1px solid rgba(239, 68, 68, 0.3)';
+          banner.style.color = '#fca5a5';
+          banner.innerHTML = `
+            <div style="display: flex; justify-content: space-between; align-items: center; font-weight: 600;">
+              <span>${statusText}</span>
+              <span style="font-size: 0.65rem; color: #f87171;">⏱️ ${timeStr}</span>
+            </div>
+          `;
+        } else if (acc.isMvpCycling) {
+          // In cycle but no active boss target yet
+          banner.className = "boss-hunt-banner cycling";
+          banner.style.display = 'block';
+          banner.style.background = 'rgba(99, 102, 241, 0.15)';
+          banner.style.border = '1px solid rgba(99, 102, 241, 0.3)';
+          banner.style.color = '#a5b4fc';
+          banner.innerHTML = `
+            <div style="display: flex; justify-content: space-between; align-items: center; font-weight: 600;">
+              <span>🗺️ <b>Chu kỳ Săn Boss:</b> Tìm mục tiêu trên Map ${p.map || '--'}...</span>
+              <span style="font-size: 0.65rem; color: #818cf8;">⏳ Quét Boss</span>
+            </div>
+          `;
+        } else {
+          // Hunt enabled but no boss alive on map (Type 1 or Type 2 idle)
+          banner.className = "boss-hunt-banner idle";
+          banner.style.display = 'block';
+          banner.style.background = 'rgba(255, 255, 255, 0.05)';
+          banner.style.border = '1px solid rgba(255, 255, 255, 0.1)';
+          banner.style.color = '#94a3b8';
+          banner.innerHTML = `
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span>😈 Chế độ Săn Boss: Đang rà soát map...</span>
+              <span style="font-size: 0.65rem;">🔍 Chờ</span>
+            </div>
+          `;
+        }
+      } else {
+        banner.style.display = 'none';
+      }
+    }
+
+    // Render live boss list inside Săn Boss tab pane
+    const liveBossesSection = document.getElementById(`live-bosses-section-${acc.line_uid}`);
+    if (liveBossesSection) {
+      if (acc.bossHuntActive && acc.aliveBosses && acc.aliveBosses.length > 0) {
+        liveBossesSection.style.display = 'block';
+        const badgeEl = document.getElementById(`live-boss-count-badge-${acc.line_uid}`);
+        if (badgeEl) badgeEl.textContent = `${acc.aliveBosses.length} Boss`;
+        
+        const listEl = document.getElementById(`live-bosses-list-${acc.line_uid}`);
+        if (listEl) {
+          listEl.innerHTML = acc.aliveBosses.map(b => {
+            const hpPct = b.hp_max > 0 ? Math.round((b.hp / b.hp_max) * 100) : 0;
+            // Calculate distance to boss
+            const dx = (p.x || 0) - (b.x || 0);
+            const dy = (p.y || 0) - (b.y || 0);
+            const dist = Math.round(Math.sqrt(dx*dx + dy*dy));
+            
+            const targetIcon = b.isTarget ? '🎯 ' : '';
+            const targetClass = b.isTarget ? 'target' : '';
+            const approachText = dist <= 5 ? 'Đã áp sát' : `${dist}m`;
+            
+            return `
+              <div class="live-boss-item ${targetClass}" style="display: flex; flex-direction: column; gap: 4px; padding: 6px 8px; border-radius: 6px; border: 1px solid ${b.isTarget ? 'rgba(251,191,36,0.3)' : 'rgba(255,255,255,0.06)'}; background: ${b.isTarget ? 'rgba(251,191,36,0.08)' : 'rgba(0,0,0,0.2)'}; font-size: 0.72rem;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                  <span style="font-weight: 600; color: ${b.isTarget ? '#fbbf24' : '#fff'};">${targetIcon}${b.emoji} ${b.name} <span style="font-size: 0.65rem; color: var(--text-muted);">Lv.${b.lv}</span></span>
+                  <span style="font-size: 0.65rem; color: ${b.isTarget ? '#fbbf24' : 'var(--text-secondary)'}; font-weight: 600;">📍 ${approachText} (${b.x}, ${b.y})</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <div class="hp-bar-mini-container" style="flex: 1; height: 6px; background: rgba(0,0,0,0.3); border-radius: 3px; overflow: hidden;">
+                    <div class="hp-bar-mini-fill" style="width: ${hpPct}%; height: 100%; background: ${hpPct <= 30 ? '#ef4444' : '#eab308'}; border-radius: 3px; transition: width 0.3s;"></div>
+                  </div>
+                  <span style="font-size: 0.65rem; min-width: 65px; text-align: right; color: var(--text-muted); font-family: monospace;">${b.hp.toLocaleString()}/${b.hp_max.toLocaleString()} (${hpPct}%)</span>
+                </div>
+              </div>
+            `;
+          }).join('');
+        }
+      } else {
+        liveBossesSection.style.display = 'none';
+      }
+    }
+
     // Render tab contents based on active state
     const currentTab = activeTabs[acc.line_uid];
     if (currentTab === 'log' && (activeLogSubTabs[acc.line_uid] || 'act') === 'act') {
@@ -2045,8 +2157,15 @@ document.addEventListener('DOMContentLoaded', () => {
     if (targetTabId === 'log') {
       const subTabId = activeLogSubTabs[uid] || 'act';
       switchLogSubTab(uid, subTabId);
-    } else if (targetTabId) {
-      fetchAccounts();
+    } else {
+      // Clear the boss log interval if switching away from log tab or collapsing card
+      if (window._bossLogIntervals && window._bossLogIntervals[uid]) {
+        clearInterval(window._bossLogIntervals[uid]);
+        delete window._bossLogIntervals[uid];
+      }
+      if (targetTabId) {
+        fetchAccounts();
+      }
     }
   };
 
@@ -2074,6 +2193,13 @@ document.addEventListener('DOMContentLoaded', () => {
     if (paneMarket) paneMarket.style.display = subTabId === 'market' ? 'block' : 'none';
     if (paneBoss) paneBoss.style.display = subTabId === 'boss' ? 'block' : 'none';
 
+    // Reset/clear existing interval for this bot card
+    if (!window._bossLogIntervals) window._bossLogIntervals = {};
+    if (window._bossLogIntervals[uid]) {
+      clearInterval(window._bossLogIntervals[uid]);
+      delete window._bossLogIntervals[uid];
+    }
+
     if (subTabId === 'act') {
       fetchLogs(uid);
     } else if (subTabId === 'loot') {
@@ -2082,6 +2208,17 @@ document.addEventListener('DOMContentLoaded', () => {
       fetchMarketHistory(uid);
     } else if (subTabId === 'boss') {
       fetchBossLog(uid);
+      // Auto-refresh boss log every 5 seconds while active
+      window._bossLogIntervals[uid] = setInterval(() => {
+        const pane = document.getElementById(`pane-log-${uid}`);
+        const subpane = document.getElementById(`log-subpane-boss-${uid}`);
+        if (pane && pane.style.display !== 'none' && subpane && subpane.style.display !== 'none' && activeLogSubTabs[uid] === 'boss') {
+          fetchBossLog(uid);
+        } else {
+          clearInterval(window._bossLogIntervals[uid]);
+          delete window._bossLogIntervals[uid];
+        }
+      }, 5000);
     }
   };
 
@@ -2600,6 +2737,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Compute MVP Boss hunting statistics
   function computeBossStats(log) {
     const kills = log.filter(e => e.event === 'boss_killed');
+    const losts = log.filter(e => e.event === 'boss_lost');
     const cycles = log.filter(e => e.event === 'cycle_done');
     const mapCounts = {};
     kills.forEach(k => {
@@ -2611,12 +2749,19 @@ document.addEventListener('DOMContentLoaded', () => {
     const totalMs = kills.reduce((s, k) => s + (k.durationMs || 0), 0);
     const avgDurMs = kills.length > 0 ? Math.round(totalMs / kills.length) : 0;
 
+    const totalKills = kills.length;
+    const totalLosts = losts.length;
+    const successRate = (totalKills + totalLosts) > 0 ? Math.round((totalKills / (totalKills + totalLosts)) * 100) : 100;
+    const totalCycleTimeMs = cycles.reduce((s, c) => s + (c.totalTimeMs || 0), 0);
+
     return {
-      totalKills: kills.length,
+      totalKills,
       totalCycles: cycles.length,
       avgDurMs,
       hotMap,
-      hotMapCount
+      hotMapCount,
+      successRate,
+      totalCycleTimeMs
     };
   }
 
@@ -2626,10 +2771,14 @@ document.addEventListener('DOMContentLoaded', () => {
     if (statsContainer) {
       const st = computeBossStats(log);
       statsContainer.innerHTML = `
-        <div class="boss-stats-grid">
+        <div class="boss-stats-grid" style="grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 6px 8px; background: rgba(192, 132, 252, 0.08); border: 1px solid rgba(192, 132, 252, 0.2); border-radius: 6px;">
           <div class="boss-stat-item">
             <span class="bsi-val">💀 ${st.totalKills}</span>
             <span class="bsi-label">Boss đã hạ</span>
+          </div>
+          <div class="boss-stat-item" title="Tỷ lệ hạ Boss thành công so với bị người khác Ks">
+            <span class="bsi-val" style="color: ${st.successRate >= 70 ? '#34d399' : (st.successRate >= 40 ? '#fbbf24' : '#ef4444')};">🎯 ${st.successRate}%</span>
+            <span class="bsi-label">Tỷ lệ diệt</span>
           </div>
           <div class="boss-stat-item">
             <span class="bsi-val">🔄 ${st.totalCycles}</span>
@@ -2638,6 +2787,10 @@ document.addEventListener('DOMContentLoaded', () => {
           <div class="boss-stat-item">
             <span class="bsi-val">⏱️ ${fmtMs(st.avgDurMs)}</span>
             <span class="bsi-label">TB / Boss</span>
+          </div>
+          <div class="boss-stat-item" title="Tổng thời gian chạy trong các chu kỳ xoay vòng">
+            <span class="bsi-val">⏳ ${fmtMs(st.totalCycleTimeMs)}</span>
+            <span class="bsi-label">Tổng tg săn</span>
           </div>
           <div class="boss-stat-item">
             <span class="bsi-val">🗺️ Map ${st.hotMap}</span>
