@@ -1033,6 +1033,8 @@ class BotInstance {
     this.targetedMvp = false;
     this.lastTargetedBossId = null;
     this.bossSpawnTimes = {}; // Tracker for when each boss starts appearing: bossId -> timestamp
+    this._bossNameCache = {}; // Cache boss names for logging when they disappear
+    this._lastBossStatusLogAt = 0; // Track last time boss status log was sent to prevent spamming
     this.firstErrorAt = null; // Mốc thời gian bắt đầu lỗi liên tục
     this.isMvpCycling = false;
     this.mvpCycleMapIndex = 0;
@@ -1160,6 +1162,8 @@ class BotInstance {
         this.mvpCycleMapStayCount = 0;
         this.mvpConfirmClearCount = 0;
         this.bosses = null;
+        this._bossNameCache = {};
+        this._lastBossStatusLogAt = 0;
         
         // Khôi phục autoMap ban đầu
         if (this.mvpCycleOriginalAutoMap !== null) {
@@ -1211,6 +1215,48 @@ class BotInstance {
     if (this.mvpHuntLog.length > 100) {
       this.mvpHuntLog.shift();
     }
+  }
+
+  logTargetBossCompletion() {
+    if (this.lastTargetedBossId === null) return;
+    const durationMs = this.currentMvpBossInfo ? (Date.now() - this.currentMvpBossInfo.startTs) : 0;
+    const bInfo = this.currentMvpBossInfo || { name: 'Boss', emoji: '👾', lv: 1, mapId: Number(this.player ? this.player.map : 0) };
+
+    if (this.weKilledCurrentMvp) {
+      this.addLog('SUCCESS', `✅ [Auto Boss] Đã tiêu diệt Boss: ${bInfo.emoji || '👾'} ${bInfo.name} (Lv.${bInfo.lv})!`);
+      this.addMvpLog('boss_killed', {
+        bossName: bInfo.name,
+        bossEmoji: bInfo.emoji,
+        bossLv: bInfo.lv,
+        mapId: bInfo.mapId,
+        durationMs: durationMs
+      });
+
+      if (this.mvpCycleStats) {
+        this.mvpCycleStats.bossKilledInCycle = (this.mvpCycleStats.bossKilledInCycle || 0) + 1;
+        this.mvpCycleStats.bossKilledInMap = (this.mvpCycleStats.bossKilledInMap || 0) + 1;
+      }
+    } else {
+      this.addLog('WARNING', `❌ [Auto Boss] Boss ${bInfo.emoji || '👾'} ${bInfo.name} đã bị người khác tiêu diệt hoặc mất dấu.`);
+      this.addMvpLog('boss_lost', {
+        bossName: bInfo.name,
+        bossEmoji: bInfo.emoji,
+        bossLv: bInfo.lv,
+        mapId: bInfo.mapId,
+        durationMs: durationMs
+      });
+    }
+
+    // Clean up spawn time so it doesn't double-log in general cleanup
+    if (this.currentMvpBossInfo && this.currentMvpBossInfo.id) {
+      delete this.bossSpawnTimes[this.currentMvpBossInfo.id];
+    }
+
+    this.lastTargetedBossId = null;
+    this.currentMvpBossInfo = null;
+    this._bossSnipeActive = false;
+    this._snipeLoggedOnce = false;
+    this.weKilledCurrentMvp = false;
   }
 
   getCombatRates() {
@@ -1793,7 +1839,11 @@ class BotInstance {
 
           // Log when a new boss is first targeted
           if (this.lastTargetedBossId !== activeBoss.id) {
+            if (this.lastTargetedBossId !== null) {
+              this.logTargetBossCompletion();
+            }
             this.lastTargetedBossId = activeBoss.id;
+            this._lastBossStatusLogAt = 0; // Force immediate status log for the new boss
             
             // Get actual spawn time from bossSpawnTimes, fallback to Date.now()
             const spawnTs = this.bossSpawnTimes[activeBoss.id] || Date.now();
@@ -1837,18 +1887,23 @@ class BotInstance {
             exploreCx = activeBoss.x;
             exploreCy = activeBoss.y;
 
+            const nowMs = Date.now();
+            const shouldLogStatus = (nowMs - (this._lastBossStatusLogAt || 0)) >= 5000;
+
             if (dist > approachDist) {
               exploreRadius = 300;
               traveling = 1;
               lockPos = 0;
-              if (this.pollCount % 10 === 0) {
+              if (shouldLogStatus) {
+                this._lastBossStatusLogAt = nowMs;
                 this.addLog('SYSTEM', `⚔️ [Auto Boss] Đang di chuyển săn Boss: ${activeBoss.emoji || '👾'} ${activeBoss.name || 'Boss'} (Khoảng cách: ${Math.round(dist)}m, Ngưỡng dừng: ${approachDist}m)`);
               }
             } else {
               exploreRadius = 100;
               traveling = 0;
               lockPos = 1; // Khóa vị trí khi đã vào tầm bắn để dồn toàn bộ DPS
-              if (this.pollCount % 10 === 0) {
+              if (shouldLogStatus) {
+                this._lastBossStatusLogAt = nowMs;
                 this.addLog('SYSTEM', `⚔️ [Auto Boss] Đang tấn công Boss: ${activeBoss.emoji || '👾'} ${activeBoss.name || 'Boss'} (HP: ${bossHpPct}%)`);
               }
             }
@@ -1862,6 +1917,9 @@ class BotInstance {
 
     // Tự động hủy trạng thái nhắm boss trong im lặng nếu nhân vật đã đổi map (manual warp hoặc auto warp)
     if (this.lastTargetedBossId !== null && this.player && this.currentMvpBossInfo && Number(this.player.map) !== Number(this.currentMvpBossInfo.mapId)) {
+      if (this.currentMvpBossInfo && this.currentMvpBossInfo.id) {
+        delete this.bossSpawnTimes[this.currentMvpBossInfo.id];
+      }
       this.lastTargetedBossId = null;
       this.currentMvpBossInfo = null;
       this._bossSnipeActive = false;
@@ -1871,39 +1929,7 @@ class BotInstance {
 
     // Clear targeted boss state and log when done
     if (!this.targetedMvp && this.lastTargetedBossId !== null) {
-      const durationMs = this.currentMvpBossInfo ? (Date.now() - this.currentMvpBossInfo.startTs) : 0;
-      const bInfo = this.currentMvpBossInfo || { name: 'Boss', emoji: '👾', lv: 1, mapId: Number(this.player ? this.player.map : 0) };
-
-      if (this.weKilledCurrentMvp) {
-        this.addLog('SUCCESS', `✅ [Auto Boss] Đã tiêu diệt Boss: ${bInfo.emoji || '👾'} ${bInfo.name} (Lv.${bInfo.lv})!`);
-        this.addMvpLog('boss_killed', {
-          bossName: bInfo.name,
-          bossEmoji: bInfo.emoji,
-          bossLv: bInfo.lv,
-          mapId: bInfo.mapId,
-          durationMs: durationMs
-        });
-
-        if (this.mvpCycleStats) {
-          this.mvpCycleStats.bossKilledInCycle = (this.mvpCycleStats.bossKilledInCycle || 0) + 1;
-          this.mvpCycleStats.bossKilledInMap = (this.mvpCycleStats.bossKilledInMap || 0) + 1;
-        }
-      } else {
-        this.addLog('WARNING', `❌ [Auto Boss] Boss ${bInfo.emoji || '👾'} ${bInfo.name} đã bị người khác tiêu diệt hoặc mất dấu.`);
-        this.addMvpLog('boss_lost', {
-          bossName: bInfo.name,
-          bossEmoji: bInfo.emoji,
-          bossLv: bInfo.lv,
-          mapId: bInfo.mapId,
-          durationMs: durationMs
-        });
-      }
-
-      this.lastTargetedBossId = null;
-      this.currentMvpBossInfo = null;
-      this._bossSnipeActive = false;
-      this._snipeLoggedOnce = false;
-      this.weKilledCurrentMvp = false;
+      this.logTargetBossCompletion();
     }
 
     // 2. Auto Zone checking (Priority 2, only runs if no MVP is being targeted)
@@ -2035,6 +2061,9 @@ class BotInstance {
       
       // Track newly appeared bosses
       aliveBosses.forEach(b => {
+        if (!this._bossNameCache) this._bossNameCache = {};
+        this._bossNameCache[b.id] = `${b.emoji || '👾'} ${b.name || 'Boss'} (Lv.${b.lv || 1})`;
+
         if (!this.bossSpawnTimes[b.id]) {
           this.bossSpawnTimes[b.id] = nowTs;
           const timeStr = new Date(nowTs).toLocaleTimeString('vi-VN');
@@ -2046,6 +2075,11 @@ class BotInstance {
       const aliveIds = new Set(aliveBosses.map(b => b.id));
       Object.keys(this.bossSpawnTimes).forEach(id => {
         if (!aliveIds.has(Number(id))) {
+          // Nếu boss biến mất và KHÔNG phải là target hiện tại (vì target hiện tại đã được log riêng ở logTargetBossCompletion)
+          if (Number(id) !== this.lastTargetedBossId) {
+            const bossInfo = this._bossNameCache ? (this._bossNameCache[id] || `Boss #${id}`) : `Boss #${id}`;
+            this.addLog('WARNING', `👁️ [Auto Boss] Boss ${bossInfo} đã bị tiêu diệt hoặc mất dấu (không phải mục tiêu chính).`);
+          }
           delete this.bossSpawnTimes[id];
         }
       });
