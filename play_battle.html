@@ -872,14 +872,53 @@ function updateBossTable(bosses, px, py) {
   }).join('');
 }
 
-function inspectPlayer(uid) {
+function inspectPlayer(name, providedUid) {
   event.stopPropagation(); // Ngăn target khi click inspect
-  if (typeof xhrpg !== 'undefined' && xhrpg.lbShow) {
-    addBattleLog(`🔍 Đang mở thông tin chi tiết của người chơi [UID: ${uid}]...`, 'SYSTEM');
-    xhrpg.lbShow(uid);
-  } else {
-    addBattleLog('❌ Không thể mở giao diện Inspect của game client.', 'ERROR');
+  
+  // Nếu đã có sẵn UID từ đối tượng người chơi
+  if (providedUid && providedUid !== name && providedUid !== 'undefined') {
+    if (typeof xhrpg !== 'undefined' && xhrpg.lbShow) {
+      addBattleLog(`🔍 Đang mở thông tin của [${name}]...`, 'SYSTEM');
+      xhrpg.lbShow(providedUid);
+    }
+    return;
   }
+  
+  // Giải pháp dự phòng: Gửi request tìm kiếm UID theo Tên qua API Trade
+  const urlParams = new URLSearchParams(window.location.search);
+  const uid = urlParams.get('line_uid');
+  const token = urlParams.get('session_token');
+  
+  if (!uid || !token) {
+    addBattleLog('❌ Thiếu thông tin tài khoản để tìm kiếm người chơi.', 'ERROR');
+    return;
+  }
+  
+  addBattleLog(`🔍 Đang truy vấn UID của người chơi [${name}] từ máy chủ...`, 'SYSTEM');
+  
+  $.post('/xhrpg_trade.php', {
+    line_uid: uid,
+    session_token: token,
+    lang: 'vi',
+    action: 'search',
+    q: name
+  })
+  .done(res => {
+    const data = typeof res === 'string' ? JSON.parse(res) : res;
+    const found = data && data.players ? data.players.find(p => p.name === name) : null;
+    
+    if (found && found.uid) {
+      addBattleLog(`✅ Đã tìm thấy UID của [${name}]. Đang mở profile...`, 'SUCCESS');
+      if (typeof xhrpg !== 'undefined' && xhrpg.lbShow) {
+        xhrpg.lbShow(found.uid);
+      }
+    } else {
+      addBattleLog(`❌ Không tìm thấy thông tin của người chơi [${name}] trên hệ thống.`, 'ERROR');
+    }
+  })
+  .fail(() => {
+    addBattleLog(`❌ Lỗi kết nối khi truy vấn thông tin của [${name}].`, 'ERROR');
+  });
 }
 
 // Cập nhật bảng PK
@@ -933,7 +972,7 @@ function updatePkTable(players, px, py) {
         <td>📍 ${p.dist}m</td>
         <td>
           <div style="display:flex; gap:4px">
-            <button class="target-btn" onclick="inspectPlayer('${targetUid}')" style="background:#4b5563" title="Xem trang bị & sức mạnh">🔍 Xem</button>
+            <button class="target-btn" onclick="inspectPlayer('${p.name}', '${targetUid}')" style="background:#4b5563" title="Xem trang bị & sức mạnh">🔍 Xem</button>
             <button class="target-btn ${isTargeted ? 'active' : ''}">
               ${isTargeted ? '🎯 Đang Đuổi' : '⚔️ PK'}
             </button>
