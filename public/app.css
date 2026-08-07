@@ -783,17 +783,19 @@ input:checked + .slider:before {
 .log-line {
   display: flex;
   gap: 8px;
-  word-break: break-all;
+  flex-wrap: nowrap;
 }
 .log-time {
   color: var(--text-muted);
   user-select: none;
+  flex-shrink: 0;
 }
 .log-type {
   font-weight: 700;
   text-transform: uppercase;
   font-size: 0.75rem;
   min-width: 55px;
+  flex-shrink: 0;
 }
 .log-type.system { color: #38bdf8; }
 .log-type.kill { color: #f43f5e; }
@@ -803,6 +805,10 @@ input:checked + .slider:before {
 .log-type.action { color: #34d399; }
 .log-text-content {
   color: #cbd5e1;
+  word-break: break-word;
+  white-space: pre-wrap;
+  flex: 1;
+  min-width: 0;
 }
 
 /* Modal form style */

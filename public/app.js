@@ -1395,21 +1395,30 @@ document.addEventListener('DOMContentLoaded', () => {
                <label style="font-size: 0.8rem; font-weight: 700; color: #fbbf24; display: block; margin-bottom: 8px;">🎯 Loại Mặt Hàng Muốn Mua</label>
                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px;">
                  <label style="display:flex; align-items:center; gap:6px; font-size:0.78rem; cursor:pointer;">
-                   <input type="checkbox" id="chk-marketfilter-card-${acc.line_uid}" onchange="toggleMarketFilter('${acc.line_uid}', 'card')"> 🎴 Thẻ bài / Hộp
+                   <input type="checkbox" id="chk-marketfilter-card-${acc.line_uid}" onchange="toggleMarketFilter('${acc.line_uid}', 'card')"> 🎴 Thẻ quái vật lẻ
                  </label>
                  <label style="display:flex; align-items:center; gap:6px; font-size:0.78rem; cursor:pointer;">
-                   <input type="checkbox" id="chk-marketfilter-egg-${acc.line_uid}" onchange="toggleMarketFilter('${acc.line_uid}', 'egg')"> 🥚 Trứng / Hộp
+                   <input type="checkbox" id="chk-marketfilter-card_box-${acc.line_uid}" onchange="toggleMarketFilter('${acc.line_uid}', 'card_box')"> 🎁 Hộp thẻ bài
                  </label>
                  <label style="display:flex; align-items:center; gap:6px; font-size:0.78rem; cursor:pointer;">
-                   <input type="checkbox" id="chk-marketfilter-module-${acc.line_uid}" onchange="toggleMarketFilter('${acc.line_uid}', 'module')"> 🔧 Module lẻ / Hộp
+                   <input type="checkbox" id="chk-marketfilter-egg-${acc.line_uid}" onchange="toggleMarketFilter('${acc.line_uid}', 'egg')"> 🥚 Trứng thú cưng lẻ
                  </label>
                  <label style="display:flex; align-items:center; gap:6px; font-size:0.78rem; cursor:pointer;">
-                   <input type="checkbox" id="chk-marketfilter-collectible-${acc.line_uid}" onchange="toggleMarketFilter('${acc.line_uid}', 'collectible')"> 🗃️ Đồ sưu tầm (Linh kiện)
+                   <input type="checkbox" id="chk-marketfilter-egg_box-${acc.line_uid}" onchange="toggleMarketFilter('${acc.line_uid}', 'egg_box')"> 🎁 Hộp trứng Pet
+                 </label>
+                 <label style="display:flex; align-items:center; gap:6px; font-size:0.78rem; cursor:pointer;">
+                   <input type="checkbox" id="chk-marketfilter-module-${acc.line_uid}" onchange="toggleMarketFilter('${acc.line_uid}', 'module')"> 🔧 Module lẻ
+                 </label>
+                 <label style="display:flex; align-items:center; gap:6px; font-size:0.78rem; cursor:pointer;">
+                   <input type="checkbox" id="chk-marketfilter-module_box-${acc.line_uid}" onchange="toggleMarketFilter('${acc.line_uid}', 'module_box')"> 📦 Hộp Module
+                 </label>
+                 <label style="display:flex; align-items:center; gap:6px; font-size:0.78rem; cursor:pointer;">
+                   <input type="checkbox" id="chk-marketfilter-collectible-${acc.line_uid}" onchange="toggleMarketFilter('${acc.line_uid}', 'collectible')"> 🗃️ Đồ sưu tầm (Chứng)
                  </label>
                  <label style="display:flex; align-items:center; gap:6px; font-size:0.78rem; cursor:pointer;">
                    <input type="checkbox" id="chk-marketfilter-diamond-${acc.line_uid}" onchange="toggleMarketFilter('${acc.line_uid}', 'diamond')"> 💎 Kim cương
                  </label>
-                 <label style="display:flex; align-items:center; gap:6px; font-size:0.78rem; cursor:pointer; color: #94a3b8;">
+                 <label style="display:flex; align-items:center; gap:6px; font-size:0.78rem; cursor:pointer; color: #94a3b8; grid-column: span 2;">
                    <input type="checkbox" id="chk-marketfilter-trash-${acc.line_uid}" onchange="toggleMarketFilter('${acc.line_uid}', 'trash')"> 🪵 Gỗ, Đá, Đạn (Rác)
                  </label>
                </div>
@@ -1956,7 +1965,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (numMarketMaxPrice && document.activeElement !== numMarketMaxPrice) numMarketMaxPrice.value = acc.settings.marketMaxPrice || 10000;
 
     const filters = acc.settings.marketFilters || [];
-    ['card', 'egg', 'module', 'collectible', 'diamond', 'trash'].forEach(cat => {
+    ['card', 'card_box', 'egg', 'egg_box', 'module', 'module_box', 'collectible', 'diamond', 'trash'].forEach(cat => {
       const chk = document.getElementById(`chk-marketfilter-${cat}-${acc.line_uid}`);
       if (chk && document.activeElement !== chk) {
         chk.checked = filters.includes(cat);
@@ -4397,8 +4406,8 @@ window.toggleMarketFilter = async function(line_uid, category) {
   const acc = lastFetchedAccounts.find(x => x.line_uid === line_uid);
   if (!acc) return;
   
-  let filters = acc.settings.marketFilters || [];
-  if (!Array.isArray(filters)) filters = [];
+  // Clone mảng để tránh lỗi tham chiếu
+  let filters = [...(acc.settings.marketFilters || [])];
   
   const index = filters.indexOf(category);
   if (index !== -1) {
@@ -4407,17 +4416,32 @@ window.toggleMarketFilter = async function(line_uid, category) {
     filters.push(category);
   }
   
+  // Cập nhật UI cục bộ lập tức
+  acc.settings.marketFilters = filters;
+  updateCard(acc);
+  
   try {
     const response = await fetch(`/api/accounts/${line_uid}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ marketFilters: filters })
     });
-    if (response.ok) {
+    if (!response.ok) {
+      // Rollback
+      const idx = filters.indexOf(category);
+      if (idx !== -1) filters.splice(idx, 1);
+      else filters.push(category);
       acc.settings.marketFilters = filters;
+      updateCard(acc);
     }
   } catch (err) {
     console.error('Error updating market filter:', err);
+    // Rollback
+    const idx = filters.indexOf(category);
+    if (idx !== -1) filters.splice(idx, 1);
+    else filters.push(category);
+    acc.settings.marketFilters = filters;
+    updateCard(acc);
   }
 };
 

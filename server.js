@@ -2940,10 +2940,16 @@ class BotInstance {
         let category = 'trash';
         const type = item.item_type || '';
         
-        if (type === 'card' || type === 'card_box') {
+        if (type === 'card') {
           category = 'card';
-        } else if (type === 'egg' || type === 'egg_box') {
+        } else if (type === 'card_box') {
+          category = 'card_box';
+        } else if (type === 'egg') {
           category = 'egg';
+        } else if (type === 'egg_box') {
+          category = 'egg_box';
+        } else if (type === 'module_box') {
+          category = 'module_box';
         } else if (type.startsWith('module_')) {
           category = 'module';
         } else if (['stat_parts', 'hardware', 'weapon_parts', 'house_parts', 'treasure'].includes(type)) {
