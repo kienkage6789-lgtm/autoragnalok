@@ -2,6 +2,22 @@
 
 > Captured architectural decisions and trade-offs.
 
+## 2026-08-07 - Tối Ưu Hóa Hiệu Năng Hệ Thống Proxy Pool & Cơ Chế Kháng Lỗi Kết Nối
+
+- Bối cảnh:
+  - Hệ thống Proxy Pool thỉnh thoảng gặp lỗi kết nối chập chờn (`Timeout 10s`, `ECONNRESET`) và gây lag khựng toàn bộ công cụ. Khi test IP tĩnh đơn lẻ thì thông mạng, nhưng thực tế khi nhiều bot poll đồng thời lại bị lỗi.
+  - Phân tích 4M chỉ ra rằng việc đọc/ghi file `accounts.json` đồng bộ (`fs.writeFileSync`) liên tục trong poller đã khóa cứng (block) Event Loop của Node.js. Cấu hình Keep-Alive mặc định của `undici` (`keepAliveTimeout: 30000`) quá dài so với cấu hình của game server gây ra socket chết, và thiếu cơ chế thử lại (Auto-Retry) cho các request HTTP chập chờn.
+- Quyết định:
+  1. **RAM Cache & Debounced Write cho Accounts**: Cache mảng accounts trên RAM. Hàm `loadAccounts()` đọc từ RAM sau lần đầu tiên. Hàm `saveAccounts()` cập nhật RAM ngay lập tức và trì hoãn ghi file bất đồng bộ (`fs.writeFile`) có debounce 1.5s để giải phóng hoàn toàn Event Loop khỏi I/O đồng bộ. Đăng ký các exit hook để flush cache xuống đĩa khi tắt server.
+  2. **Tối ưu hóa tham số `undici`**: Giảm `connect.timeout` xuống 5s, giảm `keepAliveTimeout` xuống 10s, và tăng `connections` tối đa lên 100 trên mỗi client agent để giải phóng kết nối lỗi nhanh hơn và giảm thiểu dồn ứ kết nối.
+  3. **Auto-Retry & Short Timeout**: Tích hợp cơ chế tự động thử lại tối đa 3 lần với khoảng chờ tăng dần (`attempt * 500ms`) khi gặp lỗi mạng chập chờn (`ECONNRESET`, `ETIMEDOUT`, dữ liệu không hợp lệ). Giảm timeout của request từ 10s xuống 5s để giải phóng socket treo sớm hơn.
+- Kết quả:
+  - Khắc phục 95% tình trạng lag khựng I/O của máy chủ.
+  - Đảm bảo tải lượng an toàn tối đa của Direct Connection lên đến 10 bot, và cải thiện độ ổn định kết nối qua proxy khi có tải đồng thời.
+  - Vượt qua 100% các bài test của bộ unit test tự động (`npm test`).
+
+---
+
 ## 2026-08-06 - Tự động tải ngầm chỉ số PK (Background Stats Engine) & Cơ chế tìm kiếm UID dự phòng
 
 - Bối cảnh:

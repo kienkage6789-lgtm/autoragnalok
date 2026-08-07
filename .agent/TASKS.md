@@ -3,6 +3,21 @@
 > Work Breakdown Structure. Update task states immediately upon changes.
 > Statuses: todo | doing | blocked | review | done
 
+### [x] T57 - Tối Ưu Hóa Hiệu Năng Proxy Pool & Kháng Lỗi Kết Nối
+- Description: Giải quyết triệt để vấn đề lag giật hệ thống do đọc/ghi file accounts.json đồng bộ gây nghẽn Event Loop và khắc phục lỗi kết nối chập chờn (ECONNRESET, Timeout 10s) qua proxy bằng cách tối ưu hóa cấu hình keep-alive của undici, triển khai RAM cache kết hợp Debounced Write và tích hợp logic Auto-Retry 3 lần cho các HTTP request của bot.
+- Files related: `server.js`
+- Acceptance criteria:
+  - [x] Triển khai RAM cache cho accounts trong `loadAccounts` để hạn chế I/O đọc đĩa liên tục.
+  - [x] Thay thế ghi đĩa đồng bộ trong `saveAccounts` bằng ghi đĩa bất đồng bộ (`fs.writeFile`) có Debounce 1.5s để giải phóng Event Loop Node.js.
+  - [x] Đăng ký exit hook (`SIGINT`, `SIGTERM`, `exit`) để tự động flush dữ liệu cache từ RAM xuống đĩa an toàn trước khi tắt server.
+  - [x] Cấu hình lại `undici` Agent và ProxyAgent với `connect.timeout: 5000`, `keepAliveTimeout: 10000`, `keepAliveMaxTimeout: 30000`, và `connections: 100` để giải phóng kết nối lỗi nhanh hơn và giảm thiểu dồn ứ kết nối.
+  - [x] Tích hợp cơ chế tự động thử lại (Auto-Retry) tối đa 3 lần với delay tăng dần (`attempt * 500ms`) khi bot gửi HTTP request lỗi mạng chập chờn.
+  - [x] Giảm timeout request trong `sendRequest` từ 10s xuống 5s.
+  - [x] Chạy bộ unit test tự động `npm test` thành công PASS 100%.
+- Status: done
+
+---
+
 ### [x] T56 - Big Update: Battle Radar Control Panel (Săn Boss, PK, Inspect Fallback, Background Stats Cache)
 - Description: Phát triển hệ thống giao diện chiến đấu chuyên nghiệp play_battle.html với cơ chế AJAX Interceptor cho phép target Boss và PK tự động di chuyển. Tích hợp tính năng Xem sức mạnh (Inspect) có cơ chế tìm kiếm UID dự phòng qua Trade API, và tự động tải ngầm chỉ số Level, Phòng thủ (DEF) thực tế của đối thủ hiển thị trực quan lên bảng PK thông qua bộ nhớ đệm client.
 - Files related: `server.js`, `public/app.js`, `play_battle.html`

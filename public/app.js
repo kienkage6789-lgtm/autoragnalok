@@ -494,6 +494,14 @@ document.addEventListener('DOMContentLoaded', () => {
               </div>
             `}
           </td>
+          <td style="padding:8px;">
+            ${isAdmin ? '<span style="font-size:0.8rem; color:#a5b4fc;">Cho phép</span>' : `
+              <label class="switch">
+                <input type="checkbox" id="user-market-allow-${u.id}" ${u.allowMarket ? 'checked' : ''} onchange="toggleUserMarketPermission('${u.id}', this.checked)">
+                <span class="slider"></span>
+              </label>
+            `}
+          </td>
           <td style="padding:8px;">${expiryHtml}</td>
           <td style="padding:8px; text-align:right;">
             ${isAdmin ? '<span style="font-size:0.75rem; color:var(--text-secondary);">Gốc</span>' : `
@@ -1109,6 +1117,7 @@ document.addEventListener('DOMContentLoaded', () => {
         <button class="tab-link" id="tab-btn-home-${acc.line_uid}" onclick="switchTab('${acc.line_uid}', 'home')">🏡 Nông Trại</button>
         <button class="tab-link" id="tab-btn-mvp-${acc.line_uid}" onclick="switchTab('${acc.line_uid}', 'mvp')">Săn Boss</button>
         <button class="tab-link" id="tab-btn-skills-${acc.line_uid}" onclick="switchTab('${acc.line_uid}', 'skills')">👤 Nhân Vật</button>
+        <button class="tab-link" id="tab-btn-market-buy-${acc.line_uid}" onclick="switchTab('${acc.line_uid}', 'market-buy')">🏪 Chợ Auto</button>
         <button class="tab-link" id="tab-btn-log-${acc.line_uid}" onclick="switchTab('${acc.line_uid}', 'log')">Log</button>
       </div>
 
@@ -1355,6 +1364,61 @@ document.addEventListener('DOMContentLoaded', () => {
         </div>
 
         <!-- Merged into pane-log -->
+
+        <!-- Auto Market Buy Tab Pane -->
+        <div class="tab-pane" id="pane-market-buy-${acc.line_uid}">
+          <div class="market-buy-locked-overlay" id="market-buy-locked-${acc.line_uid}" style="display: none; background: rgba(220,38,38,0.08); padding: 16px; border: 1px dashed rgba(239, 68, 68, 0.4); border-radius: 12px; text-align: center; margin-bottom: 10px;">
+            <div style="font-size: 2rem; margin-bottom: 8px;">🔒</div>
+            <div style="font-size: 0.85rem; color: #fca5a5; font-weight: 700; margin-bottom: 4px;">CHỨC NĂNG BỊ KHÓA</div>
+            <div style="font-size: 0.76rem; color: #94a3b8; line-height: 1.4;">Tài khoản của bạn chưa được cấp quyền sử dụng Auto Market Buy. Vui lòng liên hệ Admin để mở khóa.</div>
+          </div>
+
+          <div class="market-buy-unlocked-panel" id="market-buy-panel-${acc.line_uid}" style="display: block;">
+            <div class="settings-group" style="margin-bottom: 8px;">
+              <div class="toggle-control">
+                <span class="toggle-label" style="font-weight: 700; color: #38bdf8;">🏪 Auto Market Buy (Tự mua Chợ)</span>
+                <label class="switch">
+                  <input type="checkbox" id="chk-automarketbuy-${acc.line_uid}" onchange="toggleSetting('${acc.line_uid}', 'autoMarketBuy')">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+
+            <div class="settings-group" style="margin-bottom: 8px;">
+              <div class="input-control" style="grid-column: span 2;">
+                <label for="num-market-maxprice-${acc.line_uid}">💰 Giá mua tối đa / món (Gold)</label>
+                <input type="number" id="num-market-maxprice-${acc.line_uid}" placeholder="10000" min="1" onchange="updateNumericSetting('${acc.line_uid}', 'marketMaxPrice')" onkeydown="if(event.key==='Enter') this.blur()" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; padding: 6px; font-family: inherit; font-size: 0.85rem; outline: none; margin-top:2px; width: 100%;">
+              </div>
+            </div>
+
+            <div class="settings-group" style="margin-bottom: 10px; padding: 10px; background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.05); border-radius: 8px;">
+               <label style="font-size: 0.8rem; font-weight: 700; color: #fbbf24; display: block; margin-bottom: 8px;">🎯 Loại Mặt Hàng Muốn Mua</label>
+               <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px;">
+                 <label style="display:flex; align-items:center; gap:6px; font-size:0.78rem; cursor:pointer;">
+                   <input type="checkbox" id="chk-marketfilter-card-${acc.line_uid}" onchange="toggleMarketFilter('${acc.line_uid}', 'card')"> 🎴 Thẻ bài / Hộp
+                 </label>
+                 <label style="display:flex; align-items:center; gap:6px; font-size:0.78rem; cursor:pointer;">
+                   <input type="checkbox" id="chk-marketfilter-egg-${acc.line_uid}" onchange="toggleMarketFilter('${acc.line_uid}', 'egg')"> 🥚 Trứng / Hộp
+                 </label>
+                 <label style="display:flex; align-items:center; gap:6px; font-size:0.78rem; cursor:pointer;">
+                   <input type="checkbox" id="chk-marketfilter-module-${acc.line_uid}" onchange="toggleMarketFilter('${acc.line_uid}', 'module')"> 🔧 Module lẻ / Hộp
+                 </label>
+                 <label style="display:flex; align-items:center; gap:6px; font-size:0.78rem; cursor:pointer;">
+                   <input type="checkbox" id="chk-marketfilter-collectible-${acc.line_uid}" onchange="toggleMarketFilter('${acc.line_uid}', 'collectible')"> 🗃️ Đồ sưu tầm (Linh kiện)
+                 </label>
+                 <label style="display:flex; align-items:center; gap:6px; font-size:0.78rem; cursor:pointer;">
+                   <input type="checkbox" id="chk-marketfilter-diamond-${acc.line_uid}" onchange="toggleMarketFilter('${acc.line_uid}', 'diamond')"> 💎 Kim cương
+                 </label>
+                 <label style="display:flex; align-items:center; gap:6px; font-size:0.78rem; cursor:pointer; color: #94a3b8;">
+                   <input type="checkbox" id="chk-marketfilter-trash-${acc.line_uid}" onchange="toggleMarketFilter('${acc.line_uid}', 'trash')"> 🪵 Gỗ, Đá, Đạn (Rác)
+                 </label>
+               </div>
+            </div>
+            <div style="font-size: 0.72rem; color: #94a3b8; line-height: 1.3; background: rgba(0,0,0,0.2); padding: 6px 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.03);">
+              💡 Hệ thống sẽ tự động quét Chợ game định kỳ mỗi **2 phút** qua proxy/đường truyền của Bot. Chỉ mua khi nhân vật đủ vàng và bỏ qua các mặt hàng không khớp bộ lọc.
+            </div>
+          </div>
+        </div>
 
         <!-- Character & Skills Tab Pane -->
         <div class="tab-pane" id="pane-skills-${acc.line_uid}">
@@ -1883,6 +1947,34 @@ document.addEventListener('DOMContentLoaded', () => {
     renderEggBook(acc);
     renderPetSection(acc);
     updateHomeTabUI(acc);
+
+    // Sync Auto Market Buy Settings
+    const chkAutoMarketBuy = document.getElementById(`chk-automarketbuy-${acc.line_uid}`);
+    if (chkAutoMarketBuy && document.activeElement !== chkAutoMarketBuy) chkAutoMarketBuy.checked = acc.settings.autoMarketBuy === true;
+
+    const numMarketMaxPrice = document.getElementById(`num-market-maxprice-${acc.line_uid}`);
+    if (numMarketMaxPrice && document.activeElement !== numMarketMaxPrice) numMarketMaxPrice.value = acc.settings.marketMaxPrice || 10000;
+
+    const filters = acc.settings.marketFilters || [];
+    ['card', 'egg', 'module', 'collectible', 'diamond', 'trash'].forEach(cat => {
+      const chk = document.getElementById(`chk-marketfilter-${cat}-${acc.line_uid}`);
+      if (chk && document.activeElement !== chk) {
+        chk.checked = filters.includes(cat);
+      }
+    });
+
+    const isPermitted = currentUser && (currentUser.role === 'admin' || currentUser.allowMarket === true);
+    const lockedPanel = document.getElementById(`market-buy-locked-${acc.line_uid}`);
+    const unlockedPanel = document.getElementById(`market-buy-panel-${acc.line_uid}`);
+    if (lockedPanel && unlockedPanel) {
+      if (isPermitted) {
+        lockedPanel.style.display = 'none';
+        unlockedPanel.style.display = 'block';
+      } else {
+        lockedPanel.style.display = 'block';
+        unlockedPanel.style.display = 'none';
+      }
+    }
 
     // Render real-time boss hunt banner
     const banner = document.getElementById(`boss-hunt-banner-${acc.line_uid}`);
@@ -4271,6 +4363,61 @@ window.syncTeamSetup = async function(uid) {
     }
   } catch (e) {
     alert(`❌ Lỗi kết nối: ${e.message}`);
+  }
+};
+
+window.toggleUserMarketPermission = async function(userId, checked) {
+  try {
+    const res = await fetch(`/api/admin/users/${userId}/allow-market`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ allowMarket: checked })
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      alert(`🔴 Lỗi phân quyền chợ: ${data.error || 'Thất bại'}`);
+      const inp = document.getElementById(`user-market-allow-${userId}`);
+      if (inp) inp.checked = !checked;
+    } else {
+      // Reload accounts silently to reflect permissions on dashboards
+      const response = await fetch('/api/accounts');
+      if (response.ok) {
+        lastFetchedAccounts = await response.json();
+        renderAccounts(lastFetchedAccounts);
+      }
+    }
+  } catch (e) {
+    console.error('Error toggling user market permission:', e);
+    const inp = document.getElementById(`user-market-allow-${userId}`);
+    if (inp) inp.checked = !checked;
+  }
+};
+
+window.toggleMarketFilter = async function(line_uid, category) {
+  const acc = lastFetchedAccounts.find(x => x.line_uid === line_uid);
+  if (!acc) return;
+  
+  let filters = acc.settings.marketFilters || [];
+  if (!Array.isArray(filters)) filters = [];
+  
+  const index = filters.indexOf(category);
+  if (index !== -1) {
+    filters.splice(index, 1);
+  } else {
+    filters.push(category);
+  }
+  
+  try {
+    const response = await fetch(`/api/accounts/${line_uid}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ marketFilters: filters })
+    });
+    if (response.ok) {
+      acc.settings.marketFilters = filters;
+    }
+  } catch (err) {
+    console.error('Error updating market filter:', err);
   }
 };
 

@@ -25,11 +25,11 @@ class ProxyPool {
     this._assignments = {}; // line_uid -> proxy_id | 'direct'
     this._agents = {};      // proxy_id -> ProxyAgent instance
     this._directAgent = new Agent({
-      connect: { timeout: 10000 },
-      keepAliveTimeout: 30000,
-      keepAliveMaxTimeout: 60000,
+      connect: { timeout: 5000 }, // Giảm xuống 5s kết nối
+      keepAliveTimeout: 10000,     // Giảm xuống 10s để tránh ECONNRESET do máy chủ đóng trước
+      keepAliveMaxTimeout: 30000,
       pipelining: 1,
-      connections: 50,
+      connections: 100,            // Tăng số lượng kết nối tối đa giảm nghẽn
     });
     this._load();
 
@@ -69,11 +69,11 @@ class ProxyPool {
   _createAgent(url) {
     return new ProxyAgent({
       uri: url,
-      connect: { timeout: 10000 },
-      keepAliveTimeout: 30000,
-      keepAliveMaxTimeout: 60000,
+      connect: { timeout: 5000 },  // Giảm timeout kết nối
+      keepAliveTimeout: 10000,     // Giảm keepAliveTimeout tránh ECONNRESET
+      keepAliveMaxTimeout: 30000,
       pipelining: 1,
-      connections: 50,
+      connections: 100,            // Tăng kết nối tối đa lên 100
     });
   }
 
@@ -841,27 +841,70 @@ function isUserExpired(user) {
 // In-memory data store for bot instances
 let botInstances = {};
 
+// In-memory cache for accounts to prevent blocking I/O on multiple reads
+let accountsCache = null;
+let saveAccountsTimeout = null;
+
 // Load accounts
 function loadAccounts() {
+  if (accountsCache !== null) {
+    return accountsCache;
+  }
   try {
     if (fs.existsSync(ACCOUNTS_FILE)) {
       const data = fs.readFileSync(ACCOUNTS_FILE, 'utf8');
-      return JSON.parse(data || '[]');
+      accountsCache = JSON.parse(data || '[]');
+      return accountsCache;
     }
   } catch (err) {
     console.error('Error reading accounts file:', err);
   }
-  return [];
+  accountsCache = [];
+  return accountsCache;
 }
 
-// Save accounts
+// Save accounts (Debounced Async Write with In-memory Cache)
 function saveAccounts(accounts) {
-  try {
-    fs.writeFileSync(ACCOUNTS_FILE, JSON.stringify(accounts, null, 2), 'utf8');
-  } catch (err) {
-    console.error('Error writing accounts file:', err);
+  accountsCache = accounts;
+  
+  if (saveAccountsTimeout) {
+    clearTimeout(saveAccountsTimeout);
+  }
+  
+  saveAccountsTimeout = setTimeout(() => {
+    fs.writeFile(ACCOUNTS_FILE, JSON.stringify(accountsCache, null, 2), 'utf8', (err) => {
+      if (err) {
+        console.error('Error writing accounts file asynchronously:', err);
+      }
+    });
+    saveAccountsTimeout = null;
+  }, 1500); // 1.5s debounce
+}
+
+// Flush accounts cache to disk on shutdown to prevent data loss
+function flushAccountsToDisk() {
+  if (accountsCache !== null && saveAccountsTimeout !== null) {
+    try {
+      console.log('[Shutdown] Flushing accounts cache to disk...');
+      fs.writeFileSync(ACCOUNTS_FILE, JSON.stringify(accountsCache, null, 2), 'utf8');
+      console.log('[Shutdown] Accounts cache flushed successfully.');
+    } catch (e) {
+      console.error('[Shutdown] Failed to flush accounts cache:', e.message);
+    }
   }
 }
+
+process.on('SIGINT', () => {
+  flushAccountsToDisk();
+  process.exit(0);
+});
+process.on('SIGTERM', () => {
+  flushAccountsToDisk();
+  process.exit(0);
+});
+process.on('exit', () => {
+  flushAccountsToDisk();
+});
 
 // Initialize default Admin and migrate accounts if needed
 function initDefaultAdminAndMigrate() {
@@ -1012,7 +1055,7 @@ class BotInstance {
     this.session_token = account.session_token;
     this.name = account.name;
     this.userId = account.userId || 'usr_admin';
-    this.settings = account.settings || this.getDefaultSettings();
+    this.settings = { ...this.getDefaultSettings(), ...(account.settings || {}) };
     if (this.settings.bossHuntMode === undefined) {
       if (this.settings.autoMVP) {
         this.settings.bossHuntMode = this.settings.autoMvpCycle !== false ? 'type2' : 'type1';
@@ -1129,7 +1172,10 @@ class BotInstance {
       homePlantPriority: 'highest_tier',
       autoHomeUpgrade: false,
       bypassHomeWarp: false,
-      teamRole: 'none'
+      teamRole: 'none',
+      autoMarketBuy: false,
+      marketMaxPrice: 10000,
+      marketFilters: []
     };
   }
 
@@ -1441,72 +1487,85 @@ class BotInstance {
       this.pendingActFlag = true;
     }
 
-    // Throttle requests: Đảm bảo khoảng cách tối thiểu 1.1s giữa các request của bot để tránh lỗi "too_fast"
-    const now = Date.now();
-    const timeSinceLast = now - (this.lastRequestAt || 0);
-    if (timeSinceLast < 1100) {
-      await new Promise(r => setTimeout(r, 1100 - timeSinceLast));
-    }
-    this.lastRequestAt = Date.now();
+    const maxAttempts = 3;
+    let lastError = null;
 
-    const headers = {
-      'content-type': 'application/x-www-form-urlencoded; charset=UTF-8',
-      'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      'accept': '*/*',
-      'origin': 'https://ragnalok.online',
-      'referer': 'https://ragnalok.online/human/'
-    };
-
-    const searchParams = new URLSearchParams(payload);
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10000); // 10s timeout
-    
-    try {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: headers,
-        body: searchParams.toString(),
-        dispatcher: proxyPool.getDispatcher(this.line_uid),
-        signal: controller.signal
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP Error ${response.status}`);
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      // Throttle requests: Đảm bảo khoảng cách tối thiểu 1.1s giữa các request của bot để tránh lỗi "too_fast"
+      const now = Date.now();
+      const timeSinceLast = now - (this.lastRequestAt || 0);
+      if (timeSinceLast < 1100) {
+        await new Promise(r => setTimeout(r, 1100 - timeSinceLast));
       }
+      this.lastRequestAt = Date.now();
 
-      const text = await response.text();
+      const headers = {
+        'content-type': 'application/x-www-form-urlencoded; charset=UTF-8',
+        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'accept': '*/*',
+        'origin': 'https://ragnalok.online',
+        'referer': 'https://ragnalok.online/human/'
+      };
+
+      const searchParams = new URLSearchParams(payload);
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000); // 5s timeout giải phóng socket nhanh
+      
       try {
-        return JSON.parse(text);
-      } catch (e) {
-        // If it returns HTML or Cloudflare challenge
-        if (text.includes('cf-challenge') || text.includes('Cloudflare')) {
-          throw new Error('Bị chặn bởi Cloudflare (Rate Limit/JS Challenge)');
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: headers,
+          body: searchParams.toString(),
+          dispatcher: proxyPool.getDispatcher(this.line_uid),
+          signal: controller.signal
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP Error ${response.status}`);
         }
-        throw new Error('Dữ liệu máy chủ trả về không hợp lệ (Không phải JSON)');
+
+        const text = await response.text();
+        try {
+          const parsed = JSON.parse(text);
+          clearTimeout(timeout);
+          return parsed;
+        } catch (e) {
+          // If it returns HTML or Cloudflare challenge
+          if (text.includes('cf-challenge') || text.includes('Cloudflare')) {
+            throw new Error('Bị chặn bởi Cloudflare (Rate Limit/JS Challenge)');
+          }
+          throw new Error('Dữ liệu máy chủ trả về không hợp lệ (Không phải JSON)');
+        }
+      } catch (err) {
+        let formattedErr = err;
+        if (err.name === 'AbortError') {
+          formattedErr = new Error('Yêu cầu kết nối quá hạn (Timeout 5s)');
+        } else if (err.cause) {
+          if (err.cause.code === 'ENOTFOUND') {
+            const host = err.cause.hostname || 'ragnalok.online';
+            formattedErr = new Error(`Lỗi DNS (ENOTFOUND): Không tìm thấy địa chỉ máy chủ ${host}`);
+          } else if (err.cause.code === 'ECONNREFUSED') {
+            formattedErr = new Error(`Lỗi kết nối (ECONNREFUSED): Máy chủ từ chối kết nối`);
+          } else if (err.cause.code === 'ETIMEDOUT' || err.cause.code === 'UND_ERR_CONNECT_TIMEOUT') {
+            formattedErr = new Error(`Lỗi kết nối Timeout (${err.cause.code})`);
+          } else if (err.cause.code === 'ECONNRESET') {
+            formattedErr = new Error(`Lỗi kết nối bị ngắt đột ngột (ECONNRESET)`);
+          }
+        }
+        
+        lastError = formattedErr;
+
+        if (attempt < maxAttempts) {
+          const waitTime = attempt * 500;
+          console.log(`[Request Retry] Bot "${this.name}" gặp lỗi "${formattedErr.message}" khi gọi ${url.substring(url.lastIndexOf('/'))}. Đang thử lại lần ${attempt + 1}/${maxAttempts} sau ${waitTime}ms...`);
+          await new Promise(resolve => setTimeout(resolve, waitTime));
+        }
+      } finally {
+        clearTimeout(timeout);
       }
-    } catch (err) {
-      if (err.name === 'AbortError') {
-        throw new Error('Yêu cầu kết nối quá hạn (Timeout 10s)');
-      }
-      if (err.cause) {
-        if (err.cause.code === 'ENOTFOUND') {
-          const host = err.cause.hostname || 'ragnalok.online';
-          throw new Error(`Lỗi DNS (ENOTFOUND): Không tìm thấy địa chỉ máy chủ ${host}`);
-        }
-        if (err.cause.code === 'ECONNREFUSED') {
-          throw new Error(`Lỗi kết nối (ECONNREFUSED): Máy chủ từ chối kết nối`);
-        }
-        if (err.cause.code === 'ETIMEDOUT' || err.cause.code === 'UND_ERR_CONNECT_TIMEOUT') {
-          throw new Error(`Lỗi kết nối Timeout (${err.cause.code})`);
-        }
-        if (err.cause.code === 'ECONNRESET') {
-          throw new Error(`Lỗi kết nối bị ngắt đột ngột (ECONNRESET)`);
-        }
-      }
-      throw err;
-    } finally {
-      clearTimeout(timeout);
     }
+
+    throw lastError;
   }
 
   getCurrentMvpCycleMap() {
@@ -2823,6 +2882,125 @@ class BotInstance {
         console.error(`Auto Home error for ${this.name}:`, err);
       }
     }
+
+    // 9. Auto Market Buy
+    await this.scanAndBuyMarket();
+  }
+
+  async scanAndBuyMarket() {
+    // 1. Kiểm tra điều kiện bật tính năng
+    if (!this.settings.autoMarketBuy) return;
+    if (this.status !== 'running') return;
+    
+    // 2. Kiểm tra cooldown quét (120 giây)
+    const now = Date.now();
+    if (this.lastMarketScanAt && (now - this.lastMarketScanAt < 120000)) return;
+    
+    // 3. Kiểm tra phân quyền của user sở hữu
+    const users = loadUsers();
+    const owner = users.find(u => u.id === this.userId);
+    if (!owner) return;
+    const hasPermission = owner.role === 'admin' || owner.allowMarket === true;
+    if (!hasPermission) {
+      if (this.pollCount % 60 === 0) {
+        this.addLog('WARNING', '🔒 Tính năng Auto Market Buy bị khóa do chưa được Admin cấp quyền.');
+      }
+      return;
+    }
+
+    this.lastMarketScanAt = now;
+
+    try {
+      this.addLog('SYSTEM', '🏪 Đang tự động quét danh sách chợ game...');
+      const rawData = await this.sendRequest('https://ragnalok.online/human/xhrpg_market.php', {
+        action: 'get_listings',
+        line_uid: this.line_uid,
+        session_token: this.session_token,
+        lang: 'vi'
+      });
+
+      if (!rawData || !rawData.ok || !Array.isArray(rawData.listings)) {
+        return;
+      }
+
+      const listings = rawData.listings;
+      const filters = this.settings.marketFilters || [];
+      const maxPrice = this.settings.marketMaxPrice || 10000;
+      const currentGold = this.player.gold || 0;
+
+      // Tìm sản phẩm thỏa mãn điều kiện
+      const matchingItems = [];
+
+      for (const item of listings) {
+        const price = item.price_per || 0;
+        if (price > maxPrice) continue;
+        if (price > currentGold) continue;
+
+        // Phân loại item_type
+        let category = 'trash';
+        const type = item.item_type || '';
+        
+        if (type === 'card' || type === 'card_box') {
+          category = 'card';
+        } else if (type === 'egg' || type === 'egg_box') {
+          category = 'egg';
+        } else if (type.startsWith('module_')) {
+          category = 'module';
+        } else if (['stat_parts', 'hardware', 'weapon_parts', 'house_parts', 'treasure'].includes(type)) {
+          category = 'collectible';
+        } else if (type === 'diamond') {
+          category = 'diamond';
+        }
+
+        // Kiểm tra bộ lọc
+        if (filters.length > 0) {
+          if (!filters.includes(category)) continue;
+        } else {
+          // Mặc định không mua trash
+          if (category === 'trash') continue;
+        }
+
+        matchingItems.push({
+          id: item.id,
+          name: translateThaiText(item.item_name || 'Vật phẩm'),
+          price: price,
+          qty: 1, // Mua từng món để an toàn
+          category
+        });
+      }
+
+      if (matchingItems.length === 0) {
+        return;
+      }
+
+      // Sắp xếp mua món rẻ nhất trước
+      matchingItems.sort((a, b) => a.price - b.price);
+      const targetItem = matchingItems[0];
+
+      this.addLog('SYSTEM', `🛒 Phát hiện sản phẩm phù hợp: ${targetItem.name} với giá ${targetItem.price.toLocaleString()}G. Tiến hành tự động mua...`);
+
+      const buyRes = await this.sendRequest('https://ragnalok.online/human/xhrpg_market.php', {
+        action: 'buy',
+        line_uid: this.line_uid,
+        session_token: this.session_token,
+        listing_id: targetItem.id,
+        qty: targetItem.qty,
+        lang: 'vi'
+      });
+
+      if (buyRes && buyRes.ok) {
+        this.addLog('SUCCESS', `🎉 Auto-buy thành công: ${targetItem.name} (${targetItem.price.toLocaleString()}G)`);
+        if (buyRes.player) {
+          this.updatePlayerState(buyRes.player);
+        }
+      } else {
+        const errMsg = buyRes ? (buyRes.error || buyRes.msg || 'Lỗi không xác định') : 'Không phản hồi';
+        this.addLog('ERROR', `Mua hàng thất bại: ${errMsg}`);
+      }
+
+    } catch (e) {
+      console.error(`[Market Scanner Error] ${this.name}:`, e.message);
+    }
   }
 }
 
@@ -2959,7 +3137,8 @@ app.get('/api/auth/me', requireAuth, (req, res) => {
       username: req.user.username,
       role: req.user.role,
       maxAccounts: req.user.maxAccounts || 1,
-      expiresAt: req.user.expiresAt || null
+      expiresAt: req.user.expiresAt || null,
+      allowMarket: req.user.role === 'admin' || req.user.allowMarket === true
     }
   });
 });
@@ -3085,6 +3264,7 @@ app.get('/api/admin/users', requireAdmin, (req, res) => {
       role: u.role,
       maxAccounts: u.maxAccounts || 1,
       expiresAt: u.expiresAt || null,
+      allowMarket: u.allowMarket === true,
       createdAt: u.createdAt,
       botCount: userBots.length,
       onlineBotCount: onlineCount
@@ -3129,6 +3309,7 @@ app.post('/api/admin/users', requireAdmin, (req, res) => {
     role: 'user',
     maxAccounts: parseInt(maxAccounts) > 0 ? parseInt(maxAccounts) : 1,
     expiresAt: expiresAt,
+    allowMarket: false,
     createdAt: new Date().toISOString()
   };
 
@@ -3143,6 +3324,7 @@ app.post('/api/admin/users', requireAdmin, (req, res) => {
       role: newUser.role,
       maxAccounts: newUser.maxAccounts,
       expiresAt: newUser.expiresAt,
+      allowMarket: newUser.allowMarket,
       createdAt: newUser.createdAt,
       botCount: 0
     }
@@ -3202,6 +3384,31 @@ app.put('/api/admin/users/:userId', requireAdmin, (req, res) => {
   });
 
   res.json({ success: true, user: { id: users[index].id, username: users[index].username, role: users[index].role, maxAccounts: users[index].maxAccounts } });
+});
+
+// Toggle market permission for a specific user (Admin only)
+app.put('/api/admin/users/:userId/allow-market', requireAdmin, (req, res) => {
+  const { userId } = req.params;
+  const { allowMarket } = req.body;
+
+  const users = loadUsers();
+  const index = users.findIndex(u => u.id === userId);
+  if (index === -1) {
+    return res.status(404).json({ error: 'Không tìm thấy người dùng' });
+  }
+
+  users[index].allowMarket = allowMarket === true;
+  saveUsers(users);
+
+  res.json({ 
+    success: true, 
+    user: { 
+      id: users[index].id, 
+      username: users[index].username, 
+      role: users[index].role, 
+      allowMarket: users[index].allowMarket 
+    } 
+  });
 });
 
 // Batch update proxy for all bots owned by a specific user (Admin only)

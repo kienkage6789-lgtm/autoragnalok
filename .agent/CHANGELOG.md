@@ -1086,3 +1086,14 @@
 - File đã đổi: `server.js` (+220 dòng), `public/app.css` (+150 dòng), `public/app.js` (+480 dòng).
 - Đã làm: Thiết lập giao diện Tabs, viết logic nâng cấp & bật tắt kỹ năng, quản lý 6 mỏ đào quặng quặng, cấu hình đạn phi thuyền và nâng cấp đệ tử Companion/Titan Robot.
 - Đã test bằng: Chạy thử server và kiểm tra giao diện trên trình duyệt -> Giao diện tải và tương tác mượt mà.
+
+---
+
+## 2026-08-07 - Tối Ưu Hóa Hiệu Năng Hệ Thống Proxy Pool & Cơ Chế Kháng Lỗi Kết Nối
+
+- File đã đổi: `server.js` (sửa).
+- Đã làm:
+  - **Tối ưu cấu hình Connection Pool (Undici)**: Giảm timeout kết nối từ 10s xuống 5s, giảm keepAliveTimeout xuống 10s và keepAliveMaxTimeout xuống 30s. Tăng connections tối đa mỗi Agent lên 100 để khắc phục tình trạng tái sử dụng socket đã chết ở phía server gây ra lỗi `ECONNRESET`.
+  - **Triển khai In-memory Cache & Debounced Write**: Lưu mảng accounts vào RAM cache để phục vụ cho hơn 25 nơi đọc file `accounts.json` liên tục. Thay đổi `saveAccounts` thành ghi file bất đồng bộ (`fs.writeFile`) có debounce 1.5 giây, giải phóng hoàn toàn Event Loop của Node.js khỏi nghẽn I/O đồng bộ. Đăng ký hooks `SIGINT`, `SIGTERM`, `exit` để flush dữ liệu cache xuống đĩa khi tắt server nhằm chống mất mát dữ liệu.
+  - **Cơ chế Auto-Retry trong `sendRequest`**: Tích hợp cơ chế tự động thử lại tối đa 3 lần cho mỗi HTTP request của bot game khi gặp các lỗi mạng chập chờn (`ECONNRESET`, `ETIMEDOUT`, dữ liệu không hợp lệ). Khoảng cách giữa các lần thử lại tăng dần (attempt * 500ms). Giảm timeout của request từ 10s xuống 5s để giải phóng socket treo nhanh hơn.
+- Đã test bằng: Chạy bộ unit test tự động `node test.js` -> Tất cả các test đều PASS thành công.
