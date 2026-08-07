@@ -2,6 +2,21 @@
 
 > Changelog of actual changes implemented.
 
+## 2026-08-06 - Big Update: Battle Radar Control Panel (Săn Boss, PK, Inspect Fallback, Background Stats Cache)
+- File đã đổi: [server.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [public/app.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/public/app.js), [play_battle.html](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/play_battle.html).
+- Đã làm:
+  - **Dựng giao diện chiến đấu chuyên nghiệp (`play_battle.html`)**: Thiết kế giao diện Space-Dark Premium hiển thị song song màn hình game và Panel điều khiển Radar (Tab Boss, Tab PK, Tab Cấu hình, Log chiến đấu).
+  - **AJAX Interceptor thông minh**: Can thiệp `$.post` của jQuery tại client-side để tự động ghi đè tọa độ di chuyển `explore_cx/cy` về phía mục tiêu (Boss/Player) khi có `customTarget`.
+  - **Tích hợp Route `/battle` & Cache-buster**: Tạo route `/battle` serve file tĩnh và inject tham số cache-busting timestamp động để tải file game JS an toàn, không bị cache cũ.
+  - **Tích hợp Dashboard chính**: Thêm nút **⚡ PK** trong Account Card trên trang chủ (`public/app.js`) liên kết đến Radar.
+  - **Xem trang bị đối thủ (Inspect)**: Gọi `xhrpg.lbShow(uid)` mở popup đồ gốc.
+  - **Truy vấn UID dự phòng (Fallback Search Engine)**: Tự động gửi request POST âm thầm tìm kiếm UID theo Tên qua API `/xhrpg_trade.php` khi đối thủ trên map thiếu trường UID.
+  - **Tự động tải chỉ số PK (Background Stats Engine)**: Tự động quét và tải ngầm chỉ số Level, Phòng thủ (DEF) của đối thủ từ `xhrpg_leaderboard.php` lưu vào bộ nhớ đệm `window.playerDetailCache` phía client.
+  - **Tối ưu hóa UI bảng PK**: Bỏ cột Bang hội (gộp gọn dưới tên), thêm cột Phòng Thủ (DEF) hiển thị độ chống chịu thực tế (ví dụ: `🛡️ 15,240`).
+- Đã test bằng: `node -c server.js` -> PASS 100%.
+
+---
+
 ## 2026-08-04 - Phân tích & Bóc tách Lỗi DNS ENOTFOUND ragnalok.online cho Bot Poller
 - File đã đổi: [server.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/server.js).
 - Đã làm:

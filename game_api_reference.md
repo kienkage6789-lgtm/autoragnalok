@@ -212,8 +212,81 @@ Tất cả các thao tác nâng cấp chỉ số Pet gửi POST tới `/xhrpg_up
 
 ---
 
+## 🔍 9. API Truy Vấn & Xem Trang Bị Người Chơi Khác (Inspect & Player Query APIs)
+
+Dưới đây là các API chính thức của game dùng để tra cứu và xem chi tiết trang bị của người chơi khác:
+
+### A. API Tra Cứu UID Theo Tên Người Chơi
+Dùng để tìm kiếm UID của một người chơi dựa vào Tên hiển thị (Tên trên bản đồ).
+*   **Endpoint**: `/xhrpg_trade.php`
+*   **Phương thức**: `POST`
+*   **Tham số gửi**:
+    ```json
+    {
+      "action": "search",
+      "q": "Tên_người_chơi_cần_tìm",
+      "line_uid": "line_uid_của_bạn",
+      "session_token": "session_token_của_bạn",
+      "lang": "vi"
+    }
+    ```
+*   **Cấu trúc dữ liệu trả về**:
+    ```json
+    {
+      "ok": true,
+      "players": [
+        {
+          "uid": "U12345678",
+          "name": "Tên_người_chơi",
+          "cc": "VN",
+          "vip": 5,
+          "lv": 70
+        }
+      ]
+    }
+    ```
+
+### B. API Tải Chi Tiết Trang Bị & Sức Mạnh (Profile Inspect)
+Dùng để xem toàn bộ thông tin trang bị, stats, card, trứng của người chơi đó (Hàm `xhrpg.lbShow(uid)` gốc gọi API này).
+*   **Endpoint**: `/xhrpg_leaderboard.php`
+*   **Phương thức**: `GET`
+*   **Tham số gửi**: `{ show: "uid_người_chơi_cần_xem" }`
+*   **Cấu trúc dữ liệu trả về**:
+    ```json
+    {
+      "ok": true,
+      "uid": "U12345678",
+      "name": "Tên_người_chơi",
+      "lv": 70,
+      "rag": 2,
+      "def": 15240,
+      "stat": {
+        "str": 120,
+        "agi": 80,
+        "vit": 50,
+        "int": 5,
+        "dex": 80,
+        "luk": 5
+      },
+      "eq": [
+        {
+          "t": 6,
+          "p": 5,
+          "lv": 50,
+          "af": [["Tấn công%", 120]]
+        }
+      ],
+      "cards": { "t": 12 },
+      "eggs": { "t": 4 },
+      "book": [...]
+    }
+    ```
+
+---
+
 ## 🔍 Nơi tìm kiếm thông tin khi thiếu sót
 
 *   **Tài liệu hướng dẫn của AGY**: Đọc tài liệu skill [antigravity-guide](file:///C:/Users/Admin/.gemini/antigravity-cli/builtin/skills/antigravity_guide/SKILL.md) để biết cách tinh chỉnh CLI, MCP và Customizations.
 *   **Log hoạt động của Client**: Theo dõi tab **Nhật Ký (Logs)** trên bảng điều khiển local hoặc đọc trực tiếp file dữ liệu [accounts.json](file:///C:/Users/Admin/Desktop/auto/accounts.json).
 *   **Trình gỡ lỗi Client**: Bấm `F12` trong tab Client game local (`/play`) để xem các gói dữ liệu JSON gửi đi và nhận về từ `/xhrpg_game.php`.
+

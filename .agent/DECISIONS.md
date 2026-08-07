@@ -2,6 +2,18 @@
 
 > Captured architectural decisions and trade-offs.
 
+## 2026-08-06 - Tự động tải ngầm chỉ số PK (Background Stats Engine) & Cơ chế tìm kiếm UID dự phòng
+
+- Bối cảnh:
+  - Khi xem thông tin người chơi khác (Inspect) trên bản đồ qua bảng PK, game server chỉ gửi Tên và tọa độ trong dữ liệu polling `/xhrpg_game.php`, không gửi UID và các chỉ số chiến đấu (Level, DEF, HP). Điều này khiến cột Cấp (Lv) hiển thị trống (`--`) và nút Xem 🔍 bị lỗi `undefined` do không có UID để truyền vào hàm `xhrpg.lbShow()`.
+- Quyết định:
+  1. **Bộ nhớ đệm thông minh (Client-side Cache)**: Khai báo `window.playerDetailCache` và `window.lastGameData` tại client-side.
+  2. **Tải ngầm chỉ số (Background Stats Engine)**: Khi phát hiện người chơi mới trên bản đồ, Radar tự động gửi request ngầm đến `xhrpg_leaderboard.php?show=uid` để lấy Level và Phòng thủ (DEF) thực tế hiển thị lên bảng PK.
+  3. **Truy vấn UID dự phòng (Fallback Search Engine)**: Nếu người chơi không có sẵn UID, khi click Xem 🔍, Radar tự động gửi request POST âm thầm tìm kiếm UID theo Tên qua API giao dịch `/xhrpg_trade.php` trước, sau đó dùng UID lấy được để mở popup xem đồ.
+  4. **Cải tiến UI bảng PK**: Bỏ cột Bang hội (gộp xuống dưới tên), thay bằng cột Phòng Thủ (DEF) để hiển thị trực tiếp độ chống chịu của đối thủ (ví dụ: `🛡️ 15,240`).
+
+---
+
 ## 2026-08-04 - Khắc phục Triệt để Lỗi Kẹt Xoay Map Săn Boss MVP & Tự động Kích hoạt Giờ tròn
 
 - Bối cảnh:

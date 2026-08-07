@@ -3,6 +3,23 @@
 > Work Breakdown Structure. Update task states immediately upon changes.
 > Statuses: todo | doing | blocked | review | done
 
+### [x] T56 - Big Update: Battle Radar Control Panel (Săn Boss, PK, Inspect Fallback, Background Stats Cache)
+- Description: Phát triển hệ thống giao diện chiến đấu chuyên nghiệp play_battle.html với cơ chế AJAX Interceptor cho phép target Boss và PK tự động di chuyển. Tích hợp tính năng Xem sức mạnh (Inspect) có cơ chế tìm kiếm UID dự phòng qua Trade API, và tự động tải ngầm chỉ số Level, Phòng thủ (DEF) thực tế của đối thủ hiển thị trực quan lên bảng PK thông qua bộ nhớ đệm client.
+- Files related: `server.js`, `public/app.js`, `play_battle.html`
+- Acceptance criteria:
+  - [x] Tạo trang mới `play_battle.html` hiển thị song song màn hình game và Panel Radar (Tab Boss, Tab PK, Tab Cấu hình, Log chiến đấu).
+  - [x] AJAX Interceptor can thiệp `$.post` tại client-side để ghi đè tọa độ di chuyển `explore_cx/cy` when `customTarget` exists.
+  - [x] Thêm route `/battle` trên `server.js` tích hợp cache-buster timestamp động để nạp JS game an toàn.
+  - [x] Thêm nút ⚡ PK trên Dashboard (`public/app.js`) liên kết đến Radar.
+  - [x] Triển khai tính năng Inspect 🔍 gọi `xhrpg.lbShow(uid)` xem đồ gốc của đối phương.
+  - [x] Bổ sung cơ chế Fallback Search Engine: Tự động gửi request tìm kiếm UID âm thầm theo Tên qua `/xhrpg_trade.php` khi đối tượng người chơi trên map thiếu UID.
+  - [x] Triển khai Background PK Stats Engine & Client Cache (`window.playerDetailCache`): Tự động tải ngầm chỉ số Level và DEF của đối thủ từ `xhrpg_leaderboard.php` hiển thị lên bảng PK.
+  - [x] Tối ưu hóa UI bảng PK: Gộp Bang hội, thêm cột Phòng Thủ (DEF) hiển thị điểm chống chịu thực tế.
+  - [x] Chạy kiểm thử cú pháp an toàn và xác minh hoạt động trơn tru.
+- Status: done
+
+---
+
 ### [x] T55 - Nâng cấp & Sửa lỗi Chức năng Săn Boss MVP (Tốc độ, Toggle, Log Accuracy & HP Priority)
 - Description: Giải quyết triệt để 3 vấn đề lớn trong luồng săn Boss MVP: (1) Sửa lỗi kẹt deadlock map do warp thất bại hoặc map vượt level nhân vật; (2) Tối ưu tốc độ xác nhận map sạch boss từ 10-12s xuống 1-2s (1 poll) khi bosses là []; (3) Thêm công tắc UI `autoMvpCycle` và tiêu chí ưu tiên Boss ít % HP nhất (`hp_asc`); (4) Sửa lỗi thông báo log nhầm lẫn giữa "Không có Boss" và "Đã dọn sạch Boss" khi diệt 0 boss.
 - Files related: `server.js`, `public/app.js`, `test.js`
