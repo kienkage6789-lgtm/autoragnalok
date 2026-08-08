@@ -1048,6 +1048,115 @@ function isSkillUnlocked(skillId, playerLv, skills) {
 // Map definitions (dynamically loaded & cached)
 const MAP_DEFS = getMapDefs();
 
+const MONSTER_DICT = {
+  1:  { n: 'Sứa Đỏ',             lv: 1 },
+  2:  { n: 'Sâu Lá',              lv: 2 },
+  3:  { n: 'Thỏ Trắng',          lv: 3 },
+  4:  { n: 'Chim Khai Phá',       lv: 5 },
+  5:  { n: 'Chuồn Chuồn',          lv: 7 },
+  6:  { n: 'Mộc Yêu',             lv: 9 },
+  7:  { n: 'Nấm Độc',             lv: 12 },
+  8:  { n: 'Sói Xám',             lv: 15 },
+  9:  { n: 'Cốt Binh',             lv: 18 },
+  10: { n: 'Thây Ma',             lv: 22 },
+  11: { n: 'Xác Ướp',             lv: 26 },
+  12: { n: 'Rắn Độc',             lv: 30 },
+  13: { n: 'Người Đá',            lv: 35 },
+  14: { n: 'Băng Khổng Lồ',        lv: 40 },
+  15: { n: 'Quỷ Tuyết',            lv: 45 },
+  16: { n: 'Bò Thần',              lv: 50 },
+  17: { n: 'Pháp Sư',             lv: 55 },
+  18: { n: 'Thuyền Trưởng',       lv: 60 },
+  19: { n: 'Quỷ Lửa',             lv: 65 },
+  20: { n: 'Chúa Lửa',             lv: 70 },
+  21: { n: 'Bọ Hoàng Kim',        lv: 75 },
+  22: { n: 'Nữ Hoàng Maya',        lv: 80 },
+  23: { n: 'Vua Bọ',              lv: 85 },
+  24: { n: 'Chúa Tể Baphomet',    lv: 90 },
+  25: { n: 'Chúa Tể Bóng Tối',    lv: 95 },
+  26: { n: 'Nữ Thần Valkyrie',    lv: 100 }
+};
+
+function getCardStars(translatedName) {
+  let monLv = 1;
+  const nameLower = translatedName.toLowerCase();
+  for (const mid in MONSTER_DICT) {
+    const m = MONSTER_DICT[mid];
+    if (nameLower.includes(m.n.toLowerCase())) {
+      monLv = m.lv;
+      break;
+    }
+  }
+  return Math.ceil(monLv / 10);
+}
+
+function getModuleTier(translatedName) {
+  if (!translatedName) return 'T1';
+  const match = translatedName.match(/\bT([1-5])\b/i) || translatedName.match(/tier\s*([1-5])\b/i) || translatedName.match(/bậc\s*([1-5])\b/i) || translatedName.match(/cấp\s*([1-5])\b/i);
+  if (match) return `T${match[1]}`;
+  const nameLower = translatedName.toLowerCase();
+  for (let i = 5; i >= 1; i--) {
+    if (nameLower.includes(`t${i}`) || nameLower.includes(`bậc ${i}`) || nameLower.includes(`cấp ${i}`)) {
+      return `T${i}`;
+    }
+  }
+  return 'T1';
+}
+
+function getModuleType(translatedName) {
+  const nameLower = translatedName.toLowerCase();
+  if (nameLower.includes('dao găm') || nameLower.includes('knife')) return 'knife';
+  if (nameLower.includes('kiếm') || nameLower.includes('dao dài') || nameLower.includes('sword') || nameLower.includes('blade')) return 'sword';
+  if (nameLower.includes('rìu') || nameLower.includes('axe')) return 'axe';
+  if (nameLower.includes('titan')) return 'titan';
+  if (nameLower.includes('giáp') || nameLower.includes('armor')) return 'armor';
+  if (nameLower.includes('phi thuyền') || nameLower.includes('spaceship') || nameLower.includes('thuyền')) return 'spaceship';
+  if (nameLower.includes('pháo tháp') || nameLower.includes('pháo') || nameLower.includes('turret')) return 'turret';
+  return 'other';
+}
+
+function getItemCategory(item) {
+  if (!item) return 'resource';
+  const type = (item.item_type || '').toLowerCase();
+  const rawName = (item.item_name || '').toLowerCase();
+  const transName = translateThaiText(item.item_name || '').toLowerCase();
+
+  // 1. Card Box
+  if (type === 'card_box' || rawName.includes('กล่องการ์ด') || transName.includes('hộp thẻ')) {
+    return 'card_box';
+  }
+  // 2. Egg Box
+  if (type === 'egg_box' || rawName.includes('กล่องไข่') || transName.includes('hộp trứng')) {
+    return 'egg_box';
+  }
+  // 3. Module Box
+  if (type === 'module_box' || rawName.includes('กล่องโมดูล') || transName.includes('hộp module')) {
+    return 'module_box';
+  }
+  // 4. Card
+  if (type === 'card' || rawName.includes('การ์ด') || transName.includes('thẻ')) {
+    return 'card';
+  }
+  // 5. Egg
+  if (type === 'egg' || rawName.includes('ไข่') || transName.includes('trứng')) {
+    return 'egg';
+  }
+  // 6. Module
+  if (type.startsWith('module_') || rawName.includes('โมดูล') || transName.includes('module')) {
+    return 'module';
+  }
+  // 7. Collectible / Proof
+  if (['stat_parts', 'hardware', 'weapon_parts', 'house_parts', 'treasure'].includes(type) || transName.includes('chứng') || transName.includes('sưu tầm') || transName.includes('linh kiện')) {
+    return 'collectible';
+  }
+  // 8. Diamond
+  if (type === 'diamond' || rawName.includes('เพชร') || transName.includes('kim cương')) {
+    return 'diamond';
+  }
+  // 9. Resource / Material / Trash (default fallback)
+  return 'resource';
+}
+
 // Background poller manager
 class BotInstance {
   constructor(account) {
@@ -1109,6 +1218,7 @@ class BotInstance {
     this.failedSeeds = {}; // Danh sách hạt giống bị lỗi gieo trồng
     this.lastHarvestFailedAt = 0;
     this.lastHomeUpgradeFailedAt = 0;
+    this.marketBuyHistory = account.marketBuyHistory || [];
     this.addLog('SYSTEM', `Khởi tạo bot cho tài khoản: ${this.name}`);
   }
 
@@ -1175,7 +1285,22 @@ class BotInstance {
       teamRole: 'none',
       autoMarketBuy: false,
       marketMaxPrice: 10000,
-      marketFilters: []
+      marketScanInterval: 10,
+      marketCategories: {
+        module: false,
+        card: false,
+        egg: false,
+        collectible: false,
+        resource: false,
+        card_box: false,
+        egg_box: false,
+        module_box: false,
+        diamond: false
+      },
+      marketSelectedCards: [],
+      marketSelectedEggs: [],
+      marketSelectedModuleTiers: [],
+      marketCategoryMaxPrices: {}
     };
   }
 
@@ -1461,7 +1586,9 @@ class BotInstance {
         // Schedule next poll staggering
         if (this.status === 'running') {
           const isSnipe = this.targetedMvp && this._bossSnipeActive;
-          this.timer = setTimeout(runPoll, isSnipe ? 1000 : 2000);
+          const baseDelay = isSnipe ? 1200 : 2000;
+          const jitter = Math.floor(Math.random() * 300) - 150; // Jitter ngẫu nhiên ±150ms né Cloudflare pattern
+          this.timer = setTimeout(runPoll, Math.max(1000, baseDelay + jitter));
         }
       }
     };
@@ -1491,11 +1618,12 @@ class BotInstance {
     let lastError = null;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      // Throttle requests: Đảm bảo khoảng cách tối thiểu 1.1s giữa các request của bot để tránh lỗi "too_fast"
+      // Throttle requests: Đảm bảo khoảng cách tối thiểu giữa các request của bot để tránh lỗi "too_fast"
+      const minInterval = url.includes('xhrpg_game.php') ? 900 : 600;
       const now = Date.now();
       const timeSinceLast = now - (this.lastRequestAt || 0);
-      if (timeSinceLast < 1100) {
-        await new Promise(r => setTimeout(r, 1100 - timeSinceLast));
+      if (timeSinceLast < minInterval) {
+        await new Promise(r => setTimeout(r, minInterval - timeSinceLast));
       }
       this.lastRequestAt = Date.now();
 
@@ -1509,7 +1637,8 @@ class BotInstance {
 
       const searchParams = new URLSearchParams(payload);
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 5000); // 5s timeout giải phóng socket nhanh
+      const timeoutMs = url.includes('xhrpg_game.php') ? 8000 : 10000;
+      const timeout = setTimeout(() => controller.abort(), timeoutMs); // 8-10s timeout chịu trễ mạng tốt hơn
       
       try {
         const response = await fetch(url, {
@@ -1539,7 +1668,7 @@ class BotInstance {
       } catch (err) {
         let formattedErr = err;
         if (err.name === 'AbortError') {
-          formattedErr = new Error('Yêu cầu kết nối quá hạn (Timeout 5s)');
+          formattedErr = new Error(`Yêu cầu kết nối quá hạn (Timeout ${Math.round(timeoutMs/1000)}s)`);
         } else if (err.cause) {
           if (err.cause.code === 'ENOTFOUND') {
             const host = err.cause.hostname || 'ragnalok.online';
@@ -1732,31 +1861,18 @@ class BotInstance {
       this.mvpConfirmClearCount = 0;
     }
 
-    const isDoneWithCurrentMap = (
-      (this.mvpConfirmClearCount >= 1) || // Tối ưu: Chuyển map NGAY (1 poll ~1-2s) khi bosses = [] hoặc sạch boss
-      (this.mvpCycleMapStayCount >= 40)   // Timeout sau ~80s
-    );
+    const isDoneWithCurrentMap = (this.mvpConfirmClearCount >= 1); // Chỉ chuyển map khi đã dọn sạch Boss (không bị timeout)
     
     if (isDoneWithCurrentMap) {
-      const isTimeout = this.mvpCycleMapStayCount >= 40;
       const killedCount = this.mvpCycleStats ? (this.mvpCycleStats.bossKilledInMap || 0) : 0;
-      let reason = 'Không có Boss mục tiêu';
-      if (isTimeout) {
-        reason = 'Hết thời gian chờ (Timeout)';
-      } else if (killedCount > 0) {
-        reason = `Đã dọn sạch Boss (Đã diệt ${killedCount} Boss)`;
-      }
+      let reason = killedCount > 0 ? `Đã dọn sạch Boss (Đã diệt ${killedCount} Boss)` : 'Không có Boss mục tiêu';
       const timeSpentMs = Date.now() - (this.mvpCycleStats ? (this.mvpCycleStats.mapStartTs || Date.now()) : Date.now());
       
-      if (isTimeout) {
-        this.addMvpLog('map_timeout', { mapId: currentMap, timeSpentMs });
-      } else {
-        this.addMvpLog('map_clear', {
-          mapId: currentMap,
-          bossKilledCount: this.mvpCycleStats ? (this.mvpCycleStats.bossKilledInMap || 0) : 0,
-          timeSpentMs
-        });
-      }
+      this.addMvpLog('map_clear', {
+        mapId: currentMap,
+        bossKilledCount: killedCount,
+        timeSpentMs
+      });
 
       this.mvpCycleMapIndex++;
       this.mvpCycleMapStayCount = 0;
@@ -1998,8 +2114,10 @@ class BotInstance {
             const dy = this.player.y - activeBoss.y;
             const dist = Math.sqrt(dx * dx + dy * dy);
 
-            // Khoảng cách tiếp cận 5m để bù dung sai di chuyển theo yêu cầu của khách hàng
-            const approachDist = 5;
+            // Cấu hình duy trì khoảng cách an toàn 15m - 20m với Boss
+            const MIN_BOSS_DIST = 15;
+            const MAX_BOSS_DIST = 20;
+            const TARGET_KITE_DIST = 17.5;
 
             // Kiểm tra trạng thái kích hoạt Snipe Mode (HP <= 30%)
             const bossHpPct = Math.round((activeBoss.hp || 0) / (activeBoss.hp_max || 1) * 100);
@@ -2010,28 +2128,40 @@ class BotInstance {
               this.addLog('SYSTEM', `⚡ [Snipe Mode] Boss ${activeBoss.emoji || '👾'} ${activeBoss.name || 'Boss'} HP xuống ${bossHpPct}% -> Kích hoạt tăng tốc tấn công!`);
             }
 
-            // Luôn đặt tâm tìm mục tiêu vào vị trí Boss để không bị quái rác cướp lượt
-            exploreCx = activeBoss.x;
-            exploreCy = activeBoss.y;
-
             const nowMs = Date.now();
             const shouldLogStatus = (nowMs - (this._lastBossStatusLogAt || 0)) >= 5000;
 
-            if (dist > approachDist) {
-              exploreRadius = 300;
+            if (dist > MAX_BOSS_DIST || dist < MIN_BOSS_DIST) {
+              // Tính vector đơn vị hướng từ Boss đến Player
+              const ux = dist > 0 ? dx / dist : 1;
+              const uy = dist > 0 ? dy / dist : 0;
+
+              // Tọa độ mục tiêu di chuyển/kiting duy trì khoảng cách 17.5m
+              exploreCx = Math.round((activeBoss.x + ux * TARGET_KITE_DIST) * 100) / 100;
+              exploreCy = Math.round((activeBoss.y + uy * TARGET_KITE_DIST) * 100) / 100;
               traveling = 1;
               lockPos = 0;
+              exploreRadius = 300;
+
               if (shouldLogStatus) {
                 this._lastBossStatusLogAt = nowMs;
-                this.addLog('SYSTEM', `⚔️ [Auto Boss] Đang di chuyển săn Boss: ${activeBoss.emoji || '👾'} ${activeBoss.name || 'Boss'} (Khoảng cách: ${Math.round(dist)}m, Ngưỡng dừng: ${approachDist}m)`);
+                if (dist > MAX_BOSS_DIST) {
+                  this.addLog('SYSTEM', `⚔️ [Auto Boss] Đang di chuyển lại gần Boss: ${activeBoss.emoji || '👾'} ${activeBoss.name || 'Boss'} (Khoảng cách: ${Math.round(dist)}m -> Ngưỡng an toàn 15-20m)`);
+                } else {
+                  this.addLog('SYSTEM', `🛡️ [Auto Boss] Boss lại quá gần (${Math.round(dist)}m < 15m) -> Lùi lại giữ khoảng cách an toàn 17.5m`);
+                }
               }
             } else {
-              exploreRadius = 100;
+              // Đã ở khoảng cách an toàn hoàn hảo (15m - 20m)
+              exploreCx = activeBoss.x;
+              exploreCy = activeBoss.y;
               traveling = 0;
-              lockPos = 1; // Khóa vị trí khi đã vào tầm bắn để dồn toàn bộ DPS
+              lockPos = 1; // Khóa vị trí khi đã ở khoảng cách an toàn để dồn toàn bộ DPS
+              exploreRadius = 100;
+
               if (shouldLogStatus) {
                 this._lastBossStatusLogAt = nowMs;
-                this.addLog('SYSTEM', `⚔️ [Auto Boss] Đang tấn công Boss: ${activeBoss.emoji || '👾'} ${activeBoss.name || 'Boss'} (HP: ${bossHpPct}%)`);
+                this.addLog('SYSTEM', `⚔️ [Auto Boss] Đang tấn công Boss ở khoảng cách an toàn: ${activeBoss.emoji || '👾'} ${activeBoss.name || 'Boss'} (Khoảng cách: ${Math.round(dist)}m [15-20m], HP: ${bossHpPct}%)`);
               }
             }
           } else {
@@ -2412,8 +2542,10 @@ class BotInstance {
     // Enable automation routines based on individual user settings
     const enableUpgrades = !this.isMvpCycling;
     if (enableUpgrades) {
+      let subActionDone = false;
+
       // 1. Auto allocation of stats
-      if (this.settings.autoStats && this.player.stat_pts > 0) {
+      if (!subActionDone && this.settings.autoStats && this.player.stat_pts > 0) {
       const targetStat = this.settings.statsPriority.find(s => s === 'str' || s === 'agi' || s === 'vit' || s === 'intel' || s === 'dex' || s === 'luk');
       if (targetStat) {
         const amount = this.player.stat_pts;
@@ -2429,6 +2561,7 @@ class BotInstance {
           if (res.ok) {
             this.updatePlayerState(res.player);
             this.addLog('SUCCESS', `Tăng điểm ${targetStat.toUpperCase()} thành công`);
+            subActionDone = true;
           } else {
             this.addLog('WARNING', `Tăng điểm thất bại: ${res.error}`);
           }
@@ -2439,7 +2572,7 @@ class BotInstance {
     }
 
     // 2. Auto upgrading Gear/Armor
-    if (this.settings.autoGear && (this.player.armor_lv || 0) < 50) {
+    if (!subActionDone && this.settings.autoGear && (this.player.armor_lv || 0) < 50) {
       const armLv = this.player.armor_lv || 0;
       const cost = getArmorUpgradeCost(armLv);
       if ((this.player.gold || 0) >= cost.gold && (this.player.stone || 0) >= cost.stone) {
@@ -2453,6 +2586,7 @@ class BotInstance {
           if (res.ok) {
             this.updatePlayerState(res.player);
             this.addLog('SUCCESS', `Nâng cấp Armor lên Lv.${this.player.armor_lv} thành công`);
+            subActionDone = true;
           } else {
             this.addLog('WARNING', `Nâng cấp Armor thất bại: ${res.error}`);
           }
@@ -2463,7 +2597,7 @@ class BotInstance {
     }
 
     // 3. Auto upgrading Skills
-    if (this.settings.autoSkills && (this.player.skill_pts || 0) > 0) {
+    if (!subActionDone && this.settings.autoSkills && (this.player.skill_pts || 0) > 0) {
       let skills = {};
       try {
         skills = typeof this.player.skills === 'object' ? this.player.skills : JSON.parse(this.player.skills || '{}');
@@ -2486,6 +2620,7 @@ class BotInstance {
           if (res.ok) {
             this.updatePlayerState(res.player);
             this.addLog('SUCCESS', `Nâng cấp kỹ năng ${skillToUpgrade} thành công`);
+            subActionDone = true;
           } else {
             this.addLog('WARNING', `Nâng cấp kỹ năng thất bại: ${res.error}`);
           }
@@ -2496,7 +2631,7 @@ class BotInstance {
     }
 
     // 4. Auto Companions (Cat & Drone)
-    if (this.settings.autoCompanion) {
+    if (!subActionDone && this.settings.autoCompanion) {
       // Cat upgrade
       const catLv = this.player.cat_lv || 0;
       if (catLv < 30) {
@@ -2512,34 +2647,38 @@ class BotInstance {
             if (res.ok) {
               this.updatePlayerState(res.player);
               this.addLog('SUCCESS', `Nâng cấp Cat lên Lv.${this.player.cat_lv} thành công`);
+              subActionDone = true;
             }
           } catch (e) {}
         }
       }
 
       // Drone upgrade
-      const droneLv = this.player.drone_lv || 0;
-      if (droneLv < 30) {
-        const cost = getDroneUpgradeCost(droneLv);
-        if ((this.player.gold || 0) >= cost.gold && (this.player.copper || 0) >= cost.copper) {
-          this.addLog('SYSTEM', `🛸 [Tự động] Nâng cấp Drone lên Lv.${droneLv + 1}`);
-          try {
-            const res = await this.sendRequest('https://ragnalok.online/human/xhrpg_upgrade.php', {
-              line_uid: this.line_uid,
-              session_token: this.session_token,
-              action: 'upgrade_drone'
-            });
-            if (res.ok) {
-              this.updatePlayerState(res.player);
-              this.addLog('SUCCESS', `Nâng cấp Drone lên Lv.${this.player.drone_lv} thành công`);
-            }
-          } catch (e) {}
+      if (!subActionDone) {
+        const droneLv = this.player.drone_lv || 0;
+        if (droneLv < 30) {
+          const cost = getDroneUpgradeCost(droneLv);
+          if ((this.player.gold || 0) >= cost.gold && (this.player.copper || 0) >= cost.copper) {
+            this.addLog('SYSTEM', `🛸 [Tự động] Nâng cấp Drone lên Lv.${droneLv + 1}`);
+            try {
+              const res = await this.sendRequest('https://ragnalok.online/human/xhrpg_upgrade.php', {
+                line_uid: this.line_uid,
+                session_token: this.session_token,
+                action: 'upgrade_drone'
+              });
+              if (res.ok) {
+                this.updatePlayerState(res.player);
+                this.addLog('SUCCESS', `Nâng cấp Drone lên Lv.${this.player.drone_lv} thành công`);
+                subActionDone = true;
+              }
+            } catch (e) {}
+          }
         }
       }
     }
 
     // 5. Auto Mines management
-    if (this.settings.autoMines && (this.player.house_lv || 0) >= 20) {
+    if (!subActionDone && this.settings.autoMines && (this.player.house_lv || 0) >= 20) {
       const MINE_UNLOCK = [20, 40, 60, 999, 999, 999];
       let mlv = [], mor = [], mon = [];
       try {
@@ -2579,6 +2718,7 @@ class BotInstance {
               if (res.player) {
                 this.updatePlayerState(res.player);
                 this.addLog('SUCCESS', `Xây dựng mỏ khai thác ô ${s + 1} thành công`);
+                subActionDone = true;
               }
             } catch (e) {}
             break; // Do one mine action per poll
@@ -2604,6 +2744,7 @@ class BotInstance {
               if (res.player) {
                 this.updatePlayerState(res.player);
                 this.addLog('SUCCESS', `Nâng cấp mỏ khai thác ô ${s + 1} thành công`);
+                subActionDone = true;
               }
             } catch (e) {}
             break;
@@ -2622,6 +2763,7 @@ class BotInstance {
             if (res.player) {
               this.updatePlayerState(res.player);
               this.addLog('SUCCESS', `Mỏ ô ${s + 1} hoạt động trở lại`);
+              subActionDone = true;
             }
           } catch (e) {}
           break;
@@ -2892,9 +3034,10 @@ class BotInstance {
     if (!this.settings.autoMarketBuy) return;
     if (this.status !== 'running') return;
     
-    // 2. Kiểm tra cooldown quét (120 giây)
+    // 2. Kiểm tra chu kỳ quét (cấu hình được từ 3s-60s, mặc định 10s)
+    const intervalSec = Math.max(3, Number(this.settings.marketScanInterval || 10));
     const now = Date.now();
-    if (this.lastMarketScanAt && (now - this.lastMarketScanAt < 120000)) return;
+    if (this.lastMarketScanAt && (now - this.lastMarketScanAt < intervalSec * 1000)) return;
     
     // 3. Kiểm tra phân quyền của user sở hữu
     const users = loadUsers();
@@ -2924,54 +3067,80 @@ class BotInstance {
       }
 
       const listings = rawData.listings;
-      const filters = this.settings.marketFilters || [];
-      const maxPrice = this.settings.marketMaxPrice || 10000;
+      const categoriesConfig = this.settings.marketCategories || {};
+      const globalMaxPrice = Number(this.settings.marketMaxPrice || 10000);
+      const categoryMaxPrices = this.settings.marketCategoryMaxPrices || {};
       const currentGold = this.player.gold || 0;
 
-      // Tìm sản phẩm thỏa mãn điều kiện
       const matchingItems = [];
 
       for (const item of listings) {
-        const price = item.price_per || 0;
-        if (price > maxPrice) continue;
+        const category = getItemCategory(item);
+        
+        // A. Kiểm tra xem category này có đang được BẬT không
+        if (!categoriesConfig[category]) continue;
+
+        const price = Number(item.price_per || 0);
+
+        // B. Tính giá tối đa hiệu lực cho category này
+        const catMaxPrice = categoryMaxPrices[category] !== undefined && categoryMaxPrices[category] !== null && categoryMaxPrices[category] !== '' 
+          ? Number(categoryMaxPrices[category]) 
+          : globalMaxPrice;
+        const effectiveMaxPrice = catMaxPrice > 0 ? catMaxPrice : globalMaxPrice;
+
+        if (price > effectiveMaxPrice) continue;
         if (price > currentGold) continue;
 
-        // Phân loại item_type
-        let category = 'trash';
-        const type = item.item_type || '';
-        
-        if (type === 'card') {
-          category = 'card';
-        } else if (type === 'card_box') {
-          category = 'card_box';
-        } else if (type === 'egg') {
-          category = 'egg';
-        } else if (type === 'egg_box') {
-          category = 'egg_box';
-        } else if (type === 'module_box') {
-          category = 'module_box';
-        } else if (type.startsWith('module_')) {
-          category = 'module';
-        } else if (['stat_parts', 'hardware', 'weapon_parts', 'house_parts', 'treasure'].includes(type)) {
-          category = 'collectible';
-        } else if (type === 'diamond') {
-          category = 'diamond';
-        }
+        const translatedName = translateThaiText(item.item_name || 'Vật phẩm');
 
-        // Kiểm tra bộ lọc
-        if (filters.length > 0) {
-          if (!filters.includes(category)) continue;
-        } else {
-          // Mặc định không mua trash
-          if (category === 'trash') continue;
+        // C. Kiểm tra lọc riêng từng loại
+        // C. Kiểm tra lọc riêng từng loại (nếu danh sách rỗng -> mặc định mua tất cả vật phẩm thuộc loại này <= max price)
+        if (category === 'card') {
+          const selectedCards = this.settings.marketSelectedCards || [];
+          if (Array.isArray(selectedCards) && selectedCards.length > 0) {
+            const itemLower = translatedName.toLowerCase();
+            const matches = selectedCards.some(cardName => {
+              let cardLower = cardName.toLowerCase().trim();
+              if (cardLower.startsWith('mvp ')) cardLower = cardLower.replace(/^mvp\s+/, '');
+              return cardLower && (itemLower.includes(cardLower) || cardLower.includes(itemLower));
+            });
+            if (!matches) continue;
+          }
+        } else if (category === 'egg') {
+          const selectedEggs = this.settings.marketSelectedEggs || [];
+          if (Array.isArray(selectedEggs) && selectedEggs.length > 0) {
+            const itemLower = translatedName.toLowerCase();
+            const matches = selectedEggs.some(eggName => {
+              let eggLower = eggName.toLowerCase().trim();
+              if (eggLower.startsWith('mvp ')) eggLower = eggLower.replace(/^mvp\s+/, '');
+              return eggLower && (itemLower.includes(eggLower) || eggLower.includes(itemLower));
+            });
+            if (!matches) continue;
+          }
+        } else if (category === 'module') {
+          const selectedTiers = this.settings.marketSelectedModuleTiers || [];
+          if (Array.isArray(selectedTiers) && selectedTiers.length > 0) {
+            const itemTier = getModuleTier(translatedName) || getModuleTier(item.item_name || '');
+            if (!itemTier || !selectedTiers.includes(itemTier)) continue;
+          }
+        } else if (category === 'collectible') {
+          const selectedCollectibles = this.settings.marketSelectedCollectibles || [];
+          if (Array.isArray(selectedCollectibles) && selectedCollectibles.length > 0) {
+            const itemLower = translatedName.toLowerCase();
+            const matches = selectedCollectibles.some(colName => {
+              const colLower = colName.toLowerCase().trim();
+              return colLower && (itemLower.includes(colLower) || colLower.includes(itemLower));
+            });
+            if (!matches) continue;
+          }
         }
 
         matchingItems.push({
           id: item.id,
-          name: translateThaiText(item.item_name || 'Vật phẩm'),
+          name: translatedName,
           price: price,
-          qty: 1, // Mua từng món để an toàn
-          category
+          qty: 1,
+          category: category
         });
       }
 
@@ -2979,11 +3148,11 @@ class BotInstance {
         return;
       }
 
-      // Sắp xếp mua món rẻ nhất trước
+      // Sắp xếp ưu tiên sản phẩm có giá rẻ nhất trước
       matchingItems.sort((a, b) => a.price - b.price);
       const targetItem = matchingItems[0];
 
-      this.addLog('SYSTEM', `🛒 Phát hiện sản phẩm phù hợp: ${targetItem.name} với giá ${targetItem.price.toLocaleString()}G. Tiến hành tự động mua...`);
+      this.addLog('SYSTEM', `🛒 Phát hiện sản phẩm phù hợp: ${targetItem.name} với giá ${targetItem.price.toLocaleString()}G. Tiến hành mua...`);
 
       const buyRes = await this.sendRequest('https://ragnalok.online/human/xhrpg_market.php', {
         action: 'buy',
@@ -2994,15 +3163,33 @@ class BotInstance {
         lang: 'vi'
       });
 
+      const historyEntry = {
+        id: targetItem.id,
+        itemName: targetItem.name,
+        category: targetItem.category,
+        price: targetItem.price,
+        time: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        timestamp: Date.now(),
+        status: 'success',
+        error: null
+      };
+
       if (buyRes && buyRes.ok) {
         this.addLog('SUCCESS', `🎉 Auto-buy thành công: ${targetItem.name} (${targetItem.price.toLocaleString()}G)`);
+        historyEntry.status = 'success';
         if (buyRes.player) {
           this.updatePlayerState(buyRes.player);
         }
       } else {
-        const errMsg = buyRes ? (buyRes.error || buyRes.msg || 'Lỗi không xác định') : 'Không phản hồi';
-        this.addLog('ERROR', `Mua hàng thất bại: ${errMsg}`);
+        const errMsg = buyRes ? (buyRes.error || buyRes.msg || 'Sản phẩm đã bị người khác mua trước hoặc không còn tồn tại') : 'Không phản hồi từ server';
+        this.addLog('WARNING', `⚠️ Mua hàng không thành công [${targetItem.name}]: ${errMsg}`);
+        historyEntry.status = 'failed';
+        historyEntry.error = errMsg;
       }
+
+      if (!Array.isArray(this.marketBuyHistory)) this.marketBuyHistory = [];
+      this.marketBuyHistory.unshift(historyEntry);
+      if (this.marketBuyHistory.length > 50) this.marketBuyHistory.pop();
 
     } catch (e) {
       console.error(`[Market Scanner Error] ${this.name}:`, e.message);
@@ -4221,7 +4408,8 @@ app.get('/api/accounts', requireAuth, (req, res) => {
             x: b.x,
             y: b.y,
             isTarget: b.id === bot.lastTargetedBossId
-          }))
+          })),
+          marketBuyHistory: bot.marketBuyHistory || []
         };
       });
     res.json(list);
@@ -4690,6 +4878,23 @@ app.get('/api/accounts/:line_uid/market-history', requireAuth, async (req, res) 
   } catch (err) {
     res.status(500).json({ error: `Không thể tải lịch sử chợ: ${err.message}` });
   }
+});
+
+// Get bot local auto-buy market history
+app.get('/api/accounts/:line_uid/market-buy-history', requireAuth, (req, res) => {
+  const { line_uid } = req.params;
+  const bot = botInstances[line_uid];
+  if (!checkAccountOwnership(req, res, bot)) return;
+  res.json({ ok: true, history: bot.marketBuyHistory || [] });
+});
+
+// Clear bot local auto-buy market history
+app.delete('/api/accounts/:line_uid/market-buy-history', requireAuth, (req, res) => {
+  const { line_uid } = req.params;
+  const bot = botInstances[line_uid];
+  if (!checkAccountOwnership(req, res, bot)) return;
+  bot.marketBuyHistory = [];
+  res.json({ ok: true, message: 'Đã xóa lịch sử mua tự động.' });
 });
 
 // Get detailed full player state

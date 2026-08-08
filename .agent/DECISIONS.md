@@ -2,6 +2,72 @@
 
 > Captured architectural decisions and trade-offs.
 
+## 2026-08-08 - Đồng Bộ Thuật Toán Khoảng Cách An Toàn 15m - 20m & Kiting Cho Chức Năng PK (T61)
+
+- Bối cảnh:
+  - Khi PK đối thủ người chơi khác trên giao diện Battle Radar (`play_battle.html`), AJAX Interceptor cũ đặt `data.explore_cx/cy` trùng với tọa độ thực tế đối thủ và luôn ép `data.traveling = 1`. Điều này làm nhân vật chạy thẳng đâm sầm vào áp sát 0m với đối thủ PK, bị đòn cận chiến đánh gục. Người dùng yêu cầu đồng bộ cơ chế giữ khoảng cách 15m - 20m cho cả tính năng PK.
+- Quyết định:
+  1. **Đồng bộ AJAX Interceptor trong `play_battle.html`**:
+     - Lấy tọa độ nhân vật hiện tại $(P_x, P_y)$ từ `window.lastGameData.player` và tọa độ đối thủ PK $(T_x, T_y)$ từ `window.customTarget`.
+     - Khoảng cách $> 20\text{m}$ hoặc $< 15\text{m}$: Tự động tính tọa độ mục tiêu $17.5\text{m}$ theo vector hướng đối thủ và bật `data.traveling = 1`, `data.lock_pos = 0`.
+     - Khoảng cách $15\text{m} \le d \le 20\text{m}$: Khóa vị trí đứng yên xả skill PK (`data.traveling = 0`, `data.lock_pos = 1`).
+  2. **Cải tiến Target Widget Trực Quan**:
+     - Cập nhật hiển thị khoảng cách kèm cờ trạng thái: `[Vùng 15-20m]` (màu xanh lá `#22c55e`), `[Lùi Kiting]` (màu cam `#f59e0b`), `[Đang áp sát]` (màu xám `#94a3b8`).
+- Kết quả:
+  - Giúp nhân vật chiến đấu PK ở cự ly an toàn 15m - 20m cực kỳ đẳng cấp, tự động kiting khi đối thủ lao vào cận chiến.
+  - Vượt qua 100% các bài kiểm thử unit test tự động.
+
+---
+
+## 2026-08-08 - Thiết Kế Thuật Toán Duy Trì Khoảng Cách An Toàn 15m - 20m & Vector Kiting (T60)
+
+- Bối cảnh:
+  - Ngưỡng khoảng cách tiếp cận Boss cũ là 5m khiến nhân vật dễ đứng áp sát cận chiến với Boss, dễ chịu sát thương diện rộng (AoE) hoặc đòn cận chiến lớn của Boss MVP. Người dùng yêu cầu duy trì khoảng cách giữa nhân vật và Boss luôn ở mức 15m - 20m.
+- Quyết định:
+  1. **Tọa độ Mục tiêu Theo Vector Hình Học ($T(x,y)$)**:
+     - Khi khoảng cách $d > 20\text{m}$ (ở quá xa) hoặc $d < 15\text{m}$ (Boss lấn lại gần), bot tính toán tọa độ di chuyển $T(x,y)$ duy trì khoảng cách $17.5\text{m}$ theo vector từ Boss đến Player:
+       $$T_x = B_x + \frac{P_x - B_x}{d} \times 17.5$$
+       $$T_y = B_y + \frac{P_y - B_y}{d} \times 17.5$$
+     - Đặt `traveling = 1`, `lockPos = 0`, `exploreRadius = 300`.
+  2. **Vùng Xả Skill An Toàn ($15\text{m} \le d \le 20\text{m}$)**:
+     - Đặt `exploreCx = B_x`, `exploreCy = B_y`, `traveling = 0`, `lockPos = 1` (khóa vị trí đứng yên để dồn toàn bộ DPS), `exploreRadius = 100`.
+  3. **Thuật Toán Kiting Thả Diều**:
+     - Khi Boss tiến lại gần $< 15\text{m}$, bot tự động lùi bước về điểm $17.5\text{m}$ mà không dừng xả đạn/skill.
+- Kết quả:
+  - Đảm bảo nhân vật luôn giữ được khoảng cách vàng 15m-20m khi săn Boss MVP.
+  - Vượt qua 100% test cases trong `node test.js`.
+
+---
+
+## 2026-08-08 - Loại Bỏ Thời Gian Timeout Trong Chu Kỳ Săn Boss MVP (T59)
+
+- Bối cảnh:
+  - Khi bot chạy chế độ săn boss MVP xoay vòng theo danh sách map chỉ định (`bossHuntMode = 'type2'`), hệ thống cũ cài đặt giới hạn thời gian lưu lại trên map `mvpCycleMapStayCount >= 40` (~80 giây). Khi bot chưa kịp diệt xong boss (ví dụ: boss nhiều HP hoặc phải di chuyển quãng đường xa), hết 80 giây bot bị ép ngắt timeout và nhảy sang map tiếp theo, làm bỏ dở boss chưa diệt xong.
+- Quyết định:
+  1. **Loại bỏ Timeout Stay trên Map (`mvpCycleMapStayCount >= 40`)**: Thay đổi điều kiện `isDoneWithCurrentMap` thành `this.mvpConfirmClearCount >= 1`. Bot sẽ ở lại map cho tới khi dọn sạch tất cả các boss trên map và xác nhận `bosses` trống.
+  2. **Duy trì Log Clear Map**: Khi map thực sự sạch boss, bot ghi nhận log `map_clear` kèm thông tin số lượng boss đã diệt và thời gian gian trên map (`timeSpentMs`).
+- Kết quả:
+  - Bot diệt triệt để 100% boss trên từng map trước khi chuyển map, không còn tình trạng bỏ dở boss do bị ngắt timeout giữa chừng.
+  - Chạy bộ unit test tự động `node test.js` thành công 100%.
+
+---
+
+## 2026-08-08 - Thiết Kế Kiến Trúc Auto Market Buy 9 Categories & Accordions System (T58)
+
+- Bối cảnh:
+  - Chức năng tự động mua đồ cũ thiếu tính linh hoạt: không phân loại được 9 nhóm mặt hàng riêng biệt (Module, Thẻ, Trứng, Đồ sưu tầm, Nguyên liệu/Rác, Hộp thẻ, Hộp trứng, Hộp module, Kim cương), dính hiện tượng mua rác do nguyên liệu luôn bật, thiếu bộ lọc theo tên quái cho Trứng & Thẻ, thiếu bộ lọc Tier T1..T10 cho Module, thiếu tùy chỉnh chu kỳ quét và chưa lưu vết lịch sử mua hàng khi đồ bị người khác cướp trước.
+- Quyết định:
+  1. **Classify & Filter Engine 9 Categories (`getItemCategory`)**: Xây dựng thuật toán phân loại vật phẩm tự động dựa trên `item_type` và tên dịch tiếng Việt/Thái sang 9 nhóm chuẩn.
+  2. **Bộ lọc Chọn lọc Theo Tên Quái & Tier**: Tự động ghép danh sách `mon_masters` từ server game với danh sách quái mặc định để người dùng chọn checkbox tên quái cụ thể cho Thẻ và Trứng. Module hỗ trợ lọc từ Tier T1 đến T10.
+  3. **Tắt Mặc Định Loại Nguyên Liệu (Resource/Trash)**: Đặt `marketCategories.resource = false` mặc định để bot tuyệt đối không tự động mua đá, gỗ, đạn, thuốc nếu người dùng không chủ động bật.
+  4. **Xử Lý Mua An Toàn & Ghi Log Lịch Sử (`marketBuyHistory`)**: Khi vật phẩm bị mua trước hoặc mua thất bại, bot ghi nhận log `status: 'failed'` với lý do cụ thể và tiếp tục vòng quét mà không crash hệ thống. Lưu tối đa 50 lượt mua gần nhất trong bộ nhớ đệm bot và cung cấp API xóa lịch sử.
+  5. **Thiết Kế UI Accordion Cards Space-Dark Premium**: Giao diện tab "🏪 Chợ Auto" dạng Accordion với các thẻ phân loại có công tắc Bật/Tắt độc lập, badge trạng thái, chevron mở rộng và bảng Lịch sử Auto-Buy hiển thị thời gian thực.
+- Kết quả:
+  - Giải quyết triệt để tất cả 5 nhóm yêu cầu của người dùng.
+  - Bộ kiểm thử tự động `node test.js` vượt qua 100% test cases.
+
+---
+
 ## 2026-08-07 - Tối Ưu Hóa Hiệu Năng Hệ Thống Proxy Pool & Cơ Chế Kháng Lỗi Kết Nối
 
 - Bối cảnh:

@@ -734,11 +734,44 @@ const originalPost = $.post;
 $.post = function(url, data, success, dataType) {
   if (url && url.includes('xhrpg_game.php')) {
     
-    // 1. Ghi đè explore_cx/cy khi có target thủ công từ Radar Panel
+    // 1. Ghi đè explore_cx/cy duy trì khoảng cách an toàn 15m-20m khi có target thủ công (PK/Boss) từ Radar Panel
     if (window.customTarget) {
-      data.explore_cx = window.customTarget.x;
-      data.explore_cy = window.customTarget.y;
-      data.traveling = 1;
+      const px = (window.lastGameData && window.lastGameData.player) ? window.lastGameData.player.x : null;
+      const py = (window.lastGameData && window.lastGameData.player) ? window.lastGameData.player.y : null;
+      const tx = window.customTarget.x;
+      const ty = window.customTarget.y;
+
+      if (px !== null && py !== null && tx !== undefined && ty !== undefined) {
+        const dx = px - tx;
+        const dy = py - ty;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const MIN_DIST = 15;
+        const MAX_DIST = 20;
+        const TARGET_KITE_DIST = 17.5;
+
+        if (dist > MAX_DIST || dist < MIN_DIST) {
+          // Tính vector kiting/áp sát duy trì 17.5m
+          const ux = dist > 0 ? dx / dist : 1;
+          const uy = dist > 0 ? dy / dist : 0;
+          data.explore_cx = Math.round((tx + ux * TARGET_KITE_DIST) * 100) / 100;
+          data.explore_cy = Math.round((ty + uy * TARGET_KITE_DIST) * 100) / 100;
+          data.traveling = 1;
+          data.lock_pos = 0;
+          data.explore_radius = 300;
+        } else {
+          // Đã ở vùng an toàn 15m - 20m: Khóa vị trí xả skill/DPS
+          data.explore_cx = tx;
+          data.explore_cy = ty;
+          data.traveling = 0;
+          data.lock_pos = 1;
+          data.explore_radius = 100;
+        }
+      } else {
+        data.explore_cx = tx;
+        data.explore_cy = ty;
+        data.traveling = 1;
+      }
+
       data.bot = 1; // Ép bật auto để tự chạy và đánh mục tiêu
       
       // Đồng thời cập nhật trạng thái phím Auto bên game screen (nếu có)
@@ -1093,12 +1126,18 @@ function updateTargetWidget(px, py, bosses, players) {
     window.customTarget.y = aliveTarget.y;
     
     const dist = Math.round(Math.sqrt((px - aliveTarget.x) ** 2 + (py - aliveTarget.y) ** 2));
-    document.getElementById('target-distance').textContent = `Khoảng cách: ${dist}m`;
-    
-    if (dist <= 20) {
-      document.getElementById('target-distance').style.color = '#22c55e'; // Xanh lá - Trong tầm đánh
-    } else {
-      document.getElementById('target-distance').style.color = '#94a3b8';
+    const distElem = document.getElementById('target-distance');
+    if (distElem) {
+      if (dist >= 15 && dist <= 20) {
+        distElem.textContent = `Khoảng cách: ${dist}m [Vùng 15-20m]`;
+        distElem.style.color = '#22c55e'; // Xanh lá - Vùng an toàn xả DPS
+      } else if (dist < 15) {
+        distElem.textContent = `Khoảng cách: ${dist}m [Lùi Kiting]`;
+        distElem.style.color = '#f59e0b'; // Cam - Kiting
+      } else {
+        distElem.textContent = `Khoảng cách: ${dist}m [Đang áp sát]`;
+        distElem.style.color = '#94a3b8'; // Xám - Tiến lại gần
+      }
     }
   } else {
     // Mục tiêu đã chết hoặc biến mất

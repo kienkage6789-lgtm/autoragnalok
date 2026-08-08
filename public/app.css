@@ -440,7 +440,8 @@ body {
 
 /* Segmented Pill Tabs Nav */
 .card-tabs-nav {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
   background: rgba(0, 0, 0, 0.25);
   padding: 3px;
   border-radius: 8px;
@@ -2430,4 +2431,302 @@ input:checked + .slider:before {
 @keyframes pulse-border {
   0% { border-color: rgba(251, 191, 36, 0.3); box-shadow: 0 0 2px rgba(251, 191, 36, 0.1); }
   100% { border-color: rgba(251, 191, 36, 0.8); box-shadow: 0 0 6px rgba(251, 191, 36, 0.3); }
+}
+
+/* Market checkboxes alignment fix */
+.market-filter-label {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  font-size: 0.78rem !important;
+  cursor: pointer !important;
+  user-select: none;
+}
+.market-filter-checkbox {
+  width: 14px !important;
+  height: 14px !important;
+  margin: 0 !important;
+  flex-shrink: 0 !important;
+  cursor: pointer !important;
+  accent-color: var(--color-accent) !important;
+}
+
+/* Custom styles for Advanced Market Filter Panels */
+.market-advanced-panel {
+  margin-top: 12px;
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  backdrop-filter: blur(4px);
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.05);
+}
+
+.market-advanced-title {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #fbbf24;
+  margin-bottom: 8px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.market-search-input {
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  color: #fff;
+  padding: 5px 10px;
+  font-family: inherit;
+  font-size: 0.74rem;
+  outline: none;
+  width: 100%;
+  margin-bottom: 10px;
+  transition: all 0.2s ease;
+}
+
+.market-search-input:focus {
+  border-color: #fbbf24;
+  box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.15);
+}
+
+.market-checklist-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.market-checklist-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.market-checklist-header span {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #94a3b8;
+}
+
+.market-checklist-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.market-checklist-actions a {
+  color: #60a5fa;
+  font-size: 0.65rem;
+  text-decoration: none;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: rgba(96, 165, 250, 0.1);
+  transition: all 0.2s;
+}
+
+.market-checklist-actions a:hover {
+  background: rgba(96, 165, 250, 0.2);
+  color: #93c5fd;
+}
+
+.market-checklist-actions a.clear {
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.1);
+}
+
+.market-checklist-actions a.clear:hover {
+  background: rgba(248, 113, 113, 0.2);
+  color: #fca5a5;
+}
+
+.market-checklist-scroll {
+  max-height: 140px;
+  overflow-y: auto;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+}
+
+.market-checklist-scroll::-webkit-scrollbar {
+  width: 4px;
+}
+
+.market-checklist-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 2px;
+}
+
+.card-item-select-row, .collectible-item-select-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.72rem;
+  cursor: pointer;
+  user-select: none;
+  color: #e2e8f0;
+  margin: 0;
+  padding: 4px 6px;
+  border-radius: 4px;
+  transition: background 0.15s;
+}
+
+.card-item-select-row:hover, .collectible-item-select-row:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.card-item-select-row input[type="checkbox"], 
+.collectible-item-select-row input[type="checkbox"] {
+  width: 12px;
+  height: 12px;
+  margin: 0;
+  cursor: pointer;
+  accent-color: #fbbf24;
+}
+
+.mvp-card-row, .mvp-collectible-row {
+  color: #fbbf24 !important; /* Gold text for MVP */
+  font-weight: 600;
+}
+
+.mvp-card-row:hover, .mvp-collectible-row:hover {
+  background: rgba(251, 191, 36, 0.08);
+}
+
+.mvp-card-row input[type="checkbox"], 
+.mvp-collectible-row input[type="checkbox"] {
+  accent-color: #fbbf24;
+}
+
+.market-label-text {
+  font-size: 0.72rem;
+  color: #94a3b8;
+  display: block;
+  margin-bottom: 4px;
+  font-weight: 500;
+}
+
+/* Market Category Accordion Cards */
+.market-category-card {
+  background: rgba(15, 23, 42, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  margin-bottom: 8px;
+  overflow: hidden;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.market-category-card.active-on {
+  border-color: rgba(56, 189, 248, 0.3);
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.05);
+}
+
+.market-category-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.02);
+  cursor: pointer;
+  user-select: none;
+}
+
+.market-category-header:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.market-category-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.market-category-icon {
+  font-size: 1.1rem;
+}
+
+.market-category-name {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #f1f5f9;
+}
+
+.market-category-badge {
+  font-size: 0.65rem;
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-weight: 600;
+}
+
+.market-category-badge.badge-on {
+  background: rgba(34, 197, 94, 0.15);
+  color: #4ade80;
+  border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+.market-category-badge.badge-off {
+  background: rgba(148, 163, 184, 0.1);
+  color: #94a3b8;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.market-category-body {
+  padding: 10px 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  background: rgba(0, 0, 0, 0.2);
+}
+
+/* History Log Table */
+.market-history-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.72rem;
+  margin-top: 6px;
+}
+
+.market-history-table th {
+  background: rgba(0, 0, 0, 0.4);
+  color: #94a3b8;
+  text-align: left;
+  padding: 6px 8px;
+  font-weight: 600;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.market-history-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  color: #e2e8f0;
+}
+
+.market-history-row.success td {
+  color: #4ade80;
+}
+
+.market-history-row.failed td {
+  color: #f87171;
+}
+
+.market-history-status-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 0.65rem;
+  font-weight: 700;
+}
+
+.market-history-status-badge.success {
+  background: rgba(34, 197, 94, 0.2);
+  color: #4ade80;
+}
+
+.market-history-status-badge.failed {
+  background: rgba(239, 68, 68, 0.2);
+  color: #fca5a5;
 }

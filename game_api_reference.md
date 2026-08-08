@@ -284,9 +284,80 @@ Dùng để xem toàn bộ thông tin trang bị, stats, card, trứng của ng�
 
 ---
 
+## 🏪 10. Hệ Thống Tự Động Mua Chợ Giá Rẻ (Auto Market Buy System)
+
+Hệ thống Auto Market Buy tự động kết nối với chợ game qua Endpoint `/xhrpg_market.php` để tìm kiếm và mua vật phẩm thỏa mãn bộ lọc với mức giá tốt nhất.
+
+### A. Endpoints Chợ Game Client (`/xhrpg_market.php`)
+* **Lấy Danh Sách Vật Phẩm Đang Bán**:
+  * **Endpoint**: `/xhrpg_market.php`
+  * **Phương thức**: `POST`
+  * **Tham số**: `{ action: 'get_listings', line_uid, session_token, lang: 'vi' }`
+  * **Dữ liệu trả về**:
+    ```json
+    {
+      "ok": true,
+      "listings": [
+        { "id": 101, "item_name": "การ์ด ไก่เจี๊ยบ (1⭐)", "item_type": "card", "price_per": 500, "qty": 1 },
+        { "id": 201, "item_name": "โมดูลมีด T3", "item_type": "module_knife", "price_per": 2500, "qty": 1 }
+      ]
+    }
+    ```
+* **Mua Vật Phẩm Trực Tiếp**:
+  * **Endpoint**: `/xhrpg_market.php`
+  * **Phương thức**: `POST`
+  * **Tham số**: `{ action: 'buy', line_uid, session_token, listing_id, qty: 1, lang: 'vi' }`
+  * **Dữ liệu trả về**:
+    * Mua thành công: `{ ok: true, player: { gold, ... } }`
+    * Thất bại (đồ bị mua trước): `{ ok: false, error: "Sản phẩm đã bị người khác mua mất" }`
+
+### B. Endpoints Nội Bộ Quản Lý Lịch Sử Mua Hàng (Bot Manager APIs)
+* **Lấy Lịch Sử Mua Hàng**: `GET /api/accounts/:line_uid/market-buy-history`
+  * Trả về mảng `history` (tối đa 50 lượt mua gần nhất).
+* **Xóa Lịch Sử Mua Hàng**: `DELETE /api/accounts/:line_uid/market-buy-history`
+  * Trả về `{ ok: true, message: "Đã xóa lịch sử mua chợ" }`.
+
+### C. Thuật Toán Phân Loại 9 Nhóm Vật Phẩm (`getItemCategory`)
+1. `card_box`: Hộp thẻ bài.
+2. `egg_box`: Hộp trứng thú cưng.
+3. `module_box`: Hộp module.
+4. `card`: Thẻ quái vật lẻ (72 quái thường + 72 MVP = 144 loại).
+5. `egg`: Trứng thú cưng lẻ (72 quái thường + 72 MVP = 144 loại).
+6. `module`: Module trang bị lẻ (Phân theo Tier T1 đến T5).
+7. `collectible`: Đồ sưu tầm (Linh kiện Titan, Phi thuyền, Bảo vật, Khung đúc...).
+8. `diamond`: Kim cương.
+9. `resource`: Nguyên liệu rác (Đá, Thuốc, Đạn, Gỗ, Quặng...) — **Mặc định OFF**.
+
+### D. Cấu Trúc Cấu Hình Settings Bot
+```json
+{
+  "autoMarketBuy": true,
+  "marketMaxPrice": 10000,
+  "marketScanInterval": 10,
+  "marketCategories": {
+    "module": true,
+    "card": true,
+    "egg": true,
+    "collectible": true,
+    "resource": false,
+    "card_box": true,
+    "egg_box": true,
+    "module_box": true,
+    "diamond": true
+  },
+  "marketSelectedCards": ["Gà con", "Vua Slime tím"],
+  "marketSelectedEggs": ["Slime xanh lá"],
+  "marketSelectedModuleTiers": ["T1", "T2", "T3", "T4", "T5"],
+  "marketSelectedCollectibles": ["Linh kiện Titan", "Bảo vật"]
+}
+```
+
+---
+
 ## 🔍 Nơi tìm kiếm thông tin khi thiếu sót
 
 *   **Tài liệu hướng dẫn của AGY**: Đọc tài liệu skill [antigravity-guide](file:///C:/Users/Admin/.gemini/antigravity-cli/builtin/skills/antigravity_guide/SKILL.md) để biết cách tinh chỉnh CLI, MCP và Customizations.
 *   **Log hoạt động của Client**: Theo dõi tab **Nhật Ký (Logs)** trên bảng điều khiển local hoặc đọc trực tiếp file dữ liệu [accounts.json](file:///C:/Users/Admin/Desktop/auto/accounts.json).
 *   **Trình gỡ lỗi Client**: Bấm `F12` trong tab Client game local (`/play`) để xem các gói dữ liệu JSON gửi đi và nhận về từ `/xhrpg_game.php`.
+
 

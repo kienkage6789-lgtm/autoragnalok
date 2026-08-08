@@ -22,6 +22,34 @@ const SKILL_DEFS = [
   { id: 'turret_cannon', name: 'Đại pháo hủy diệt', emoji: '💣', type: 'active', tree: 'turret' }
 ];
 
+const NORMAL_MONSTERS = [
+  'Gà con', 'Heo con', 'Cừu con', 'Gà rừng', 'Gà tây', 'Cừu', 'Bò', 'Vua bò tót',
+  'Slime xanh lá', 'Slime xanh dương', 'Vua Slime tím', 'Slime vàng', 'Slime cam', 'Vua Slime đỏ',
+  'Mầm độc', 'Cây ăn thịt', 'Vua cây bóng tối', 'Golem đá', 'Golem đá tảng', 'Golem cổ đại',
+  'Nấm bào tử', 'Nấm độc đỏ', 'Nấm tím tử thần', 'Chuột cát', 'Chuột khổng lồ', 'Vua chuột',
+  'Người thằn lằn', 'Chiến binh thằn lằn', 'Vua thằn lằn', 'Người sói', 'Chiến binh sói', 'Vua sói',
+  'Slime độc', 'Slime khổng lồ', 'Vua Slime', 'Ma cà rồng trẻ', 'Ma cà rồng trưởng lão', 'Chúa tể ma cà rồng',
+  'Lính xương', 'Kỵ sĩ xương', 'Tướng quân xương', 'Tiểu quỷ', 'Quỷ chiến tranh', 'Chúa tể ác quỷ',
+  'Zombie đất', 'Zombie chiến binh', 'Vua Zombie', 'Sứa phát quang', 'Sứa độc', 'Vua sứa',
+  'Cua đá khổng lồ', 'Cua thiết giáp', 'Cầu gai độc', 'Cá san hô độc', 'Cá sư tử', 'Cá quỷ',
+  'Cá mập đói', 'Cá mập búa', 'Thủy quái vực sâu', 'Hỏa long cổ đại', 'Kim long', 'Huyết long',
+  'Ma nhãn xám', 'Hỏa ma nhãn', 'Vua ma nhãn', 'Kỳ nhông lửa', 'Tiểu quỷ hỏa', 'Tiểu quỷ bóng tối',
+  'Chó săn lửa', 'Đầu lâu lửa', 'Kỵ sĩ hỏa ngục', 'Ma Vương Bóng Đêm'
+];
+
+const MVP_MONSTERS = NORMAL_MONSTERS.map(m => m.startsWith('MVP ') || m.startsWith('Vua ') || m.startsWith('Chúa tể ') ? m : `MVP ${m}`);
+
+const ALL_MONSTERS = [...NORMAL_MONSTERS];
+
+const NORMAL_COLLECTIBLES = [
+  'Linh kiện phi thuyền', 'Linh kiện vũ khí', 'Linh kiện Stat', 
+  'Khúc gỗ kỳ diệu', 'Linh kiện băng chuyền', 'Khuôn đúc đặc biệt'
+];
+const MVP_COLLECTIBLES = [
+  'Linh kiện Titan', 'Bảo vật'
+];
+const ALL_COLLECTIBLES = [...NORMAL_COLLECTIBLES, ...MVP_COLLECTIBLES];
+
 document.addEventListener('DOMContentLoaded', () => {
   // DOM Elements
   const btnAddAccount = document.getElementById('btn-add-account');
@@ -92,7 +120,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const activeLogSubTabs = {}; // line_uid -> sub_tab_id
   let expandedUserGroups = new Set();
   let isUserGroupInitialized = false;
-  let lastFetchedAccounts = [];
+  window.lastFetchedAccounts = [];
   let isDraggingCard = false;
 
   window.toggleUserGroup = function(userId, event) {
@@ -105,8 +133,8 @@ document.addEventListener('DOMContentLoaded', () => {
     } else {
       expandedUserGroups.add(userId);
       groupCard.classList.add('expanded');
-      if (lastFetchedAccounts && lastFetchedAccounts.length > 0) {
-        renderAccounts(lastFetchedAccounts);
+      if (window.lastFetchedAccounts && window.lastFetchedAccounts.length > 0) {
+        renderAccounts(window.lastFetchedAccounts);
       }
     }
   };
@@ -186,7 +214,7 @@ document.addEventListener('DOMContentLoaded', () => {
     Object.keys(activeTabs).forEach(k => delete activeTabs[k]);
     expandedUserGroups.clear();
     isUserGroupInitialized = false;
-    lastFetchedAccounts = [];
+    window.lastFetchedAccounts = [];
     if (accountsGrid) {
       accountsGrid.innerHTML = '';
       delete accountsGrid.dataset.renderMode;
@@ -824,6 +852,7 @@ document.addEventListener('DOMContentLoaded', () => {
       console.error('Error fetching accounts:', err);
     }
   }
+  window.fetchAccounts = fetchAccounts;
 
   // Render accounts list (Grouped by User for Admin)
   function renderAccounts(accounts) {
@@ -833,7 +862,7 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    lastFetchedAccounts = accounts;
+    window.lastFetchedAccounts = accounts;
     noAccountsMsg.style.display = 'none';
 
     // Auto fetch proxies list if Admin and list empty
@@ -1036,6 +1065,7 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     }
   }
+  window.renderAccounts = renderAccounts;
 
   // Build the skeleton structure for the card
   function buildCardSkeleton(cardEl, acc) {
@@ -1374,58 +1404,73 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
 
           <div class="market-buy-unlocked-panel" id="market-buy-panel-${acc.line_uid}" style="display: block;">
-            <div class="settings-group" style="margin-bottom: 8px;">
-              <div class="toggle-control">
-                <span class="toggle-label" style="font-weight: 700; color: #38bdf8;">🏪 Auto Market Buy (Tự mua Chợ)</span>
+            <!-- Master Control Header -->
+            <div class="settings-group" style="margin-bottom: 10px; padding: 10px; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(56, 189, 248, 0.2); border-radius: 10px;">
+              <div class="toggle-control" style="margin-bottom: 8px;">
+                <span class="toggle-label" style="font-weight: 700; color: #38bdf8; font-size: 0.9rem;">🏪 Auto Market Buy (Tự Mua Chợ Giá Rẻ)</span>
                 <label class="switch">
                   <input type="checkbox" id="chk-automarketbuy-${acc.line_uid}" onchange="toggleSetting('${acc.line_uid}', 'autoMarketBuy')">
                   <span class="slider"></span>
                 </label>
               </div>
-            </div>
 
-            <div class="settings-group" style="margin-bottom: 8px;">
-              <div class="input-control" style="grid-column: span 2;">
-                <label for="num-market-maxprice-${acc.line_uid}">💰 Giá mua tối đa / món (Gold)</label>
-                <input type="number" id="num-market-maxprice-${acc.line_uid}" placeholder="10000" min="1" onchange="updateNumericSetting('${acc.line_uid}', 'marketMaxPrice')" onkeydown="if(event.key==='Enter') this.blur()" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; padding: 6px; font-family: inherit; font-size: 0.85rem; outline: none; margin-top:2px; width: 100%;">
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                <div class="input-control">
+                  <label for="num-market-maxprice-${acc.line_uid}" style="font-size: 0.75rem; color: #fbbf24; font-weight: 600;">💰 Giá Mua Tối Đa (Gold)</label>
+                  <input type="number" id="num-market-maxprice-${acc.line_uid}" placeholder="10000" min="1" onchange="updateNumericSetting('${acc.line_uid}', 'marketMaxPrice')" onkeydown="if(event.key==='Enter') this.blur()" style="background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; color: #fff; padding: 6px; font-family: inherit; font-size: 0.82rem; outline: none; margin-top:2px; width: 100%;">
+                </div>
+                <div class="input-control">
+                  <label for="sel-market-scaninterval-${acc.line_uid}" style="font-size: 0.75rem; color: #38bdf8; font-weight: 600;">⏱️ Chu Kỳ Quét</label>
+                  <select id="sel-market-scaninterval-${acc.line_uid}" onchange="updateNumericSetting('${acc.line_uid}', 'marketScanInterval')" style="background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; color: #fff; padding: 6px; font-family: inherit; font-size: 0.82rem; outline: none; margin-top:2px; width: 100%;">
+                    <option value="5">⚡ 5 giây</option>
+                    <option value="10" selected>⏱️ 10 giây (Khuyên dùng)</option>
+                    <option value="15">⏱️ 15 giây</option>
+                    <option value="30">🐢 30 giây</option>
+                    <option value="60">🐢 60 giây</option>
+                  </select>
+                </div>
               </div>
             </div>
 
-            <div class="settings-group" style="margin-bottom: 10px; padding: 10px; background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.05); border-radius: 8px;">
-               <label style="font-size: 0.8rem; font-weight: 700; color: #fbbf24; display: block; margin-bottom: 8px;">🎯 Loại Mặt Hàng Muốn Mua</label>
-               <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px;">
-                 <label style="display:flex; align-items:center; gap:6px; font-size:0.78rem; cursor:pointer;">
-                   <input type="checkbox" id="chk-marketfilter-card-${acc.line_uid}" onchange="toggleMarketFilter('${acc.line_uid}', 'card')"> 🎴 Thẻ quái vật lẻ
-                 </label>
-                 <label style="display:flex; align-items:center; gap:6px; font-size:0.78rem; cursor:pointer;">
-                   <input type="checkbox" id="chk-marketfilter-card_box-${acc.line_uid}" onchange="toggleMarketFilter('${acc.line_uid}', 'card_box')"> 🎁 Hộp thẻ bài
-                 </label>
-                 <label style="display:flex; align-items:center; gap:6px; font-size:0.78rem; cursor:pointer;">
-                   <input type="checkbox" id="chk-marketfilter-egg-${acc.line_uid}" onchange="toggleMarketFilter('${acc.line_uid}', 'egg')"> 🥚 Trứng thú cưng lẻ
-                 </label>
-                 <label style="display:flex; align-items:center; gap:6px; font-size:0.78rem; cursor:pointer;">
-                   <input type="checkbox" id="chk-marketfilter-egg_box-${acc.line_uid}" onchange="toggleMarketFilter('${acc.line_uid}', 'egg_box')"> 🎁 Hộp trứng Pet
-                 </label>
-                 <label style="display:flex; align-items:center; gap:6px; font-size:0.78rem; cursor:pointer;">
-                   <input type="checkbox" id="chk-marketfilter-module-${acc.line_uid}" onchange="toggleMarketFilter('${acc.line_uid}', 'module')"> 🔧 Module lẻ
-                 </label>
-                 <label style="display:flex; align-items:center; gap:6px; font-size:0.78rem; cursor:pointer;">
-                   <input type="checkbox" id="chk-marketfilter-module_box-${acc.line_uid}" onchange="toggleMarketFilter('${acc.line_uid}', 'module_box')"> 📦 Hộp Module
-                 </label>
-                 <label style="display:flex; align-items:center; gap:6px; font-size:0.78rem; cursor:pointer;">
-                   <input type="checkbox" id="chk-marketfilter-collectible-${acc.line_uid}" onchange="toggleMarketFilter('${acc.line_uid}', 'collectible')"> 🗃️ Đồ sưu tầm (Chứng)
-                 </label>
-                 <label style="display:flex; align-items:center; gap:6px; font-size:0.78rem; cursor:pointer;">
-                   <input type="checkbox" id="chk-marketfilter-diamond-${acc.line_uid}" onchange="toggleMarketFilter('${acc.line_uid}', 'diamond')"> 💎 Kim cương
-                 </label>
-                 <label style="display:flex; align-items:center; gap:6px; font-size:0.78rem; cursor:pointer; color: #94a3b8; grid-column: span 2;">
-                   <input type="checkbox" id="chk-marketfilter-trash-${acc.line_uid}" onchange="toggleMarketFilter('${acc.line_uid}', 'trash')"> 🪵 Gỗ, Đá, Đạn (Rác)
-                 </label>
-               </div>
+            <!-- Accordion / Collapsible Categories Container -->
+            <div style="margin-bottom: 12px;">
+              <div style="font-size: 0.8rem; font-weight: 700; color: #fbbf24; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
+                <span>🎯 Cấu Hình 9 Loại Vật Phẩm</span>
+                <span style="font-size: 0.7rem; color: #94a3b8; font-weight: 400;">Bật công tắc & mở rộng để lọc chi tiết</span>
+              </div>
+
+              <div id="market-categories-accordion-${acc.line_uid}">
+                <!-- Populated dynamically by renderMarketCategoryAccordion(acc) -->
+              </div>
             </div>
-            <div style="font-size: 0.72rem; color: #94a3b8; line-height: 1.3; background: rgba(0,0,0,0.2); padding: 6px 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.03);">
-              💡 Hệ thống sẽ tự động quét Chợ game định kỳ mỗi **2 phút** qua proxy/đường truyền của Bot. Chỉ mua khi nhân vật đủ vàng và bỏ qua các mặt hàng không khớp bộ lọc.
+
+            <!-- Auto-Buy History Log Table -->
+            <div class="settings-group" style="padding: 10px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.06); border-radius: 10px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                <span style="font-size: 0.8rem; font-weight: 700; color: #4ade80;">📜 Lịch Sử Tự Động Mua (Auto-Buy Log)</span>
+                <button class="action-btn text-btn btn-sm" onclick="clearMarketBuyHistory('${acc.line_uid}')" style="font-size: 0.68rem; padding: 2px 8px; color: #f87171; border-color: rgba(248, 113, 113, 0.3);">
+                  🗑️ Xóa Lịch Sử
+                </button>
+              </div>
+              <div style="max-height: 180px; overflow-y: auto;">
+                <table class="market-history-table">
+                  <thead>
+                    <tr>
+                      <th style="width: 22%;">Thời Gian</th>
+                      <th style="width: 40%;">Vật Phẩm</th>
+                      <th style="width: 18%;">Giá Mua</th>
+                      <th style="width: 20%;">Trạng Thái</th>
+                    </tr>
+                  </thead>
+                  <tbody id="tbl-market-buy-history-${acc.line_uid}">
+                    <tr>
+                      <td colspan="4" style="text-align: center; color: #94a3b8; padding: 12px 0;">Chưa có lịch sử tự động mua.</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
             </div>
+
           </div>
         </div>
 
@@ -1627,6 +1672,33 @@ document.addEventListener('DOMContentLoaded', () => {
   function updateCard(acc) {
     const card = document.getElementById(`card-${acc.line_uid}`);
     if (!card) return;
+
+    // Sync Auto Market Buy Settings (done regardless of player loading status)
+    const chkAutoMarketBuy = document.getElementById(`chk-automarketbuy-${acc.line_uid}`);
+    if (chkAutoMarketBuy && document.activeElement !== chkAutoMarketBuy) chkAutoMarketBuy.checked = (acc.settings && acc.settings.autoMarketBuy === true);
+
+    const numMarketMaxPrice = document.getElementById(`num-market-maxprice-${acc.line_uid}`);
+    if (numMarketMaxPrice && document.activeElement !== numMarketMaxPrice) numMarketMaxPrice.value = (acc.settings && acc.settings.marketMaxPrice) || 10000;
+
+    const selScanInterval = document.getElementById(`sel-market-scaninterval-${acc.line_uid}`);
+    if (selScanInterval && document.activeElement !== selScanInterval) selScanInterval.value = (acc.settings && acc.settings.marketScanInterval) || 10;
+
+    // Render & sync 9 category cards accordion and buy history
+    renderMarketCategoryAccordion(acc);
+    renderMarketBuyHistory(acc);
+
+    const isPermitted = currentUser && (currentUser.role === 'admin' || currentUser.allowMarket === true);
+    const lockedPanel = document.getElementById(`market-buy-locked-${acc.line_uid}`);
+    const unlockedPanel = document.getElementById(`market-buy-panel-${acc.line_uid}`);
+    if (lockedPanel && unlockedPanel) {
+      if (isPermitted) {
+        lockedPanel.style.display = 'none';
+        unlockedPanel.style.display = 'block';
+      } else {
+        lockedPanel.style.display = 'block';
+        unlockedPanel.style.display = 'none';
+      }
+    }
 
     // Status badge
     const badge = document.getElementById(`status-badge-${acc.line_uid}`);
@@ -1957,33 +2029,7 @@ document.addEventListener('DOMContentLoaded', () => {
     renderPetSection(acc);
     updateHomeTabUI(acc);
 
-    // Sync Auto Market Buy Settings
-    const chkAutoMarketBuy = document.getElementById(`chk-automarketbuy-${acc.line_uid}`);
-    if (chkAutoMarketBuy && document.activeElement !== chkAutoMarketBuy) chkAutoMarketBuy.checked = acc.settings.autoMarketBuy === true;
 
-    const numMarketMaxPrice = document.getElementById(`num-market-maxprice-${acc.line_uid}`);
-    if (numMarketMaxPrice && document.activeElement !== numMarketMaxPrice) numMarketMaxPrice.value = acc.settings.marketMaxPrice || 10000;
-
-    const filters = acc.settings.marketFilters || [];
-    ['card', 'card_box', 'egg', 'egg_box', 'module', 'module_box', 'collectible', 'diamond', 'trash'].forEach(cat => {
-      const chk = document.getElementById(`chk-marketfilter-${cat}-${acc.line_uid}`);
-      if (chk && document.activeElement !== chk) {
-        chk.checked = filters.includes(cat);
-      }
-    });
-
-    const isPermitted = currentUser && (currentUser.role === 'admin' || currentUser.allowMarket === true);
-    const lockedPanel = document.getElementById(`market-buy-locked-${acc.line_uid}`);
-    const unlockedPanel = document.getElementById(`market-buy-panel-${acc.line_uid}`);
-    if (lockedPanel && unlockedPanel) {
-      if (isPermitted) {
-        lockedPanel.style.display = 'none';
-        unlockedPanel.style.display = 'block';
-      } else {
-        lockedPanel.style.display = 'block';
-        unlockedPanel.style.display = 'none';
-      }
-    }
 
     // Render real-time boss hunt banner
     const banner = document.getElementById(`boss-hunt-banner-${acc.line_uid}`);
@@ -2121,6 +2167,7 @@ document.addEventListener('DOMContentLoaded', () => {
       fetchLogs(acc.line_uid);
     }
   }
+  window.updateCard = updateCard;
 
   // Populate map dropdown from dynamic mapsList returned by server
   function populateMapSelect(acc) {
@@ -2363,8 +2410,8 @@ document.addEventListener('DOMContentLoaded', () => {
     rateUnits[uid] = next;
     
     // Refresh card immediately
-    if (lastFetchedAccounts) {
-      const acc = lastFetchedAccounts.find(a => a.line_uid === uid);
+    if (window.lastFetchedAccounts) {
+      const acc = window.lastFetchedAccounts.find(a => a.line_uid === uid);
       if (acc) {
         updateCard(acc);
       }
@@ -4345,7 +4392,7 @@ async function saveNewAccountOrder(container) {
       // Reload silently to sync settings
       const response = await fetch('/api/accounts');
       if (response.ok) {
-        lastFetchedAccounts = await response.json();
+        window.lastFetchedAccounts = await response.json();
       }
     }
   } catch (err) {
@@ -4391,8 +4438,8 @@ window.toggleUserMarketPermission = async function(userId, checked) {
       // Reload accounts silently to reflect permissions on dashboards
       const response = await fetch('/api/accounts');
       if (response.ok) {
-        lastFetchedAccounts = await response.json();
-        renderAccounts(lastFetchedAccounts);
+        window.lastFetchedAccounts = await response.json();
+        renderAccounts(window.lastFetchedAccounts);
       }
     }
   } catch (e) {
@@ -4403,7 +4450,7 @@ window.toggleUserMarketPermission = async function(userId, checked) {
 };
 
 window.toggleMarketFilter = async function(line_uid, category) {
-  const acc = lastFetchedAccounts.find(x => x.line_uid === line_uid);
+  const acc = window.lastFetchedAccounts.find(x => x.line_uid === line_uid);
   if (!acc) return;
   
   // Clone mảng để tránh lỗi tham chiếu
@@ -4445,5 +4492,536 @@ window.toggleMarketFilter = async function(line_uid, category) {
   }
 };
 
+window.filterCardList = function(line_uid, searchVal) {
+  const container = document.getElementById(`market-card-subpanel-${line_uid}`);
+  if (!container) return;
+  const q = (searchVal || '').toLowerCase().trim();
+  const rows = container.querySelectorAll('.card-item-select-row');
+  rows.forEach(row => {
+    const text = row.textContent.toLowerCase();
+    row.style.display = text.includes(q) ? 'flex' : 'none';
+  });
+};
 
+window.filterCollectibleList = function(line_uid, searchVal) {
+  const container = document.getElementById(`market-collectible-subpanel-${line_uid}`);
+  if (!container) return;
+  const q = (searchVal || '').toLowerCase().trim();
+  const rows = container.querySelectorAll('.collectible-item-select-row');
+  rows.forEach(row => {
+    const text = row.textContent.toLowerCase();
+    row.style.display = text.includes(q) ? 'flex' : 'none';
+  });
+};
 
+window.toggleMarketItemKeyword = async function(line_uid, fieldType, itemName) {
+  const acc = window.lastFetchedAccounts.find(x => x.line_uid === line_uid);
+  if (!acc) return;
+  acc.settings = acc.settings || {};
+  
+  const settingsField = fieldType === 'card' ? 'marketCardNames' : 'marketCollectibleNames';
+  let currentNames = (acc.settings[settingsField] || '').split(',').map(s => s.trim()).filter(Boolean);
+  
+  const idx = currentNames.indexOf(itemName);
+  if (idx !== -1) {
+    currentNames.splice(idx, 1);
+  } else {
+    currentNames.push(itemName);
+  }
+  
+  const newVal = currentNames.join(', ');
+  acc.settings[settingsField] = newVal;
+  
+  // Update local UI
+  window.updateCard(acc);
+  
+  try {
+    await fetch(`/api/accounts/${line_uid}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ [settingsField]: newVal })
+    });
+  } catch (err) {
+    console.error(`Error updating ${settingsField}:`, err);
+  }
+};
+
+window.toggleSelectAllKeywords = async function(line_uid, fieldType, groupType, action) {
+  const acc = window.lastFetchedAccounts.find(x => x.line_uid === line_uid);
+  if (!acc) return;
+  acc.settings = acc.settings || {};
+  
+  const settingsField = fieldType === 'card' ? 'marketCardNames' : 'marketCollectibleNames';
+  let currentNames = (acc.settings[settingsField] || '').split(',').map(s => s.trim()).filter(Boolean);
+  
+  let targetList = [];
+  if (fieldType === 'card') {
+    targetList = groupType === 'normal' ? NORMAL_MONSTERS : MVP_MONSTERS;
+  } else {
+    targetList = groupType === 'normal' ? NORMAL_COLLECTIBLES : MVP_COLLECTIBLES;
+  }
+  
+  if (action === 'select') {
+    // Add all items in targetList that are not already present
+    targetList.forEach(item => {
+      if (!currentNames.includes(item)) {
+        currentNames.push(item);
+      }
+    });
+  } else {
+    // Remove all items in targetList
+    currentNames = currentNames.filter(item => !targetList.includes(item));
+  }
+  
+  const newVal = currentNames.join(', ');
+  acc.settings[settingsField] = newVal;
+  
+  // Update UI
+  window.updateCard(acc);
+  
+  try {
+    await fetch(`/api/accounts/${line_uid}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ [settingsField]: newVal })
+    });
+  } catch (err) {
+    console.error(`Error updating ${settingsField}:`, err);
+  }
+};
+
+window.toggleModuleTierFilter = async function(line_uid, tier) {
+  const acc = window.lastFetchedAccounts.find(x => x.line_uid === line_uid);
+  if (!acc) return;
+  acc.settings = acc.settings || {};
+  let tiers = acc.settings.marketModuleTiers || [];
+  if (!Array.isArray(tiers)) tiers = [];
+  const idx = tiers.indexOf(tier);
+  if (idx !== -1) tiers.splice(idx, 1);
+  else tiers.push(tier);
+  acc.settings.marketModuleTiers = tiers;
+  window.updateCard(acc);
+  try {
+    await fetch(`/api/accounts/${line_uid}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ marketModuleTiers: tiers })
+    });
+  } catch (err) {
+    console.error('Error updating market module tiers:', err);
+  }
+};
+
+window.toggleModuleTypeFilter = async function(line_uid, type) {
+  const acc = window.lastFetchedAccounts.find(x => x.line_uid === line_uid);
+  if (!acc) return;
+  acc.settings = acc.settings || {};
+  let types = acc.settings.marketModuleTypes || [];
+  if (!Array.isArray(types)) types = [];
+  const idx = types.indexOf(type);
+  if (idx !== -1) types.splice(idx, 1);
+  else types.push(type);
+  acc.settings.marketModuleTypes = types;
+  window.updateCard(acc);
+  try {
+    await fetch(`/api/accounts/${line_uid}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ marketModuleTypes: types })
+    });
+  } catch (err) {
+    console.error('Error updating market module types:', err);
+  }
+};
+
+// ==================== REVAMPED AUTO MARKET BUY ENGINE & ACCORDION UI ====================
+const MARKET_CATEGORY_DEFS = [
+  { key: 'module', title: 'Module (Phân theo Tier T1 - T5)', icon: '🔧', filterable: true, desc: 'Lọc mua các loại Module phụ trợ theo Tier (T1 đến T5).' },
+  { key: 'card', title: 'Thẻ Quái Lẻ (Phân theo Tên quái)', icon: '🎴', filterable: true, desc: 'Lọc mua thẻ quái vật theo danh sách tên quái chỉ định.' },
+  { key: 'egg', title: 'Trứng Thú Cưng (Phân theo Tên quái)', icon: '🥚', filterable: true, desc: 'Lọc mua trứng Pet theo danh sách quái chỉ định.' },
+  { key: 'collectible', title: 'Đồ Sưu Tầm & Chứng', icon: '🗃️', filterable: true, desc: 'Lọc mua các loại Chứng Titan, Bảo vật, Linh kiện.' },
+  { key: 'resource', title: 'Nguyên Liệu (Đá, Thuốc, Đạn...) — Mặc định OFF', icon: '🪵', filterable: false, desc: '⚠️ Coi là rác. Mặc định OFF. Bật công tắc nếu muốn tự động mua.' },
+  { key: 'card_box', title: 'Hộp Thẻ Bài', icon: '🎁', filterable: false, desc: 'Tự động mua hộp thẻ bài khi giá <= mức giá tối đa.' },
+  { key: 'egg_box', title: 'Hộp Trứng Pet', icon: '🎁', filterable: false, desc: 'Tự động mua hộp trứng Pet khi giá <= mức giá tối đa.' },
+  { key: 'module_box', title: 'Hộp Module', icon: '📦', filterable: false, desc: 'Tự động mua hộp Module khi giá <= mức giá tối đa.' },
+  { key: 'diamond', title: 'Kim Cương', icon: '💎', filterable: false, desc: 'Tự động mua Kim Cương khi giá <= mức giá tối đa.' }
+];
+
+function getMonsterLists(acc) {
+  const normSet = new Set(NORMAL_MONSTERS);
+  const mvpSet = new Set(MVP_MONSTERS);
+
+  if (acc && acc.mon_masters) {
+    for (const mid in acc.mon_masters) {
+      const mm = acc.mon_masters[mid];
+      if (!mm || !mm.n) continue;
+      const name = mm.n;
+      if (name.startsWith('Vua') || name.startsWith('Chúa tể') || name.startsWith('Tướng quân') || name.includes('Rồng') || name.includes('Long')) {
+        if (!normSet.has(name)) mvpSet.add(name);
+      } else {
+        if (!mvpSet.has(name)) normSet.add(name);
+      }
+    }
+  }
+
+  return {
+    normal: Array.from(normSet),
+    mvp: Array.from(mvpSet)
+  };
+}
+
+function renderMarketCategoryAccordion(acc) {
+  const container = document.getElementById(`market-categories-accordion-${acc.line_uid}`);
+  if (!container) return;
+
+  const categoriesConfig = (acc.settings && acc.settings.marketCategories) || {};
+  const selectedCards = (acc.settings && acc.settings.marketSelectedCards) || [];
+  const selectedEggs = (acc.settings && acc.settings.marketSelectedEggs) || [];
+  const selectedTiers = (acc.settings && acc.settings.marketSelectedModuleTiers) || [];
+  const selectedCollectibles = (acc.settings && acc.settings.marketSelectedCollectibles) || [];
+
+  const { normal, mvp } = getMonsterLists(acc);
+
+  if (!container.getAttribute('data-rendered')) {
+    container.setAttribute('data-rendered', 'true');
+
+    let html = '';
+    MARKET_CATEGORY_DEFS.forEach(cat => {
+      const isON = !!categoriesConfig[cat.key];
+
+      html += `
+        <div class="market-category-card ${isON ? 'active-on' : ''}" id="catcard-marketcat-${cat.key}-${acc.line_uid}">
+          <div class="market-category-header" onclick="toggleCategoryAccordion('${acc.line_uid}', '${cat.key}')">
+            <div class="market-category-title-wrap">
+              <span class="market-category-icon">${cat.icon}</span>
+              <span class="market-category-name">${cat.title}</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 10px;" onclick="event.stopPropagation();">
+              <span class="market-category-badge ${isON ? 'badge-on' : 'badge-off'}" id="badge-marketcat-${cat.key}-${acc.line_uid}">
+                ${isON ? 'BẬT' : 'TẮT'}
+              </span>
+              <label class="switch" style="transform: scale(0.8);">
+                <input type="checkbox" id="chk-marketcat-${cat.key}-${acc.line_uid}" ${isON ? 'checked' : ''} onchange="toggleMarketCategory('${acc.line_uid}', '${cat.key}')">
+                <span class="slider"></span>
+              </label>
+              ${cat.filterable ? `<span id="chevron-marketcat-${cat.key}-${acc.line_uid}" style="font-size: 0.75rem; color: #94a3b8; margin-left: 4px; cursor: pointer;" onclick="event.stopPropagation(); toggleCategoryAccordion('${acc.line_uid}', '${cat.key}')">▼</span>` : ''}
+            </div>
+          </div>
+
+          ${cat.filterable ? `
+            <div class="market-category-body" id="subpanel-marketcat-${cat.key}-${acc.line_uid}" style="display: none;">
+              <div style="font-size: 0.72rem; color: #94a3b8; margin-bottom: 8px;">${cat.desc}</div>
+
+              ${cat.key === 'module' ? `
+                <div style="margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">
+                  <span class="market-label-text" style="color: #fbbf24; font-weight: 700;">📦 Chọn Bậc Module (Tier T1 - T5):</span>
+                  <div class="market-checklist-actions">
+                    <a href="#" onclick="toggleSelectAllMarketCategoryItems('${acc.line_uid}', 'module', 'all', 'select'); return false;">☑️ Chọn tất cả</a>
+                    <a href="#" class="clear" onclick="toggleSelectAllMarketCategoryItems('${acc.line_uid}', 'module', 'all', 'clear'); return false;">❌ Bỏ chọn tất cả</a>
+                  </div>
+                </div>
+                <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; background: rgba(0,0,0,0.3); padding: 8px; border-radius: 8px;">
+                  ${['T1', 'T2', 'T3', 'T4', 'T5'].map(tier => `
+                    <label class="market-filter-label" style="font-size: 0.75rem; color: #38bdf8;">
+                      <input type="checkbox" class="market-filter-checkbox" id="chk-marketitem-module-${tier}-${acc.line_uid}" ${selectedTiers.includes(tier) ? 'checked' : ''} onchange="toggleMarketItemSelection('${acc.line_uid}', 'module', '${tier}')"> ${tier}
+                    </label>
+                  `).join('')}
+                </div>
+              ` : ''}
+
+              ${(cat.key === 'card' || cat.key === 'egg') ? `
+                <div style="margin-bottom: 8px;">
+                  <input type="text" id="txt-market-${cat.key}-search-${acc.line_uid}" class="market-search-input" placeholder="🔍 Tìm tên ${cat.key === 'card' ? 'thẻ quái vật' : 'trứng thú cưng'}..." oninput="filterMarketCategoryItems('${acc.line_uid}', '${cat.key}', this.value)">
+                  <div class="market-checklist-grid">
+                    <div>
+                      <div class="market-checklist-header">
+                        <span style="color: #60a5fa;">👾 Quái Thường (${normal.length}):</span>
+                        <div class="market-checklist-actions">
+                          <a href="#" onclick="toggleSelectAllMarketCategoryItems('${acc.line_uid}', '${cat.key}', 'normal', 'select'); return false;">☑️ Chọn hết</a>
+                          <a href="#" class="clear" onclick="toggleSelectAllMarketCategoryItems('${acc.line_uid}', '${cat.key}', 'normal', 'clear'); return false;">❌ Bỏ</a>
+                        </div>
+                      </div>
+                      <div class="market-checklist-scroll">
+                        ${normal.map(m => {
+                          const isChecked = cat.key === 'card' ? selectedCards.includes(m) : selectedEggs.includes(m);
+                          const safeId = m.replace(/\s+/g, '_');
+                          return `
+                            <label class="card-item-select-row normal-card-row market-item-row-${cat.key}-${acc.line_uid}" data-name="${m}">
+                              <input type="checkbox" id="chk-marketitem-${cat.key}-${safeId}-${acc.line_uid}" ${isChecked ? 'checked' : ''} onchange="toggleMarketItemSelection('${acc.line_uid}', '${cat.key}', '${m}')"> ${m}
+                            </label>
+                          `;
+                        }).join('')}
+                      </div>
+                    </div>
+
+                    <div>
+                      <div class="market-checklist-header">
+                        <span style="color: #fbbf24;">👑 Boss MVP (${mvp.length}):</span>
+                        <div class="market-checklist-actions">
+                          <a href="#" onclick="toggleSelectAllMarketCategoryItems('${acc.line_uid}', '${cat.key}', 'mvp', 'select'); return false;">☑️ Chọn hết</a>
+                          <a href="#" class="clear" onclick="toggleSelectAllMarketCategoryItems('${acc.line_uid}', '${cat.key}', 'mvp', 'clear'); return false;">❌ Bỏ</a>
+                        </div>
+                      </div>
+                      <div class="market-checklist-scroll">
+                        ${mvp.map(m => {
+                          const isChecked = cat.key === 'card' ? selectedCards.includes(m) : selectedEggs.includes(m);
+                          const safeId = m.replace(/\s+/g, '_');
+                          return `
+                            <label class="card-item-select-row mvp-card-row market-item-row-${cat.key}-${acc.line_uid}" data-name="${m}">
+                              <input type="checkbox" id="chk-marketitem-${cat.key}-${safeId}-${acc.line_uid}" ${isChecked ? 'checked' : ''} onchange="toggleMarketItemSelection('${acc.line_uid}', '${cat.key}', '${m}')"> ${m}
+                            </label>
+                          `;
+                        }).join('')}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ` : ''}
+
+              ${cat.key === 'collectible' ? `
+                <div style="margin-bottom: 8px;">
+                  <div class="market-checklist-grid">
+                    <div>
+                      <div class="market-checklist-header">
+                        <span>🗃️ Chứng & Linh kiện Thường:</span>
+                        <div class="market-checklist-actions">
+                          <a href="#" onclick="toggleSelectAllMarketCategoryItems('${acc.line_uid}', 'collectible', 'normal', 'select'); return false;">☑️ Chọn hết</a>
+                          <a href="#" class="clear" onclick="toggleSelectAllMarketCategoryItems('${acc.line_uid}', 'collectible', 'normal', 'clear'); return false;">❌ Bỏ</a>
+                        </div>
+                      </div>
+                      <div class="market-checklist-scroll">
+                        ${NORMAL_COLLECTIBLES.map(c => `
+                          <label class="collectible-item-select-row normal-collectible-row">
+                            <input type="checkbox" id="chk-marketitem-collectible-${c.replace(/\s+/g, '_')}-${acc.line_uid}" ${selectedCollectibles.includes(c) ? 'checked' : ''} onchange="toggleMarketItemSelection('${acc.line_uid}', 'collectible', '${c}')"> ${c}
+                          </label>
+                        `).join('')}
+                      </div>
+                    </div>
+                    <div>
+                      <div class="market-checklist-header">
+                        <span style="color: #fbbf24;">👑 Chứng Titan & Bảo Vật:</span>
+                        <div class="market-checklist-actions">
+                          <a href="#" onclick="toggleSelectAllMarketCategoryItems('${acc.line_uid}', 'collectible', 'mvp', 'select'); return false;">☑️ Chọn hết</a>
+                          <a href="#" class="clear" onclick="toggleSelectAllMarketCategoryItems('${acc.line_uid}', 'collectible', 'mvp', 'clear'); return false;">❌ Bỏ</a>
+                        </div>
+                      </div>
+                      <div class="market-checklist-scroll">
+                        ${MVP_COLLECTIBLES.map(c => `
+                          <label class="collectible-item-select-row mvp-collectible-row">
+                            <input type="checkbox" id="chk-marketitem-collectible-${c.replace(/\s+/g, '_')}-${acc.line_uid}" ${selectedCollectibles.includes(c) ? 'checked' : ''} onchange="toggleMarketItemSelection('${acc.line_uid}', 'collectible', '${c}')"> ${c}
+                          </label>
+                        `).join('')}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ` : ''}
+
+            </div>
+          ` : ''}
+        </div>
+      `;
+    });
+
+    container.innerHTML = html;
+  } else {
+    MARKET_CATEGORY_DEFS.forEach(cat => {
+      const isON = !!categoriesConfig[cat.key];
+      const chk = document.getElementById(`chk-marketcat-${cat.key}-${acc.line_uid}`);
+      if (chk && document.activeElement !== chk) chk.checked = isON;
+
+      const badge = document.getElementById(`badge-marketcat-${cat.key}-${acc.line_uid}`);
+      if (badge) {
+        badge.textContent = isON ? 'BẬT' : 'TẮT';
+        badge.className = `market-category-badge ${isON ? 'badge-on' : 'badge-off'}`;
+      }
+
+      const cardEl = document.getElementById(`catcard-marketcat-${cat.key}-${acc.line_uid}`);
+      if (cardEl) {
+        if (isON) cardEl.classList.add('active-on');
+        else cardEl.classList.remove('active-on');
+      }
+
+      if (cat.key === 'module') {
+        ['T1', 'T2', 'T3', 'T4', 'T5'].forEach(tier => {
+          const chkTier = document.getElementById(`chk-marketitem-module-${tier}-${acc.line_uid}`);
+          if (chkTier && document.activeElement !== chkTier) chkTier.checked = selectedTiers.includes(tier);
+        });
+      } else if (cat.key === 'card' || cat.key === 'egg') {
+        const list = cat.key === 'card' ? selectedCards : selectedEggs;
+        const { normal, mvp } = getMonsterLists(acc);
+        [...normal, ...mvp].forEach(m => {
+          const chkMon = document.getElementById(`chk-marketitem-${cat.key}-${m.replace(/\s+/g, '_')}-${acc.line_uid}`);
+          if (chkMon && document.activeElement !== chkMon) chkMon.checked = list.includes(m);
+        });
+      } else if (cat.key === 'collectible') {
+        ALL_COLLECTIBLES.forEach(c => {
+          const chkCol = document.getElementById(`chk-marketitem-collectible-${c.replace(/\s+/g, '_')}-${acc.line_uid}`);
+          if (chkCol && document.activeElement !== chkCol) chkCol.checked = selectedCollectibles.includes(c);
+        });
+      }
+    });
+  }
+}
+
+function renderMarketBuyHistory(acc) {
+  const tbody = document.getElementById(`tbl-market-buy-history-${acc.line_uid}`);
+  if (!tbody) return;
+
+  const history = acc.marketBuyHistory || [];
+  if (history.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="4" style="text-align: center; color: #94a3b8; padding: 12px 0;">Chưa có lịch sử tự động mua.</td></tr>`;
+    return;
+  }
+
+  const categoryIcons = {
+    card: '🎴', egg: '🥚', module: '🔧', collectible: '🗃️', resource: '🪵',
+    card_box: '🎁', egg_box: '🎁', module_box: '📦', diamond: '💎'
+  };
+
+  tbody.innerHTML = history.map(item => {
+    const isSuccess = item.status === 'success';
+    const icon = categoryIcons[item.category] || '📦';
+    return `
+      <tr class="market-history-row ${isSuccess ? 'success' : 'failed'}">
+        <td style="color: #94a3b8;">${item.time || '--:--'}</td>
+        <td style="font-weight: 600;">${icon} ${item.itemName || 'Vật phẩm'}</td>
+        <td style="color: #fbbf24; font-weight: 700;">${(item.price || 0).toLocaleString()}G</td>
+        <td>
+          <span class="market-history-status-badge ${isSuccess ? 'success' : 'failed'}">
+            ${isSuccess ? '✓ Thành công' : '✕ Thất bại'}
+          </span>
+          ${item.error ? `<div style="font-size: 0.65rem; color: #fca5a5; margin-top: 2px;">${item.error}</div>` : ''}
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+window.toggleMarketCategory = async function(uid, categoryKey) {
+  const chk = document.getElementById(`chk-marketcat-${categoryKey}-${uid}`);
+  if (!chk) return;
+  const isChecked = chk.checked;
+
+  const acc = (window.lastFetchedAccounts || []).find(a => a.line_uid === uid);
+  const categories = { ...((acc && acc.settings && acc.settings.marketCategories) || {}) };
+  categories[categoryKey] = isChecked;
+
+  try {
+    await fetch(`/api/accounts/${uid}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ marketCategories: categories })
+    });
+    if (acc && acc.settings) acc.settings.marketCategories = categories;
+    updateCard(acc || { line_uid: uid });
+  } catch (err) {
+    console.error('Error updating market category:', err);
+  }
+};
+
+window.toggleCategoryAccordion = function(uid, categoryKey) {
+  const panel = document.getElementById(`subpanel-marketcat-${categoryKey}-${uid}`);
+  const chevron = document.getElementById(`chevron-marketcat-${categoryKey}-${uid}`);
+  if (!panel) return;
+  const isHidden = panel.style.display === 'none' || !panel.style.display;
+  panel.style.display = isHidden ? 'block' : 'none';
+  if (chevron) chevron.textContent = isHidden ? '▲' : '▼';
+};
+
+window.toggleMarketItemSelection = async function(uid, category, itemVal) {
+  const safeId = itemVal.replace(/\s+/g, '_');
+  const chk = document.getElementById(`chk-marketitem-${category}-${safeId}-${uid}`);
+  if (!chk) return;
+  const isChecked = chk.checked;
+
+  const acc = (window.lastFetchedAccounts || []).find(a => a.line_uid === uid);
+  if (!acc || !acc.settings) return;
+
+  let fieldKey = 'marketSelectedCards';
+  if (category === 'egg') fieldKey = 'marketSelectedEggs';
+  else if (category === 'module') fieldKey = 'marketSelectedModuleTiers';
+  else if (category === 'collectible') fieldKey = 'marketSelectedCollectibles';
+
+  let currentList = [...(acc.settings[fieldKey] || [])];
+  if (isChecked) {
+    if (!currentList.includes(itemVal)) currentList.push(itemVal);
+  } else {
+    currentList = currentList.filter(x => x !== itemVal);
+  }
+
+  try {
+    await fetch(`/api/accounts/${uid}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ [fieldKey]: currentList })
+    });
+    acc.settings[fieldKey] = currentList;
+  } catch (err) {
+    console.error(`Error updating ${fieldKey}:`, err);
+  }
+};
+
+window.toggleSelectAllMarketCategoryItems = async function(uid, category, group, action) {
+  const acc = (window.lastFetchedAccounts || []).find(a => a.line_uid === uid);
+  if (!acc || !acc.settings) return;
+
+  let fieldKey = 'marketSelectedCards';
+  if (category === 'egg') fieldKey = 'marketSelectedEggs';
+  else if (category === 'module') fieldKey = 'marketSelectedModuleTiers';
+  else if (category === 'collectible') fieldKey = 'marketSelectedCollectibles';
+
+  let targetItems = [];
+  if (category === 'module') {
+    targetItems = ['T1', 'T2', 'T3', 'T4', 'T5'];
+  } else if (category === 'collectible') {
+    targetItems = group === 'normal' ? NORMAL_COLLECTIBLES : group === 'mvp' ? MVP_COLLECTIBLES : ALL_COLLECTIBLES;
+  } else {
+    const { normal, mvp } = getMonsterLists(acc);
+    targetItems = group === 'normal' ? normal : group === 'mvp' ? mvp : [...normal, ...mvp];
+  }
+
+  let currentList = [...(acc.settings[fieldKey] || [])];
+  if (action === 'select') {
+    targetItems.forEach(item => {
+      if (!currentList.includes(item)) currentList.push(item);
+    });
+  } else {
+    currentList = currentList.filter(item => !targetItems.includes(item));
+  }
+
+  try {
+    await fetch(`/api/accounts/${uid}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ [fieldKey]: currentList })
+    });
+    acc.settings[fieldKey] = currentList;
+    updateCard(acc);
+  } catch (err) {
+    console.error(`Error in select all ${fieldKey}:`, err);
+  }
+};
+
+window.filterMarketCategoryItems = function(uid, category, query) {
+  const q = (query || '').toLowerCase().trim();
+  const rows = document.querySelectorAll(`.market-item-row-${category}-${uid}`);
+  rows.forEach(row => {
+    const name = row.getAttribute('data-name') || '';
+    row.style.display = (!q || name.toLowerCase().includes(q)) ? 'flex' : 'none';
+  });
+};
+
+window.clearMarketBuyHistory = async function(uid) {
+  try {
+    await fetch(`/api/accounts/${uid}/market-buy-history`, { method: 'DELETE' });
+    const acc = (window.lastFetchedAccounts || []).find(a => a.line_uid === uid);
+    if (acc) acc.marketBuyHistory = [];
+    const tbody = document.getElementById(`tbl-market-buy-history-${uid}`);
+    if (tbody) {
+      tbody.innerHTML = `<tr><td colspan="4" style="text-align: center; color: #94a3b8; padding: 12px 0;">Chưa có lịch sử tự động mua.</td></tr>`;
+    }
+  } catch (err) {
+    console.error('Error clearing market buy history:', err);
+  }
+};

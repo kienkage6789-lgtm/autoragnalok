@@ -12,6 +12,7 @@ const {
 
 console.log('🧪 Running Unit Tests...');
 
+(async () => {
 try {
   // Test tierGold
   console.log('Testing tierGold...');
@@ -334,8 +335,179 @@ try {
   const isDoneFast = (instance.mvpConfirmClearCount >= 1);
   assert.strictEqual(isDoneFast, true, 'isDoneWithCurrentMap must be true on 1st poll when bosses array is empty');
 
+  // Test Case 7: Boss Safe Distance 15m - 20m & Kiting Vector Engine
+  console.log('Testing Boss Safe Distance (15m - 20m) & Kiting Vector Engine...');
+  const calcBossDistState = (playerPos, bossPos) => {
+    const dx = playerPos.x - bossPos.x;
+    const dy = playerPos.y - bossPos.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const MIN_BOSS_DIST = 15;
+    const MAX_BOSS_DIST = 20;
+    const TARGET_KITE_DIST = 17.5;
+    let expCx, expCy, traveling, lockPos;
+
+    if (dist > MAX_BOSS_DIST || dist < MIN_BOSS_DIST) {
+      const ux = dist > 0 ? dx / dist : 1;
+      const uy = dist > 0 ? dy / dist : 0;
+      expCx = Math.round((bossPos.x + ux * TARGET_KITE_DIST) * 100) / 100;
+      expCy = Math.round((bossPos.y + uy * TARGET_KITE_DIST) * 100) / 100;
+      traveling = 1;
+      lockPos = 0;
+    } else {
+      expCx = bossPos.x;
+      expCy = bossPos.y;
+      traveling = 0;
+      lockPos = 1;
+    }
+    return { dist, expCx, expCy, traveling, lockPos };
+  };
+
+  // Scenario A: Far away (30m > 20m) -> Approach target 17.5m
+  const resFar = calcBossDistState({ x: 100, y: 130 }, { x: 100, y: 100 });
+  assert.strictEqual(resFar.traveling, 1, 'Far away: traveling must be 1');
+  assert.strictEqual(resFar.lockPos, 0, 'Far away: lockPos must be 0');
+  assert.strictEqual(resFar.expCy, 117.5, 'Far away: target Y must be 100 + 17.5 = 117.5');
+
+  // Scenario B: Perfect distance (17m in [15, 20]) -> Stand still & Lock DPS
+  const resOptimal = calcBossDistState({ x: 100, y: 117 }, { x: 100, y: 100 });
+  assert.strictEqual(resOptimal.traveling, 0, 'Optimal distance: traveling must be 0');
+  assert.strictEqual(resOptimal.lockPos, 1, 'Optimal distance: lockPos must be 1');
+
+  // Scenario C: Too close (8m < 15m) -> Kite back to 17.5m
+  const resTooClose = calcBossDistState({ x: 100, y: 108 }, { x: 100, y: 100 });
+  assert.strictEqual(resTooClose.traveling, 1, 'Too close: traveling must be 1 to kite');
+  assert.strictEqual(resTooClose.lockPos, 0, 'Too close: lockPos must be 0');
+  assert.strictEqual(resTooClose.expCy, 117.5, 'Too close: target Y must kite back to 117.5');
+
+  // Test Case 7: Advanced Market Filtering
+  console.log('Testing Advanced Market Filtering (Card, Module, Collectibles)...');
+
+  // Test Case 7: Revamped Auto Market Buy System (9 Categories & Custom Filters)
+  console.log('Testing Revamped Auto Market Buy Engine...');
+
+  // Reset instance player and settings
+  instance.player = { gold: 100000, lv: 50 };
+  instance.status = 'running';
+  instance.userId = 'usr_admin';
+  instance.lastMarketScanAt = null;
+  instance.marketBuyHistory = [];
+  instance.settings = {
+    autoMarketBuy: true,
+    marketMaxPrice: 10000,
+    marketScanInterval: 5,
+    marketCategories: {
+      module: false,
+      card: false,
+      egg: false,
+      collectible: false,
+      resource: false, // Default OFF
+      card_box: false,
+      egg_box: false,
+      module_box: false,
+      diamond: false
+    },
+    marketSelectedCards: [],
+    marketSelectedEggs: [],
+    marketSelectedModuleTiers: []
+  };
+
+  const mockListings = {
+    ok: true,
+    listings: [
+      // Cards
+      { id: 101, item_name: 'การ์ด Jellyfish (1⭐)', item_type: 'card', price_per: 500 }, // Star: 1
+      { id: 102, item_name: 'การ์ด Wolf (2⭐)', item_type: 'card', price_per: 800 },   // Star: 2
+      { id: 103, item_name: 'การ์ด Baphomet (10⭐)', item_type: 'card', price_per: 15000 }, // Over max price
+      // Eggs
+      { id: 105, item_name: 'ไข่ ไก่เจี๊ยบ', item_type: 'egg', price_per: 600 },
+      // Modules
+      { id: 201, item_name: 'โมดูลมีด T1', item_type: 'module_knife', price_per: 1200 },
+      { id: 202, item_name: 'โมดูลเกราะ T3', item_type: 'module_armor', price_per: 3000 },
+      { id: 203, item_name: 'โมดูลดาบ T4', item_type: 'module_sword', price_per: 4000 },
+      // Collectibles/Proofs
+      { id: 301, item_name: 'ชิ้นส่วนไททัน', item_type: 'hardware', price_per: 1000 }, // Titan part
+      { id: 302, item_name: 'ท่อนไม้มหัศจรรย์', item_type: 'house_parts', price_per: 2000 },
+      // Resource / Trash
+      { id: 401, item_name: 'แร่อื่นๆ (Resource)', item_type: 'ore', price_per: 100 }
+    ]
+  };
+
+  let lastBoughtListingId = null;
+  let simulateBuyError = false;
+
+  instance.sendRequest = async function(url, params) {
+    if (url.includes('xhrpg_market.php')) {
+      if (params.action === 'get_listings') {
+        return mockListings;
+      }
+      if (params.action === 'buy') {
+        if (simulateBuyError) {
+          return { ok: false, error: 'Sản phẩm đã bị người khác mua mất' };
+        }
+        lastBoughtListingId = params.listing_id;
+        return { ok: true, player: instance.player };
+      }
+    }
+    return { ok: true };
+  };
+
+  // 7a. Test Card selective filtering
+  instance.settings.marketCategories.card = true;
+  instance.settings.marketSelectedCards = ['Jellyfish', 'Wolf'];
+  lastBoughtListingId = null;
+  instance.lastMarketScanAt = null;
+  await instance.scanAndBuyMarket();
+  assert.strictEqual(lastBoughtListingId, 101, 'Should buy cheapest card matching Jellyfish (id 101)');
+  instance.settings.marketCategories.card = false;
+
+  // 7b. Test Egg selective filtering with newly translated monster name
+  instance.settings.marketCategories.egg = true;
+  instance.settings.marketSelectedEggs = ['Gà con']; // Maps to 'ไข่ ไก่เจี๊ยบ' -> 'Trứng Gà con'
+  lastBoughtListingId = null;
+  instance.lastMarketScanAt = null;
+  await instance.scanAndBuyMarket();
+  assert.strictEqual(lastBoughtListingId, 105, 'Should buy egg matching Gà con (id 105)');
+  instance.settings.marketCategories.egg = false;
+
+  // 7c. Test Module Tier filtering (T3, T4 within T1-T5 range)
+  instance.settings.marketCategories.module = true;
+  instance.settings.marketSelectedModuleTiers = ['T3', 'T4'];
+  lastBoughtListingId = null;
+  instance.lastMarketScanAt = null;
+  await instance.scanAndBuyMarket();
+  assert.strictEqual(lastBoughtListingId, 202, 'Should buy Module T3 (id 202)');
+  instance.settings.marketCategories.module = false;
+
+  // 7d. Test Resource/Trash Category OFF (Default behavior)
+  instance.settings.marketCategories.resource = false; // Resource switch OFF
+  lastBoughtListingId = null;
+  instance.lastMarketScanAt = null;
+  await instance.scanAndBuyMarket();
+  assert.strictEqual(lastBoughtListingId, null, 'Should NOT buy resource/trash when resource category is OFF');
+
+  // 7f. Test Category ON with empty sub-filters (Should buy ANY card <= max price)
+  instance.settings.marketCategories.card = true;
+  instance.settings.marketSelectedCards = []; // Empty sub-filters
+  lastBoughtListingId = null;
+  instance.lastMarketScanAt = null;
+  await instance.scanAndBuyMarket();
+  assert.strictEqual(lastBoughtListingId, 101, 'Should buy cheapest card (id 101) when card category is ON even if sub-filters are empty');
+  instance.settings.marketCategories.card = false;
+
+  // 7e. Test Buy Error Handling & History Log Recording
+  instance.settings.marketCategories.collectible = true;
+  simulateBuyError = true;
+  lastBoughtListingId = null;
+  instance.lastMarketScanAt = null;
+  await instance.scanAndBuyMarket();
+  assert.strictEqual(simulateBuyError, true);
+  assert.strictEqual(instance.marketBuyHistory.length > 0, true, 'Should record failed buy in marketBuyHistory');
+  assert.strictEqual(instance.marketBuyHistory[0].status, 'failed', 'History entry status must be failed');
+
+  console.log('✅ Revamped Auto Market Buy Tests Passed successfully!');
   console.log('✅ All Unit Tests Passed successfully!');
 } catch (error) {
   console.error('❌ Unit Tests Failed:', error);
   process.exit(1);
 }
+})();

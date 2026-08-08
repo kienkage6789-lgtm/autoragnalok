@@ -3,6 +3,63 @@
 > Work Breakdown Structure. Update task states immediately upon changes.
 > Statuses: todo | doing | blocked | review | done
 
+### [x] T61 - Áp Dụng Khoảng Cách An Toàn 15m - 20m & Vector Kiting Cho Chức Năng PK (Battle Radar)
+- Description: Nâng cấp AJAX Interceptor và Target Widget trong play_battle.html. Khi khóa mục tiêu PK người chơi khác (hoặc Boss thủ công), client tự động tính toán vị trí di chuyển/lùi giữ khoảng cách an toàn 15m-20m theo vector mục tiêu. Tự động chuyển sang trạng thái đứng yên xả skill (`traveling = 0`, `lock_pos = 1`) khi ở trong dải 15m-20m, và tự động lùi kiting khi đối thủ áp sát <15m. Cập nhật UI Target Badge hiển thị các trạng thái [Vùng 15-20m] (xanh lá), [Lùi Kiting] (cam) và [Đang áp sát] (xám).
+- Files related: `play_battle.html`, `test.js`
+- Acceptance criteria:
+  - [x] Ghi đè AJAX Interceptor với thuật toán duy trì khoảng cách $17.5\text{m}$ theo vector từ Target đến Player.
+  - [x] Đặt `traveling = 0`, `lock_pos = 1` khi khoảng cách người chơi ở trong dải $[15\text{m}, 20\text{m}]$.
+  - [x] Cập nhật Target Widget hiển thị trực quan các vùng trạng thái và màu sắc tương ứng.
+  - [x] Chạy bộ unit test tự động `node test.js` thành công 100%.
+- Status: done
+
+---
+
+### [x] T60 - Duy Trì Khoảng Cách An Toàn 15m - 20m & Thuật Toán Kiting Khi Săn Boss MVP
+- Description: Điều chỉnh khoảng cách tiếp cận và giao tranh với Boss MVP. Thay thế ngưỡng áp sát 5m cũ bằng dải khoảng cách an toàn 15m-20m. Khi ở xa (>20m), bot di chuyển lại gần ngưỡng 17.5m. Khi ở trong dải 15-20m, bot khóa vị trí (lockPos=1) dồn toàn bộ DPS. Khi Boss áp sát (<15m), bot tự động lùi lại (Kiting) dọc theo vector nối từ Boss đến nhân vật để duy trì khoảng cách an toàn 17.5m.
+- Files related: `server.js`, `test.js`
+- Acceptance criteria:
+  - [x] Triển khai thuật toán tính tọa độ mục tiêu $T(x,y)$ duy trì khoảng cách $17.5\text{m}$ theo vector từ Boss đến Player.
+  - [x] Đứng yên xả skill (`traveling = 0`, `lockPos = 1`) khi khoảng cách nằm trong dải $[15\text{m}, 20\text{m}]$.
+  - [x] Tự động lùi lại (Kiting) khi Boss áp sát $< 15\text{m}$.
+  - [x] Viết unit tests kiểm thử cả 3 kịch bản khoảng cách trong `test.js` và chạy `node test.js` thành công 100%.
+- Status: done
+
+---
+
+### [x] T59 - Loại Bỏ Thời Gian Timeout Khi Săn Boss MVP
+- Description: Loại bỏ hoàn toàn giới hạn thời gian timeout ngầm (40 nhịp poll ~80s) trên từng map trong chế độ săn boss MVP xoay vòng. Đảm bảo bot ở lại map săn boss cho đến khi dọn sạch tất cả các boss trên map (xác nhận map clear) mà không bị tự động ngắt timeout chuyển map giữa chừng.
+- Files related: `server.js`, `test.js`
+- Acceptance criteria:
+  - [x] Loại bỏ cờ timeout `(this.mvpCycleMapStayCount >= 40)` khỏi logic xác định hoàn thành map `isDoneWithCurrentMap`.
+  - [x] Đảm bảo `isDoneWithCurrentMap` chỉ trả về `true` khi `this.mvpConfirmClearCount >= 1` (map đã sạch boss mục tiêu).
+  - [x] Chạy bộ unit test tự động `node test.js` thành công 100%.
+- Status: done
+
+---
+
+### [x] T58 - Xây dựng Chức năng Auto Mua Đồ Giá Rẻ Trên Chợ (Auto Market Buy)
+- Description: Tải lại và xây dựng toàn diện hệ thống Auto Market Buy tự động săn vật phẩm giá rẻ trên chợ. Hỗ trợ 9 loại vật phẩm (Module T1-T5, Thẻ quái lẻ, Trứng thú cưng, Hộp thẻ, Hộp trứng, Hộp module, Kim cương, Đồ sưu tầm, Nguyên liệu/Rác - mặc định OFF). Cho phép chọn danh sách thẻ/trứng/module tier cụ thể (72 quái thường + 72 boss MVP = 144 thẻ/trứng chuẩn Tiếng Việt), cấu hình ngưỡng giá tối đa và chu kỳ quét (5s-60s), ghi log lịch sử các lần mua thành công/thất bại và thiết kế giao diện dạng thẻ mở rộng/thu gọn (accordion) trực quan, premium.
+- Files related: `server.js`, `public/app.js`, `public/app.css`, `xhrpg_lang_vi.js`, `mon_masters_cache.json`, `test.js`
+- Acceptance criteria:
+  - [x] Dịch hoàn chỉnh 100% 72 quái vật / 72 thẻ / 72 trứng sang tiếng Việt chuẩn (bổ sung 27 tên quái từ ID 60 đến 86).
+  - [x] Hiển thị cột Quái Thường (72) và Boss MVP (72) cho Thẻ Bài và Trứng Thú Cưng.
+  - [x] Đảm bảo nếu Bật công tắc loại mặt hàng bất kỳ $\rightarrow$ Bot sẽ tự động mua MỌI sản phẩm thuộc loại đó có giá <= giá tối đa (dù không tích ô nhỏ lẻ).
+  - [x] Sửa dứt điểm lỗi Chọn tất cả / Bỏ chọn tất cả cho Đồ Sưu Tầm & Chứng (đồng bộ DOM checkbox thời gian thực).
+  - [x] Giới hạn lọc Module chuẩn xác từ Tier T1 đến Tier T5.
+  - [x] Cấu hình giá tối đa (`marketMaxPrice`) và chu kỳ quét (`marketScanInterval` 5s-60s).
+  - [x] Hỗ trợ 9 loại vật phẩm riêng biệt với công tắc Bật/Tắt từng loại trong `marketCategories`.
+  - [x] Bộ lọc Trứng & Thẻ: Danh sách 72 quái thường + 72 MVP, có nút "Chọn tất cả", "Bỏ chọn tất cả" và ô tìm kiếm tên quái.
+  - [x] Bộ lọc Module: Danh sách checkbox theo Tier T1 đến T5, có nút "Chọn tất cả", "Bỏ chọn tất cả".
+  - [x] Loại Nguyên liệu (đá, thuốc, đạn, gỗ, quặng...): Mặc định OFF.
+  - [x] Xử lý mua hàng an toàn khi sản phẩm bị mua trước (không crash, ghi nhận log warning/error và tiếp tục quét).
+  - [x] Lưu lịch sử mua hàng `marketBuyHistory` (tên item, loại, giá, thời gian, trạng thái) và cung cấp API/UI xem + xóa lịch sử.
+  - [x] Giao diện Dashboard tab "🏪 Chợ Auto": Cấu hình tổng (Start/Stop, Max Price, Scan Interval), Accordion 9 Category mở rộng/thu gọn, Bảng lịch sử mua gần nhất.
+  - [x] Viết unit tests tự động cho Auto Market Buy trong `test.js` và chạy `npm test` thành công 100%.
+- Status: done
+
+---
+
 ### [x] T57 - Tối Ưu Hóa Hiệu Năng Proxy Pool & Kháng Lỗi Kết Nối
 - Description: Giải quyết triệt để vấn đề lag giật hệ thống do đọc/ghi file accounts.json đồng bộ gây nghẽn Event Loop và khắc phục lỗi kết nối chập chờn (ECONNRESET, Timeout 10s) qua proxy bằng cách tối ưu hóa cấu hình keep-alive của undici, triển khai RAM cache kết hợp Debounced Write và tích hợp logic Auto-Retry 3 lần cho các HTTP request của bot.
 - Files related: `server.js`

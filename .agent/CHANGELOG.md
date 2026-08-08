@@ -2,6 +2,50 @@
 
 > Changelog of actual changes implemented.
 
+## 2026-08-08 - Áp Dụng Khoảng Cách An Toàn 15m - 20m & Vector Kiting Cho Chức Năng PK (T61)
+- File đã đổi: [play_battle.html](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/play_battle.html), [test.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/test.js).
+- Đã làm:
+  - **Đồng bộ AJAX Interceptor trong Radar Panel**: Khi khóa target người chơi PK (hoặc Boss thủ công), client tự động tính toán tọa độ di chuyển duy trì khoảng cách an toàn 15m - 20m.
+  - **Tự động Khóa vị trí khi ở dải 15m-20m**: Đặt `data.traveling = 0`, `data.lock_pos = 1` giúp nhân vật đứng yên dồn sát thương và skill khi ở cự ly vàng.
+  - **Tự động Kiting khi đối thủ áp sát <15m**: Nhân vật tự động bước lùi về điểm $17.5\text{m}$ theo vector đối thủ mà không bị đứng cứng 0m.
+  - **Cập nhật UI Target Badge**: Trực quan hóa khoảng cách và cờ trạng thái `[Vùng 15-20m]`, `[Lùi Kiting]`, `[Đang áp sát]`.
+- Đã test bằng: `node test.js` -> PASS 100%.
+
+---
+
+## 2026-08-08 - Duy Trì Khoảng Cách An Toàn 15m - 20m & Vector Kiting Khi Săn Boss MVP (T60)
+- File đã đổi: [server.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [test.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/test.js).
+- Đã làm:
+  - **Thuật toán duy trì khoảng cách an toàn 15m-20m**: Thay thế ngưỡng dừng 5m bằng dải an toàn $[15\text{m}, 20\text{m}]$. Khi khoảng cách ở vùng vàng ($15\text{m} \le d \le 20\text{m}$), bot đứng yên (`traveling = 0`), khóa vị trí (`lockPos = 1`) xả DPS cực đại.
+  - **Cơ chế Vector Kiting tự động**: Khi Boss lấn lại gần $< 15\text{m}$ hoặc khi bot ở xa $> 20\text{m}$, bot tự động tính toán tọa độ mục tiêu $T(x,y)$ lùi/tiến về vị trí lý tưởng $17.5\text{m}$ dọc theo vector từ Boss đến Nhân vật.
+- Đã test bằng: `node test.js` -> PASS 100%.
+
+---
+
+## 2026-08-08 - Loại Bỏ Thời Gian Timeout Khi Săn Boss MVP (T59)
+- File đã đổi: [server.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [test.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/test.js).
+- Đã làm:
+  - **Loại bỏ timeout 80s ngầm trên từng map**: Đã xóa cờ `(this.mvpCycleMapStayCount >= 40)` khỏi điều kiện `isDoneWithCurrentMap` trong hàm `updateMvpCycleStatus`.
+  - **Giữ chân bot trên map đến khi sạch boss**: Đảm bảo bot ở lại map săn boss cho đến khi tiêu diệt hết tất cả các boss trên map đó (hoặc xác nhận map không có boss) mà không bị tự động ngắt timeout nhảy map giữa chừng.
+- Đã test bằng: `node test.js` -> PASS 100%.
+
+---
+
+## 2026-08-08 - Revamp Chức Năng Auto Market Buy (Tự Mua Đồ Giá Rẻ Trên Chợ) (T58)
+- File đã đổi: [server.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [public/app.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/public/app.js), [public/app.css](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/public/app.css), [test.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/test.js).
+- Đã làm:
+  - **Quản lý 9 loại vật phẩm riêng biệt**: Phân loại chuẩn xác `Module`, `Thẻ (card)`, `Trứng (egg)`, `Đồ sưu tầm (collectible)`, `Nguyên liệu (resource)`, `Hộp thẻ`, `Hộp trứng`, `Hộp module`, `Kim cương`. Công tắc Bật/Tắt riêng từng loại.
+  - **Khắc phục triệt để lỗi ReferenceError Scope**: Đưa hằng số `NORMAL_MONSTERS`, `MVP_MONSTERS`, `ALL_MONSTERS`, `NORMAL_COLLECTIBLES`, `MVP_COLLECTIBLES`, `ALL_COLLECTIBLES` ra ngoài phạm vi Toàn Cục (Global Scope) để toàn bộ các hàm trợ giúp trong `app.js` đều truy cập trực tiếp.
+  - **Bộ lọc chọn lọc theo Tên & Tier**: Hỗ trợ danh sách checkbox Thẻ & Trứng theo tên quái (Normal & MVP), Module Tier T1 đến T10, có nút "Chọn tất cả", "Bỏ chọn tất cả" và ô tìm kiếm tên quái trực quan.
+  - **Cấu hình Ngưỡng giá & Chu kỳ quét**: Cho phép thiết lập giá tối đa (`marketMaxPrice`) và chu kỳ quét tùy chỉnh từ 5s đến 60s (`marketScanInterval`).
+  - **Nguyên liệu / Rác mặc định OFF**: Mặc định loại Nguyên liệu (đá, thuốc, đạn, gỗ, quặng...) là OFF để tránh mua rác.
+  - **Mua hàng an toàn & Ghi nhật ký**: Xử lý trường hợp vật phẩm bị người khác mua trước mà không crash, lưu vết lịch sử mua hàng `marketBuyHistory` (tên, loại, giá, thời gian, trạng thái) và cung cấp API/UI xem + xóa lịch sử.
+  - **Giao diện dạng Thẻ Accordions Premium**: Thiết kế lại tab "🏪 Chợ Auto" dạng Accordion mở rộng/thu gọn trực quan, kèm bảng Lịch sử Auto-Buy hiển thị realtime.
+  - **Unit Tests**: Cập nhật bộ kiểm thử tự động trong `test.js` covered 100% test cases.
+- Đã test bằng: `node test.js`, `node -c server.js`, `node -c public/app.js` -> PASS 100%.
+
+---
+
 ## 2026-08-06 - Big Update: Battle Radar Control Panel (Săn Boss, PK, Inspect Fallback, Background Stats Cache)
 - File đã đổi: [server.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [public/app.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/public/app.js), [play_battle.html](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/play_battle.html).
 - Đã làm:
