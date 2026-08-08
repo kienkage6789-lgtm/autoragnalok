@@ -700,6 +700,23 @@
             <span class="config-label">Quay về Phi Thuyền</span>
             <button class="target-btn" style="background:#4338ca" onclick="xhrpg.warpHome()">🏠 WARP HOME</button>
           </div>
+          
+          <div class="config-row" style="margin-top: 10px; border-top: 1px dashed #334155; padding-top: 10px;">
+            <span class="config-label" title="Chủ động gửi request bơm máu khẩn cấp tại mỗi nhịp game">💊 Bơm Máu Khẩn Cấp</span>
+            <button class="target-btn" id="cfg-active-heal-toggle" onclick="toggleActiveHeal()" style="background:#ef4444">TẮT</button>
+          </div>
+          <div class="config-row">
+            <span class="config-label">Ngưỡng HP Bơm Máu</span>
+            <select id="cfg-active-heal-threshold" onchange="changeActiveHealThreshold()" style="background:#1e293b; border:1px solid #475569; color:#fff; padding:4px; border-radius:4px; font-family:inherit; outline:none; cursor:pointer;">
+              <option value="30">30% HP</option>
+              <option value="40">40% HP</option>
+              <option value="50">50% HP</option>
+              <option value="60">60% HP</option>
+              <option value="70">70% HP</option>
+              <option value="80">80% HP</option>
+              <option value="90">90% HP</option>
+            </select>
+          </div>
         </div>
       </div>
 
@@ -787,6 +804,30 @@ $.post = function(url, data, success, dataType) {
       const d = typeof res === 'string' ? JSON.parse(res) : res;
       if (d && d.ok) {
         window.handleGameData(d);
+
+        // Bơm máu chủ động khẩn cấp
+        const activeHealEnabled = localStorage.getItem('pk_activeHealEnabled') === 'true';
+        const activeHealThreshold = parseInt(localStorage.getItem('pk_activeHealThreshold')) || 50;
+
+        if (activeHealEnabled && d.player && !d.player.is_dead) {
+          const hpPct = Math.round((d.player.hp / d.player.hp_max) * 100);
+          if (hpPct < activeHealThreshold) {
+            addBattleLog(`💊 [Active Heal] HP dưới ${activeHealThreshold}% -> Tự động bơm máu khẩn cấp!`, 'WARNING');
+            originalPost('/xhrpg_upgrade.php', {
+              line_uid: data.line_uid,
+              session_token: data.session_token,
+              action: 'use_potion_manual'
+            }, function(upgRes) {
+              const ud = typeof upgRes === 'string' ? JSON.parse(upgRes) : upgRes;
+              if (ud && ud.ok && ud.player) {
+                if (window.lastGameData) {
+                  window.lastGameData.player = ud.player;
+                }
+                addBattleLog(`💊 Bơm máu thành công! HP hiện tại: ${ud.player.hp}/${ud.player.hp_max}`, 'SUCCESS');
+              }
+            });
+          }
+        }
       }
       if (success) success(res);
     }, dataType);
@@ -1256,6 +1297,47 @@ if (uid && token) {
 } else {
   document.getElementById('loading-msg').textContent = 'Lỗi: Thiếu tham số line_uid hoặc session_token trên link';
 }
+
+// --- URGENT ACTIVE POTION HEALING SYSTEM ---
+function initActiveHeal() {
+  const activeHealEnabled = localStorage.getItem('pk_activeHealEnabled') === 'true';
+  const activeHealThreshold = localStorage.getItem('pk_activeHealThreshold') || '50';
+
+  const toggleBtn = document.getElementById('cfg-active-heal-toggle');
+  if (toggleBtn) {
+    if (activeHealEnabled) {
+      toggleBtn.textContent = 'BẬT';
+      toggleBtn.style.background = '#22c55e';
+    } else {
+      toggleBtn.textContent = 'TẮT';
+      toggleBtn.style.background = '#ef4444';
+    }
+  }
+
+  const selectEl = document.getElementById('cfg-active-heal-threshold');
+  if (selectEl) {
+    selectEl.value = activeHealThreshold;
+  }
+}
+
+function toggleActiveHeal() {
+  const current = localStorage.getItem('pk_activeHealEnabled') === 'true';
+  const next = !current;
+  localStorage.setItem('pk_activeHealEnabled', next ? 'true' : 'false');
+  initActiveHeal();
+  addBattleLog(`💊 Đã ${next ? 'BẬT' : 'TẮT'} Bơm Máu Khẩn Cấp Chủ Động`, 'SYSTEM');
+}
+
+function changeActiveHealThreshold() {
+  const selectEl = document.getElementById('cfg-active-heal-threshold');
+  if (selectEl) {
+    localStorage.setItem('pk_activeHealThreshold', selectEl.value);
+    addBattleLog(`💊 Đã đổi ngưỡng Bơm Máu Khẩn Cấp thành ${selectEl.value}% HP`, 'SYSTEM');
+  }
+}
+
+// Khởi chạy hệ thống chủ động bơm máu
+initActiveHeal();
 </script>
 </body>
 </html>

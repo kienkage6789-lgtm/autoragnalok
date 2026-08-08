@@ -466,7 +466,10 @@ function translateThaiText(text) {
     { raw: 'ล้มเหลว', val: 'thất bại' },
     { raw: 'ยานบินผลิต', val: 'Phi thuyền sản xuất' },
     { raw: 'เลเวลเพิ่มเป็น', val: 'Lv tăng thành' },
-    { raw: 'เพิ่มเป็น', val: 'tăng thành' }
+    { raw: 'เพิ่มเป็น', val: 'tăng thành' },
+    { raw: 'ระดับ', val: 'Bậc' },
+    { raw: 'กล่องสุ่มไข่', val: 'Hộp trứng' },
+    { raw: 'กล่องไข่', val: 'Hộp trứng' }
   ];
   
   for (const rep of commonReplacements) {
@@ -1313,7 +1316,24 @@ class BotInstance {
       marketSelectedCards: [],
       marketSelectedEggs: [],
       marketSelectedModuleTiers: [],
+      marketSelectedCollectibles: [],
+      marketSelectedModuleBoxes: [],
+      marketSelectedCardBoxes: [],
+      marketSelectedEggBoxes: [],
       marketCategoryMaxPrices: {},
+      marketCategoryMaxQtys: {
+        resource: 100,
+        card: 1,
+        egg: 1,
+        module: 1,
+        collectible: 1,
+        diamond: 1,
+        card_box: 1,
+        egg_box: 1,
+        module_box: 1
+      },
+      activeHealEnabled: false,
+      activeHealThreshold: 50,
       autoEventJoin: false,
       eventPotionThreshold: 0,
       eventTargetMinDef: false,
@@ -2656,11 +2676,23 @@ class BotInstance {
     this.lastUpdate = new Date().toISOString();
     this.error = null;
 
-    // Event Potion Healing
-    if (this.inEventMode && this.settings.eventPotionThreshold > 0 && this.player && !this.player.is_dead) {
+    // Urgent Active Potion Healing (Active Potion Healing)
+    if (this.player && !this.player.is_dead) {
       const hpPct = Math.round((this.player.hp / this.player.hp_max) * 100);
-      if (hpPct < this.settings.eventPotionThreshold) {
-        this.addLog('HEAL', `💊 [Event Auto Heal] HP dưới ${this.settings.eventPotionThreshold}% -> Bơm máu khẩn cấp!`);
+      
+      let shouldActiveHeal = false;
+      let healReason = '';
+
+      if (this.settings.activeHealEnabled && hpPct < Number(this.settings.activeHealThreshold || 50)) {
+        shouldActiveHeal = true;
+        healReason = `HP dưới ${this.settings.activeHealThreshold}% (Chủ động)`;
+      } else if (this.inEventMode && this.settings.eventPotionThreshold > 0 && hpPct < this.settings.eventPotionThreshold) {
+        shouldActiveHeal = true;
+        healReason = `HP dưới ${this.settings.eventPotionThreshold}% (Sự kiện)`;
+      }
+
+      if (shouldActiveHeal) {
+        this.addLog('HEAL', `💊 [Urgent Potion] ${healReason} -> Bơm máu khẩn cấp!`);
         try {
           const res = await this.sendRequest('https://ragnalok.online/human/xhrpg_upgrade.php', {
             line_uid: this.line_uid,
@@ -2671,7 +2703,7 @@ class BotInstance {
             this.updatePlayerState(res.player);
           }
         } catch (e) {
-          console.error(`[Event Auto Heal Error] Failed to use potion:`, e.message);
+          console.error(`[Urgent Potion Error] Failed to use potion:`, e.message);
         }
       }
     }
@@ -3411,7 +3443,7 @@ class BotInstance {
       const categoriesConfig = this.settings.marketCategories || {};
       const globalMaxPrice = Number(this.settings.marketMaxPrice || 10000);
       const categoryMaxPrices = this.settings.marketCategoryMaxPrices || {};
-      const currentGold = this.player.gold || 0;
+      let currentGold = this.player.gold || 0;
 
       const matchingItems = [];
 
@@ -3479,13 +3511,49 @@ class BotInstance {
             });
             if (!matches) continue;
           }
+        } else if (category === 'module_box') {
+          const selectedModuleBoxes = this.settings.marketSelectedModuleBoxes || [];
+          if (Array.isArray(selectedModuleBoxes) && selectedModuleBoxes.length > 0) {
+            const itemLower = translatedName.toLowerCase();
+            const matches = selectedModuleBoxes.some(boxType => {
+              const typeLower = boxType.toLowerCase().trim();
+              if (typeLower === 'sử thi+') {
+                return itemLower.includes('sử thi+');
+              } else if (typeLower === 'sử thi') {
+                return itemLower.includes('sử thi') && !itemLower.includes('sử thi+');
+              } else {
+                return itemLower.includes(typeLower);
+              }
+            });
+            if (!matches) continue;
+          }
+        } else if (category === 'card_box') {
+          const selectedCardBoxes = this.settings.marketSelectedCardBoxes || [];
+          if (Array.isArray(selectedCardBoxes) && selectedCardBoxes.length > 0) {
+            const itemLower = translatedName.toLowerCase();
+            const matches = selectedCardBoxes.some(boxTier => {
+              const tierLower = boxTier.toLowerCase().trim();
+              return itemLower.includes(tierLower);
+            });
+            if (!matches) continue;
+          }
+        } else if (category === 'egg_box') {
+          const selectedEggBoxes = this.settings.marketSelectedEggBoxes || [];
+          if (Array.isArray(selectedEggBoxes) && selectedEggBoxes.length > 0) {
+            const itemLower = translatedName.toLowerCase();
+            const matches = selectedEggBoxes.some(boxTier => {
+              const tierLower = boxTier.toLowerCase().trim();
+              return itemLower.includes(tierLower);
+            });
+            if (!matches) continue;
+          }
         }
 
         matchingItems.push({
           id: item.id,
           name: translatedName,
           price: price,
-          qty: 1,
+          qty: Number(item.qty || 1),
           category: category
         });
       }
@@ -3496,46 +3564,73 @@ class BotInstance {
 
       // Sắp xếp ưu tiên sản phẩm có giá rẻ nhất trước
       matchingItems.sort((a, b) => a.price - b.price);
-      const targetItem = matchingItems[0];
 
-      this.addLog('SYSTEM', `🛒 Phát hiện sản phẩm phù hợp: ${targetItem.name} với giá ${targetItem.price.toLocaleString()}G. Tiến hành mua...`);
+      this.addLog('SYSTEM', `🛒 Phát hiện ${matchingItems.length} sản phẩm phù hợp. Tiến hành mua hàng loạt...`);
 
-      const buyRes = await this.sendRequest('https://ragnalok.online/human/xhrpg_market.php', {
-        action: 'buy',
-        line_uid: this.line_uid,
-        session_token: this.session_token,
-        listing_id: targetItem.id,
-        qty: targetItem.qty,
-        lang: 'vi'
-      });
+      currentGold = this.player.gold || 0;
+      let successCount = 0;
 
-      const historyEntry = {
-        id: targetItem.id,
-        itemName: targetItem.name,
-        category: targetItem.category,
-        price: targetItem.price,
-        time: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-        timestamp: Date.now(),
-        status: 'success',
-        error: null
-      };
+      for (const targetItem of matchingItems) {
+        const categoryMaxQtys = this.settings.marketCategoryMaxQtys || {};
+        const limitQty = categoryMaxQtys[targetItem.category] !== undefined 
+          ? Number(categoryMaxQtys[targetItem.category]) 
+          : (targetItem.category === 'resource' ? 100 : 1);
 
-      if (buyRes && buyRes.ok) {
-        this.addLog('SUCCESS', `🎉 Auto-buy thành công: ${targetItem.name} (${targetItem.price.toLocaleString()}G)`);
-        historyEntry.status = 'success';
-        if (buyRes.player) {
-          this.updatePlayerState(buyRes.player);
+        const maxAffordable = Math.floor(currentGold / targetItem.price);
+        const qtyToBuy = Math.min(targetItem.qty, limitQty, maxAffordable);
+
+        if (qtyToBuy <= 0) {
+          if (maxAffordable <= 0) {
+            this.addLog('WARNING', `🪙 Vàng không đủ để mua tiếp: ${targetItem.name} (${targetItem.price.toLocaleString()}G)`);
+            break;
+          }
+          continue;
         }
-      } else {
-        const errMsg = buyRes ? (buyRes.error || buyRes.msg || 'Sản phẩm đã bị người khác mua trước hoặc không còn tồn tại') : 'Không phản hồi từ server';
-        this.addLog('WARNING', `⚠️ Mua hàng không thành công [${targetItem.name}]: ${errMsg}`);
-        historyEntry.status = 'failed';
-        historyEntry.error = errMsg;
-      }
 
-      if (!Array.isArray(this.marketBuyHistory)) this.marketBuyHistory = [];
-      this.marketBuyHistory.unshift(historyEntry);
-      if (this.marketBuyHistory.length > 50) this.marketBuyHistory.pop();
+        const buyRes = await this.sendRequest('https://ragnalok.online/human/xhrpg_market.php', {
+          action: 'buy',
+          line_uid: this.line_uid,
+          session_token: this.session_token,
+          listing_id: targetItem.id,
+          qty: qtyToBuy,
+          lang: 'vi'
+        });
+
+        const historyEntry = {
+          id: targetItem.id,
+          itemName: `${qtyToBuy}x ${targetItem.name}`,
+          category: targetItem.category,
+          price: qtyToBuy * targetItem.price,
+          time: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+          timestamp: Date.now(),
+          status: 'success',
+          error: null
+        };
+
+        if (buyRes && buyRes.ok) {
+          successCount++;
+          this.addLog('SUCCESS', `🎉 Auto-buy thành công: ${qtyToBuy}x ${targetItem.name} (Tổng cộng: ${(qtyToBuy * targetItem.price).toLocaleString()}G)`);
+          historyEntry.status = 'success';
+          if (buyRes.player) {
+            this.updatePlayerState(buyRes.player);
+            currentGold = this.player.gold || 0;
+          } else {
+            currentGold -= qtyToBuy * targetItem.price;
+          }
+        } else {
+          const errMsg = buyRes ? (buyRes.error || buyRes.msg || 'Sản phẩm đã bị người khác mua trước hoặc không còn tồn tại') : 'Không phản hồi từ server';
+          this.addLog('WARNING', `⚠️ Mua hàng không thành công [${targetItem.name}]: ${errMsg}`);
+          historyEntry.status = 'failed';
+          historyEntry.error = errMsg;
+        }
+
+        if (!Array.isArray(this.marketBuyHistory)) this.marketBuyHistory = [];
+        this.marketBuyHistory.unshift(historyEntry);
+        if (this.marketBuyHistory.length > 50) this.marketBuyHistory.pop();
+
+        // Delay nhẹ 200ms để tránh spam server game quá nhanh
+        await new Promise(resolve => setTimeout(resolve, 200));
+      }
 
     } catch (e) {
       console.error(`[Market Scanner Error] ${this.name}:`, e.message);

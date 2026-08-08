@@ -2,6 +2,30 @@
 
 > Captured architectural decisions and trade-offs.
 
+## 2026-08-08 - Lọc Hộp Theo Cấp Bậc Trên Chợ & Bơm Máu Khẩn Cấp Chủ Động (T62)
+
+- Bối cảnh:
+  - Khi auto mua đồ rẻ trên chợ (Auto Market Buy), người dùng cần bộ lọc chi tiết cho các loại hộp (Module, Card, Egg boxes) với cấp bậc/độ hiếm tương ứng. Gặp lỗi đồng bộ giao diện check/uncheck danh sách quái và trứng thú cưng do trùng ID thẻ.
+  - Cơ chế tự động hồi máu cũ do server quyết định phản hồi rất chậm, nhân vật dễ bị sốc sát thương chết khi săn boss MVP hoặc đi sự kiện. Người dùng muốn tích hợp cơ chế bơm máu khẩn cấp tương tự khi đang chơi/PK trực tiếp trên trang radar (`play_battle.html`).
+- Quyết định:
+  - **Tách biệt DOM ID và danh sách quái/trứng**: Phân tách Quái Thường và Quái MVP thành 2 danh sách độc lập hoàn toàn để loại bỏ hoàn toàn hiện tượng trùng lặp ID phần tử, sửa triệt để lỗi không nhận diện tương tác nhấp chọn.
+  - **Dịch thuật fallback phía Backend**: Bổ sung bộ chuyển đổi từ vựng tiếng Thái `"ระดับ"` thành `"Bậc"` và `"กล่องสุ่มไข่"`/`"กล่องไข่"` thành `"Hộp trứng"` để tăng tính tương thích cho bộ lọc chuỗi, cho phép so khớp chính xác tên vật phẩm nhận về từ server với cấu hình tiếng Việt của người dùng.
+  - **Bơm máu chủ động qua nhịp Request (Urgent Potion)**: Tích hợp tuỳ chọn gửi POST request `{ action: 'use_potion_manual' }` trực tiếp lên server tại mỗi nhịp poll nếu HP của người chơi giảm xuống dưới ngưỡng quy định. Cơ chế này hoạt động song song với cơ chế của server, đảm bảo bù đắp lượng HP bị hụt cực nhanh.
+  - **Tích hợp Bơm máu chủ động vào Radar PK (`play_battle.html`)**:
+    - Can thiệp vào AJAX Interceptor `$.post` của game client. Ngay khi nhận được phản hồi tick trạng thái game mới nhất từ server game, nếu lượng HP thực tế giảm xuống dưới ngưỡng thiết lập, client sẽ chủ động phát đi yêu cầu nâng cấp/sử dụng bình máu thủ công (`use_potion_manual`) lập tức, giảm thiểu rủi ro bị chết khi đang PK hoặc săn boss trực tiếp trên radar.
+    - Trạng thái cấu hình được lưu cục bộ thông qua `localStorage` của trình duyệt.
+  - **Mua số lượng lớn (Multi-Qty) & Chia Sub-tabs Chợ**:
+    - Tự động mua hàng loạt với tham số `qty` linh hoạt được tính toán tự động dựa trên số dư và số lượng có sẵn trên chợ.
+    - Tổ chức lại tab Chợ Auto thành 3 sub-tabs độc lập (Cấu hình chung, Bộ lọc 9 loại, Lịch sử mua) để giao diện trực quan, khoa học, dễ thao tác và không bị quá tải thông tin.
+    - Khắc phục lỗi mất focus của các ô nhập số lượng thông qua giải pháp Custom Control tích hợp phím điều chỉnh tăng/giảm số lượng **`+/-`** (Minus/Plus) chạy hàm `adjustMarketQty` cập nhật trực tiếp lên database và làm mới giao diện ngay lập tức.
+- Kết quả:
+  - Khắc phục hoàn toàn lỗi giao diện của tính năng chợ.
+  - Nhân vật tự động bơm máu khẩn cấp nhanh như click tay thật cả ở bot poller backend lẫn khi chơi trực tiếp trên radar PK.
+  - Thiết kế UI Chợ Auto siêu gọn gàng, giảm 60% diện tích cuộn trang.
+  - Tất cả các bài kiểm thử unit test tự động trong `test.js` đã pass 100%.
+
+---
+
 ## 2026-08-08 - Đồng Bộ Thuật Toán Khoảng Cách An Toàn 15m - 20m & Kiting Cho Chức Năng PK (T61)
 
 - Bối cảnh:

@@ -2,6 +2,29 @@
 
 > Changelog of actual changes implemented.
 
+## 2026-08-08 - Lọc Hộp Theo Cấp Bậc Trên Chợ & Bơm Máu Khẩn Cấp Chủ Động (T62)
+- File đã đổi: [server.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [public/app.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/public/app.js), [play_battle.html](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/play_battle.html), [test.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/test.js).
+- Đã làm:
+  - **Sửa đồng bộ checkbox quái và trứng**: Thiết kế lại hàm `getMonsterLists(acc)` tách biệt hoàn toàn danh sách Quái Thường và Quái MVP để tránh trùng lặp DOM ID, sửa lỗi ấn "Chọn tất cả" hay "Bỏ chọn" không phản hồi trực quan trên giao diện.
+  - **Mở rộng bộ lọc Chợ cho Hộp (Box)**: Tích hợp bộ lọc sâu cho các loại hộp trong Auto Market Buy bao gồm Hộp Module (Cao cấp, Hiếm, Sử thi, Sử thi+), Hộp Thẻ bài (Bậc 1-8), và Hộp Trứng (Bậc 1-8).
+  - **Chuẩn hóa dịch thuật box phía Backend**: Bổ sung các luật dịch thuật dự phòng (fallback translations) cho từ khóa `"ระดับ"` (Bậc) và `"กล่องสุ่มไข่"`/`"กล่องไข่"` (Hộp trứng) trong `translateThaiText` để phục vụ so khớp logic mua hàng chính xác ở backend.
+  - **Tính năng Chủ động bơm máu khẩn cấp (Nhịp request)**: Thay thế logic tự động bơm máu cũ chỉ dùng trong Event thành cơ chế tổng quát, cho phép chủ động gửi POST request `{ action: 'use_potion_manual' }` ngay tại mỗi nhịp poll nếu HP của nhân vật giảm xuống dưới ngưỡng người dùng thiết lập, tăng mạnh khả năng sống sót khi săn boss.
+  - **Giao diện & Đồng bộ**: Thêm nút switch kích hoạt và dropdown chọn ngưỡng HP khẩn cấp trong tab **Cơ Bản** trên Dashboard, đồng bộ hóa trạng thái qua API settings.
+  - **Tích hợp Bơm máu chủ động vào Radar PK (`play_battle.html`)**:
+    - Thêm nút cấu hình **💊 Bơm Máu Khẩn Cấp** (Bật/Tắt) và dropdown **Ngưỡng HP Bơm Máu** trong tab Cấu hình của Battle Radar.
+    - Lưu giữ trạng thái hoạt động độc lập qua `localStorage` của trình duyệt.
+    - Can thiệp vào AJAX Interceptor `$.post` của game client. Ngay khi nhận được phản hồi tick trạng thái game mới nhất từ server game, nếu lượng HP thực tế giảm xuống dưới ngưỡng thiết lập, client sẽ chủ động phát đi yêu cầu nâng cấp/sử dụng bình máu thủ công (`use_potion_manual`) lập tức, giảm thiểu rủi ro bị chết khi đang PK hoặc săn boss trực tiếp trên radar.
+  - **Nâng cấp Auto Market Buy mua số lượng lớn (Multi-Qty)**:
+    - Backend tự động trích xuất `item.qty` từ listings chợ và tính toán số lượng tối đa có thể mua: `qtyToBuy = Math.min(item.qty, limitQty, Math.floor(currentGold / price_per))`.
+    - Phân tách giao diện **Chợ Auto** thành 3 sub-tabs siêu gọn gàng:
+      1. **Cấu hình chung (⚙️ Settings)**: Gom toàn bộ phần Giá mua tối đa, Chu kỳ quét, Khớp đúng giá, và bảng 3x3 cấu hình Số lượng mua tối đa cho 9 loại.
+      2. **Bộ lọc 9 loại (🎯 Filters)**: Chứa accordion cấu hình danh sách checklist thẻ bài, trứng thú, module, v.v.
+      3. **Lịch sử mua (📜 History)**: Hiển thị nhật ký log tự động mua của chợ đã được làm rộng rãi hơn.
+    - Thiết kế lại 9 ô nhập số lượng mua tối đa thành cụm điều khiển tăng/giảm tích hợp hai nút **`+/-`** màu sắc sinh động (giảm màu đỏ `#f43f5e`, tăng màu xanh `#10b981`), đồng thời bổ sung hàm `adjustMarketQty` giải quyết triệt để lỗi không nhận diện thao tác nhập số hoặc bị ghi đè/reset focus từ vòng lặp cập nhật trạng thái của thẻ nhân vật (thẻ quái, đồ sưu tầm, hộp trứng).
+- Đã test bằng: `npm test` -> PASS 100%.
+
+---
+
 ## 2026-08-08 - Phân Quyền & Giới Hạn Bot Chạy Chợ (Auto Market Limit) (T53)
 - File đã đổi: [server.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [public/index.html](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/public/index.html), [public/app.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/public/app.js).
 - Đã làm:

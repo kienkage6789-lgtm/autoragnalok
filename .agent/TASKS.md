@@ -3,6 +3,21 @@
 > Work Breakdown Structure. Update task states immediately upon changes.
 > Statuses: todo | doing | blocked | review | done
 
+### [x] T62 - Lọc Hộp Theo Cấp Bậc Trên Chợ & Bơm Máu Khẩn Cấp Chủ Động (Urgent Active Healing)
+- Description: Tích hợp bộ lọc chi tiết cho các hộp trên chợ (Hộp Module, Hộp Thẻ bài, Hộp Trứng) theo độ hiếm/bậc. Khắc phục lỗi đồng bộ check/uncheck danh sách quái và trứng thú cưng do trùng phần tử DOM ID. Triển khai tùy chọn bơm máu chủ động trực tiếp gửi request `{ action: 'use_potion_manual' }` tại mỗi nhịp poll nếu HP giảm dưới ngưỡng để tăng tỷ lệ sống sót của nhân vật. Tích hợp bơm máu khẩn cấp tương tự vào client-side PK/Battle Radar.
+- Files related: `server.js`, `public/app.js`, `play_battle.html`, `test.js`
+- Acceptance criteria:
+  - [x] Phân tách Quái Thường và Quái MVP thành 2 danh sách độc lập hoàn toàn, sửa dứt điểm lỗi không nhận diện check/uncheck quái và trứng.
+  - [x] Thêm các cấu hình mặc định `activeHealEnabled`, `activeHealThreshold`, và các mảng lọc hộp mới.
+  - [x] Triển khai bộ lọc hộp Module (Cao cấp, Hiếm, Sử thi, Sử thi+), Hộp Thẻ bài (Bậc 1-8), Hộp Trứng (Bậc 1-8) trên Backend và UI Dashboard.
+  - [x] Bổ sung dịch thuật fallback trong `translateThaiText` cho `"ระดับ"` -> `"Bậc"` và `"กล่องสุ่มไข่"` / `"กล่องไข่"` -> `"Hộp trứng"` để so khớp chính xác tên vật phẩm ở Backend.
+  - [x] Triển khai logic bơm máu khẩn cấp chủ động qua nhịp request trong `pollGame()`, thiết kế công tắc bật/tắt và chọn ngưỡng HP trên UI tab Cơ Bản.
+  - [x] Tích hợp cấu hình và logic bơm máu khẩn cấp tương ứng vào `play_battle.html` thông qua `localStorage` và can thiệp AJAX `$.post` callback.
+  - [x] Viết unit tests kiểm thử bộ lọc hộp và cơ chế bơm máu khẩn cấp trong `test.js`, chạy `npm test` thành công 100%.
+- Status: done
+
+---
+
 ### [x] T61 - Áp Dụng Khoảng Cách An Toàn 15m - 20m & Vector Kiting Cho Chức Năng PK (Battle Radar)
 - Description: Nâng cấp AJAX Interceptor và Target Widget trong play_battle.html. Khi khóa mục tiêu PK người chơi khác (hoặc Boss thủ công), client tự động tính toán vị trí di chuyển/lùi giữ khoảng cách an toàn 15m-20m theo vector mục tiêu. Tự động chuyển sang trạng thái đứng yên xả skill (`traveling = 0`, `lock_pos = 1`) khi ở trong dải 15m-20m, và tự động lùi kiting khi đối thủ áp sát <15m. Cập nhật UI Target Badge hiển thị các trạng thái [Vùng 15-20m] (xanh lá), [Lùi Kiting] (cam) và [Đang áp sát] (xám).
 - Files related: `play_battle.html`, `test.js`

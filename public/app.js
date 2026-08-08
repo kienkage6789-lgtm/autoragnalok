@@ -1406,6 +1406,26 @@ document.addEventListener('DOMContentLoaded', () => {
                 <option value="90">90% HP</option>
               </select>
             </div>
+
+            <div class="toggle-control" style="grid-column: span 2; margin-top: 8px; border-top: 1px dashed rgba(255,255,255,0.1); padding-top: 8px;">
+              <span class="toggle-label" title="Chủ động gửi request bơm máu khẩn cấp tại mỗi nhịp request thay vì đợi server tự động hồi">💊 Chủ động bơm máu khẩn cấp (Nhịp request)</span>
+              <label class="switch">
+                <input type="checkbox" id="chk-active-heal-enabled-${acc.line_uid}" onchange="toggleSetting('${acc.line_uid}', 'activeHealEnabled')">
+                <span class="slider"></span>
+              </label>
+            </div>
+            <div class="input-control" style="grid-column: span 2; margin-bottom: 4px;">
+              <label for="sel-active-heal-threshold-${acc.line_uid}">Ngưỡng HP Khẩn Cấp (%)</label>
+              <select id="sel-active-heal-threshold-${acc.line_uid}" onchange="updateNumericSetting('${acc.line_uid}', 'activeHealThreshold')" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; padding: 4px 6px; font-family: inherit; font-size: 0.85rem; outline: none; margin-top:2px; width: 100%;">
+                <option value="30">30% HP</option>
+                <option value="40">40% HP</option>
+                <option value="50">50% HP (Mặc định)</option>
+                <option value="60">60% HP</option>
+                <option value="70">70% HP</option>
+                <option value="80">80% HP</option>
+                <option value="90">90% HP</option>
+              </select>
+            </div>
           </div>
 
           <div class="settings-group">
@@ -1537,8 +1557,6 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
         </div>
 
-        <!-- Merged into pane-log -->
-
         <!-- Auto Market Buy Tab Pane -->
         <div class="tab-pane" id="pane-market-buy-${acc.line_uid}">
           <div class="market-buy-locked-overlay" id="market-buy-locked-${acc.line_uid}" style="display: none; background: rgba(220,38,38,0.08); padding: 16px; border: 1px dashed rgba(239, 68, 68, 0.4); border-radius: 12px; text-align: center; margin-bottom: 10px;">
@@ -1548,81 +1566,176 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
 
           <div class="market-buy-unlocked-panel" id="market-buy-panel-${acc.line_uid}" style="display: block;">
-            <!-- Master Control Header -->
-            <div class="settings-group" style="margin-bottom: 10px; padding: 10px; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(56, 189, 248, 0.2); border-radius: 10px;">
-              <div class="toggle-control" style="margin-bottom: 8px;">
-                <span class="toggle-label" style="font-weight: 700; color: #38bdf8; font-size: 0.9rem;">🏪 Auto Market Buy (Tự Mua Chợ Giá Rẻ)</span>
-                <label class="switch">
-                  <input type="checkbox" id="chk-automarketbuy-${acc.line_uid}" onchange="toggleSetting('${acc.line_uid}', 'autoMarketBuy')">
-                  <span class="slider"></span>
-                </label>
-              </div>
+            <!-- Sub-tabs Navigation -->
+            <div class="subtabs-nav" style="display:flex; gap:6px; margin-bottom:10px; border-bottom:1px solid rgba(255,255,255,0.08); padding-bottom:6px; overflow-x:auto;">
+              <button class="subtab-btn active" id="subtab-btn-mkt-settings-${acc.line_uid}" onclick="switchMarketSubTab('${acc.line_uid}', 'settings')">⚙️ Cấu hình chung</button>
+              <button class="subtab-btn" id="subtab-btn-mkt-filters-${acc.line_uid}" onclick="switchMarketSubTab('${acc.line_uid}', 'filters')">🎯 Bộ lọc 9 loại</button>
+              <button class="subtab-btn" id="subtab-btn-mkt-history-${acc.line_uid}" onclick="switchMarketSubTab('${acc.line_uid}', 'history')">📜 Lịch sử mua</button>
+            </div>
 
-              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 8px;">
-                <div class="input-control">
-                  <label for="num-market-max-price-${acc.line_uid}" style="font-size: 0.75rem; color: #fbbf24; font-weight: 600; display: flex; justify-content: space-between; align-items: center;">
-                    <span>💰 Giá Mua Tối Đa</span>
-                    <span id="lbl-market-max-price-preview-${acc.line_uid}" style="font-size: 0.7rem; color: #4ade80; font-weight: bold;"></span>
+            <!-- Sub-pane 1: Cấu hình chung (Settings) -->
+            <div class="subtab-pane" id="subpane-mkt-settings-${acc.line_uid}" style="display:block;">
+              <!-- Master Control Header -->
+              <div style="margin-bottom: 10px; padding: 10px; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(56, 189, 248, 0.2); border-radius: 10px; display: flex; flex-direction: column; gap: 8px;">
+                <div class="toggle-control">
+                  <span class="toggle-label" style="font-weight: 700; color: #38bdf8; font-size: 0.9rem;">🏪 Auto Market Buy (Tự Mua Chợ Giá Rẻ)</span>
+                  <label class="switch">
+                    <input type="checkbox" id="chk-automarketbuy-${acc.line_uid}" onchange="toggleSetting('${acc.line_uid}', 'autoMarketBuy')">
+                    <span class="slider"></span>
                   </label>
-                  <input type="text" id="num-market-max-price-${acc.line_uid}" placeholder="10.000" oninput="formatMarketPriceInput(this, '${acc.line_uid}')" onchange="updateNumericSetting('${acc.line_uid}', 'marketMaxPrice')" onkeydown="if(event.key==='Enter') this.blur()" style="background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; color: #fff; padding: 6px; font-family: inherit; font-size: 0.82rem; outline: none; margin-top:2px; width: 100%;">
                 </div>
-                <div class="input-control">
-                  <label for="sel-market-scan-interval-${acc.line_uid}" style="font-size: 0.75rem; color: #38bdf8; font-weight: 600;">⏱️ Chu Kỳ Quét</label>
-                  <select id="sel-market-scan-interval-${acc.line_uid}" onchange="updateNumericSetting('${acc.line_uid}', 'marketScanInterval')" style="background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; color: #fff; padding: 6px; font-family: inherit; font-size: 0.82rem; outline: none; margin-top:2px; width: 100%;">
-                    <option value="5">⚡ 5 giây</option>
-                    <option value="10" selected>⏱️ 10 giây (Khuyên dùng)</option>
-                    <option value="15">⏱️ 15 giây</option>
-                    <option value="30">🐢 30 giây</option>
-                    <option value="60">🐢 60 giây</option>
-                  </select>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                  <div class="input-control">
+                    <label for="num-market-max-price-${acc.line_uid}" style="font-size: 0.75rem; color: #fbbf24; font-weight: 600; display: flex; justify-content: space-between; align-items: center;">
+                      <span>💰 Giá Mua Tối Đa</span>
+                      <span id="lbl-market-max-price-preview-${acc.line_uid}" style="font-size: 0.7rem; color: #4ade80; font-weight: bold;"></span>
+                    </label>
+                    <input type="text" id="num-market-max-price-${acc.line_uid}" placeholder="10.000" oninput="formatMarketPriceInput(this, '${acc.line_uid}')" onchange="updateNumericSetting('${acc.line_uid}', 'marketMaxPrice')" onkeydown="if(event.key==='Enter') this.blur()" style="background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; color: #fff; padding: 6px; font-family: inherit; font-size: 0.82rem; outline: none; margin-top:2px; width: 100%;">
+                  </div>
+                  <div class="input-control">
+                    <label for="sel-market-scan-interval-${acc.line_uid}" style="font-size: 0.75rem; color: #38bdf8; font-weight: 600;">⏱️ Chu Kỳ Quét</label>
+                    <select id="sel-market-scan-interval-${acc.line_uid}" onchange="updateNumericSetting('${acc.line_uid}', 'marketScanInterval')" style="background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; color: #fff; padding: 6px; font-family: inherit; font-size: 0.82rem; outline: none; margin-top:2px; width: 100%;">
+                      <option value="5">⚡ 5 giây</option>
+                      <option value="10" selected>⏱️ 10 giây (Khuyên dùng)</option>
+                      <option value="15">⏱️ 15 giây</option>
+                      <option value="30">🐢 30 giây</option>
+                      <option value="60">🐢 60 giây</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div class="toggle-control" style="padding-top: 4px; border-top: 1px solid rgba(255,255,255,0.05);">
+                  <span class="toggle-label" style="font-weight: 600; color: #cbd5e1; font-size: 0.78rem;">🎯 Khớp đúng giá cố định (chuyển/giao dịch đồ)</span>
+                  <label class="switch" style="transform: scale(0.85); margin-right: -4px;">
+                    <input type="checkbox" id="chk-marketexactprice-${acc.line_uid}" onchange="toggleSetting('${acc.line_uid}', 'marketExactPrice')">
+                    <span class="slider"></span>
+                  </label>
                 </div>
               </div>
 
-              <div class="toggle-control" style="padding-top: 4px; border-top: 1px solid rgba(255,255,255,0.05);">
-                <span class="toggle-label" style="font-weight: 600; color: #cbd5e1; font-size: 0.78rem;">🎯 Khớp đúng giá cố định (chuyển/giao dịch đồ)</span>
-                <label class="switch" style="transform: scale(0.85); margin-right: -4px;">
-                  <input type="checkbox" id="chk-marketexactprice-${acc.line_uid}" onchange="toggleSetting('${acc.line_uid}', 'marketExactPrice')">
-                  <span class="slider"></span>
-                </label>
+              <!-- Cấu Hình Số Lượng Mua Tối Đa -->
+              <div style="margin-bottom: 10px; padding: 10px; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(168, 85, 247, 0.2); border-radius: 10px; display: flex; flex-direction: column; gap: 8px;">
+                <div style="font-size: 0.8rem; font-weight: 700; color: #a855f7; display: flex; align-items: center; gap: 4px;">
+                  <span>📈 Số Lượng Mua Tối Đa mỗi lượt quét</span>
+                </div>
+                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px 8px;">
+                  <div class="input-control" style="background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.04); border-radius: 8px; padding: 6px; display: flex; flex-direction: column; justify-content: space-between; height: 64px;">
+                    <label style="font-size: 0.7rem; color: #cbd5e1; font-weight: 600; text-align: center; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 4px;">🪵 Nguyên liệu</label>
+                    <div style="display: flex; align-items: center; background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; padding: 2px 4px; height: 26px;">
+                      <button type="button" onclick="adjustMarketQty('${acc.line_uid}', 'resource', -1)" style="background: none; border: none; color: #f43f5e; font-weight: bold; font-size: 1rem; width: 22px; height: 22px; cursor: pointer; user-select: none; display: flex; align-items: center; justify-content: center;">-</button>
+                      <input type="number" id="num-market-max-qty-resource-${acc.line_uid}" min="1" onchange="updateMarketCategoryMaxQty('${acc.line_uid}', 'resource')" style="background: none; border: none; color: #fff; text-align: center; font-family: inherit; font-size: 0.8rem; font-weight: 700; outline: none; width: 100%; -moz-appearance: textfield; margin: 0; padding: 0;">
+                      <button type="button" onclick="adjustMarketQty('${acc.line_uid}', 'resource', 1)" style="background: none; border: none; color: #10b981; font-weight: bold; font-size: 1rem; width: 22px; height: 22px; cursor: pointer; user-select: none; display: flex; align-items: center; justify-content: center;">+</button>
+                    </div>
+                  </div>
+                  <div class="input-control" style="background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.04); border-radius: 8px; padding: 6px; display: flex; flex-direction: column; justify-content: space-between; height: 64px;">
+                    <label style="font-size: 0.7rem; color: #cbd5e1; font-weight: 600; text-align: center; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 4px;">🎴 Thẻ quái</label>
+                    <div style="display: flex; align-items: center; background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; padding: 2px 4px; height: 26px;">
+                      <button type="button" onclick="adjustMarketQty('${acc.line_uid}', 'card', -1)" style="background: none; border: none; color: #f43f5e; font-weight: bold; font-size: 1rem; width: 22px; height: 22px; cursor: pointer; user-select: none; display: flex; align-items: center; justify-content: center;">-</button>
+                      <input type="number" id="num-market-max-qty-card-${acc.line_uid}" min="1" onchange="updateMarketCategoryMaxQty('${acc.line_uid}', 'card')" style="background: none; border: none; color: #fff; text-align: center; font-family: inherit; font-size: 0.8rem; font-weight: 700; outline: none; width: 100%; -moz-appearance: textfield; margin: 0; padding: 0;">
+                      <button type="button" onclick="adjustMarketQty('${acc.line_uid}', 'card', 1)" style="background: none; border: none; color: #10b981; font-weight: bold; font-size: 1rem; width: 22px; height: 22px; cursor: pointer; user-select: none; display: flex; align-items: center; justify-content: center;">+</button>
+                    </div>
+                  </div>
+                  <div class="input-control" style="background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.04); border-radius: 8px; padding: 6px; display: flex; flex-direction: column; justify-content: space-between; height: 64px;">
+                    <label style="font-size: 0.7rem; color: #cbd5e1; font-weight: 600; text-align: center; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 4px;">🥚 Trứng thú</label>
+                    <div style="display: flex; align-items: center; background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; padding: 2px 4px; height: 26px;">
+                      <button type="button" onclick="adjustMarketQty('${acc.line_uid}', 'egg', -1)" style="background: none; border: none; color: #f43f5e; font-weight: bold; font-size: 1rem; width: 22px; height: 22px; cursor: pointer; user-select: none; display: flex; align-items: center; justify-content: center;">-</button>
+                      <input type="number" id="num-market-max-qty-egg-${acc.line_uid}" min="1" onchange="updateMarketCategoryMaxQty('${acc.line_uid}', 'egg')" style="background: none; border: none; color: #fff; text-align: center; font-family: inherit; font-size: 0.8rem; font-weight: 700; outline: none; width: 100%; -moz-appearance: textfield; margin: 0; padding: 0;">
+                      <button type="button" onclick="adjustMarketQty('${acc.line_uid}', 'egg', 1)" style="background: none; border: none; color: #10b981; font-weight: bold; font-size: 1rem; width: 22px; height: 22px; cursor: pointer; user-select: none; display: flex; align-items: center; justify-content: center;">+</button>
+                    </div>
+                  </div>
+                  <div class="input-control" style="background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.04); border-radius: 8px; padding: 6px; display: flex; flex-direction: column; justify-content: space-between; height: 64px;">
+                    <label style="font-size: 0.7rem; color: #cbd5e1; font-weight: 600; text-align: center; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 4px;">⚙️ Module</label>
+                    <div style="display: flex; align-items: center; background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; padding: 2px 4px; height: 26px;">
+                      <button type="button" onclick="adjustMarketQty('${acc.line_uid}', 'module', -1)" style="background: none; border: none; color: #f43f5e; font-weight: bold; font-size: 1rem; width: 22px; height: 22px; cursor: pointer; user-select: none; display: flex; align-items: center; justify-content: center;">-</button>
+                      <input type="number" id="num-market-max-qty-module-${acc.line_uid}" min="1" onchange="updateMarketCategoryMaxQty('${acc.line_uid}', 'module')" style="background: none; border: none; color: #fff; text-align: center; font-family: inherit; font-size: 0.8rem; font-weight: 700; outline: none; width: 100%; -moz-appearance: textfield; margin: 0; padding: 0;">
+                      <button type="button" onclick="adjustMarketQty('${acc.line_uid}', 'module', 1)" style="background: none; border: none; color: #10b981; font-weight: bold; font-size: 1rem; width: 22px; height: 22px; cursor: pointer; user-select: none; display: flex; align-items: center; justify-content: center;">+</button>
+                    </div>
+                  </div>
+                  <div class="input-control" style="background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.04); border-radius: 8px; padding: 6px; display: flex; flex-direction: column; justify-content: space-between; height: 64px;">
+                    <label style="font-size: 0.7rem; color: #cbd5e1; font-weight: 600; text-align: center; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 4px;">🏛️ Đồ sưu tầm</label>
+                    <div style="display: flex; align-items: center; background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; padding: 2px 4px; height: 26px;">
+                      <button type="button" onclick="adjustMarketQty('${acc.line_uid}', 'collectible', -1)" style="background: none; border: none; color: #f43f5e; font-weight: bold; font-size: 1rem; width: 22px; height: 22px; cursor: pointer; user-select: none; display: flex; align-items: center; justify-content: center;">-</button>
+                      <input type="number" id="num-market-max-qty-collectible-${acc.line_uid}" min="1" onchange="updateMarketCategoryMaxQty('${acc.line_uid}', 'collectible')" style="background: none; border: none; color: #fff; text-align: center; font-family: inherit; font-size: 0.8rem; font-weight: 700; outline: none; width: 100%; -moz-appearance: textfield; margin: 0; padding: 0;">
+                      <button type="button" onclick="adjustMarketQty('${acc.line_uid}', 'collectible', 1)" style="background: none; border: none; color: #10b981; font-weight: bold; font-size: 1rem; width: 22px; height: 22px; cursor: pointer; user-select: none; display: flex; align-items: center; justify-content: center;">+</button>
+                    </div>
+                  </div>
+                  <div class="input-control" style="background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.04); border-radius: 8px; padding: 6px; display: flex; flex-direction: column; justify-content: space-between; height: 64px;">
+                    <label style="font-size: 0.7rem; color: #cbd5e1; font-weight: 600; text-align: center; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 4px;">💎 Kim cương</label>
+                    <div style="display: flex; align-items: center; background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; padding: 2px 4px; height: 26px;">
+                      <button type="button" onclick="adjustMarketQty('${acc.line_uid}', 'diamond', -1)" style="background: none; border: none; color: #f43f5e; font-weight: bold; font-size: 1rem; width: 22px; height: 22px; cursor: pointer; user-select: none; display: flex; align-items: center; justify-content: center;">-</button>
+                      <input type="number" id="num-market-max-qty-diamond-${acc.line_uid}" min="1" onchange="updateMarketCategoryMaxQty('${acc.line_uid}', 'diamond')" style="background: none; border: none; color: #fff; text-align: center; font-family: inherit; font-size: 0.8rem; font-weight: 700; outline: none; width: 100%; -moz-appearance: textfield; margin: 0; padding: 0;">
+                      <button type="button" onclick="adjustMarketQty('${acc.line_uid}', 'diamond', 1)" style="background: none; border: none; color: #10b981; font-weight: bold; font-size: 1rem; width: 22px; height: 22px; cursor: pointer; user-select: none; display: flex; align-items: center; justify-content: center;">+</button>
+                    </div>
+                  </div>
+                  <div class="input-control" style="background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.04); border-radius: 8px; padding: 6px; display: flex; flex-direction: column; justify-content: space-between; height: 64px;">
+                    <label style="font-size: 0.7rem; color: #cbd5e1; font-weight: 600; text-align: center; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 4px;">📦 Hộp thẻ</label>
+                    <div style="display: flex; align-items: center; background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; padding: 2px 4px; height: 26px;">
+                      <button type="button" onclick="adjustMarketQty('${acc.line_uid}', 'card_box', -1)" style="background: none; border: none; color: #f43f5e; font-weight: bold; font-size: 1rem; width: 22px; height: 22px; cursor: pointer; user-select: none; display: flex; align-items: center; justify-content: center;">-</button>
+                      <input type="number" id="num-market-max-qty-card_box-${acc.line_uid}" min="1" onchange="updateMarketCategoryMaxQty('${acc.line_uid}', 'card_box')" style="background: none; border: none; color: #fff; text-align: center; font-family: inherit; font-size: 0.8rem; font-weight: 700; outline: none; width: 100%; -moz-appearance: textfield; margin: 0; padding: 0;">
+                      <button type="button" onclick="adjustMarketQty('${acc.line_uid}', 'card_box', 1)" style="background: none; border: none; color: #10b981; font-weight: bold; font-size: 1rem; width: 22px; height: 22px; cursor: pointer; user-select: none; display: flex; align-items: center; justify-content: center;">+</button>
+                    </div>
+                  </div>
+                  <div class="input-control" style="background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.04); border-radius: 8px; padding: 6px; display: flex; flex-direction: column; justify-content: space-between; height: 64px;">
+                    <label style="font-size: 0.7rem; color: #cbd5e1; font-weight: 600; text-align: center; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 4px;">📦 Hộp trứng</label>
+                    <div style="display: flex; align-items: center; background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; padding: 2px 4px; height: 26px;">
+                      <button type="button" onclick="adjustMarketQty('${acc.line_uid}', 'egg_box', -1)" style="background: none; border: none; color: #f43f5e; font-weight: bold; font-size: 1rem; width: 22px; height: 22px; cursor: pointer; user-select: none; display: flex; align-items: center; justify-content: center;">-</button>
+                      <input type="number" id="num-market-max-qty-egg_box-${acc.line_uid}" min="1" onchange="updateMarketCategoryMaxQty('${acc.line_uid}', 'egg_box')" style="background: none; border: none; color: #fff; text-align: center; font-family: inherit; font-size: 0.8rem; font-weight: 700; outline: none; width: 100%; -moz-appearance: textfield; margin: 0; padding: 0;">
+                      <button type="button" onclick="adjustMarketQty('${acc.line_uid}', 'egg_box', 1)" style="background: none; border: none; color: #10b981; font-weight: bold; font-size: 1rem; width: 22px; height: 22px; cursor: pointer; user-select: none; display: flex; align-items: center; justify-content: center;">+</button>
+                    </div>
+                  </div>
+                  <div class="input-control" style="background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.04); border-radius: 8px; padding: 6px; display: flex; flex-direction: column; justify-content: space-between; height: 64px;">
+                    <label style="font-size: 0.7rem; color: #cbd5e1; font-weight: 600; text-align: center; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 4px;">📦 Hộp Module</label>
+                    <div style="display: flex; align-items: center; background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; padding: 2px 4px; height: 26px;">
+                      <button type="button" onclick="adjustMarketQty('${acc.line_uid}', 'module_box', -1)" style="background: none; border: none; color: #f43f5e; font-weight: bold; font-size: 1rem; width: 22px; height: 22px; cursor: pointer; user-select: none; display: flex; align-items: center; justify-content: center;">-</button>
+                      <input type="number" id="num-market-max-qty-module_box-${acc.line_uid}" min="1" onchange="updateMarketCategoryMaxQty('${acc.line_uid}', 'module_box')" style="background: none; border: none; color: #fff; text-align: center; font-family: inherit; font-size: 0.8rem; font-weight: 700; outline: none; width: 100%; -moz-appearance: textfield; margin: 0; padding: 0;">
+                      <button type="button" onclick="adjustMarketQty('${acc.line_uid}', 'module_box', 1)" style="background: none; border: none; color: #10b981; font-weight: bold; font-size: 1rem; width: 22px; height: 22px; cursor: pointer; user-select: none; display: flex; align-items: center; justify-content: center;">+</button>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
 
-            <!-- Accordion / Collapsible Categories Container -->
-            <div style="margin-bottom: 12px;">
-              <div style="font-size: 0.8rem; font-weight: 700; color: #fbbf24; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
-                <span>🎯 Cấu Hình 9 Loại Vật Phẩm</span>
-                <span style="font-size: 0.7rem; color: #94a3b8; font-weight: 400;">Bật công tắc & mở rộng để lọc chi tiết</span>
-              </div>
+            <!-- Sub-pane 2: Bộ lọc 9 loại (Filters) -->
+            <div class="subtab-pane" id="subpane-mkt-filters-${acc.line_uid}" style="display:none;">
+              <div style="margin-bottom: 12px; display: flex; flex-direction: column; gap: 8px;">
+                <div style="font-size: 0.8rem; font-weight: 700; color: #fbbf24; display: flex; justify-content: space-between; align-items: center;">
+                  <span>🎯 Bộ Lọc 9 Loại Vật Phẩm</span>
+                  <span style="font-size: 0.7rem; color: #94a3b8; font-weight: 400;">Bật công tắc & mở rộng để lọc chi tiết</span>
+                </div>
 
-              <div id="market-categories-accordion-${acc.line_uid}">
-                <!-- Populated dynamically by renderMarketCategoryAccordion(acc) -->
+                <div id="market-categories-accordion-${acc.line_uid}">
+                  <!-- Populated dynamically by renderMarketCategoryAccordion(acc) -->
+                </div>
               </div>
             </div>
 
-            <!-- Auto-Buy History Log Table -->
-            <div class="settings-group" style="padding: 10px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.06); border-radius: 10px;">
-              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                <span style="font-size: 0.8rem; font-weight: 700; color: #4ade80;">📜 Lịch Sử Tự Động Mua (Auto-Buy Log)</span>
-                <button class="action-btn text-btn btn-sm" onclick="clearMarketBuyHistory('${acc.line_uid}')" style="font-size: 0.68rem; padding: 2px 8px; color: #f87171; border-color: rgba(248, 113, 113, 0.3);">
-                  🗑️ Xóa Lịch Sử
-                </button>
-              </div>
-              <div style="max-height: 180px; overflow-y: auto;">
-                <table class="market-history-table">
-                  <thead>
-                    <tr>
-                      <th style="width: 22%;">Thời Gian</th>
-                      <th style="width: 40%;">Vật Phẩm</th>
-                      <th style="width: 18%;">Giá Mua</th>
-                      <th style="width: 20%;">Trạng Thái</th>
-                    </tr>
-                  </thead>
-                  <tbody id="tbl-market-buy-history-${acc.line_uid}">
-                    <tr>
-                      <td colspan="4" style="text-align: center; color: #94a3b8; padding: 12px 0;">Chưa có lịch sử tự động mua.</td>
-                    </tr>
-                  </tbody>
-                </table>
+            <!-- Sub-pane 3: Lịch sử mua (History) -->
+            <div class="subtab-pane" id="subpane-mkt-history-${acc.line_uid}" style="display:none;">
+              <div style="padding: 10px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; display: flex; flex-direction: column; gap: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                  <span style="font-size: 0.8rem; font-weight: 700; color: #4ade80;">📜 Lịch Sử Tự Động Mua (Auto-Buy Log)</span>
+                  <button class="action-btn text-btn btn-sm" onclick="clearMarketBuyHistory('${acc.line_uid}')" style="font-size: 0.68rem; padding: 2px 8px; color: #f87171; border-color: rgba(248, 113, 113, 0.3);">
+                    🗑️ Xóa Lịch Sử
+                  </button>
+                </div>
+                <div style="max-height: 280px; overflow-y: auto;">
+                  <table class="market-history-table">
+                    <thead>
+                      <tr>
+                        <th style="width: 22%;">Thời Gian</th>
+                        <th style="width: 40%;">Vật Phẩm</th>
+                        <th style="width: 18%;">Giá Mua</th>
+                        <th style="width: 20%;">Trạng Thái</th>
+                      </tr>
+                    </thead>
+                    <tbody id="tbl-market-buy-history-${acc.line_uid}">
+                      <tr>
+                        <td colspan="4" style="text-align: center; color: #94a3b8; padding: 12px 0;">Chưa có lịch sử tự động mua.</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
 
@@ -1847,6 +1960,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const selScanInterval = document.getElementById(`sel-market-scan-interval-${acc.line_uid}`);
     if (selScanInterval && document.activeElement !== selScanInterval) selScanInterval.value = (acc.settings && acc.settings.marketScanInterval) || 10;
+
+    // Sync Auto Market Buy Max Quantities
+    const categoryMaxQtys = (acc.settings && acc.settings.marketCategoryMaxQtys) || {};
+    const qtyCategories = ['resource', 'card', 'egg', 'module', 'collectible', 'diamond', 'card_box', 'egg_box', 'module_box'];
+    qtyCategories.forEach(cat => {
+      const input = document.getElementById(`num-market-max-qty-${cat}-${acc.line_uid}`);
+      if (input && document.activeElement !== input) {
+        const defaultQty = cat === 'resource' ? 100 : 1;
+        input.value = categoryMaxQtys[cat] !== undefined ? categoryMaxQtys[cat] : defaultQty;
+      }
+    });
 
     // Render & sync 9 category cards accordion and buy history
     renderMarketCategoryAccordion(acc);
@@ -2142,6 +2266,16 @@ document.addEventListener('DOMContentLoaded', () => {
     const selPotion = document.getElementById(`sel-auto-potion-threshold-${acc.line_uid}`);
     if (selPotion && document.activeElement !== selPotion) {
       selPotion.value = acc.settings.auto_potion_threshold !== undefined ? String(acc.settings.auto_potion_threshold) : '50';
+    }
+
+    // Urgent Active Potion Healing sync
+    const chkActiveHeal = document.getElementById(`chk-active-heal-enabled-${acc.line_uid}`);
+    if (chkActiveHeal && document.activeElement !== chkActiveHeal) {
+      chkActiveHeal.checked = (acc.settings.activeHealEnabled === true);
+    }
+    const selActiveHealThreshold = document.getElementById(`sel-active-heal-threshold-${acc.line_uid}`);
+    if (selActiveHealThreshold && document.activeElement !== selActiveHealThreshold) {
+      selActiveHealThreshold.value = acc.settings.activeHealThreshold !== undefined ? String(acc.settings.activeHealThreshold) : '50';
     }
 
     // Auto Map toggle & map select sync
@@ -2702,6 +2836,25 @@ document.addEventListener('DOMContentLoaded', () => {
     if (paneSkills) paneSkills.style.display = subTabId === 'skills' ? 'block' : 'none';
     if (paneCards) paneCards.style.display = subTabId === 'cards' ? 'block' : 'none';
     if (paneEggs) paneEggs.style.display = subTabId === 'eggs' ? 'block' : 'none';
+  };
+
+  // Switch Sub-Tab inside Market Pane
+  window.switchMarketSubTab = function(uid, subTabId) {
+    const btnSettings = document.getElementById(`subtab-btn-mkt-settings-${uid}`);
+    const btnFilters = document.getElementById(`subtab-btn-mkt-filters-${uid}`);
+    const btnHistory = document.getElementById(`subtab-btn-mkt-history-${uid}`);
+
+    const paneSettings = document.getElementById(`subpane-mkt-settings-${uid}`);
+    const paneFilters = document.getElementById(`subpane-mkt-filters-${uid}`);
+    const paneHistory = document.getElementById(`subpane-mkt-history-${uid}`);
+
+    if (btnSettings) btnSettings.classList.toggle('active', subTabId === 'settings');
+    if (btnFilters) btnFilters.classList.toggle('active', subTabId === 'filters');
+    if (btnHistory) btnHistory.classList.toggle('active', subTabId === 'history');
+
+    if (paneSettings) paneSettings.style.display = subTabId === 'settings' ? 'block' : 'none';
+    if (paneFilters) paneFilters.style.display = subTabId === 'filters' ? 'block' : 'none';
+    if (paneHistory) paneHistory.style.display = subTabId === 'history' ? 'block' : 'none';
   };
 
   const MONSTER_DICT = {
@@ -3420,6 +3573,41 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (err) {
       console.error('Error updating setting:', err);
     }
+  };
+
+  // Update Market Category Max Qty
+  window.updateMarketCategoryMaxQty = async function(uid, category) {
+    const input = document.getElementById(`num-market-max-qty-${category}-${uid}`);
+    if (!input) return;
+    const val = isNaN(parseInt(input.value)) ? 1 : Math.max(1, parseInt(input.value));
+
+    const acc = (window.lastFetchedAccounts || []).find(a => a.line_uid === uid);
+    if (acc) {
+      if (!acc.settings.marketCategoryMaxQtys) {
+        acc.settings.marketCategoryMaxQtys = {};
+      }
+      acc.settings.marketCategoryMaxQtys[category] = val;
+
+      try {
+        await fetch(`/api/accounts/${uid}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ marketCategoryMaxQtys: acc.settings.marketCategoryMaxQtys })
+        });
+      } catch (err) {
+        console.error('Error updating market max qty:', err);
+      }
+    }
+  };
+
+  // Adjust Market Category Qty +/- buttons
+  window.adjustMarketQty = function(uid, category, amount) {
+    const input = document.getElementById(`num-market-max-qty-${category}-${uid}`);
+    if (!input) return;
+    let val = parseInt(input.value) || 1;
+    val = Math.max(1, val + amount);
+    input.value = val;
+    window.updateMarketCategoryMaxQty(uid, category);
   };
 
   // Update String Settings
@@ -4906,28 +5094,53 @@ const MARKET_CATEGORY_DEFS = [
   { key: 'egg', title: 'Trứng Thú Cưng (Phân theo Tên quái)', icon: '🥚', filterable: true, desc: 'Lọc mua trứng Pet theo danh sách quái chỉ định.' },
   { key: 'collectible', title: 'Đồ Sưu Tầm & Chứng', icon: '🗃️', filterable: true, desc: 'Lọc mua các loại Chứng Titan, Bảo vật, Linh kiện.' },
   { key: 'resource', title: 'Nguyên Liệu (Đá, Thuốc, Đạn...) — Mặc định OFF', icon: '🪵', filterable: false, desc: '⚠️ Coi là rác. Mặc định OFF. Bật công tắc nếu muốn tự động mua.' },
-  { key: 'card_box', title: 'Hộp Thẻ Bài', icon: '🎁', filterable: false, desc: 'Tự động mua hộp thẻ bài khi giá <= mức giá tối đa.' },
-  { key: 'egg_box', title: 'Hộp Trứng Pet', icon: '🎁', filterable: false, desc: 'Tự động mua hộp trứng Pet khi giá <= mức giá tối đa.' },
-  { key: 'module_box', title: 'Hộp Module', icon: '📦', filterable: false, desc: 'Tự động mua hộp Module khi giá <= mức giá tối đa.' },
+  { key: 'card_box', title: 'Hộp Thẻ Bài', icon: '🎁', filterable: true, desc: 'Lọc mua hộp thẻ bài theo Bậc (bậc 1 đến bậc 8).' },
+  { key: 'egg_box', title: 'Hộp Trứng Pet', icon: '🎁', filterable: true, desc: 'Lọc mua hộp trứng Pet theo Bậc (bậc 1 đến bậc 8).' },
+  { key: 'module_box', title: 'Hộp Module', icon: '📦', filterable: true, desc: 'Lọc mua hộp Module theo loại (Cao cấp, Hiếm, Sử thi, Sử thi+).' },
   { key: 'diamond', title: 'Kim Cương', icon: '💎', filterable: false, desc: 'Tự động mua Kim Cương khi giá <= mức giá tối đa.' }
 ];
 
+function isMvpName(name) {
+  return name.startsWith('MVP ') ||
+         name.startsWith('Vua') ||
+         name.startsWith('Chúa tể') ||
+         name.startsWith('Tướng quan') ||
+         name.startsWith('Ma Vương') ||
+         name.includes('Rồng') ||
+         name.includes('Long');
+}
+
 function getMonsterLists(acc) {
-  const normSet = new Set(NORMAL_MONSTERS);
-  const mvpSet = new Set(MVP_MONSTERS);
+  const normSet = new Set();
+  const mvpSet = new Set();
+
+  NORMAL_MONSTERS.forEach(m => {
+    if (isMvpName(m)) {
+      mvpSet.add(m);
+    } else {
+      normSet.add(m);
+      mvpSet.add(`MVP ${m}`);
+    }
+  });
 
   if (acc && acc.mon_masters) {
     for (const mid in acc.mon_masters) {
       const mm = acc.mon_masters[mid];
       if (!mm || !mm.n) continue;
       const name = mm.n;
-      if (name.startsWith('Vua') || name.startsWith('Chúa tể') || name.startsWith('Tướng quân') || name.includes('Rồng') || name.includes('Long')) {
-        if (!normSet.has(name)) mvpSet.add(name);
+      if (isMvpName(name)) {
+        mvpSet.add(name);
       } else {
-        if (!mvpSet.has(name)) normSet.add(name);
+        normSet.add(name);
+        mvpSet.add(`MVP ${name}`);
       }
     }
   }
+
+  // Ensure strict mutual exclusivity by removing any MVP names from the normal set
+  mvpSet.forEach(m => {
+    normSet.delete(m);
+  });
 
   return {
     normal: Array.from(normSet),
@@ -4944,6 +5157,9 @@ function renderMarketCategoryAccordion(acc) {
   const selectedEggs = (acc.settings && acc.settings.marketSelectedEggs) || [];
   const selectedTiers = (acc.settings && acc.settings.marketSelectedModuleTiers) || [];
   const selectedCollectibles = (acc.settings && acc.settings.marketSelectedCollectibles) || [];
+  const selectedModuleBoxes = (acc.settings && acc.settings.marketSelectedModuleBoxes) || [];
+  const selectedCardBoxes = (acc.settings && acc.settings.marketSelectedCardBoxes) || [];
+  const selectedEggBoxes = (acc.settings && acc.settings.marketSelectedEggBoxes) || [];
 
   const { normal, mvp } = getMonsterLists(acc);
 
@@ -5082,6 +5298,66 @@ function renderMarketCategoryAccordion(acc) {
                 </div>
               ` : ''}
 
+              ${cat.key === 'module_box' ? `
+                <div style="margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">
+                  <span class="market-label-text" style="color: #fbbf24; font-weight: 700;">📦 Chọn Loại Hộp Module:</span>
+                  <div class="market-checklist-actions">
+                    <a href="#" onclick="toggleSelectAllMarketCategoryItems('${acc.line_uid}', 'module_box', 'all', 'select'); return false;">☑️ Chọn tất cả</a>
+                    <a href="#" class="clear" onclick="toggleSelectAllMarketCategoryItems('${acc.line_uid}', 'module_box', 'all', 'clear'); return false;">❌ Bỏ chọn tất cả</a>
+                  </div>
+                </div>
+                <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; background: rgba(0,0,0,0.3); padding: 8px; border-radius: 8px;">
+                  ${['Cao cấp', 'Hiếm', 'Sử thi', 'Sử thi+'].map(type => {
+                    const safeId = type.replace(/\s+/g, '_').replace(/\+/g, '_plus');
+                    return `
+                      <label class="market-filter-label" style="font-size: 0.75rem; color: #38bdf8;">
+                        <input type="checkbox" class="market-filter-checkbox" id="chk-marketitem-module_box-${safeId}-${acc.line_uid}" ${selectedModuleBoxes.includes(type) ? 'checked' : ''} onchange="toggleMarketItemSelection('${acc.line_uid}', 'module_box', '${type}')"> ${type}
+                      </label>
+                    `;
+                  }).join('')}
+                </div>
+              ` : ''}
+
+              ${cat.key === 'card_box' ? `
+                <div style="margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">
+                  <span class="market-label-text" style="color: #fbbf24; font-weight: 700;">🎁 Chọn Bậc Hộp Thẻ Bài:</span>
+                  <div class="market-checklist-actions">
+                    <a href="#" onclick="toggleSelectAllMarketCategoryItems('${acc.line_uid}', 'card_box', 'all', 'select'); return false;">☑️ Chọn tất cả</a>
+                    <a href="#" class="clear" onclick="toggleSelectAllMarketCategoryItems('${acc.line_uid}', 'card_box', 'all', 'clear'); return false;">❌ Bỏ chọn tất cả</a>
+                  </div>
+                </div>
+                <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; background: rgba(0,0,0,0.3); padding: 8px; border-radius: 8px;">
+                  ${['Bậc 1', 'Bậc 2', 'Bậc 3', 'Bậc 4', 'Bậc 5', 'Bậc 6', 'Bậc 7', 'Bậc 8'].map(tier => {
+                    const safeId = tier.replace(/\s+/g, '_');
+                    return `
+                      <label class="market-filter-label" style="font-size: 0.75rem; color: #38bdf8;">
+                        <input type="checkbox" class="market-filter-checkbox" id="chk-marketitem-card_box-${safeId}-${acc.line_uid}" ${selectedCardBoxes.includes(tier) ? 'checked' : ''} onchange="toggleMarketItemSelection('${acc.line_uid}', 'card_box', '${tier}')"> ${tier}
+                      </label>
+                    `;
+                  }).join('')}
+                </div>
+              ` : ''}
+
+              ${cat.key === 'egg_box' ? `
+                <div style="margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">
+                  <span class="market-label-text" style="color: #fbbf24; font-weight: 700;">🥚 Chọn Bậc Hộp Trứng Pet:</span>
+                  <div class="market-checklist-actions">
+                    <a href="#" onclick="toggleSelectAllMarketCategoryItems('${acc.line_uid}', 'egg_box', 'all', 'select'); return false;">☑️ Chọn tất cả</a>
+                    <a href="#" class="clear" onclick="toggleSelectAllMarketCategoryItems('${acc.line_uid}', 'egg_box', 'all', 'clear'); return false;">❌ Bỏ chọn tất cả</a>
+                  </div>
+                </div>
+                <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; background: rgba(0,0,0,0.3); padding: 8px; border-radius: 8px;">
+                  ${['Bậc 1', 'Bậc 2', 'Bậc 3', 'Bậc 4', 'Bậc 5', 'Bậc 6', 'Bậc 7', 'Bậc 8'].map(tier => {
+                    const safeId = tier.replace(/\s+/g, '_');
+                    return `
+                      <label class="market-filter-label" style="font-size: 0.75rem; color: #38bdf8;">
+                        <input type="checkbox" class="market-filter-checkbox" id="chk-marketitem-egg_box-${safeId}-${acc.line_uid}" ${selectedEggBoxes.includes(tier) ? 'checked' : ''} onchange="toggleMarketItemSelection('${acc.line_uid}', 'egg_box', '${tier}')"> ${tier}
+                      </label>
+                    `;
+                  }).join('')}
+                </div>
+              ` : ''}
+
             </div>
           ` : ''}
         </div>
@@ -5123,6 +5399,21 @@ function renderMarketCategoryAccordion(acc) {
         ALL_COLLECTIBLES.forEach(c => {
           const chkCol = document.getElementById(`chk-marketitem-collectible-${c.replace(/\s+/g, '_')}-${acc.line_uid}`);
           if (chkCol && document.activeElement !== chkCol) chkCol.checked = selectedCollectibles.includes(c);
+        });
+      } else if (cat.key === 'module_box') {
+        ['Cao cấp', 'Hiếm', 'Sử thi', 'Sử thi+'].forEach(type => {
+          const chkBox = document.getElementById(`chk-marketitem-module_box-${type.replace(/\s+/g, '_').replace(/\+/g, '_plus')}-${acc.line_uid}`);
+          if (chkBox && document.activeElement !== chkBox) chkBox.checked = selectedModuleBoxes.includes(type);
+        });
+      } else if (cat.key === 'card_box') {
+        ['Bậc 1', 'Bậc 2', 'Bậc 3', 'Bậc 4', 'Bậc 5', 'Bậc 6', 'Bậc 7', 'Bậc 8'].forEach(tier => {
+          const chkBox = document.getElementById(`chk-marketitem-card_box-${tier.replace(/\s+/g, '_')}-${acc.line_uid}`);
+          if (chkBox && document.activeElement !== chkBox) chkBox.checked = selectedCardBoxes.includes(tier);
+        });
+      } else if (cat.key === 'egg_box') {
+        ['Bậc 1', 'Bậc 2', 'Bậc 3', 'Bậc 4', 'Bậc 5', 'Bậc 6', 'Bậc 7', 'Bậc 8'].forEach(tier => {
+          const chkBox = document.getElementById(`chk-marketitem-egg_box-${tier.replace(/\s+/g, '_')}-${acc.line_uid}`);
+          if (chkBox && document.activeElement !== chkBox) chkBox.checked = selectedEggBoxes.includes(tier);
         });
       }
     });
@@ -5195,7 +5486,7 @@ window.toggleCategoryAccordion = function(uid, categoryKey) {
 };
 
 window.toggleMarketItemSelection = async function(uid, category, itemVal) {
-  const safeId = itemVal.replace(/\s+/g, '_');
+  const safeId = itemVal.replace(/\s+/g, '_').replace(/\+/g, '_plus');
   const chk = document.getElementById(`chk-marketitem-${category}-${safeId}-${uid}`);
   if (!chk) return;
   const isChecked = chk.checked;
@@ -5207,6 +5498,9 @@ window.toggleMarketItemSelection = async function(uid, category, itemVal) {
   if (category === 'egg') fieldKey = 'marketSelectedEggs';
   else if (category === 'module') fieldKey = 'marketSelectedModuleTiers';
   else if (category === 'collectible') fieldKey = 'marketSelectedCollectibles';
+  else if (category === 'module_box') fieldKey = 'marketSelectedModuleBoxes';
+  else if (category === 'card_box') fieldKey = 'marketSelectedCardBoxes';
+  else if (category === 'egg_box') fieldKey = 'marketSelectedEggBoxes';
 
   let currentList = [...(acc.settings[fieldKey] || [])];
   if (isChecked) {
@@ -5235,10 +5529,17 @@ window.toggleSelectAllMarketCategoryItems = async function(uid, category, group,
   if (category === 'egg') fieldKey = 'marketSelectedEggs';
   else if (category === 'module') fieldKey = 'marketSelectedModuleTiers';
   else if (category === 'collectible') fieldKey = 'marketSelectedCollectibles';
+  else if (category === 'module_box') fieldKey = 'marketSelectedModuleBoxes';
+  else if (category === 'card_box') fieldKey = 'marketSelectedCardBoxes';
+  else if (category === 'egg_box') fieldKey = 'marketSelectedEggBoxes';
 
   let targetItems = [];
   if (category === 'module') {
     targetItems = ['T1', 'T2', 'T3', 'T4', 'T5'];
+  } else if (category === 'module_box') {
+    targetItems = ['Cao cấp', 'Hiếm', 'Sử thi', 'Sử thi+'];
+  } else if (category === 'card_box' || category === 'egg_box') {
+    targetItems = ['Bậc 1', 'Bậc 2', 'Bậc 3', 'Bậc 4', 'Bậc 5', 'Bậc 6', 'Bậc 7', 'Bậc 8'];
   } else if (category === 'collectible') {
     targetItems = group === 'normal' ? NORMAL_COLLECTIBLES : group === 'mvp' ? MVP_COLLECTIBLES : ALL_COLLECTIBLES;
   } else {

@@ -428,11 +428,20 @@ try {
       { id: 301, item_name: 'ชิ้นส่วนไททัน', item_type: 'hardware', price_per: 1000 }, // Titan part
       { id: 302, item_name: 'ท่อนไม้มหัศจรรย์', item_type: 'house_parts', price_per: 2000 },
       // Resource / Trash
-      { id: 401, item_name: 'แร่อื่นๆ (Resource)', item_type: 'ore', price_per: 100 }
+      { id: 401, item_name: 'แร่อื่นๆ (Resource)', item_type: 'ore', price_per: 100, qty: 500 },
+      // Boxes
+      { id: 501, item_name: 'กล่องสุ่มการ์ด ระดับ 1', item_type: 'card_box', price_per: 2000, qty: 8 },
+      { id: 502, item_name: 'กล่องสุ่มการ์ด ระดับ 7', item_type: 'card_box', price_per: 8000, qty: 15 },
+      { id: 601, item_name: 'กล่องสุ่มไข่ ระดับ 2', item_type: 'egg_box', price_per: 1500 },
+      { id: 602, item_name: 'กล่องสุ่มไข่ ระดับ 8', item_type: 'egg_box', price_per: 9000 },
+      { id: 701, item_name: 'กล่องสุ่มโมดูล ซับซ้อน', item_type: 'module_box', price_per: 3000 },
+      { id: 702, item_name: 'กล่องสุ่มโมดูล ขั้นสูง', item_type: 'module_box', price_per: 5000 },
+      { id: 703, item_name: 'กล่องสุ่มโมดูล ขั้นสูงพิเศษ', item_type: 'module_box', price_per: 9000 }
     ]
   };
 
-  let lastBoughtListingId = null;
+  let lastBoughtListingIds = [];
+  let lastBoughtQuantities = [];
   let simulateBuyError = false;
 
   instance.sendRequest = async function(url, params) {
@@ -444,7 +453,8 @@ try {
         if (simulateBuyError) {
           return { ok: false, error: 'Sản phẩm đã bị người khác mua mất' };
         }
-        lastBoughtListingId = params.listing_id;
+        lastBoughtListingIds.push(params.listing_id);
+        lastBoughtQuantities.push({ id: params.listing_id, qty: params.qty });
         return { ok: true, player: instance.player };
       }
     }
@@ -454,58 +464,171 @@ try {
   // 7a. Test Card selective filtering
   instance.settings.marketCategories.card = true;
   instance.settings.marketSelectedCards = ['Jellyfish', 'Wolf'];
-  lastBoughtListingId = null;
+  lastBoughtListingIds = [];
   instance.lastMarketScanAt = null;
   await instance.scanAndBuyMarket();
-  assert.strictEqual(lastBoughtListingId, 101, 'Should buy cheapest card matching Jellyfish (id 101)');
+  assert.deepStrictEqual(lastBoughtListingIds, [101, 102], 'Should buy all matching cards (id 101, 102)');
   instance.settings.marketCategories.card = false;
 
   // 7b. Test Egg selective filtering with newly translated monster name
   instance.settings.marketCategories.egg = true;
   instance.settings.marketSelectedEggs = ['Gà con']; // Maps to 'ไข่ ไก่เจี๊ยบ' -> 'Trứng Gà con'
-  lastBoughtListingId = null;
+  lastBoughtListingIds = [];
   instance.lastMarketScanAt = null;
   await instance.scanAndBuyMarket();
-  assert.strictEqual(lastBoughtListingId, 105, 'Should buy egg matching Gà con (id 105)');
+  assert.deepStrictEqual(lastBoughtListingIds, [105], 'Should buy egg matching Gà con (id 105)');
   instance.settings.marketCategories.egg = false;
 
   // 7c. Test Module Tier filtering (T3, T4 within T1-T5 range)
   instance.settings.marketCategories.module = true;
   instance.settings.marketSelectedModuleTiers = ['T3', 'T4'];
-  lastBoughtListingId = null;
+  lastBoughtListingIds = [];
   instance.lastMarketScanAt = null;
   await instance.scanAndBuyMarket();
-  assert.strictEqual(lastBoughtListingId, 202, 'Should buy Module T3 (id 202)');
+  assert.deepStrictEqual(lastBoughtListingIds, [202, 203], 'Should buy Module T3 and T4 (id 202, 203)');
   instance.settings.marketCategories.module = false;
 
   // 7d. Test Resource/Trash Category OFF (Default behavior)
   instance.settings.marketCategories.resource = false; // Resource switch OFF
-  lastBoughtListingId = null;
+  lastBoughtListingIds = [];
   instance.lastMarketScanAt = null;
   await instance.scanAndBuyMarket();
-  assert.strictEqual(lastBoughtListingId, null, 'Should NOT buy resource/trash when resource category is OFF');
+  assert.deepStrictEqual(lastBoughtListingIds, [], 'Should NOT buy resource/trash when resource category is OFF');
 
   // 7f. Test Category ON with empty sub-filters (Should buy ANY card <= max price)
   instance.settings.marketCategories.card = true;
   instance.settings.marketSelectedCards = []; // Empty sub-filters
-  lastBoughtListingId = null;
+  lastBoughtListingIds = [];
   instance.lastMarketScanAt = null;
   await instance.scanAndBuyMarket();
-  assert.strictEqual(lastBoughtListingId, 101, 'Should buy cheapest card (id 101) when card category is ON even if sub-filters are empty');
+  assert.deepStrictEqual(lastBoughtListingIds, [101, 102], 'Should buy all cards <= max price (id 101, 102) when card category is ON even if sub-filters are empty');
   instance.settings.marketCategories.card = false;
+
+  // 7g. Test Box selective filtering
+  // Module box (should match Cao cấp, Sử thi, Sử thi+ selectively)
+  instance.settings.marketCategories.module_box = true;
+  instance.settings.marketSelectedModuleBoxes = ['Cao cấp', 'Sử thi+'];
+  lastBoughtListingIds = [];
+  instance.lastMarketScanAt = null;
+  await instance.scanAndBuyMarket();
+  assert.deepStrictEqual(lastBoughtListingIds, [701, 703], 'Should buy Cao cấp (701) and Sử thi+ (703), skipping Sử thi (702)');
+  instance.settings.marketCategories.module_box = false;
+  instance.settings.marketSelectedModuleBoxes = [];
+
+  // Card box (should match Bậc 7 selectively)
+  instance.settings.marketCategories.card_box = true;
+  instance.settings.marketSelectedCardBoxes = ['Bậc 7'];
+  lastBoughtListingIds = [];
+  instance.lastMarketScanAt = null;
+  await instance.scanAndBuyMarket();
+  assert.deepStrictEqual(lastBoughtListingIds, [502], 'Should only buy card box Bậc 7 (502)');
+  instance.settings.marketCategories.card_box = false;
+  instance.settings.marketSelectedCardBoxes = [];
+
+  // Egg box (should match Bậc 2 selectively)
+  instance.settings.marketCategories.egg_box = true;
+  instance.settings.marketSelectedEggBoxes = ['Bậc 2'];
+  lastBoughtListingIds = [];
+  instance.lastMarketScanAt = null;
+  await instance.scanAndBuyMarket();
+  assert.deepStrictEqual(lastBoughtListingIds, [601], 'Should only buy egg box Bậc 2 (601)');
+  instance.settings.marketCategories.egg_box = false;
+  instance.settings.marketSelectedEggBoxes = [];
+
+  // 7h. Test Multi-Qty Buying and Capping
+  console.log('Testing Multi-Qty Buying and Capping...');
+  instance.settings.marketCategories.resource = true;
+  instance.settings.marketCategoryMaxQtys = { resource: 150, card_box: 10 };
+  instance.player.gold = 30000; // Enough gold for 150 ore (150 * 100 = 15000 gold)
+  
+  lastBoughtListingIds = [];
+  lastBoughtQuantities = [];
+  instance.lastMarketScanAt = null;
+  await instance.scanAndBuyMarket();
+  
+  // Since category resource is ON, and id 401 has qty 500, we should buy capped by limit resource: 150!
+  const oreBought = lastBoughtQuantities.find(x => x.id === 401);
+  assert.ok(oreBought, 'Should buy resource id 401');
+  assert.strictEqual(oreBought.qty, 150, 'Should buy exactly 150 ore (capped by limit 150)');
+
+  // Let's test buying with gold limits capping:
+  instance.player.gold = 500; // Only enough gold for 5 ore (5 * 100 = 500 gold)
+  lastBoughtListingIds = [];
+  lastBoughtQuantities = [];
+  instance.lastMarketScanAt = null;
+  await instance.scanAndBuyMarket();
+  
+  const oreBoughtCapped = lastBoughtQuantities.find(x => x.id === 401);
+  assert.ok(oreBoughtCapped, 'Should buy resource id 401');
+  assert.strictEqual(oreBoughtCapped.qty, 5, 'Should buy exactly 5 ore (capped by gold limit)');
+
+  // Test buying card boxes with limit 10, when card_box has qty 8, it should buy all 8!
+  instance.settings.marketCategories.resource = false;
+  instance.settings.marketCategories.card_box = true;
+  instance.settings.marketSelectedCardBoxes = ['Bậc 1']; // id 501 has tier 1, qty 8
+  instance.player.gold = 50000; // Plenty of gold
+  
+  lastBoughtListingIds = [];
+  lastBoughtQuantities = [];
+  instance.lastMarketScanAt = null;
+  await instance.scanAndBuyMarket();
+  
+  const boxBought = lastBoughtQuantities.find(x => x.id === 501);
+  assert.ok(boxBought, 'Should buy card box id 501');
+  assert.strictEqual(boxBought.qty, 8, 'Should buy all 8 box items (market has 8, limit is 10)');
+
+  // Clean up
+  instance.settings.marketCategories.card_box = false;
+  instance.settings.marketSelectedCardBoxes = [];
 
   // 7e. Test Buy Error Handling & History Log Recording
   instance.settings.marketCategories.collectible = true;
   simulateBuyError = true;
-  lastBoughtListingId = null;
+  lastBoughtListingIds = [];
   instance.lastMarketScanAt = null;
   await instance.scanAndBuyMarket();
   assert.strictEqual(simulateBuyError, true);
   assert.strictEqual(instance.marketBuyHistory.length > 0, true, 'Should record failed buy in marketBuyHistory');
   assert.strictEqual(instance.marketBuyHistory[0].status, 'failed', 'History entry status must be failed');
 
+  // 8. Test Urgent Active Potion Healing
+  console.log('Testing Urgent Active Potion Healing...');
+  instance.isMvpCycling = false;
+  instance.mvpCycleOriginalMap = null;
+  instance.settings.activeHealEnabled = true;
+  instance.settings.activeHealThreshold = 60;
+  instance.player = {
+    map: 3,
+    hp: 40,
+    hp_max: 100,
+    is_dead: false
+  };
+
+  let potionRequestSent = false;
+  const originalSendRequest = instance.sendRequest;
+  instance.sendRequest = async function(url, params) {
+    if (url.includes('xhrpg_upgrade.php') && params.action === 'use_potion_manual') {
+      potionRequestSent = true;
+      return { ok: true, player: { map: 3, hp: 100, hp_max: 100, is_dead: false } };
+    }
+    if (url.includes('xhrpg_game.php')) {
+      return { ok: true, player: { map: 3, hp: 40, hp_max: 100, is_dead: false } };
+    }
+    return { ok: true };
+  };
+
+  await instance.pollGame();
+  assert.strictEqual(potionRequestSent, true, 'Should send use_potion_manual request when HP < threshold and activeHealEnabled is true');
+  assert.strictEqual(instance.player.hp, 100, 'Player HP should be updated to 100 after successful heal');
+
+  // Clean up
+  instance.sendRequest = originalSendRequest;
+  instance.settings.activeHealEnabled = false;
+
   console.log('✅ Revamped Auto Market Buy Tests Passed successfully!');
+  console.log('✅ Urgent Active Potion Healing Tests Passed successfully!');
   console.log('✅ All Unit Tests Passed successfully!');
+  process.exit(0);
 } catch (error) {
   console.error('❌ Unit Tests Failed:', error);
   process.exit(1);
