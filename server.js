@@ -1219,6 +1219,18 @@ class BotInstance {
     this.lastHarvestFailedAt = 0;
     this.lastHomeUpgradeFailedAt = 0;
     this.marketBuyHistory = account.marketBuyHistory || [];
+    this.inEventMode = false;
+    this.currentEventKind = null;
+    this.eventOriginalMap = null;
+    this.eventOriginalAutoMap = null;
+    this.eventOriginalAutoZone = null;
+    this.eventOriginalLockZoneCenter = null;
+    this.eventOriginalTargetZone = null;
+    this.playerDefCache = {};
+    this.lastInv = null;
+    this.lastGw = null;
+    this.lastCw = null;
+    this.others = [];
     this.addLog('SYSTEM', `Khởi tạo bot cho tài khoản: ${this.name}`);
   }
 
@@ -1285,6 +1297,7 @@ class BotInstance {
       teamRole: 'none',
       autoMarketBuy: false,
       marketMaxPrice: 10000,
+      marketExactPrice: false,
       marketScanInterval: 10,
       marketCategories: {
         module: false,
@@ -1300,7 +1313,11 @@ class BotInstance {
       marketSelectedCards: [],
       marketSelectedEggs: [],
       marketSelectedModuleTiers: [],
-      marketCategoryMaxPrices: {}
+      marketCategoryMaxPrices: {},
+      autoEventJoin: false,
+      eventPotionThreshold: 0,
+      eventTargetMinDef: false,
+      eventAttackRange: 300
     };
   }
 
@@ -1499,6 +1516,151 @@ class BotInstance {
     const targetMap = mapIds[this.settings.currentMvpMapIndex];
     this.addLog('SYSTEM', `🗺️ [Auto MVP] Di chuyển sang Map Boss tiếp theo: Map ${targetMap}`);
     await this.warpToMap(targetMap);
+  }
+
+  enterEventMode(kind, mapId) {
+    if (this.inEventMode) return;
+    this.inEventMode = true;
+    this.currentEventKind = kind;
+    
+    // Save original states
+    this.eventOriginalMap = this.player ? Number(this.player.map) : Number(this.settings.targetMap || 1);
+    this.eventOriginalAutoMap = this.settings.autoMap;
+    this.eventOriginalAutoZone = this.settings.autoZone;
+    this.eventOriginalLockZoneCenter = this.settings.lock_zone_center;
+    this.eventOriginalTargetZone = this.settings.targetZone;
+    
+    this.addLog('SYSTEM', `🚀 Kích hoạt Chế độ Event [${kind.toUpperCase()}]. Đã lưu vị trí bản đồ farm gốc (Map ${this.eventOriginalMap}).`);
+    
+    // Override settings to keep bot in event map
+    this.settings.targetMap = mapId;
+    this.settings.autoMap = true;
+    this.settings.autoZone = false;
+    this.settings.lock_zone_center = false;
+    this.settings.targetZone = 0;
+    
+    const currentAccounts = loadAccounts();
+    const index = currentAccounts.findIndex(acc => acc.line_uid === this.line_uid);
+    if (index !== -1) {
+      currentAccounts[index].settings = this.settings;
+      saveAccounts(currentAccounts);
+    }
+  }
+
+  exitEventMode() {
+    if (!this.inEventMode) return;
+    this.inEventMode = false;
+    
+    const returnMap = this.eventOriginalMap || 1;
+    this.addLog('SYSTEM', `⏹️ Event kết thúc -> Thoát Chế độ Event, tự động quay về bản đồ farm gốc (Map ${returnMap}).`);
+    
+    // Restore settings
+    this.settings.targetMap = returnMap;
+    this.settings.autoMap = this.eventOriginalAutoMap !== undefined ? this.eventOriginalAutoMap : true;
+    this.settings.autoZone = this.eventOriginalAutoZone !== undefined ? this.eventOriginalAutoZone : false;
+    this.settings.lock_zone_center = this.eventOriginalLockZoneCenter !== undefined ? this.eventOriginalLockZoneCenter : false;
+    this.settings.targetZone = this.eventOriginalTargetZone !== undefined ? this.eventOriginalTargetZone : 0;
+    
+    this.eventOriginalMap = null;
+    this.eventOriginalAutoMap = null;
+    this.eventOriginalAutoZone = null;
+    this.eventOriginalLockZoneCenter = null;
+    this.eventOriginalTargetZone = null;
+    
+    const currentAccounts = loadAccounts();
+    const index = currentAccounts.findIndex(acc => acc.line_uid === this.line_uid);
+    if (index !== -1) {
+      currentAccounts[index].settings = this.settings;
+      saveAccounts(currentAccounts);
+    }
+  }
+
+  async joinGuildWar() {
+    try {
+      const res = await this.sendRequest('https://ragnalok.online/human/xhrpg_guild.php', {
+        line_uid: this.line_uid,
+        session_token: this.session_token,
+        action: 'gwar_join',
+        lang: 'vi'
+      });
+      if (res && res.ok) {
+        this.updatePlayerState(res.player || res);
+        this.spots = null;
+        this.bosses = null;
+        this.addLog('SUCCESS', `⚔️ [Guild War] Vào chiến trường thành công`);
+        return true;
+      } else {
+        this.addLog('WARNING', `⚔️ [Guild War] Không thể vào chiến trường: ${(res && res.error) || 'Lỗi không xác định'}`);
+        return false;
+      }
+    } catch (e) {
+      this.addLog('ERROR', `Lỗi vào Guild War: ${e.message}`);
+      return false;
+    }
+  }
+
+  async joinCountryWar() {
+    try {
+      const res = await this.sendRequest('https://ragnalok.online/human/xhrpg_cwar.php', {
+        line_uid: this.line_uid,
+        session_token: this.session_token,
+        action: 'cwar_join',
+        lang: 'vi'
+      });
+      if (res && res.ok) {
+        this.updatePlayerState(res.player || res);
+        this.spots = null;
+        this.bosses = null;
+        this.addLog('SUCCESS', `⚔️ [National War] Vào chiến trường thành công`);
+        return true;
+      } else {
+        this.addLog('WARNING', `⚔️ [National War] Không thể vào chiến trường: ${(res && res.error) || 'Lỗi không xác định'}`);
+        return false;
+      }
+    } catch (e) {
+      this.addLog('ERROR', `Lỗi vào National War: ${e.message}`);
+      return false;
+    }
+  }
+
+  getPlayerDef(name) {
+    if (!this.playerDefCache) this.playerDefCache = {};
+    const cached = this.playerDefCache[name];
+    const now = Date.now();
+    if (cached && (now - cached.ts < 2 * 3600 * 1000)) {
+      return cached.def;
+    }
+    return 999999; // Default high defense for sorting
+  }
+
+  async fetchPlayerDefBackground(name, uid) {
+    if (!this.playerDefCache) this.playerDefCache = {};
+    const cached = this.playerDefCache[name];
+    const now = Date.now();
+    
+    // Avoid double fetching
+    if (cached && (cached.loading || (now - cached.ts < 30000))) {
+      return;
+    }
+    
+    this.playerDefCache[name] = { def: 999999, ts: now, loading: true };
+    
+    try {
+      const res = await this.sendRequest(`https://ragnalok.online/human/xhrpg_leaderboard.php?show=${uid}`, {});
+      if (res && res.ok && res.def !== undefined) {
+        this.playerDefCache[name] = {
+          def: Number(res.def),
+          lv: Number(res.lv || 1),
+          ts: Date.now(),
+          loading: false
+        };
+      } else {
+        this.playerDefCache[name] = { def: 999999, ts: Date.now(), loading: false };
+      }
+    } catch (e) {
+      console.error(`[Leaderboard Fetch Error] Failed to fetch def for ${name}:`, e.message);
+      this.playerDefCache[name] = { def: 999999, ts: Date.now(), loading: false };
+    }
   }
 
   start() {
@@ -2013,6 +2175,106 @@ class BotInstance {
     this.targetedMvp = false;
     let lockPos = this.settings.lock_pos ? 1 : 0;
 
+    // 0. Auto Event PK Targeting (Priority 0 when in PK Event Mode)
+    let targetedPk = false;
+    if (this.inEventMode && (this.currentEventKind === 'gw' || this.currentEventKind === 'cw')) {
+      const alivePlayers = (this.others) ? this.others.filter(p => !p.is_dead) : [];
+      if (alivePlayers.length > 0) {
+        const px = this.player ? this.player.x : 0;
+        const py = this.player ? this.player.y : 0;
+        const attackRange = this.settings.eventAttackRange || 300;
+        
+        let scanPlayers = alivePlayers.map(p => {
+          const dx = px - p.x;
+          const dy = py - p.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          return { ...p, dist };
+        }).filter(p => p.dist <= attackRange);
+        
+        if (scanPlayers.length > 0) {
+          // Sort by defense if enabled
+          if (this.settings.eventTargetMinDef) {
+            scanPlayers.sort((a, b) => {
+              const defA = this.getPlayerDef(a.name);
+              const defB = this.getPlayerDef(b.name);
+              return defA - defB;
+            });
+          } else {
+            // Otherwise sort by distance
+            scanPlayers.sort((a, b) => a.dist - b.dist);
+          }
+          
+          const activePlayer = scanPlayers[0];
+          targetedPk = true;
+          this.targetedMvp = true; // Set this to bypass normal farming/MVP logic
+          
+          const tx = activePlayer.x;
+          const ty = activePlayer.y;
+          const dx = px - tx;
+          const dy = py - ty;
+          const dist = activePlayer.dist;
+          
+          const MIN_DIST = 15;
+          const MAX_DIST = 20;
+          const TARGET_KITE_DIST = 17.5;
+          
+          if (dist > MAX_DIST || dist < MIN_DIST) {
+            const ux = dist > 0 ? dx / dist : 1;
+            const uy = dist > 0 ? dy / dist : 0;
+            exploreCx = Math.round((tx + ux * TARGET_KITE_DIST) * 100) / 100;
+            exploreCy = Math.round((ty + uy * TARGET_KITE_DIST) * 100) / 100;
+            traveling = 1;
+            lockPos = 0;
+            exploreRadius = 300;
+          } else {
+            exploreCx = tx;
+            exploreCy = ty;
+            traveling = 0;
+            lockPos = 1;
+            exploreRadius = 100;
+          }
+          
+          // Trigger fetch in background
+          if (activePlayer.uid || activePlayer.line_uid || activePlayer.id) {
+            const targetUid = activePlayer.uid || activePlayer.line_uid || activePlayer.id;
+            this.fetchPlayerDefBackground(activePlayer.name, targetUid);
+          }
+          
+          if (this.pollCount % 5 === 0) {
+            const cacheData = this.playerDefCache[activePlayer.name];
+            const defStr = cacheData ? `Giáp: ${cacheData.def}` : 'Giáp: Quét...';
+            this.addLog('SYSTEM', `⚔️ [Event PK] Khóa mục tiêu: 🧑 ${activePlayer.name} (${defStr} - Khoảng cách: ${Math.round(dist)}m)`);
+          }
+        }
+      }
+    }
+
+    // 0. Auto World Tree Boss Event (Priority 0 when in Invasion Event Mode)
+    if (this.inEventMode && this.currentEventKind === 'inv') {
+      const px = this.player ? this.player.x : 1125;
+      const py = this.player ? this.player.y : 1125;
+      const dx = px - 1125;
+      const dy = py - 1125;
+      const distToCenter = Math.sqrt(dx * dx + dy * dy);
+      
+      exploreCx = 1125;
+      exploreCy = 1125;
+      exploreRadius = 50; // Giới hạn phạm vi hoạt động ở tâm bản đồ
+      this.targetedMvp = true; // Bỏ qua cơ chế săn MVP khác hoặc farm thường
+      
+      if (distToCenter > 15) {
+        traveling = 1;
+        lockPos = 0;
+      } else {
+        traveling = 0;
+        lockPos = 1;
+      }
+      
+      if (this.pollCount % 10 === 0) {
+        this.addLog('SYSTEM', `🌳 [Event Cây Thế Giới] Đang đứng ở tâm bản đồ (Khóa vị trí để đánh Boss)`);
+      }
+    }
+
     // 1. Auto MVP Hunting (Priority 1)
     const isCorrectMvpMap = !this.isMvpCycling || (this.player && Number(this.player.map) === Number(this.getCurrentMvpCycleMap()));
     const isHuntingEnabled = this.settings.bossHuntMode !== 'off';
@@ -2312,6 +2574,46 @@ class BotInstance {
       this.bosses = [];
     }
 
+    if (d.others) {
+      this.others = d.others;
+    } else {
+      this.others = [];
+    }
+
+    // Save event details
+    if (d.inv !== undefined) this.lastInv = d.inv;
+    if (d.gw !== undefined) this.lastGw = d.gw;
+    if (d.cw !== undefined) this.lastCw = d.cw;
+
+    const isInvActive = this.lastInv && (this.lastInv.st === 'pre' || this.lastInv.st === 'active');
+    const isGwActive = this.lastGw && (this.lastGw.st === 'open' || this.lastGw.st === 'fight');
+    const isCwActive = this.lastCw && (this.lastCw.st === 'open' || this.lastCw.st === 'fight');
+
+    // Auto-join event
+    if (this.settings.autoEventJoin && !this.inEventMode) {
+      if (isInvActive) {
+        this.enterEventMode('inv', 2);
+        await this.warpToMap(2);
+      } else if (isGwActive) {
+        this.enterEventMode('gw', 4);
+        await this.joinGuildWar();
+      } else if (isCwActive) {
+        this.enterEventMode('cw', 4);
+        await this.joinCountryWar();
+      }
+    }
+
+    // Auto-resume after event ends
+    if (this.inEventMode) {
+      if (this.currentEventKind === 'inv' && !isInvActive) {
+        this.exitEventMode();
+      } else if (this.currentEventKind === 'gw' && !isGwActive) {
+        this.exitEventMode();
+      } else if (this.currentEventKind === 'cw' && !isCwActive) {
+        this.exitEventMode();
+      }
+    }
+
     if (this.bosses) {
       const nowTs = Date.now();
       const aliveBosses = this.bosses.filter(b => (b.hp || 0) > 0);
@@ -2353,6 +2655,26 @@ class BotInstance {
     this.updatePlayerState(d.player);
     this.lastUpdate = new Date().toISOString();
     this.error = null;
+
+    // Event Potion Healing
+    if (this.inEventMode && this.settings.eventPotionThreshold > 0 && this.player && !this.player.is_dead) {
+      const hpPct = Math.round((this.player.hp / this.player.hp_max) * 100);
+      if (hpPct < this.settings.eventPotionThreshold) {
+        this.addLog('HEAL', `💊 [Event Auto Heal] HP dưới ${this.settings.eventPotionThreshold}% -> Bơm máu khẩn cấp!`);
+        try {
+          const res = await this.sendRequest('https://ragnalok.online/human/xhrpg_upgrade.php', {
+            line_uid: this.line_uid,
+            session_token: this.session_token,
+            action: 'use_potion_manual'
+          });
+          if (res && res.ok && res.player) {
+            this.updatePlayerState(res.player);
+          }
+        } catch (e) {
+          console.error(`[Event Auto Heal Error] Failed to use potion:`, e.message);
+        }
+      }
+    }
 
     // Check if we just completed a cycle and need to restore autoMap
     const wasMvpReturning = (!this.isMvpCycling && this.mvpCycleOriginalMap !== null);
@@ -3039,16 +3361,35 @@ class BotInstance {
     const now = Date.now();
     if (this.lastMarketScanAt && (now - this.lastMarketScanAt < intervalSec * 1000)) return;
     
-    // 3. Kiểm tra phân quyền của user sở hữu
+    // 3. Kiểm tra phân quyền và giới hạn bot chạy chợ của user sở hữu
     const users = loadUsers();
     const owner = users.find(u => u.id === this.userId);
     if (!owner) return;
-    const hasPermission = owner.role === 'admin' || owner.allowMarket === true;
-    if (!hasPermission) {
-      if (this.pollCount % 60 === 0) {
-        this.addLog('WARNING', '🔒 Tính năng Auto Market Buy bị khóa do chưa được Admin cấp quyền.');
+
+    if (owner.role !== 'admin') {
+      const limit = owner.marketBotLimit !== undefined ? owner.marketBotLimit : (owner.allowMarket ? owner.maxAccounts : 0);
+      if (limit <= 0) {
+        if (this.pollCount % 60 === 0) {
+          this.addLog('WARNING', '🔒 Tính năng Auto Market Buy bị khóa do chưa được Admin cấp quyền.');
+        }
+        return;
       }
-      return;
+      
+      const userBots = Object.values(botInstances).filter(bot => 
+        bot.userId === this.userId && 
+        bot.status === 'running' && 
+        bot.settings.autoMarketBuy === true
+      );
+      
+      userBots.sort((a, b) => a.line_uid.localeCompare(b.line_uid));
+      
+      const myIndex = userBots.findIndex(bot => bot.line_uid === this.line_uid);
+      if (myIndex >= limit) {
+        if (this.pollCount % 30 === 0) {
+          this.addLog('WARNING', `🔒 Số lượng bot chạy Auto Market vượt quá hạn mức cho phép của tài khoản (Hạn mức: ${limit} bot). Bot này tạm khóa chức năng chợ.`);
+        }
+        return;
+      }
     }
 
     this.lastMarketScanAt = now;
@@ -3088,7 +3429,12 @@ class BotInstance {
           : globalMaxPrice;
         const effectiveMaxPrice = catMaxPrice > 0 ? catMaxPrice : globalMaxPrice;
 
-        if (price > effectiveMaxPrice) continue;
+        const exactPriceMatch = this.settings.marketExactPrice === true;
+        if (exactPriceMatch) {
+          if (price !== effectiveMaxPrice) continue;
+        } else {
+          if (price > effectiveMaxPrice) continue;
+        }
         if (price > currentGold) continue;
 
         const translatedName = translateThaiText(item.item_name || 'Vật phẩm');
@@ -3600,6 +3946,38 @@ app.put('/api/admin/users/:userId/allow-market', requireAdmin, (req, res) => {
       username: users[index].username, 
       role: users[index].role, 
       allowMarket: users[index].allowMarket 
+    } 
+  });
+});
+
+// Update market bot limit for a specific user (Admin only)
+app.put('/api/admin/users/:userId/market-limit', requireAdmin, (req, res) => {
+  const { userId } = req.params;
+  const { marketBotLimit } = req.body;
+
+  const users = loadUsers();
+  const index = users.findIndex(u => u.id === userId);
+  if (index === -1) {
+    return res.status(404).json({ error: 'Không tìm thấy người dùng' });
+  }
+
+  const parsed = parseInt(marketBotLimit);
+  if (isNaN(parsed) || parsed < 0) {
+    return res.status(400).json({ error: 'Giới hạn bot chạy chợ không hợp lệ' });
+  }
+
+  users[index].marketBotLimit = parsed;
+  users[index].allowMarket = parsed > 0;
+  saveUsers(users);
+
+  res.json({ 
+    success: true, 
+    user: { 
+      id: users[index].id, 
+      username: users[index].username, 
+      role: users[index].role, 
+      marketBotLimit: users[index].marketBotLimit,
+      allowMarket: users[index].allowMarket
     } 
   });
 });
@@ -4214,12 +4592,18 @@ app.get('/api/accounts', requireAuth, (req, res) => {
           ownerRole: ownerUser ? ownerUser.role : 'user',
           ownerExpiresAt: ownerUser ? ownerUser.expiresAt : null,
           ownerMaxAccounts: ownerUser ? ownerUser.maxAccounts : 1,
+          ownerMarketLimit: ownerUser ? (ownerUser.marketBotLimit !== undefined ? ownerUser.marketBotLimit : (ownerUser.allowMarket ? ownerUser.maxAccounts : 0)) : 0,
           status: bot.status,
           clientActive: !!(bot.lastClientActive && (Date.now() - bot.lastClientActive < 12000)),
           error: bot.error,
           lastUpdate: bot.lastUpdate,
           settings: bot.settings,
           proxyId: bot.proxyId,
+          lastInv: bot.lastInv || null,
+          lastGw: bot.lastGw || null,
+          lastCw: bot.lastCw || null,
+          inEventMode: bot.inEventMode || false,
+          currentEventKind: bot.currentEventKind || null,
           proxyInfo: req.user.role === 'admin' ? proxyPool.getBotProxyInfo(bot.line_uid) : null,
           combatRates: bot.getCombatRates ? bot.getCombatRates() : { killsPerMin: 0, goldPerMin: 0, expPerMin: 0 },
           spots: bot.spots || null,
@@ -5093,7 +5477,25 @@ app.post('/api/accounts/:line_uid/action', requireAuth, async (req, res) => {
     }
 
     let url = 'https://ragnalok.online/human/xhrpg_upgrade.php';
-    if (action === 'warp') {
+    if (action === 'gwar_join') {
+      url = 'https://ragnalok.online/human/xhrpg_guild.php';
+      payload = {
+        line_uid: bot.line_uid,
+        session_token: bot.session_token,
+        action: 'gwar_join',
+        lang: 'vi'
+      };
+      bot.enterEventMode('gw', 4);
+    } else if (action === 'cwar_join') {
+      url = 'https://ragnalok.online/human/xhrpg_cwar.php';
+      payload = {
+        line_uid: bot.line_uid,
+        session_token: bot.session_token,
+        action: 'cwar_join',
+        lang: 'vi'
+      };
+      bot.enterEventMode('cw', 4);
+    } else if (action === 'warp') {
       url = 'https://ragnalok.online/human/xhrpg_warp.php';
       delete payload.action;
       if (param !== undefined) {
@@ -5105,6 +5507,13 @@ app.post('/api/accounts/:line_uid/action', requireAuth, async (req, res) => {
 
       if (payload.target_map !== undefined) {
         const targetMapNum = Number(payload.target_map);
+        
+        // Trực tiếp kích hoạt Event Mode nếu người dùng nhấn vào thông báo
+        const isInvActive = bot.lastInv && (bot.lastInv.st === 'pre' || bot.lastInv.st === 'active');
+        if (targetMapNum === 2 && isInvActive) {
+          bot.enterEventMode('inv', 2);
+        }
+
         const mapDef = getMapDefs().find(m => m.id === targetMapNum);
         if (mapDef && bot.player && (bot.player.lv || 1) < mapDef.req) {
           return res.status(400).json({ error: `Cấp độ không đủ! Bản đồ ${mapDef.name} yêu cầu Lv.${mapDef.req}+.` });

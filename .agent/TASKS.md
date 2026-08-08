@@ -756,3 +756,35 @@
   - [x] Bảo toàn cấu hình farm zone (`autoZone`, `lock_zone_center`, `targetZone`) khi di chuyển quay trở lại bản đồ farm gốc sau khi hoàn thành chu kỳ săn Boss thông qua cờ `wasMvpReturning`.
   - [x] Test: `node test.js` -> PASS 100%.
 - Status: done
+
+### [x] T52 - Big Update Tab Event (Auto Join, Event HP Healing & PK Targeting)
+- Description: Bổ sung tab Event mới vào giao diện Dashboard và Server, hỗ trợ tự động tham gia 3 sự kiện giờ vàng (Invasion, Guild War, Country War), bơm máu liên tục dưới ngưỡng chỉ định, quét và khóa mục tiêu PK ưu tiên giáp thấp nhất, và khôi phục hoạt động auto sau sự kiện.
+- Files related: `server.js`, `public/app.js`
+- Acceptance criteria:
+  - [x] Backend: Thêm các cấu hình mặc định (`autoEventJoin: false`, `eventPotionThreshold: 0`, `eventTargetMinDef: false`, `eventAttackRange: 300`) vào `getDefaultSettings()`.
+  - [x] Backend: Khởi tạo các biến lưu trữ trạng thái Event (`inEventMode`, `currentEventKind`, `eventOriginalMap`, v.v.) và bộ nhớ cache giáp người chơi `playerDefCache` trong constructor của `BotInstance`.
+  - [x] Backend: Bổ dung logic tự động join event (`enterEventMode`, warp/join chiến trường) và tự động khôi phục bản đồ cũ (`exitEventMode`) trong `pollGame()`.
+  - [x] Backend: Implement cơ chế quét người chơi `others`, lấy chỉ số phòng ngự ngầm từ leaderboard và lưu cache, sắp xếp và khóa mục tiêu PK ưu tiên giáp thấp nhất trong `pollGame()`.
+  - [x] Backend: Thêm cơ chế tự động bơm máu thủ công (`use_potion_manual`) khi HP dưới ngưỡng sự kiện chỉ định.
+  - [x] Backend: Khóa vị trí đứng tại tâm bản đồ (1125, 1125) khi diễn ra sự kiện Cây thế giới để tập trung tiêu diệt Boss theo yêu cầu.
+  - [x] Backend: Mở rộng API endpoint hành động bot cho `gwar_join` và `cwar_join`, và API account trả thêm trạng thái event.
+  - [x] Frontend: Thêm tab `🏆 Event` và Pane cấu hình (`chk-autoeventjoin`, `sel-event-potion-threshold`, `chk-event-target-mindef`, `sel-event-attack-range`) vào card điều khiển của bot.
+  - [x] Frontend: Hiển thị Banner sự kiện trực quan nổi bật trên Dashboard kèm nút "Tham Gia Event" chuyển hướng nhanh.
+  - [x] Test: Chạy unit test `npm test` thành công không có lỗi.
+- Status: done
+
+### [x] T53 - Phân Quyền & Giới Hạn Bot Chạy Chợ (Auto Market Limit)
+- Description: Cung cấp cơ chế giới hạn số lượng bot được phép sử dụng chức năng Chợ (Auto Market Buy) đồng thời cho mỗi tài khoản, cấu hình trực tiếp từ User Accordion trên Dashboard và bảng quản lý người dùng.
+- Files related: `server.js`, `public/index.html`, `public/app.js`
+- Acceptance criteria:
+  - [x] Backend: Thêm API route `PUT /api/admin/users/:userId/market-limit` để lưu hạn mức `marketBotLimit` vào `users.json`.
+  - [x] Backend: Trong `scanAndBuyMarket()`, kiểm tra tổng số bot đang chạy của user sở hữu có bật `autoMarketBuy`. Nếu vượt quá hạn mức `marketBotLimit` của tài khoản, bot chạy sau (sắp xếp theo lexicographical order của `line_uid`) sẽ tạm khóa tính năng chợ và ghi log cảnh báo.
+  - [x] Backend: Route `GET /api/accounts` trả thêm `ownerMarketLimit` làm thông số live.
+  - [x] Frontend: Cập nhật tiêu đề bảng quản lý user từ "Cho Phép Chợ" thành "Giới Hạn Chợ" trong `index.html`.
+  - [x] Frontend: Render ô nhập số giới hạn chợ trực tiếp trên Accordion Header và bảng quản lý user, đồng bộ hóa thay đổi thời gian thực qua hàm `changeUserMarketLimit`.
+  - [x] Frontend & Backend: Định dạng dấu chấm hàng nghìn cho Giá Mua Chợ, nhãn viết tắt K/M Gold live, và chế độ khớp đúng giá cố định `marketExactPrice` hỗ trợ chuyển đồ an toàn.
+  - [x] Test: Chạy unit test `npm test` thành công không có lỗi.
+- Status: done
+
+
+

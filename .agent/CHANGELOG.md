@@ -2,6 +2,31 @@
 
 > Changelog of actual changes implemented.
 
+## 2026-08-08 - Phân Quyền & Giới Hạn Bot Chạy Chợ (Auto Market Limit) (T53)
+- File đã đổi: [server.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [public/index.html](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/public/index.html), [public/app.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/public/app.js).
+- Đã làm:
+  - **Giới hạn số bot chạy chợ đồng thời**: Implement cơ chế đếm số lượng bot của user sở hữu đang ở trạng thái `running` và có `settings.autoMarketBuy === true`. Nếu số bot thực tế vượt quá hạn mức `marketBotLimit` của tài khoản, bot chạy sau (sắp xếp theo lexicographical order của `line_uid`) sẽ bị từ chối thực hiện tính năng chợ và in log cảnh báo.
+  - **API cập nhật hạn mức Chợ**: Thêm route `PUT /api/admin/users/:userId/market-limit` xác thực giá trị số nguyên `>= 0`, ghi nhận `marketBotLimit` và tự động cập nhật cờ `allowMarket` tương ứng vào `users.json`.
+  - **Cấu hình trực tiếp ngoài Accordion Header**: Tích hợp ô nhập số và **bộ nút tăng/giảm `[-]` / `[+]`** `Giới hạn Chợ` trực quan ngay trong user group card header trên Dashboard, cho phép Admin chỉnh sửa nhanh không cần mở Admin Panel.
+  - **Cập nhật Admin Panel Modal**: Đổi cột "Cho Phép Chợ" trong bảng User của Admin Panel thành ô nhập số và **bộ nút tăng/giảm `[-]` / `[+]`** `Giới Hạn Chợ` để đồng bộ cấu hình.
+  - **Định dạng số và Khớp giá cố định**: Chuyển ô nhập Giá Mua Tối Đa sang định dạng dấu chấm phân tách hàng nghìn và hiển thị nhãn viết tắt live (ví dụ: `1.5M Gold`). Bổ sung checkbox `Khớp đúng giá cố định (chuyển/giao dịch đồ)` phục vụ nhu cầu chuyển đồ an toàn, tránh mua nhầm vật phẩm khác rẻ hơn.
+- Đã test bằng: `node test.js`, `npm test` -> PASS 100%.
+
+---
+
+## 2026-08-08 - Big Update Tab Event (Auto Join, Event HP Healing & PK Targeting) (T52)
+- File đã đổi: [server.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [public/app.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/public/app.js).
+- Đã làm:
+  - **Tab Event Mới**: Thêm tab `🏆 Event` và cấu hình (`chk-autoeventjoin`, `sel-event-potion-threshold`, `chk-event-target-mindef`, `sel-event-attack-range`) vào card của mỗi bot.
+  - **Tự động / Thủ công tham gia sự kiện**: Bot tự động warp/join sự kiện giờ vàng (Desert Invasion - Map 2, Guild War & Country War - Map 4). Cung cấp Banner sự kiện hiển thị nổi bật trên Dashboard kèm nút bấm "Tham Gia Event" chuyển nhanh.
+  - **Bơm máu cứu thương liên tục**: Tự động gửi API `use_potion_manual` khẩn cấp mỗi nhịp poll khi máu rơi xuống dưới ngưỡng sự kiện chỉ định.
+  - **Quét và khóa mục tiêu PK giáp yếu nhất**: Cào ngầm thông số giáp đối thủ từ leaderboard, cache lại 2h, sắp xếp và khóa di chuyển kiting áp sát tấn công mục tiêu giáp thấp nhất trong tầm quét.
+  - **Khóa vị trí đánh Boss Cây Thế Giới**: Tự động di chuyển về và đứng khóa vị trí tại tâm bản đồ (1125, 1125) khi tham gia Desert Invasion, tập trung đánh Boss và không chạy lung tung theo yêu cầu.
+  - **Tự động khôi phục (Auto Resume)**: Ghi nhớ bản đồ farm gốc và tự động khôi phục cấu hình farm cũ (Auto Map, Auto Zone, Map ID) ngay khi sự kiện kết thúc.
+- Đã test bằng: `node test.js`, `npm test` -> PASS 100%.
+
+---
+
 ## 2026-08-08 - Áp Dụng Khoảng Cách An Toàn 15m - 20m & Vector Kiting Cho Chức Năng PK (T61)
 - File đã đổi: [play_battle.html](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/play_battle.html), [test.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/test.js).
 - Đã làm:

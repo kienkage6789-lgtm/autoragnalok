@@ -160,6 +160,77 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   };
 
+  window.changeUserMarketLimit = async function(userId, username, limit) {
+    const parsed = parseInt(limit);
+    if (isNaN(parsed) || parsed < 0) {
+      alert('🔴 Giới hạn không hợp lệ. Vui lòng nhập số >= 0.');
+      return;
+    }
+    try {
+      const res = await fetch(`/api/admin/users/${userId}/market-limit`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ marketBotLimit: parsed })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        alert(`✅ Đã cập nhật giới hạn bot chạy chợ (${parsed} bot) cho user ${username}!`);
+        fetchAccounts();
+      } else {
+        alert(`🔴 Lỗi cập nhật giới hạn: ${data.error || 'Thất bại'}`);
+      }
+    } catch (e) {
+      console.error('Error changing market limit:', e);
+      alert('Không thể kết nối máy chủ');
+    }
+  };
+
+  window.stepUserMarketLimit = async function(userId, username, delta) {
+    const inp = document.getElementById(`user-market-limit-${userId}`) || document.getElementById(`market-limit-inp-${userId}`);
+    let current = inp ? parseInt(inp.value) || 0 : 0;
+    let next = Math.max(0, current + delta);
+    if (inp) inp.value = next;
+    await window.changeUserMarketLimit(userId, username, next);
+  };
+
+  function formatNumberWithDots(val) {
+    if (val === undefined || val === null) return '';
+    return val.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  }
+
+  function formatShortGold(val) {
+    if (!val) return '0 Gold';
+    if (val >= 1000000) {
+      return (val / 1000000).toFixed(2).replace(/\.?0+$/, '') + 'M Gold';
+    }
+    if (val >= 1000) {
+      return (val / 1000).toFixed(1).replace(/\.?0+$/, '') + 'K Gold';
+    }
+    return val + ' Gold';
+  }
+
+  window.formatMarketPriceInput = function(input, uid) {
+    let cursor = input.selectionStart;
+    let oldLen = input.value.length;
+    let raw = input.value.replace(/[^\d]/g, '');
+    if (!raw) {
+      input.value = '';
+      const previewLbl = document.getElementById(`lbl-market-max-price-preview-${uid}`);
+      if (previewLbl) previewLbl.textContent = '';
+      return;
+    }
+    let val = parseInt(raw);
+    let formatted = val.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+    input.value = formatted;
+    let newLen = formatted.length;
+    input.setSelectionRange(cursor + (newLen - oldLen), cursor + (newLen - oldLen));
+
+    const previewLbl = document.getElementById(`lbl-market-max-price-preview-${uid}`);
+    if (previewLbl) {
+      previewLbl.textContent = formatShortGold(val);
+    }
+  };
+
   function formatRemainingTime(expiresAt) {
     if (!expiresAt) return '⏳ Vô hạn';
     const now = new Date();
@@ -523,11 +594,12 @@ document.addEventListener('DOMContentLoaded', () => {
             `}
           </td>
           <td style="padding:8px;">
-            ${isAdmin ? '<span style="font-size:0.8rem; color:#a5b4fc;">Cho phép</span>' : `
-              <label class="switch">
-                <input type="checkbox" id="user-market-allow-${u.id}" ${u.allowMarket ? 'checked' : ''} onchange="toggleUserMarketPermission('${u.id}', this.checked)">
-                <span class="slider"></span>
-              </label>
+            ${isAdmin ? '<span style="font-size:0.8rem; color:#a5b4fc;">Vô hạn</span>' : `
+              <div class="user-quota-stepper" style="display: flex; align-items: center; justify-content: center;">
+                <button type="button" class="btn-quota-step" onclick="stepUserMarketLimit('${u.id}', '${u.username}', -1)" title="Giảm 1 bot" style="width: 20px; height: 20px; min-width: 20px; font-size: 0.8rem; line-height: 1; border-radius: 4px; border: 1px solid rgba(165, 180, 252, 0.3); background: rgba(99, 102, 241, 0.2); color: #fff; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; padding: 0;">-</button>
+                <input type="number" class="quota-input-field" id="market-limit-inp-${u.id}" value="${u.marketBotLimit !== undefined ? u.marketBotLimit : (u.allowMarket ? u.maxAccounts : 0)}" min="0" onchange="changeUserMarketLimit('${u.id}', '${u.username}', this.value)" style="width: 35px; height: 20px; text-align: center; font-size: 0.8rem; padding: 2px 4px; background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 4px; color: #fff; margin: 0 4px;">
+                <button type="button" class="btn-quota-step" onclick="stepUserMarketLimit('${u.id}', '${u.username}', 1)" title="Tăng 1 bot" style="width: 20px; height: 20px; min-width: 20px; font-size: 0.8rem; line-height: 1; border-radius: 4px; border: 1px solid rgba(165, 180, 252, 0.3); background: rgba(99, 102, 241, 0.2); color: #fff; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; padding: 0;">+</button>
+              </div>
             `}
           </td>
           <td style="padding:8px;">${expiryHtml}</td>
@@ -937,6 +1009,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
               </div>
               <div class="user-group-actions" onclick="event.stopPropagation()">
+                <div class="user-market-limit-box" style="margin-right: 15px; display: inline-flex; align-items: center; gap: 4px; background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; padding: 3px 8px;">
+                  <span style="font-size: 0.72rem; color: #a5b4fc; white-space: nowrap; font-weight: bold;">🏪 Giới hạn Chợ:</span>
+                  <button type="button" onclick="stepUserMarketLimit('${userId}', '${ownerUsername}', -1)" title="Giảm 1 bot" style="width: 18px; height: 18px; font-size: 0.75rem; display: inline-flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15); color: #fff; cursor: pointer; border-radius: 3px; padding: 0;">-</button>
+                  <input type="number" id="user-market-limit-${userId}" value="${sample.ownerMarketLimit !== undefined ? sample.ownerMarketLimit : 0}" min="0" 
+                    onchange="changeUserMarketLimit('${userId}', '${ownerUsername}', this.value)" 
+                    style="width: 25px; background: transparent; border: none; color: #fff; font-size: 0.8rem; text-align: center; outline: none; font-weight: bold; font-family: monospace; margin: 0 2px;">
+                  <button type="button" onclick="stepUserMarketLimit('${userId}', '${ownerUsername}', 1)" title="Tăng 1 bot" style="width: 18px; height: 18px; font-size: 0.75rem; display: inline-flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15); color: #fff; cursor: pointer; border-radius: 3px; padding: 0;">+</button>
+                </div>
                 <div class="user-batch-proxy-box">
                   <span class="user-batch-proxy-label">🌐 Đổi Proxy Hàng Loạt:</span>
                   <select class="user-batch-proxy-select" id="user-batch-proxy-${userId}" onchange="changeUserBatchProxy('${userId}', '${ownerUsername}', this.value)">
@@ -964,6 +1044,11 @@ document.addEventListener('DOMContentLoaded', () => {
           if (expiryEl) {
             expiryEl.className = `user-expiry-badge ${isExpired ? 'expired' : ''}`;
             expiryEl.textContent = `⏱️ Hạn dùng: ${expiryText}`;
+          }
+
+          const limitInp = document.getElementById(`user-market-limit-${userId}`);
+          if (limitInp && document.activeElement !== limitInp) {
+            limitInp.value = sample.ownerMarketLimit !== undefined ? sample.ownerMarketLimit : 0;
           }
 
           const batchSel = document.getElementById(`user-batch-proxy-${userId}`);
@@ -1125,6 +1210,7 @@ document.addEventListener('DOMContentLoaded', () => {
         </div>
       </div>
 
+      <div class="event-banner" id="event-banner-${acc.line_uid}" style="display: none; padding: 6px 10px; margin-bottom: 8px; border-radius: 8px; font-size: 0.75rem; line-height: 1.35; text-align: center; font-weight: bold; cursor: pointer;"></div>
       <div class="boss-hunt-banner" id="boss-hunt-banner-${acc.line_uid}" style="display: none; padding: 6px 10px; margin-bottom: 8px; border-radius: 8px; font-size: 0.75rem; line-height: 1.35;"></div>
 
       <div class="combat-rates-strip" onclick="toggleRateUnit('${acc.line_uid}')" style="cursor: pointer;" title="Click để chuyển đổi thống kê Phút (/m) ➔ Giờ (/h) ➔ Ngày (/d)">
@@ -1146,12 +1232,70 @@ document.addEventListener('DOMContentLoaded', () => {
         <button class="tab-link" id="tab-btn-core-${acc.line_uid}" onclick="switchTab('${acc.line_uid}', 'core')">Cơ Bản</button>
         <button class="tab-link" id="tab-btn-home-${acc.line_uid}" onclick="switchTab('${acc.line_uid}', 'home')">🏡 Nông Trại</button>
         <button class="tab-link" id="tab-btn-mvp-${acc.line_uid}" onclick="switchTab('${acc.line_uid}', 'mvp')">Săn Boss</button>
+        <button class="tab-link" id="tab-btn-event-${acc.line_uid}" onclick="switchTab('${acc.line_uid}', 'event')">🏆 Event</button>
         <button class="tab-link" id="tab-btn-skills-${acc.line_uid}" onclick="switchTab('${acc.line_uid}', 'skills')">👤 Nhân Vật</button>
         <button class="tab-link" id="tab-btn-market-buy-${acc.line_uid}" onclick="switchTab('${acc.line_uid}', 'market-buy')">🏪 Chợ Auto</button>
         <button class="tab-link" id="tab-btn-log-${acc.line_uid}" onclick="switchTab('${acc.line_uid}', 'log')">Log</button>
       </div>
 
       <div class="card-tab-content">
+        <!-- Event Tab Pane -->
+        <div class="tab-pane" id="pane-event-${acc.line_uid}">
+          <div class="settings-group">
+            <div class="toggle-control" style="grid-column: span 2; margin-bottom: 6px;">
+              <span class="toggle-label">🏆 Tự Động Tham Gia Sự Kiện</span>
+              <label class="switch">
+                <input type="checkbox" id="chk-autoeventjoin-${acc.line_uid}" onchange="toggleSetting('${acc.line_uid}', 'autoEventJoin')">
+                <span class="slider"></span>
+              </label>
+            </div>
+            
+            <div class="input-control" style="grid-column: span 2; margin-bottom: 6px;">
+              <label for="sel-event-potion-threshold-${acc.line_uid}">💊 HP Bơm Máu Trong Event</label>
+              <select id="sel-event-potion-threshold-${acc.line_uid}" onchange="updateNumericSetting('${acc.line_uid}', 'eventPotionThreshold')" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; padding: 6px; font-family: inherit; font-size: 0.85rem; outline: none; margin-top:2px; width: 100%;">
+                <option value="0">❌ Tắt tự động bơm máu</option>
+                <option value="10">10%</option>
+                <option value="20">20%</option>
+                <option value="30">30%</option>
+                <option value="40">40%</option>
+                <option value="50">50%</option>
+                <option value="60">60%</option>
+                <option value="70">70%</option>
+                <option value="80">80%</option>
+                <option value="90">90%</option>
+              </select>
+            </div>
+
+            <div class="toggle-control" style="grid-column: span 2; margin-bottom: 6px;">
+              <span class="toggle-label">⚔️ PK Ưu Tiên Giáp Thấp Nhất</span>
+              <label class="switch">
+                <input type="checkbox" id="chk-event-target-mindef-${acc.line_uid}" onchange="toggleSetting('${acc.line_uid}', 'eventTargetMinDef')">
+                <span class="slider"></span>
+              </label>
+            </div>
+
+            <div class="input-control" style="grid-column: span 2; margin-bottom: 6px;">
+              <label for="sel-event-attack-range-${acc.line_uid}">🔍 Phạm Vi Quét Mục Tiêu PK</label>
+              <select id="sel-event-attack-range-${acc.line_uid}" onchange="updateNumericSetting('${acc.line_uid}', 'eventAttackRange')" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; padding: 6px; font-family: inherit; font-size: 0.85rem; outline: none; margin-top:2px; width: 100%;">
+                <option value="100">100m</option>
+                <option value="200">200m</option>
+                <option value="300">300m (Khuyến nghị)</option>
+                <option value="500">500m</option>
+                <option value="9999">Toàn bản đồ</option>
+              </select>
+            </div>
+          </div>
+
+          <div style="margin-top: 12px; border-top: 1px dashed rgba(255,255,255,0.08); padding-top: 8px;">
+            <div style="font-size: 0.78rem; font-weight: 700; color: #fbbf24; margin-bottom: 6px;">📅 Lịch Trình Sự Kiện Hàng Ngày</div>
+            <div style="font-size: 0.72rem; color: #94a3b8; display: flex; flex-direction: column; gap: 4px; line-height: 1.45;">
+              <div>🌳 <b>19:30</b> - Bảo vệ Cây Thế Giới (Map 2)</div>
+              <div>🚩 <b>20:30</b> - Bang Chiến / Guild Flag War (Map 4)</div>
+              <div>🌍 <b>21:30</b> - Quốc Chiến / Country Flag War (Map 4)</div>
+            </div>
+          </div>
+        </div>
+
         <!-- Home Farm Tab Pane -->
         <div class="tab-pane" id="pane-home-${acc.line_uid}">
           <div class="home-overview-card" style="background: rgba(22, 101, 52, 0.15); border: 1px solid rgba(34, 197, 94, 0.3); border-radius: 12px; padding: 12px; margin-bottom: 10px;">
@@ -1414,14 +1558,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 </label>
               </div>
 
-              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 8px;">
                 <div class="input-control">
-                  <label for="num-market-maxprice-${acc.line_uid}" style="font-size: 0.75rem; color: #fbbf24; font-weight: 600;">💰 Giá Mua Tối Đa (Gold)</label>
-                  <input type="number" id="num-market-maxprice-${acc.line_uid}" placeholder="10000" min="1" onchange="updateNumericSetting('${acc.line_uid}', 'marketMaxPrice')" onkeydown="if(event.key==='Enter') this.blur()" style="background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; color: #fff; padding: 6px; font-family: inherit; font-size: 0.82rem; outline: none; margin-top:2px; width: 100%;">
+                  <label for="num-market-max-price-${acc.line_uid}" style="font-size: 0.75rem; color: #fbbf24; font-weight: 600; display: flex; justify-content: space-between; align-items: center;">
+                    <span>💰 Giá Mua Tối Đa</span>
+                    <span id="lbl-market-max-price-preview-${acc.line_uid}" style="font-size: 0.7rem; color: #4ade80; font-weight: bold;"></span>
+                  </label>
+                  <input type="text" id="num-market-max-price-${acc.line_uid}" placeholder="10.000" oninput="formatMarketPriceInput(this, '${acc.line_uid}')" onchange="updateNumericSetting('${acc.line_uid}', 'marketMaxPrice')" onkeydown="if(event.key==='Enter') this.blur()" style="background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; color: #fff; padding: 6px; font-family: inherit; font-size: 0.82rem; outline: none; margin-top:2px; width: 100%;">
                 </div>
                 <div class="input-control">
-                  <label for="sel-market-scaninterval-${acc.line_uid}" style="font-size: 0.75rem; color: #38bdf8; font-weight: 600;">⏱️ Chu Kỳ Quét</label>
-                  <select id="sel-market-scaninterval-${acc.line_uid}" onchange="updateNumericSetting('${acc.line_uid}', 'marketScanInterval')" style="background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; color: #fff; padding: 6px; font-family: inherit; font-size: 0.82rem; outline: none; margin-top:2px; width: 100%;">
+                  <label for="sel-market-scan-interval-${acc.line_uid}" style="font-size: 0.75rem; color: #38bdf8; font-weight: 600;">⏱️ Chu Kỳ Quét</label>
+                  <select id="sel-market-scan-interval-${acc.line_uid}" onchange="updateNumericSetting('${acc.line_uid}', 'marketScanInterval')" style="background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; color: #fff; padding: 6px; font-family: inherit; font-size: 0.82rem; outline: none; margin-top:2px; width: 100%;">
                     <option value="5">⚡ 5 giây</option>
                     <option value="10" selected>⏱️ 10 giây (Khuyên dùng)</option>
                     <option value="15">⏱️ 15 giây</option>
@@ -1429,6 +1576,14 @@ document.addEventListener('DOMContentLoaded', () => {
                     <option value="60">🐢 60 giây</option>
                   </select>
                 </div>
+              </div>
+
+              <div class="toggle-control" style="padding-top: 4px; border-top: 1px solid rgba(255,255,255,0.05);">
+                <span class="toggle-label" style="font-weight: 600; color: #cbd5e1; font-size: 0.78rem;">🎯 Khớp đúng giá cố định (chuyển/giao dịch đồ)</span>
+                <label class="switch" style="transform: scale(0.85); margin-right: -4px;">
+                  <input type="checkbox" id="chk-marketexactprice-${acc.line_uid}" onchange="toggleSetting('${acc.line_uid}', 'marketExactPrice')">
+                  <span class="slider"></span>
+                </label>
               </div>
             </div>
 
@@ -1677,10 +1832,20 @@ document.addEventListener('DOMContentLoaded', () => {
     const chkAutoMarketBuy = document.getElementById(`chk-automarketbuy-${acc.line_uid}`);
     if (chkAutoMarketBuy && document.activeElement !== chkAutoMarketBuy) chkAutoMarketBuy.checked = (acc.settings && acc.settings.autoMarketBuy === true);
 
-    const numMarketMaxPrice = document.getElementById(`num-market-maxprice-${acc.line_uid}`);
-    if (numMarketMaxPrice && document.activeElement !== numMarketMaxPrice) numMarketMaxPrice.value = (acc.settings && acc.settings.marketMaxPrice) || 10000;
+    const numMarketMaxPrice = document.getElementById(`num-market-max-price-${acc.line_uid}`);
+    if (numMarketMaxPrice && document.activeElement !== numMarketMaxPrice) {
+      const val = (acc.settings && acc.settings.marketMaxPrice) || 10000;
+      numMarketMaxPrice.value = formatNumberWithDots(val);
+      const previewLbl = document.getElementById(`lbl-market-max-price-preview-${acc.line_uid}`);
+      if (previewLbl) previewLbl.textContent = formatShortGold(val);
+    }
 
-    const selScanInterval = document.getElementById(`sel-market-scaninterval-${acc.line_uid}`);
+    const chkMarketExactPrice = document.getElementById(`chk-marketexactprice-${acc.line_uid}`);
+    if (chkMarketExactPrice && document.activeElement !== chkMarketExactPrice) {
+      chkMarketExactPrice.checked = (acc.settings && acc.settings.marketExactPrice === true);
+    }
+
+    const selScanInterval = document.getElementById(`sel-market-scan-interval-${acc.line_uid}`);
     if (selScanInterval && document.activeElement !== selScanInterval) selScanInterval.value = (acc.settings && acc.settings.marketScanInterval) || 10;
 
     // Render & sync 9 category cards accordion and buy history
@@ -1938,6 +2103,23 @@ document.addEventListener('DOMContentLoaded', () => {
     const chkAutoArena = document.getElementById(`chk-autoarena-${acc.line_uid}`);
     if (chkAutoArena && document.activeElement !== chkAutoArena) chkAutoArena.checked = acc.settings.autoArena === true;
 
+    // Event settings checkboxes sync
+    const chkAutoEventJoin = document.getElementById(`chk-autoeventjoin-${acc.line_uid}`);
+    if (chkAutoEventJoin && document.activeElement !== chkAutoEventJoin) chkAutoEventJoin.checked = acc.settings.autoEventJoin === true;
+
+    const selEventPotion = document.getElementById(`sel-event-potion-threshold-${acc.line_uid}`);
+    if (selEventPotion && document.activeElement !== selEventPotion) {
+      selEventPotion.value = acc.settings.eventPotionThreshold !== undefined ? String(acc.settings.eventPotionThreshold) : '0';
+    }
+
+    const chkEventTargetMinDef = document.getElementById(`chk-event-target-mindef-${acc.line_uid}`);
+    if (chkEventTargetMinDef && document.activeElement !== chkEventTargetMinDef) chkEventTargetMinDef.checked = acc.settings.eventTargetMinDef === true;
+
+    const selEventRange = document.getElementById(`sel-event-attack-range-${acc.line_uid}`);
+    if (selEventRange && document.activeElement !== selEventRange) {
+      selEventRange.value = acc.settings.eventAttackRange !== undefined ? String(acc.settings.eventAttackRange) : '300';
+    }
+
     // MVP Boss settings sync
     const selMvpPriority = document.getElementById(`sel-mvp-priority-mode-${acc.line_uid}`);
     if (selMvpPriority && document.activeElement !== selMvpPriority) selMvpPriority.value = acc.settings.mvpPriorityMode || 'distance';
@@ -2030,6 +2212,87 @@ document.addEventListener('DOMContentLoaded', () => {
     updateHomeTabUI(acc);
 
 
+
+    // Render real-time event banner
+    const eventBanner = document.getElementById(`event-banner-${acc.line_uid}`);
+    if (eventBanner) {
+      let activeEvent = null;
+      let eventTitle = '';
+      let eventMapId = 0;
+      let joinAction = '';
+      let bannerBg = 'rgba(245, 158, 11, 0.15)';
+      let bannerBorder = '1px solid rgba(245, 158, 11, 0.3)';
+      let bannerColor = '#fde68a';
+
+      if (acc.lastGw && (acc.lastGw.st === 'open' || acc.lastGw.st === 'fight')) {
+        activeEvent = acc.lastGw;
+        eventTitle = `🚩 Guild Flag War: ${acc.lastGw.st === 'open' ? 'Phòng Chờ' : 'Đang Chiến Đấu'}`;
+        eventMapId = 4;
+        joinAction = 'gwar_join';
+        bannerBg = 'rgba(168, 85, 247, 0.15)';
+        bannerBorder = '1px solid rgba(168, 85, 247, 0.3)';
+        bannerColor = '#e9d5ff';
+      } else if (acc.lastCw && (acc.lastCw.st === 'open' || acc.lastCw.st === 'fight')) {
+        activeEvent = acc.lastCw;
+        eventTitle = `🌍 Country Flag War: ${acc.lastCw.st === 'open' ? 'Phòng Chờ' : 'Đang Chiến Đấu'}`;
+        eventMapId = 4;
+        joinAction = 'cwar_join';
+        bannerBg = 'rgba(14, 165, 233, 0.15)';
+        bannerBorder = '1px solid rgba(14, 165, 233, 0.3)';
+        bannerColor = '#bae6fd';
+      } else if (acc.lastInv && (acc.lastInv.st === 'pre' || acc.lastInv.st === 'active')) {
+        activeEvent = acc.lastInv;
+        eventTitle = `🌳 Bảo Vệ Cây Thế Giới: ${acc.lastInv.st === 'pre' ? 'Chuẩn Bị' : 'Đang Chiến Đấu'}`;
+        eventMapId = 2;
+        joinAction = 'inv_join';
+        bannerBg = 'rgba(239, 68, 68, 0.15)';
+        bannerBorder = '1px solid rgba(239, 68, 68, 0.3)';
+        bannerColor = '#fca5a5';
+      }
+
+      if (activeEvent) {
+        eventBanner.style.display = 'block';
+        eventBanner.style.background = bannerBg;
+        eventBanner.style.border = bannerBorder;
+        eventBanner.style.color = bannerColor;
+
+        let timeStr = '';
+        if (activeEvent.ends) {
+          const leftSecs = Math.max(0, activeEvent.ends - Math.floor(Date.now() / 1000));
+          timeStr = leftSecs >= 60 ? `${Math.floor(leftSecs/60)}m ${leftSecs%60}s` : `${leftSecs}s`;
+        } else if (activeEvent.in) {
+          const leftSecs = Math.max(0, activeEvent.in);
+          timeStr = leftSecs >= 60 ? `${Math.floor(leftSecs/60)}m ${leftSecs%60}s` : `${leftSecs}s`;
+        }
+
+        const isAlreadyThere = acc.player && Number(acc.player.map) === Number(eventMapId);
+
+        let buttonHtml = '';
+        if (!isAlreadyThere) {
+          buttonHtml = `
+            <button type="button" onclick="joinEventDirectly('${acc.line_uid}', '${joinAction}')" 
+              style="margin-top: 5px; font-size: 0.72rem; font-weight: 800; padding: 4px 10px; border-radius: 6px; border: 1px solid ${bannerColor}; background: transparent; color: ${bannerColor}; cursor: pointer; transition: all 0.2s; outline: none;"
+              onmouseover="this.style.background='rgba(255,255,255,0.08)'" onmouseout="transparent">
+              🏜️ Tham Gia Event
+            </button>
+          `;
+        } else {
+          buttonHtml = `
+            <span style="font-size: 0.65rem; color: #34d399; margin-top: 4px; display: block;">📍 Bạn đã ở bản đồ Event</span>
+          `;
+        }
+
+        eventBanner.innerHTML = `
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <span>🎁 <b>Sự kiện kích hoạt:</b> ${eventTitle}</span>
+            ${timeStr ? `<span style="font-size: 0.65rem; opacity: 0.8;">⏱️ ${timeStr}</span>` : ''}
+          </div>
+          ${buttonHtml}
+        `;
+      } else {
+        eventBanner.style.display = 'none';
+      }
+    }
 
     // Render real-time boss hunt banner
     const banner = document.getElementById(`boss-hunt-banner-${acc.line_uid}`);
@@ -3143,7 +3406,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     if (!input) return;
 
-    const val = isNaN(parseInt(input.value)) ? 0 : parseInt(input.value);
+    let cleanVal = input.value;
+    if (typeof cleanVal === 'string') {
+      cleanVal = cleanVal.replace(/[^\d]/g, '');
+    }
+    const val = isNaN(parseInt(cleanVal)) ? 0 : parseInt(cleanVal);
     try {
       await fetch(`/api/accounts/${uid}`, {
         method: 'PUT',
@@ -3337,6 +3604,29 @@ document.addEventListener('DOMContentLoaded', () => {
         fetchAccounts();
       } else {
         alert('🔴 Lỗi: ' + (data.error || 'Không thể kích hoạt săn Boss'));
+      }
+    } catch (e) {
+      alert(`❌ Lỗi kết nối: ${e.message}`);
+    }
+  };
+
+  window.joinEventDirectly = async function(uid, action) {
+    try {
+      let bodyData = { action: action };
+      if (action === 'inv_join') {
+        bodyData = { action: 'warp', param: 2 };
+      }
+      const res = await fetch(`/api/accounts/${uid}/action`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(bodyData)
+      });
+      const data = await res.json();
+      if (res.ok && (data.ok || data.success)) {
+        alert('🟢 Tham gia sự kiện thành công! Bot đang di chuyển...');
+        fetchAccounts();
+      } else {
+        alert('🔴 Lỗi: ' + (data.error || 'Không thể tham gia sự kiện'));
       }
     } catch (e) {
       alert(`❌ Lỗi kết nối: ${e.message}`);
@@ -4422,32 +4712,7 @@ window.syncTeamSetup = async function(uid) {
   }
 };
 
-window.toggleUserMarketPermission = async function(userId, checked) {
-  try {
-    const res = await fetch(`/api/admin/users/${userId}/allow-market`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ allowMarket: checked })
-    });
-    const data = await res.json();
-    if (!res.ok || !data.success) {
-      alert(`🔴 Lỗi phân quyền chợ: ${data.error || 'Thất bại'}`);
-      const inp = document.getElementById(`user-market-allow-${userId}`);
-      if (inp) inp.checked = !checked;
-    } else {
-      // Reload accounts silently to reflect permissions on dashboards
-      const response = await fetch('/api/accounts');
-      if (response.ok) {
-        window.lastFetchedAccounts = await response.json();
-        renderAccounts(window.lastFetchedAccounts);
-      }
-    }
-  } catch (e) {
-    console.error('Error toggling user market permission:', e);
-    const inp = document.getElementById(`user-market-allow-${userId}`);
-    if (inp) inp.checked = !checked;
-  }
-};
+
 
 window.toggleMarketFilter = async function(line_uid, category) {
   const acc = window.lastFetchedAccounts.find(x => x.line_uid === line_uid);
