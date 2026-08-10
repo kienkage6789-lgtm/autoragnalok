@@ -2114,50 +2114,50 @@ class BotInstance {
 
     this.pollCount++;
 
-    // 🗺️ Định tuyến bản đồ khẩn cấp (Map Routing) ngay đầu nhịp poll
+    // 🗺️ Định tuyến bản đồ khẩn cấp (Map Routing) & Đồng bộ Trưởng nhóm (Leader)
     if (this.player) {
-      const isMvpReturning = (!this.isMvpCycling && this.mvpCycleOriginalMap !== null);
-      const activeTargetMapId = this.isMvpCycling 
-        ? this.getCurrentMvpCycleMap() 
-        : (isMvpReturning ? Number(this.mvpCycleOriginalMap) : (parseInt(this.settings.targetMap) || 1));
+      const isMember = this.settings.teamRole === 'member';
+      const leader = isMember ? Object.values(botInstances).find(b => b.userId === this.userId && b.settings.teamRole === 'leader') : null;
+      
+      let activeTargetMapId;
+      let shouldWarpCheck = false;
 
-      if ((this.settings.autoMap || this.isMvpCycling || isMvpReturning) && Number(this.player.map) !== Number(activeTargetMapId)) {
+      if (isMember && leader && leader.settings.bossHuntMode !== 'off') {
+        // Đồng bộ trạng thái Cycle và Map từ Leader trước
+        this.isMvpCycling = leader.isMvpCycling;
+        this.mvpCycleMapIndex = leader.mvpCycleMapIndex;
+        this.mvpCycleOriginalMap = leader.mvpCycleOriginalMap;
+
+        // Ưu tiên bản đồ chu kỳ hiện tại của Leader, nếu không có thì theo bản đồ hiện tại của Leader
+        activeTargetMapId = leader.isMvpCycling 
+          ? leader.getCurrentMvpCycleMap() 
+          : (leader.player ? Number(leader.player.map) : (parseInt(leader.settings.targetMap) || 1));
+          
+        shouldWarpCheck = true; // Thành viên luôn đồng bộ theo Leader khi Leader đang hoạt động
+      } else {
+        const isMvpReturning = (!this.isMvpCycling && this.mvpCycleOriginalMap !== null);
+        activeTargetMapId = this.isMvpCycling 
+          ? this.getCurrentMvpCycleMap() 
+          : (isMvpReturning ? Number(this.mvpCycleOriginalMap) : (parseInt(this.settings.targetMap) || 1));
+          
+        shouldWarpCheck = (this.settings.autoMap || this.isMvpCycling || isMvpReturning);
+      }
+
+      if (shouldWarpCheck && Number(this.player.map) !== Number(activeTargetMapId)) {
         const targetMapId = activeTargetMapId;
         const mapDef = getMapDefs().find(m => m.id === targetMapId);
         if (mapDef && (this.player.lv || 1) >= mapDef.req) {
-          this.addLog('SYSTEM', `🗺️ [Tự động] Phát hiện sai bản đồ (Đang ở: Map ${this.player.map}, Cần đi: Map ${targetMapId}). Tiến hành di chuyển...`);
+          if (isMember && leader) {
+            this.addLog('SYSTEM', `👥 [Team Member] Đồng bộ di chuyển theo Trưởng nhóm (${leader.name}) sang Map ${targetMapId}`);
+          } else {
+            this.addLog('SYSTEM', `🗺️ [Tự động] Phát hiện sai bản đồ (Đang ở: Map ${this.player.map}, Cần đi: Map ${targetMapId}). Tiến hành di chuyển...`);
+          }
           try {
             await this.warpToMap(targetMapId);
             // Warp thành công, kết thúc sớm nhịp poll hiện tại để nhịp tiếp theo chạy trên map mới
             return;
           } catch (e) {
             this.addLog('ERROR', `Lỗi di chuyển bản đồ khẩn cấp: ${e.message}`);
-          }
-        }
-      }
-    }
-
-    // 👥 Nếu là Member, tự động đồng bộ Map và Trạng thái chu kỳ săn từ Leader
-    if (this.player && this.settings.teamRole === 'member') {
-      const leader = Object.values(botInstances).find(b => b.userId === this.userId && b.settings.teamRole === 'leader');
-      if (leader && leader.player && leader.settings.bossHuntMode !== 'off') {
-        const leaderMap = Number(leader.player.map);
-        // Đồng bộ trạng thái Cycle từ Leader
-        this.isMvpCycling = leader.isMvpCycling;
-        this.mvpCycleMapIndex = leader.mvpCycleMapIndex;
-        this.mvpCycleOriginalMap = leader.mvpCycleOriginalMap;
-        
-        // Nếu khác bản đồ với Leader, ép warp theo Leader ngay lập tức
-        if (Number(this.player.map) !== leaderMap) {
-          const mapDef = getMapDefs().find(m => m.id === leaderMap);
-          if (mapDef && (this.player.lv || 1) >= mapDef.req) {
-            this.addLog('SYSTEM', `👥 [Team Member] Đồng bộ di chuyển theo Trưởng nhóm (${leader.name}) sang Map ${leaderMap}`);
-            try {
-              await this.warpToMap(leaderMap);
-              return; // Kết thúc sớm poll để chạy trên map mới ở nhịp sau
-            } catch (e) {
-              this.addLog('ERROR', `Lỗi đồng bộ di chuyển theo Leader: ${e.message}`);
-            }
           }
         }
       }

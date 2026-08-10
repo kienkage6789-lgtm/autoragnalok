@@ -66,7 +66,7 @@
     <canvas id="gameCanvas"></canvas>
     <canvas id="minimapCanvas"></canvas>
     <!-- Nút bơm máu thủ công hiện mờ ở giữa màn hình -->
-    <button id="manual-heal-btn" onclick="triggerManualHeal()" 
+    <button id="manual-heal-btn" onclick="triggerManualHeal(event)" 
             style="position: absolute; left: 50%; top: 70%; transform: translate(-50%, -50%); 
                    width: 60px; height: 60px; border-radius: 50%; 
                    background: rgba(239, 68, 68, 0.35); border: 2px solid rgba(239, 68, 68, 0.6); 
@@ -379,8 +379,17 @@ if (uid && token) {
 }
 
 // --- MANUAL HEAL BUTTON ---
-function triggerManualHeal() {
-  if (!uid || !token) {
+function triggerManualHeal(event) {
+  if (event) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  const urlParams = new URLSearchParams(window.location.search);
+  const currentUid = urlParams.get('line_uid');
+  const currentToken = urlParams.get('session_token');
+
+  if (!currentUid || !currentToken) {
     alert("Lỗi: Thiếu thông tin tài khoản!");
     return;
   }
@@ -393,13 +402,19 @@ function triggerManualHeal() {
     }, 100);
   }
 
-  $.post('/xhrpg_upgrade.php', {
-    line_uid: uid,
-    session_token: token,
-    action: 'use_potion_manual'
+  fetch('/xhrpg_upgrade.php', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'
+    },
+    body: new URLSearchParams({
+      line_uid: currentUid,
+      session_token: currentToken,
+      action: 'use_potion_manual'
+    })
   })
-  .done(res => {
-    const ud = typeof res === 'string' ? JSON.parse(res) : res;
+  .then(res => res.json())
+  .then(ud => {
     if (ud && ud.ok && ud.player) {
       if (typeof xhrpg !== 'undefined' && xhrpg.player) {
         xhrpg.player = ud.player;
@@ -409,8 +424,8 @@ function triggerManualHeal() {
       console.warn(`💊 [Thủ công] Bơm máu thất bại: ${ (ud && ud.error) || 'Lỗi không xác định' }`);
     }
   })
-  .fail(() => {
-    console.error("Lỗi kết nối khi bơm máu thủ công");
+  .catch(err => {
+    console.error(`💊 [Thủ công] Lỗi kết nối khi bơm máu: ${err.message}`);
   });
 }
 </script>
