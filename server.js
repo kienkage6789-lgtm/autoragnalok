@@ -2186,7 +2186,7 @@ class BotInstance {
         shouldWarpCheck = (this.settings.autoMap || this.isMvpCycling || isMvpReturning);
       }
 
-      if (shouldWarpCheck && Number(this.player.map) !== Number(activeTargetMapId)) {
+      if (shouldWarpCheck && Number(this.player.map) !== Number(activeTargetMapId) && Number(this.player.map) !== 5) {
         const targetMapId = activeTargetMapId;
         const mapDef = getMapDefs().find(m => m.id === targetMapId);
         if (mapDef && (this.player.lv || 1) >= mapDef.req) {
@@ -2680,15 +2680,52 @@ class BotInstance {
 
     // Auto-join event
     if (this.settings.autoEventJoin && !this.inEventMode) {
-      if (isInvActive) {
-        this.enterEventMode('inv', 2);
-        await this.warpToMap(2);
-      } else if (isGwActive) {
-        this.enterEventMode('gw', 4);
-        await this.joinGuildWar();
-      } else if (isCwActive) {
-        this.enterEventMode('cw', 4);
-        await this.joinCountryWar();
+      const currentPlayer = d.player || this.player;
+      if (currentPlayer && !currentPlayer.is_dead) {
+        const playerLv = currentPlayer.lv || 1;
+        const playerMap = Number(currentPlayer.map);
+        const isAtHome = !this.isMvpCycling && playerMap === 5 && (currentPlayer.home_crops !== undefined || currentPlayer.home_lv !== undefined);
+
+        if (!isAtHome) {
+          if (isInvActive) {
+            const map2Def = getMapDefs().find(m => m.id === 2);
+            const req2 = map2Def ? map2Def.req : 25;
+            if (playerLv >= req2) {
+              if (playerMap === 2) {
+                this.enterEventMode('inv', 2);
+              } else {
+                const ok = await this.warpToMap(2);
+                if (ok) {
+                  this.enterEventMode('inv', 2);
+                }
+              }
+            } else if (this.pollCount % 30 === 0) {
+              this.addLog('WARNING', `⚠️ [Auto Event] Không thể tham gia Invasion: Cấp độ nhân vật (Lv.${playerLv}) chưa đủ yêu cầu (Lv.${req2}+)`);
+            }
+          } else if (isGwActive) {
+            const map4Def = getMapDefs().find(m => m.id === 4);
+            const req4 = map4Def ? map4Def.req : 20;
+            if (playerLv >= req4) {
+              const ok = await this.joinGuildWar();
+              if (ok) {
+                this.enterEventMode('gw', 4);
+              }
+            } else if (this.pollCount % 30 === 0) {
+              this.addLog('WARNING', `⚠️ [Auto Event] Không thể tham gia Guild War: Cấp độ nhân vật (Lv.${playerLv}) chưa đủ yêu cầu (Lv.${req4}+)`);
+            }
+          } else if (isCwActive) {
+            const map4Def = getMapDefs().find(m => m.id === 4);
+            const req4 = map4Def ? map4Def.req : 20;
+            if (playerLv >= req4) {
+              const ok = await this.joinCountryWar();
+              if (ok) {
+                this.enterEventMode('cw', 4);
+              }
+            } else if (this.pollCount % 30 === 0) {
+              this.addLog('WARNING', `⚠️ [Auto Event] Không thể tham gia Country War: Cấp độ nhân vật (Lv.${playerLv}) chưa đủ yêu cầu (Lv.${req4}+)`);
+            }
+          }
+        }
       }
     }
 
@@ -2903,13 +2940,36 @@ class BotInstance {
 
     const isAtHome = (!this.isMvpCycling && Number(this.player.map) === 5 && (this.player.home_crops !== undefined || this.player.home_lv !== undefined));
 
+    const currentEpoch = Math.floor(Date.now() / 1000);
+    const isInvActive = this.lastInv && (this.lastInv.st === 'pre' || this.lastInv.st === 'active') && (!this.lastInv.ends || this.lastInv.ends > currentEpoch);
+    const isGwActive = this.lastGw && (this.lastGw.st === 'open' || this.lastGw.st === 'fight') && (!this.lastGw.ends || this.lastGw.ends > currentEpoch);
+    const isCwActive = this.lastCw && (this.lastCw.st === 'open' || this.lastCw.st === 'fight') && (!this.lastCw.ends || this.lastCw.ends > currentEpoch);
+    
+    let isEventActive = false;
+    if (this.settings.autoEventJoin && this.player) {
+      const playerLv = this.player.lv || 1;
+      if (isInvActive) {
+        const map2Def = getMapDefs().find(m => m.id === 2);
+        const req2 = map2Def ? map2Def.req : 25;
+        if (playerLv >= req2) isEventActive = true;
+      } else if (isGwActive) {
+        const map4Def = getMapDefs().find(m => m.id === 4);
+        const req4 = map4Def ? map4Def.req : 20;
+        if (playerLv >= req4) isEventActive = true;
+      } else if (isCwActive) {
+        const map4Def = getMapDefs().find(m => m.id === 4);
+        const req4 = map4Def ? map4Def.req : 20;
+        if (playerLv >= req4) isEventActive = true;
+      }
+    }
+
     // Check if there are pending Home Farm actions
     let hasPendingHomeAction = false;
     const nowMs = Date.now();
     const harvestCooldown = (nowMs - (this.lastHarvestFailedAt || 0)) < 300000;
     const upgradeCooldown = (nowMs - (this.lastHomeUpgradeFailedAt || 0)) < 300000;
 
-    if (!this.targetedMvp && !this.isMvpCycling && (this.settings.autoHomeHarvest || this.settings.autoHomePlant || this.settings.autoHomeUpgrade)) {
+    if (!this.targetedMvp && !this.isMvpCycling && !isEventActive && (this.settings.autoHomeHarvest || this.settings.autoHomePlant || this.settings.autoHomeUpgrade)) {
       const lv = Math.max(1, this.player.home_lv | 0);
       const HOME_PLOT_LV = [20, 40, 60, 80, 100];
       const plots = 1 + HOME_PLOT_LV.filter(q => lv >= q).length;
@@ -3221,7 +3281,10 @@ class BotInstance {
     } else {
       // Không có việc nông vụ (hoặc bypassHomeWarp=true) mà vẫn kẹt ở nông trại -> Warp quay ra
       if (isAtHome) {
-        this.addLog('SYSTEM', `↩️ [Tự động] Đã hoàn tất công việc làm vườn, rời Nông trại để quay lại farm`);
+        const logMsg = isEventActive 
+          ? `↩️ [Tự động] Có sự kiện Event đang mở, rời Nông trại để tham gia Event`
+          : `↩️ [Tự động] Đã hoàn tất công việc làm vườn, rời Nông trại để quay lại farm`;
+        this.addLog('SYSTEM', logMsg);
         try {
           const res = await this.sendRequest('https://ragnalok.online/human/xhrpg_warp.php', {
             line_uid: this.line_uid,
