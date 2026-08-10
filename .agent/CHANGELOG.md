@@ -2,6 +2,14 @@
 
 > Changelog of actual changes implemented.
 
+## 2026-08-10 - Khắc Phục Lỗi Phân Loại Và Mua Nhầm Vật Phẩm Chợ Auto
+- File đã đổi: [server.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [public/app.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/public/app.js), [test.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/test.js).
+- Đã làm:
+  - **Sửa lỗi hiển thị trùng lặp và nhầm cột trên giao diện**: Điều chỉnh hàm `isMvpName(name)` trên frontend chỉ kiểm tra tiền tố `"MVP "`. Nhờ đó, các quái vật thường có tên bắt đầu bằng "Vua", "Chúa tể" (như Vua sói, Chúa tể ma cà rồng) hiển thị đúng ở danh sách quái thường, còn quái MVP của chúng hiển thị chính xác là "MVP Vua sói", "MVP Chúa tể ma cà rồng".
+  - **Khắc phục lỗi bộ lọc hoạt động sai (tự động mua dù không tích chọn)**: Nâng cấp logic so khớp backend trong `scanAndBuyMarket` thành cơ chế so khớp nghiêm ngặt (Strict Type Matching). Hệ thống so sánh đồng thời trạng thái MVP của lựa chọn cấu hình (`cardName.startsWith('MVP ')`) và vật phẩm trên chợ (`itemLower.includes('mvp')`). Nếu lệch loại (ví dụ: một bên MVP và một bên quái thường), hệ thống sẽ bỏ qua thay vì dùng `.includes()` lỏng lẻo như trước.
+  - **Khắc phục lỗi tự động mua khi để trống bộ lọc (Empty Whitelist Fallback)**: Thay đổi hành vi mặc định khi danh sách lọc rỗng. Với cả 7 danh mục lọc, nếu người dùng bật danh mục nhưng không tích chọn bất kỳ phần tử lọc cụ thể nào, bot sẽ bỏ qua không mua (thay vì mặc định mua toàn bộ).
+  - **Bổ sung và cập nhật bộ unit test**: Thêm các listing mẫu MVP vào `mockListings` và bổ sung test case trong `test.js` kiểm chứng tính năng phân biệt thẻ/trứng thường và MVP, đồng thời cập nhật test case kiểm tra bộ lọc trống để đảm bảo bot không mua gì khi danh sách trống. Chạy `npm test` thành công 100%.
+
 ## 2026-08-08 - Lọc Hộp Theo Cấp Bậc Trên Chợ & Bơm Máu Khẩn Cấp Chủ Động (T62)
 - File đã đổi: [server.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [public/app.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/public/app.js), [play_battle.html](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/play_battle.html), [test.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/test.js).
 - Đã làm:

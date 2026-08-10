@@ -3471,82 +3471,82 @@ class BotInstance {
 
         const translatedName = translateThaiText(item.item_name || 'Vật phẩm');
 
-        // C. Kiểm tra lọc riêng từng loại
-        // C. Kiểm tra lọc riêng từng loại (nếu danh sách rỗng -> mặc định mua tất cả vật phẩm thuộc loại này <= max price)
+        // C. Kiểm tra lọc riêng từng loại (nếu danh sách rỗng -> bỏ qua không mua)
         if (category === 'card') {
           const selectedCards = this.settings.marketSelectedCards || [];
-          if (Array.isArray(selectedCards) && selectedCards.length > 0) {
-            const itemLower = translatedName.toLowerCase();
-            const matches = selectedCards.some(cardName => {
-              let cardLower = cardName.toLowerCase().trim();
-              if (cardLower.startsWith('mvp ')) cardLower = cardLower.replace(/^mvp\s+/, '');
-              return cardLower && (itemLower.includes(cardLower) || cardLower.includes(itemLower));
-            });
-            if (!matches) continue;
-          }
+          if (!Array.isArray(selectedCards) || selectedCards.length === 0) continue;
+          const itemLower = translatedName.toLowerCase();
+          const matches = selectedCards.some(cardName => {
+            const isSelectedMvp = cardName.toLowerCase().startsWith('mvp ');
+            const isItemMvp = itemLower.includes('mvp');
+            if (isSelectedMvp !== isItemMvp) return false;
+
+            let cardLower = cardName.toLowerCase().trim();
+            if (isSelectedMvp) cardLower = cardLower.replace(/^mvp\s+/, '');
+            return cardLower && (itemLower.includes(cardLower) || cardLower.includes(itemLower));
+          });
+          if (!matches) continue;
         } else if (category === 'egg') {
           const selectedEggs = this.settings.marketSelectedEggs || [];
-          if (Array.isArray(selectedEggs) && selectedEggs.length > 0) {
-            const itemLower = translatedName.toLowerCase();
-            const matches = selectedEggs.some(eggName => {
-              let eggLower = eggName.toLowerCase().trim();
-              if (eggLower.startsWith('mvp ')) eggLower = eggLower.replace(/^mvp\s+/, '');
-              return eggLower && (itemLower.includes(eggLower) || eggLower.includes(itemLower));
-            });
-            if (!matches) continue;
-          }
+          if (!Array.isArray(selectedEggs) || selectedEggs.length === 0) continue;
+          const itemLower = translatedName.toLowerCase();
+          const matches = selectedEggs.some(eggName => {
+            const isSelectedMvp = eggName.toLowerCase().startsWith('mvp ');
+            const isItemMvp = itemLower.includes('mvp');
+            if (isSelectedMvp !== isItemMvp) return false;
+
+            let eggLower = eggName.toLowerCase().trim();
+            if (isSelectedMvp) eggLower = eggLower.replace(/^mvp\s+/, '');
+            return eggLower && (itemLower.includes(eggLower) || eggLower.includes(itemLower));
+          });
+          if (!matches) continue;
         } else if (category === 'module') {
           const selectedTiers = this.settings.marketSelectedModuleTiers || [];
-          if (Array.isArray(selectedTiers) && selectedTiers.length > 0) {
-            const itemTier = getModuleTier(translatedName) || getModuleTier(item.item_name || '');
-            if (!itemTier || !selectedTiers.includes(itemTier)) continue;
-          }
+          if (!Array.isArray(selectedTiers) || selectedTiers.length === 0) continue;
+          const itemTier = getModuleTier(translatedName) || getModuleTier(item.item_name || '');
+          if (!itemTier || !selectedTiers.includes(itemTier)) continue;
         } else if (category === 'collectible') {
           const selectedCollectibles = this.settings.marketSelectedCollectibles || [];
-          if (Array.isArray(selectedCollectibles) && selectedCollectibles.length > 0) {
-            const itemLower = translatedName.toLowerCase();
-            const matches = selectedCollectibles.some(colName => {
-              const colLower = colName.toLowerCase().trim();
-              return colLower && (itemLower.includes(colLower) || colLower.includes(itemLower));
-            });
-            if (!matches) continue;
-          }
+          if (!Array.isArray(selectedCollectibles) || selectedCollectibles.length === 0) continue;
+          const itemLower = translatedName.toLowerCase();
+          const matches = selectedCollectibles.some(colName => {
+            const colLower = colName.toLowerCase().trim();
+            return colLower && (itemLower.includes(colLower) || colLower.includes(itemLower));
+          });
+          if (!matches) continue;
         } else if (category === 'module_box') {
           const selectedModuleBoxes = this.settings.marketSelectedModuleBoxes || [];
-          if (Array.isArray(selectedModuleBoxes) && selectedModuleBoxes.length > 0) {
-            const itemLower = translatedName.toLowerCase();
-            const matches = selectedModuleBoxes.some(boxType => {
-              const typeLower = boxType.toLowerCase().trim();
-              if (typeLower === 'sử thi+') {
-                return itemLower.includes('sử thi+');
-              } else if (typeLower === 'sử thi') {
-                return itemLower.includes('sử thi') && !itemLower.includes('sử thi+');
-              } else {
-                return itemLower.includes(typeLower);
-              }
-            });
-            if (!matches) continue;
-          }
+          if (!Array.isArray(selectedModuleBoxes) || selectedModuleBoxes.length === 0) continue;
+          const itemLower = translatedName.toLowerCase();
+          const matches = selectedModuleBoxes.some(boxType => {
+            const typeLower = boxType.toLowerCase().trim();
+            if (typeLower === 'sử thi+') {
+              return itemLower.includes('sử thi+');
+            } else if (typeLower === 'sử thi') {
+              return itemLower.includes('sử thi') && !itemLower.includes('sử thi+');
+            } else {
+              return itemLower.includes(typeLower);
+            }
+          });
+          if (!matches) continue;
         } else if (category === 'card_box') {
           const selectedCardBoxes = this.settings.marketSelectedCardBoxes || [];
-          if (Array.isArray(selectedCardBoxes) && selectedCardBoxes.length > 0) {
-            const itemLower = translatedName.toLowerCase();
-            const matches = selectedCardBoxes.some(boxTier => {
-              const tierLower = boxTier.toLowerCase().trim();
-              return itemLower.includes(tierLower);
-            });
-            if (!matches) continue;
-          }
+          if (!Array.isArray(selectedCardBoxes) || selectedCardBoxes.length === 0) continue;
+          const itemLower = translatedName.toLowerCase();
+          const matches = selectedCardBoxes.some(boxTier => {
+            const tierLower = boxTier.toLowerCase().trim();
+            return itemLower.includes(tierLower);
+          });
+          if (!matches) continue;
         } else if (category === 'egg_box') {
           const selectedEggBoxes = this.settings.marketSelectedEggBoxes || [];
-          if (Array.isArray(selectedEggBoxes) && selectedEggBoxes.length > 0) {
-            const itemLower = translatedName.toLowerCase();
-            const matches = selectedEggBoxes.some(boxTier => {
-              const tierLower = boxTier.toLowerCase().trim();
-              return itemLower.includes(tierLower);
-            });
-            if (!matches) continue;
-          }
+          if (!Array.isArray(selectedEggBoxes) || selectedEggBoxes.length === 0) continue;
+          const itemLower = translatedName.toLowerCase();
+          const matches = selectedEggBoxes.some(boxTier => {
+            const tierLower = boxTier.toLowerCase().trim();
+            return itemLower.includes(tierLower);
+          });
+          if (!matches) continue;
         }
 
         matchingItems.push({

@@ -1,6 +1,7 @@
 # Bước 5 — Review (vai trò: Reviewer / Senior Dev)
 
 Bước cuối trước khi đánh dấu task `done`. Tự đóng vai người review code của chính mình, khách quan như thể đang review code của người khác.
+phân tích theo 4M
 
 ## Checklist review
 

@@ -5101,13 +5101,7 @@ const MARKET_CATEGORY_DEFS = [
 ];
 
 function isMvpName(name) {
-  return name.startsWith('MVP ') ||
-         name.startsWith('Vua') ||
-         name.startsWith('Chúa tể') ||
-         name.startsWith('Tướng quan') ||
-         name.startsWith('Ma Vương') ||
-         name.includes('Rồng') ||
-         name.includes('Long');
+  return name.startsWith('MVP ');
 }
 
 function getMonsterLists(acc) {

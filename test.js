@@ -418,8 +418,10 @@ try {
       { id: 101, item_name: 'การ์ด Jellyfish (1⭐)', item_type: 'card', price_per: 500 }, // Star: 1
       { id: 102, item_name: 'การ์ด Wolf (2⭐)', item_type: 'card', price_per: 800 },   // Star: 2
       { id: 103, item_name: 'การ์ด Baphomet (10⭐)', item_type: 'card', price_per: 15000 }, // Over max price
+      { id: 104, item_name: 'การ์ด MVP Wolf (5⭐)', item_type: 'card', price_per: 2000 },
       // Eggs
       { id: 105, item_name: 'ไข่ ไก่เจี๊ยบ', item_type: 'egg', price_per: 600 },
+      { id: 106, item_name: 'ไข่ MVP ไก่เจี๊ยบ', item_type: 'egg', price_per: 1500 },
       // Modules
       { id: 201, item_name: 'โมดูลมีด T1', item_type: 'module_knife', price_per: 1200 },
       { id: 202, item_name: 'โมดูลเกราะ T3', item_type: 'module_armor', price_per: 3000 },
@@ -461,22 +463,36 @@ try {
     return { ok: true };
   };
 
-  // 7a. Test Card selective filtering
+  // 7a. Test Card selective filtering (Normal cards only)
   instance.settings.marketCategories.card = true;
   instance.settings.marketSelectedCards = ['Jellyfish', 'Wolf'];
   lastBoughtListingIds = [];
   instance.lastMarketScanAt = null;
   await instance.scanAndBuyMarket();
-  assert.deepStrictEqual(lastBoughtListingIds, [101, 102], 'Should buy all matching cards (id 101, 102)');
+  assert.deepStrictEqual(lastBoughtListingIds, [101, 102], 'Should buy only normal matching cards (id 101, 102), skipping MVP (id 104)');
+  
+  // Test Card selective filtering (MVP cards only)
+  instance.settings.marketSelectedCards = ['MVP Wolf'];
+  lastBoughtListingIds = [];
+  instance.lastMarketScanAt = null;
+  await instance.scanAndBuyMarket();
+  assert.deepStrictEqual(lastBoughtListingIds, [104], 'Should buy only MVP Wolf card (id 104), skipping normal Wolf (id 102)');
   instance.settings.marketCategories.card = false;
 
-  // 7b. Test Egg selective filtering with newly translated monster name
+  // 7b. Test Egg selective filtering with newly translated monster name (Normal egg only)
   instance.settings.marketCategories.egg = true;
   instance.settings.marketSelectedEggs = ['Gà con']; // Maps to 'ไข่ ไก่เจี๊ยบ' -> 'Trứng Gà con'
   lastBoughtListingIds = [];
   instance.lastMarketScanAt = null;
   await instance.scanAndBuyMarket();
-  assert.deepStrictEqual(lastBoughtListingIds, [105], 'Should buy egg matching Gà con (id 105)');
+  assert.deepStrictEqual(lastBoughtListingIds, [105], 'Should buy normal egg matching Gà con (id 105), skipping MVP (id 106)');
+
+  // Test Egg selective filtering (MVP egg only)
+  instance.settings.marketSelectedEggs = ['MVP Gà con'];
+  lastBoughtListingIds = [];
+  instance.lastMarketScanAt = null;
+  await instance.scanAndBuyMarket();
+  assert.deepStrictEqual(lastBoughtListingIds, [106], 'Should buy MVP egg matching Gà con (id 106), skipping normal (id 105)');
   instance.settings.marketCategories.egg = false;
 
   // 7c. Test Module Tier filtering (T3, T4 within T1-T5 range)
@@ -495,13 +511,13 @@ try {
   await instance.scanAndBuyMarket();
   assert.deepStrictEqual(lastBoughtListingIds, [], 'Should NOT buy resource/trash when resource category is OFF');
 
-  // 7f. Test Category ON with empty sub-filters (Should buy ANY card <= max price)
+  // 7f. Test Category ON with empty sub-filters (Should NOT buy any cards if list is empty)
   instance.settings.marketCategories.card = true;
   instance.settings.marketSelectedCards = []; // Empty sub-filters
   lastBoughtListingIds = [];
   instance.lastMarketScanAt = null;
   await instance.scanAndBuyMarket();
-  assert.deepStrictEqual(lastBoughtListingIds, [101, 102], 'Should buy all cards <= max price (id 101, 102) when card category is ON even if sub-filters are empty');
+  assert.deepStrictEqual(lastBoughtListingIds, [], 'Should NOT buy any cards when card category is ON but sub-filters are empty');
   instance.settings.marketCategories.card = false;
 
   // 7g. Test Box selective filtering
@@ -583,6 +599,7 @@ try {
 
   // 7e. Test Buy Error Handling & History Log Recording
   instance.settings.marketCategories.collectible = true;
+  instance.settings.marketSelectedCollectibles = ['Titan']; // Set whitelist to trigger matching
   simulateBuyError = true;
   lastBoughtListingIds = [];
   instance.lastMarketScanAt = null;

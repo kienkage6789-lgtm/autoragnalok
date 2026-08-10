@@ -33,6 +33,7 @@ Ngay khi bắt đầu một task không nhỏ, tạo (nếu chưa có) thư mụ
 | `TASKS.md` | Danh sách task dạng WBS, trạng thái, acceptance criteria | Mỗi khi task đổi trạng thái |
 | `DECISIONS.md` | Quyết định kỹ thuật quan trọng + lý do (ADR ngắn gọn) | Mỗi khi có quyết định đáng nhớ (đổi thư viện, đổi kiến trúc...) |
 | `CHANGELOG.md` | Nhật ký các thay đổi thực tế đã làm, theo thời gian | Sau mỗi lần code xong 1 phần việc |
+| `4M.MD` | Phân tích lỗi | Khi nhận được phản ánh phát sinh lỗi |
 
 Template chi tiết nằm trong `assets/`. Xem `references/06-context-persistence.md` để biết cách dùng đúng cách (đây là phần quan trọng nhất, đọc kỹ).
 
