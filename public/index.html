@@ -224,7 +224,11 @@
           <h4>＋ Thêm Proxy Mới</h4>
           <div class="admin-add-proxy-grid">
             <input type="text" id="proxy-new-label" placeholder="Tên gợi nhớ (VD: VN Proxy 1)" class="admin-input-text">
-            <input type="text" id="proxy-new-url" placeholder="http://user:pass@ip:port  hoặc  IP:PORT:USER:PASS  hoặc  IP:PORT" required class="admin-input-mono">
+            <select id="proxy-new-type" class="admin-input-text" style="width: 100%;">
+              <option value="http">HTTP</option>
+              <option value="socks5">SOCKS5</option>
+            </select>
+            <input type="text" id="proxy-new-url" placeholder="http://... hoặc socks5://... hoặc IP:PORT:USER:PASS hoặc IP:PORT" required class="admin-input-mono">
             <button type="submit" class="btn btn-primary" style="padding:7px 14px; font-size:0.8rem; white-space:nowrap;">Thêm Proxy</button>
           </div>
           <div class="error-msg" id="proxy-add-error" style="margin-top:6px; font-size:0.8rem;"></div>

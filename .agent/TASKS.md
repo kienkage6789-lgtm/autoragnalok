@@ -3,6 +3,19 @@
 > Work Breakdown Structure. Update task states immediately upon changes.
 > Statuses: todo | doing | blocked | review | done
 
+### [x] T64 - Hỗ trợ Proxy SOCKS5 trong Proxy Pool
+- Description: Bổ sung hỗ trợ đầy đủ cho proxy SOCKS5 (socks5://) trong hệ thống Proxy Pool. Cung cấp tùy chọn loại proxy (HTTP / SOCKS5) trên giao diện admin, tự động phân tích định dạng thô (IP:PORT:USER:PASS hoặc IP:PORT) tương ứng với giao thức đã chọn, đồng thời cấu hình `undici` ProxyAgent tương thích SOCKS5 và viết unit test kiểm thử.
+- Files related: `server.js`, `public/index.html`, `public/app.js`, `public/app.css`, `test.js`
+- Acceptance criteria:
+  - [x] Thêm dropdown chọn loại proxy (HTTP / SOCKS5) vào form thêm proxy mới trên Admin Dashboard.
+  - [x] Cập nhật CSS hiển thị cột trong `.admin-add-proxy-grid` của `app.css`.
+  - [x] Cập nhật frontend `app.js` gửi kèm tham số `type` khi thêm proxy mới.
+  - [x] Cập nhật backend `server.js` xử lý tham số `type` để auto-parse raw proxy thành giao thức tương ứng (http:// hoặc socks5://).
+  - [x] Kiểm thử cấu hình ProxyAgent với socks5:// và tích hợp Unit Test trong `test.js`, chạy `npm test` thành công.
+- Status: done
+
+---
+
 ### [x] T63 - Sửa lỗi phân loại quái thường/MVP và bộ lọc Chợ Auto mua nhầm
 - Description: Điều chỉnh cơ chế hiển thị danh sách quái thường/MVP không bị trùng lặp bằng cách sửa hàm `isMvpName` chỉ khớp tiền tố `"MVP "`. Nâng cấp logic so khớp backend sang cơ chế strict type matching để tránh mua nhầm thẻ/trứng thường khi cấu hình chọn MVP và ngược lại. Khắc phục lỗi tự động mua hàng loạt khi bộ lọc trống.
 - Files related: `server.js`, `public/app.js`, `test.js`

@@ -19,6 +19,49 @@ app.set('trust proxy', 1); // Trust first proxy (Render, Heroku, Nginx, Cloudfla
 const PROXIES_FILE = path.join(__dirname, 'proxies.json');
 
 class ProxyPool {
+  static parseProxyInput(url, type, label) {
+    if (!url) throw new Error('Thiếu URL proxy');
+    url = url.trim();
+    const proxyType = (type === 'socks5') ? 'socks5' : 'http';
+    let newUrl = url;
+    let newLabel = label;
+
+    // Auto-parse raw proxy format (IP:PORT:USER:PASS or IP:PORT)
+    if (!newUrl.startsWith('http://') && !newUrl.startsWith('https://') && !newUrl.startsWith('socks')) {
+      const parts = newUrl.split(':');
+      if (parts.length === 4) {
+        const [ip, port, user, pass] = parts;
+        newUrl = `${proxyType}://${user}:${pass}@${ip}:${port}`;
+        if (!newLabel) {
+          newLabel = `${ip}:${port}`;
+        }
+      } else if (parts.length === 2) {
+        const [ip, port] = parts;
+        newUrl = `${proxyType}://${ip}:${port}`;
+        if (!newLabel) {
+          newLabel = `${ip}:${port}`;
+        }
+      } else {
+        throw new Error('Định dạng proxy không hợp lệ. Vui lòng nhập http://..., socks5://... hoặc dạng IP:PORT:USER:PASS hoặc IP:PORT');
+      }
+    }
+
+    if (!newLabel) {
+      try {
+        const parsed = new URL(newUrl);
+        newLabel = parsed.host;
+      } catch (e) {
+        newLabel = newUrl;
+      }
+    }
+
+    if (!newUrl.startsWith('http://') && !newUrl.startsWith('https://') && !newUrl.startsWith('socks')) {
+      throw new Error('URL proxy không hợp lệ (phải bắt đầu bằng http:// hoặc socks5://)');
+    }
+
+    return { url: newUrl, label: newLabel };
+  }
+
   constructor() {
     this._settings = { useDirectConnection: true, maxBotsPerProxy: 10 };
     this._proxies = [];
@@ -4182,47 +4225,14 @@ app.get('/api/admin/proxies', requireAuth, (req, res) => {
 
 app.post('/api/admin/proxies', requireAuth, (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'Chỉ Admin mới có quyền truy cập' });
-  let { label, url } = req.body;
-  if (!url) return res.status(400).json({ error: 'Thiếu URL proxy' });
-
-  url = url.trim();
-
-  // Auto-parse raw proxy format (IP:PORT:USER:PASS or IP:PORT)
-  if (!url.startsWith('http://') && !url.startsWith('https://') && !url.startsWith('socks')) {
-    const parts = url.split(':');
-    if (parts.length === 4) {
-      const [ip, port, user, pass] = parts;
-      url = `http://${user}:${pass}@${ip}:${port}`;
-      if (!label) {
-        label = `${ip}:${port}`;
-      }
-    } else if (parts.length === 2) {
-      const [ip, port] = parts;
-      url = `http://${ip}:${port}`;
-      if (!label) {
-        label = `${ip}:${port}`;
-      }
-    } else {
-      return res.status(400).json({ error: 'Định dạng proxy không hợp lệ. Vui lòng nhập http://..., socks5://... hoặc dạng IP:PORT:USER:PASS hoặc IP:PORT' });
-    }
+  const { label, url, type } = req.body;
+  try {
+    const parsed = ProxyPool.parseProxyInput(url, type, label);
+    const proxy = proxyPool.addProxy(parsed.label, parsed.url);
+    res.json({ success: true, proxy });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
   }
-
-  // Mask password or get clean label from URL if not specified
-  if (!label) {
-    try {
-      const parsed = new URL(url);
-      label = parsed.host;
-    } catch (e) {
-      label = url;
-    }
-  }
-
-  if (!url.startsWith('http://') && !url.startsWith('https://') && !url.startsWith('socks')) {
-    return res.status(400).json({ error: 'URL proxy không hợp lệ (phải bắt đầu bằng http:// hoặc socks5://)' });
-  }
-
-  const proxy = proxyPool.addProxy(label, url);
-  res.json({ success: true, proxy });
 });
 
 app.put('/api/admin/proxies/settings', requireAuth, (req, res) => {
@@ -6270,5 +6280,7 @@ module.exports = {
   getCatUpgradeCost,
   getDroneUpgradeCost,
   getMineUpgradeCost,
-  BotInstance
+  BotInstance,
+  ProxyPool,
+  proxyPool
 };

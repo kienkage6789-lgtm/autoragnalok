@@ -2,6 +2,18 @@
 
 > Changelog of actual changes implemented.
 
+## 2026-08-10 - Hỗ Trợ Proxy SOCKS5 trong Proxy Pool (T64)
+- File đã đổi: [server.js](file:///C:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/server.js), [public/index.html](file:///C:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/public/index.html), [public/app.js](file:///C:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/public/app.js), [public/app.css](file:///C:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/public/app.css), [test.js](file:///C:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/test.js).
+- Đã làm:
+  - **Thêm dropdown chọn loại proxy (HTTP / SOCKS5) trên giao diện**: Tích hợp thẻ `<select id="proxy-new-type">` vào Form thêm proxy của Admin Dashboard để người dùng lựa chọn giao thức muốn sử dụng.
+  - **Tái thiết kế CSS Grid cho Form thêm Proxy**: Điều chỉnh định dạng cột của `.admin-add-proxy-grid` trong `app.css` từ 3 cột thành 4 cột (`160px 100px 1fr auto`) để giao diện hiển thị gọn gàng, cân đối trên cùng một dòng ngang.
+  - **Cập nhật JavaScript Frontend**: Bổ sung thu thập giá trị `type` từ dropdown và gửi kèm trong body của POST request `/api/admin/proxies`.
+  - **Tự động phân tích (Auto-parsing) & Validate phía Backend**:
+    - Trích xuất logic phân tích và định dạng URL proxy thô thành hàm static helper `ProxyPool.parseProxyInput(url, type, label)`.
+    - Hỗ trợ chuyển đổi các định dạng proxy thô không giao thức (`IP:PORT:USER:PASS` hoặc `IP:PORT`) sang giao thức SOCKS5 (`socks5://...`) nếu loại proxy được chọn là SOCKS5.
+    - Cập nhật điều kiện validate URL proxy trên backend chấp nhận giao thức bắt đầu bằng `socks` (`socks5://`, `socks://`).
+  - **Tích hợp Unit Test**: Viết bổ sung bộ unit test toàn diện cho `ProxyPool.parseProxyInput` kiểm chứng việc phân tích các định dạng SOCKS5 thô, SOCKS5 đầy đủ URI, HTTP thô, và validate định dạng lỗi. Chạy `npm test` thành công 100%.
+
 ## 2026-08-10 - Khắc Phục Lỗi Phân Loại Và Mua Nhầm Vật Phẩm Chợ Auto
 - File đã đổi: [server.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [public/app.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/public/app.js), [test.js](file:///C:/Users/Admin/Desktop/autoR/autoragnalok/test.js).
 - Đã làm:

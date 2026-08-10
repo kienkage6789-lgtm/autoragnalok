@@ -7,7 +7,9 @@ const {
   getCatUpgradeCost,
   getDroneUpgradeCost,
   getMineUpgradeCost,
-  BotInstance
+  BotInstance,
+  ProxyPool,
+  proxyPool
 } = require('./server');
 
 console.log('🧪 Running Unit Tests...');
@@ -642,8 +644,40 @@ try {
   instance.sendRequest = originalSendRequest;
   instance.settings.activeHealEnabled = false;
 
+  // 9. Test ProxyPool SOCKS5 Parsing
+  console.log('Testing ProxyPool SOCKS5 Parsing...');
+  
+  // Test raw SOCKS5 without authentication
+  const socksRawNoAuth = ProxyPool.parseProxyInput('1.2.3.4:1080', 'socks5');
+  assert.strictEqual(socksRawNoAuth.url, 'socks5://1.2.3.4:1080');
+  assert.strictEqual(socksRawNoAuth.label, '1.2.3.4:1080');
+
+  // Test raw SOCKS5 with authentication
+  const socksRawAuth = ProxyPool.parseProxyInput('1.2.3.4:1080:myuser:mypass', 'socks5');
+  assert.strictEqual(socksRawAuth.url, 'socks5://myuser:mypass@1.2.3.4:1080');
+  assert.strictEqual(socksRawAuth.label, '1.2.3.4:1080');
+
+  // Test SOCKS5 full URI
+  const socksFullUri = ProxyPool.parseProxyInput('socks5://user:pass@127.0.0.1:1080', 'socks5');
+  assert.strictEqual(socksFullUri.url, 'socks5://user:pass@127.0.0.1:1080');
+  assert.strictEqual(socksFullUri.label, '127.0.0.1:1080');
+
+  // Test SOCKS5 full URI with default HTTP fallback (should preserve protocol)
+  const socksFullUriHttp = ProxyPool.parseProxyInput('socks5://127.0.0.1:1080', 'http');
+  assert.strictEqual(socksFullUriHttp.url, 'socks5://127.0.0.1:1080');
+
+  // Test HTTP raw formatting
+  const httpRaw = ProxyPool.parseProxyInput('1.2.3.4:8080', 'http');
+  assert.strictEqual(httpRaw.url, 'http://1.2.3.4:8080');
+  
+  // Test invalid proxy format throws error
+  assert.throws(() => {
+    ProxyPool.parseProxyInput('invalid_format', 'socks5');
+  }, /Định dạng proxy không hợp lệ/);
+
   console.log('✅ Revamped Auto Market Buy Tests Passed successfully!');
   console.log('✅ Urgent Active Potion Healing Tests Passed successfully!');
+  console.log('✅ ProxyPool SOCKS5 Parsing Tests Passed successfully!');
   console.log('✅ All Unit Tests Passed successfully!');
   process.exit(0);
 } catch (error) {

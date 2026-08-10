@@ -1215,7 +1215,7 @@ input:checked + .slider:before {
 /* Add Proxy Form grid */
 .admin-add-proxy-grid {
   display: grid;
-  grid-template-columns: 160px 1fr auto;
+  grid-template-columns: 160px 100px 1fr auto;
   gap: 8px;
   align-items: center;
 }

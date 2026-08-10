@@ -2,6 +2,21 @@
 
 > Captured architectural decisions and trade-offs.
 
+## 2026-08-10 - Hỗ trợ Proxy SOCKS5 trong Proxy Pool (T64)
+
+- Bối cảnh:
+  - Hệ thống Proxy Pool hiện tại chỉ hỗ trợ các proxy dạng HTTP/HTTPS. Người dùng muốn tích hợp thêm giao thức SOCKS5 (`socks5://`) để tăng khả năng tương thích với nhiều nguồn cung cấp proxy khác nhau.
+- Quyết định:
+  - **Sử dụng `undici.ProxyAgent` hỗ trợ SOCKS5**:
+    - Kiểm thử và xác nhận `undici` bản mới (`v8.7.0`) hỗ trợ trực tiếp giao thức SOCKS5. Khi tạo instance `ProxyAgent`, chỉ cần cung cấp URL chứa giao thức `socks5://` hoặc `socks://` vào tùy chọn `uri` mà không cần cài đặt thêm thư viện ngoài (như `socks-proxy-agent`), giữ cho mã nguồn nhẹ và sạch.
+  - **Dropdown chọn Loại Proxy và CSS Grid thích ứng**:
+    - Thêm dropdown `<select id="proxy-new-type">` vào Form thêm proxy của giao diện Admin với 2 tùy chọn: `HTTP` và `SOCKS5`.
+    - Điều chỉnh CSS `.admin-add-proxy-grid` có 4 cột: `grid-template-columns: 160px 100px 1fr auto` để hiển thị dropdown loại proxy một cách cân đối trên cùng một hàng ngang.
+  - **Xử lý Tự động phân tích (Auto-Parsing) trên Backend**:
+    - Frontend gửi thêm thuộc tính `type` (`http` hoặc `socks5`) khi tạo proxy mới.
+    - Tại route `POST /api/admin/proxies`, nếu người dùng nhập định dạng proxy thô không chứa giao thức (`IP:PORT:USER:PASS` hoặc `IP:PORT`), backend sẽ tự động phân tích và sinh ra URL đầy đủ tương ứng với giao thức đã chọn (`socks5://...` hoặc `http://...`).
+    - Nâng cấp điều kiện validate URL proxy để chấp nhận cả URL bắt đầu bằng `socks`.
+
 ## 2026-08-08 - Lọc Hộp Theo Cấp Bậc Trên Chợ & Bơm Máu Khẩn Cấp Chủ Động (T62)
 
 - Bối cảnh:

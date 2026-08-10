@@ -4232,11 +4232,13 @@ document.addEventListener('DOMContentLoaded', () => {
       errEl.textContent = '';
       const label = document.getElementById('proxy-new-label').value.trim();
       const url   = document.getElementById('proxy-new-url').value.trim();
+      const typeEl = document.getElementById('proxy-new-type');
+      const type  = typeEl ? typeEl.value : 'http';
       try {
         const res = await fetch('/api/admin/proxies', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ label, url })
+          body: JSON.stringify({ label, url, type })
         });
         const data = await res.json();
         if (res.ok && data.success) {
