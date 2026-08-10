@@ -1543,7 +1543,7 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
 
           <div style="margin-top: 10px;">
-            <button type="button" onclick="forceMvpHunt('${acc.line_uid}')" style="background: rgba(220, 38, 38, 0.25); border: 1px solid rgba(220, 38, 38, 0.5); color: #fca5a5; border-radius: 6px; padding: 6px 12px; font-size: 0.85rem; cursor: pointer; width: 100%; font-weight: 600; text-align: center; transition: all 0.2s;" onmouseover="this.style.background='rgba(220, 38, 38, 0.4)'" onmouseout="this.style.background='rgba(220, 38, 38, 0.25)'">⚡ Kích hoạt đi săn ngay (Force Hunt)</button>
+            <button type="button" onclick="forceMvpHunt('${acc.line_uid}')" style="background: rgba(220, 38, 38, 0.25); border: 1px solid rgba(220, 38, 38, 0.5); color: #fca5a5; border-radius: 6px; padding: 6px 12px; font-size: 0.85rem; cursor: pointer; width: 100%; font-weight: 600; text-align: center; transition: all 0.2s;" onmouseover="this.style.background='rgba(220, 38, 38, 0.4)'" onmouseout="this.style.background='rgba(220, 38, 38, 0.25)'">⚡ Kích hoạt đi săn ngay cho cả Team (Force Team Hunt)</button>
           </div>
 
           <div class="live-bosses-section" id="live-bosses-section-${acc.line_uid}" style="margin-top: 12px; border-top: 1px dashed rgba(255,255,255,0.08); padding-top: 10px; display: none;">
@@ -3535,7 +3535,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Update Settings (Toggles)
   window.toggleSetting = async function(uid, settingKey) {
-    const chk = document.getElementById(`chk-${settingKey.toLowerCase()}-${uid}`);
+    let idKey = settingKey.toLowerCase();
+    if (settingKey === 'activeHealEnabled') {
+      idKey = 'active-heal-enabled';
+    } else if (settingKey === 'eventTargetMinDef') {
+      idKey = 'event-target-mindef';
+    } else if (settingKey === 'autoHomeUpgrade') {
+      idKey = 'autohomeup';
+    }
+    
+    let chk = document.getElementById(`chk-${idKey}-${uid}`);
+    if (!chk) {
+      chk = document.getElementById(`chk-${settingKey.toLowerCase()}-${uid}`);
+    }
     if (!chk) return;
     
     const val = chk.checked;

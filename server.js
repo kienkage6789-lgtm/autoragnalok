@@ -1604,7 +1604,13 @@ class BotInstance {
         lang: 'vi'
       });
       if (res && res.ok) {
-        this.updatePlayerState(res.player || res);
+        if (res.player) {
+          this.updatePlayerState(res.player);
+        } else if (this.player) {
+          this.player.map = 4;
+          if (res.x !== undefined) this.player.x = res.x;
+          if (res.y !== undefined) this.player.y = res.y;
+        }
         this.spots = null;
         this.bosses = null;
         this.addLog('SUCCESS', `⚔️ [Guild War] Vào chiến trường thành công`);
@@ -1628,7 +1634,13 @@ class BotInstance {
         lang: 'vi'
       });
       if (res && res.ok) {
-        this.updatePlayerState(res.player || res);
+        if (res.player) {
+          this.updatePlayerState(res.player);
+        } else if (this.player) {
+          this.player.map = 4;
+          if (res.x !== undefined) this.player.x = res.x;
+          if (res.y !== undefined) this.player.y = res.y;
+        }
         this.spots = null;
         this.bosses = null;
         this.addLog('SUCCESS', `⚔️ [National War] Vào chiến trường thành công`);
@@ -1768,7 +1780,8 @@ class BotInstance {
         // Schedule next poll staggering
         if (this.status === 'running') {
           const isSnipe = this.targetedMvp && this._bossSnipeActive;
-          const baseDelay = isSnipe ? 1200 : 2000;
+          const isPkEvent = this.inEventMode && (this.currentEventKind === 'gw' || this.currentEventKind === 'cw');
+          const baseDelay = (isSnipe || isPkEvent) ? 1200 : 2000;
           const jitter = Math.floor(Math.random() * 300) - 150; // Jitter ngẫu nhiên ±150ms né Cloudflare pattern
           this.timer = setTimeout(runPoll, Math.max(1000, baseDelay + jitter));
         }
@@ -2601,13 +2614,26 @@ class BotInstance {
     }
 
     // Save event details
-    if (d.inv !== undefined) this.lastInv = d.inv;
-    if (d.gw !== undefined) this.lastGw = d.gw;
-    if (d.cw !== undefined) this.lastCw = d.cw;
+    if (d.inv !== undefined) {
+      this.lastInv = d.inv;
+    } else if (isFull) {
+      this.lastInv = null;
+    }
+    if (d.gw !== undefined) {
+      this.lastGw = d.gw;
+    } else if (isFull) {
+      this.lastGw = null;
+    }
+    if (d.cw !== undefined) {
+      this.lastCw = d.cw;
+    } else if (isFull) {
+      this.lastCw = null;
+    }
 
-    const isInvActive = this.lastInv && (this.lastInv.st === 'pre' || this.lastInv.st === 'active');
-    const isGwActive = this.lastGw && (this.lastGw.st === 'open' || this.lastGw.st === 'fight');
-    const isCwActive = this.lastCw && (this.lastCw.st === 'open' || this.lastCw.st === 'fight');
+    const currentEpoch = Math.floor(Date.now() / 1000);
+    const isInvActive = this.lastInv && (this.lastInv.st === 'pre' || this.lastInv.st === 'active') && (!this.lastInv.ends || this.lastInv.ends > currentEpoch);
+    const isGwActive = this.lastGw && (this.lastGw.st === 'open' || this.lastGw.st === 'fight') && (!this.lastGw.ends || this.lastGw.ends > currentEpoch);
+    const isCwActive = this.lastCw && (this.lastCw.st === 'open' || this.lastCw.st === 'fight') && (!this.lastCw.ends || this.lastCw.ends > currentEpoch);
 
     // Auto-join event
     if (this.settings.autoEventJoin && !this.inEventMode) {
@@ -2678,7 +2704,8 @@ class BotInstance {
 
     // Urgent Active Potion Healing (Active Potion Healing)
     if (this.player && !this.player.is_dead) {
-      const hpPct = Math.round((this.player.hp / this.player.hp_max) * 100);
+      const maxHp = this.player.hp_max_eff || this.player.hp_max || 100;
+      const hpPct = Math.min(100, Math.round((this.player.hp / maxHp) * 100));
       
       let shouldActiveHeal = false;
       let healReason = '';
@@ -5527,18 +5554,38 @@ app.post('/api/accounts/:line_uid/action', requireAuth, async (req, res) => {
 
   if (action === 'force_mvp_hunt') {
     try {
-      bot.updateSettings({ bossHuntMode: 'type2' });
-      
-      // Save settings changes to accounts.json
+      // Tìm tất cả các bot thuộc sở hữu của cùng một người dùng (userId)
+      const userBots = Object.values(botInstances).filter(b => b.userId === bot.userId);
       const currentAccounts = loadAccounts();
-      const index = currentAccounts.findIndex(acc => acc.line_uid === line_uid);
-      if (index !== -1) {
-        currentAccounts[index].settings = bot.settings;
-        saveAccounts(currentAccounts);
+      
+      for (const targetBot of userBots) {
+        targetBot.updateSettings({ bossHuntMode: 'type2' });
+        
+        const index = currentAccounts.findIndex(acc => acc.line_uid === targetBot.line_uid);
+        if (index !== -1) {
+          currentAccounts[index].settings = targetBot.settings;
+        }
+        
+        // Chỉ gọi triggerMvpCycle cho trưởng nhóm hoặc bot chạy độc lập
+        // Thành viên sẽ tự động đồng bộ theo trưởng nhóm trong pollGame()
+        if (targetBot.settings.teamRole !== 'member') {
+          targetBot.triggerMvpCycle(true);
+        } else {
+          const leader = userBots.find(b => b.settings.teamRole === 'leader');
+          if (leader) {
+            targetBot.isMvpCycling = leader.isMvpCycling;
+            targetBot.mvpCycleMapIndex = leader.mvpCycleMapIndex;
+            targetBot.mvpCycleOriginalMap = leader.mvpCycleOriginalMap;
+          } else {
+            targetBot.triggerMvpCycle(true);
+          }
+        }
+        
+        targetBot.addLog('SYSTEM', '🚀 [Auto Boss] Kích hoạt chế độ đi săn Boss xoay vòng cho cả Team!');
       }
-
-      bot.triggerMvpCycle(true);
-      return res.json({ ok: true, msg: 'Đã kích hoạt chế độ đi săn Boss xoay vòng map chỉ định!' });
+      
+      saveAccounts(currentAccounts);
+      return res.json({ ok: true, msg: 'Đã kích hoạt chế độ đi săn Boss xoay vòng cho cả Team!' });
     } catch (err) {
       return res.status(500).json({ error: err.message });
     }
