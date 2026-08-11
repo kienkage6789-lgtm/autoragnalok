@@ -1265,6 +1265,7 @@ class BotInstance {
     this.lastHarvestFailedAt = 0;
     this.lastHomeUpgradeFailedAt = 0;
     this.marketBuyHistory = account.marketBuyHistory || [];
+    this.eventWarHistory = [];
     this.inEventMode = false;
     this.currentEventKind = null;
     this.eventOriginalMap = null;
@@ -1341,6 +1342,7 @@ class BotInstance {
       autoHomeUpgrade: false,
       bypassHomeWarp: false,
       teamRole: 'none',
+      teamId: 'none',
       autoMarketBuy: false,
       marketMaxPrice: 10000,
       marketExactPrice: false,
@@ -1695,6 +1697,50 @@ class BotInstance {
     } catch (e) {
       this.addLog('ERROR', `Lỗi vào National War: ${e.message}`);
       return false;
+    }
+  }
+
+  async fetchWarLog() {
+    try {
+      const kind = this.currentEventKind; // 'gw' or 'cw'
+      if (!kind) return;
+      
+      const res = await this.sendRequest('https://ragnalok.online/human/xhrpg_cwar.php', {
+        line_uid: this.line_uid,
+        session_token: this.session_token,
+        action: 'war_log',
+        kind: kind,
+        lang: 'vi'
+      });
+      if (res && res.ok && Array.isArray(res.feed)) {
+        if (!this.eventWarHistory) this.eventWarHistory = [];
+        const existingKeys = new Set(this.eventWarHistory.map(h => `${h.time}_${h.killer}_${h.victim}`));
+        
+        let addedCount = 0;
+        res.feed.forEach(r => {
+          const timeMs = (r.t | 0) * 1000;
+          const key = `${timeMs}_${r.k}_${r.v}`;
+          if (!existingKeys.has(key)) {
+            this.eventWarHistory.unshift({
+              time: timeMs,
+              eventKind: kind,
+              killer: r.k,
+              killerTag: r.kt || null,
+              victim: r.v,
+              victimTag: r.vt || null,
+              points: r.p | 0
+            });
+            addedCount++;
+          }
+        });
+        
+        // Giới hạn tối đa 150 bản ghi
+        if (this.eventWarHistory.length > 150) {
+          this.eventWarHistory = this.eventWarHistory.slice(0, 150);
+        }
+      }
+    } catch (e) {
+      console.error(`Failed to fetch event war log for ${this.name}:`, e.message);
     }
   }
 
@@ -2160,7 +2206,10 @@ class BotInstance {
     // 🗺️ Định tuyến bản đồ khẩn cấp (Map Routing) & Đồng bộ Trưởng nhóm (Leader)
     if (this.player) {
       const isMember = this.settings.teamRole === 'member';
-      const leader = isMember ? Object.values(botInstances).find(b => b.userId === this.userId && b.settings.teamRole === 'leader') : null;
+      const myTeamId = this.settings.teamId || 'none';
+      const leader = (isMember && myTeamId !== 'none') 
+        ? Object.values(botInstances).find(b => b.userId === this.userId && b.settings.teamRole === 'leader' && (b.settings.teamId || 'none') === myTeamId) 
+        : null;
       
       let activeTargetMapId;
       let shouldWarpCheck = false;
@@ -2210,7 +2259,7 @@ class BotInstance {
     const nowTime = new Date();
     const currentHour = nowTime.getHours();
     const currentMinute = nowTime.getMinutes();
-    if (this.settings.bossHuntMode === 'type2' && this.settings.mvpTargetMaps) {
+    if (this.settings.bossHuntMode === 'type2' && this.settings.mvpTargetMaps && this.settings.teamRole !== 'member') {
       if (currentMinute <= 2 && this.lastMvpCycleCheckHour !== currentHour) {
         this.lastMvpCycleCheckHour = currentHour;
         this.addLog('SYSTEM', `⏰ [Auto Boss] Đến giờ tròn (${currentHour}:00). Tự động kích hoạt chu kỳ săn Boss xoay vòng map...`);
@@ -2388,7 +2437,10 @@ class BotInstance {
 
         // 👥 Nếu là Member, ưu tiên tuyệt đối mục tiêu Boss của Leader
         if (this.settings.teamRole === 'member') {
-          const leader = Object.values(botInstances).find(b => b.userId === this.userId && b.settings.teamRole === 'leader');
+          const myTeamId = this.settings.teamId || 'none';
+          const leader = myTeamId !== 'none' 
+            ? Object.values(botInstances).find(b => b.userId === this.userId && b.settings.teamRole === 'leader' && (b.settings.teamId || 'none') === myTeamId) 
+            : null;
           if (leader && leader.settings.bossHuntMode !== 'off') {
             const leaderTargetId = leader.manualTargetBossId !== null ? leader.manualTargetBossId : leader.lastTargetedBossId;
             if (leaderTargetId !== null) {
@@ -2738,6 +2790,11 @@ class BotInstance {
       } else if (this.currentEventKind === 'cw' && !isCwActive) {
         this.exitEventMode();
       }
+    }
+
+    // Kích hoạt lấy log tự động định kỳ trong đấu trường sự kiện
+    if (this.inEventMode && (this.currentEventKind === 'gw' || this.currentEventKind === 'cw') && this.pollCount % 15 === 0) {
+      this.fetchWarLog().catch(() => {});
     }
 
     if (this.bosses) {
@@ -5124,14 +5181,18 @@ app.put('/api/accounts/:line_uid', requireAuth, async (req, res) => {
         }
       }
       if (settings.teamRole === 'leader') {
-        Object.values(botInstances).forEach(otherBot => {
-          if (otherBot.userId === bot.userId && otherBot.line_uid !== bot.line_uid) {
-            if (otherBot.settings.teamRole === 'leader') {
-              otherBot.settings.teamRole = 'none';
-              otherBot.addLog('SYSTEM', 'Vai trò Leader đã được chuyển giao cho tài khoản khác.');
+        const myTeamId = settings.teamId || bot.settings.teamId || 'none';
+        if (myTeamId !== 'none') {
+          Object.values(botInstances).forEach(otherBot => {
+            if (otherBot.userId === bot.userId && otherBot.line_uid !== bot.line_uid) {
+              const isSameTeam = (otherBot.settings.teamId || 'none') === myTeamId;
+              if (isSameTeam && otherBot.settings.teamRole === 'leader') {
+                otherBot.settings.teamRole = 'none';
+                otherBot.addLog('SYSTEM', `Vai trò Leader của Team [${myTeamId.toUpperCase()}] đã được chuyển giao cho tài khoản khác.`);
+              }
             }
-          }
-        });
+          });
+        }
       }
       bot.updateSettings(settings);
     }
@@ -5146,13 +5207,17 @@ app.put('/api/accounts/:line_uid', requireAuth, async (req, res) => {
       currentAccounts[index].isManualProxy = bot.isManualProxy;
 
       if (settings.teamRole === 'leader') {
-        currentAccounts.forEach(acc => {
-          if (acc.userId === bot.userId && acc.line_uid !== bot.line_uid) {
-            if (acc.settings && acc.settings.teamRole === 'leader') {
-              acc.settings.teamRole = 'none';
+        const myTeamId = settings.teamId || bot.settings.teamId || 'none';
+        if (myTeamId !== 'none') {
+          currentAccounts.forEach(acc => {
+            if (acc.userId === bot.userId && acc.line_uid !== bot.line_uid) {
+              const isSameTeam = (acc.settings && acc.settings.teamId || 'none') === myTeamId;
+              if (isSameTeam && acc.settings && acc.settings.teamRole === 'leader') {
+                acc.settings.teamRole = 'none';
+              }
             }
-          }
-        });
+          });
+        }
       }
 
       saveAccounts(currentAccounts);
@@ -5194,20 +5259,30 @@ app.post('/api/team/sync', requireAuth, (req, res) => {
     return res.status(400).json({ error: 'Tài khoản này không phải là Leader của Team' });
   }
 
+  const leaderTeamId = leaderBot.settings.teamId || 'none';
+  if (leaderTeamId === 'none') {
+    return res.status(400).json({ error: 'Leader chưa được gán vào Đội nhóm (Team ID) nào để đồng bộ' });
+  }
+
   const currentAccounts = loadAccounts();
   let syncCount = 0;
   const leaderSettings = { ...leaderBot.settings };
   
-  // We should not copy teamRole to members, keeping their role as 'member'
+  // We should not copy teamRole or teamId to members, keeping their role and team membership
   delete leaderSettings.teamRole;
+  delete leaderSettings.teamId;
 
   currentAccounts.forEach(acc => {
     if (acc.userId === leaderBot.userId && acc.line_uid !== leaderBot.line_uid) {
-      if (acc.settings && acc.settings.teamRole === 'member') {
+      const isMemberOfSameTeam = acc.settings && 
+                                 acc.settings.teamRole === 'member' && 
+                                 (acc.settings.teamId || 'none') === leaderTeamId;
+      if (isMemberOfSameTeam) {
         // Copy settings
         acc.settings = {
           ...leaderSettings,
-          teamRole: 'member' // preserve member role
+          teamRole: 'member', // preserve member role
+          teamId: leaderTeamId // preserve team membership
         };
 
         // Sync in-memory botInstance too
@@ -5476,6 +5551,32 @@ app.delete('/api/accounts/:line_uid/market-buy-history', requireAuth, (req, res)
   res.json({ ok: true, message: 'Đã xóa lịch sử mua tự động.' });
 });
 
+// Get bot local event war history
+app.get('/api/accounts/:line_uid/event-war-history', requireAuth, async (req, res) => {
+  const { line_uid } = req.params;
+  const bot = botInstances[line_uid];
+  if (!checkAccountOwnership(req, res, bot)) return;
+
+  // Nếu sự kiện đang chạy, ưu tiên fetch dữ liệu mới nhất
+  if (bot.inEventMode && (bot.currentEventKind === 'gw' || bot.currentEventKind === 'cw')) {
+    try {
+      await bot.fetchWarLog();
+    } catch (e) {}
+  }
+
+  res.json({ ok: true, history: bot.eventWarHistory || [] });
+});
+
+// Clear bot local event war history
+app.delete('/api/accounts/:line_uid/event-war-history', requireAuth, (req, res) => {
+  const { line_uid } = req.params;
+  const bot = botInstances[line_uid];
+  if (!checkAccountOwnership(req, res, bot)) return;
+
+  bot.eventWarHistory = [];
+  res.json({ ok: true, message: 'Đã xóa lịch sử sự kiện thành công.' });
+});
+
 // Get detailed full player state
 app.get('/api/accounts/:line_uid/status', requireAuth, (req, res) => {
   const { line_uid } = req.params;
@@ -5627,11 +5728,18 @@ app.post('/api/accounts/:line_uid/action', requireAuth, async (req, res) => {
 
   if (action === 'force_mvp_hunt') {
     try {
-      // Tìm tất cả các bot thuộc sở hữu của cùng một người dùng (userId)
-      const userBots = Object.values(botInstances).filter(b => b.userId === bot.userId);
+      const myTeamId = bot.settings.teamId || 'none';
+      const targetBots = Object.values(botInstances).filter(b => {
+        if (b.userId !== bot.userId) return false;
+        if (myTeamId === 'none') {
+          return b.line_uid === bot.line_uid;
+        } else {
+          return (b.settings.teamId || 'none') === myTeamId;
+        }
+      });
       const currentAccounts = loadAccounts();
       
-      for (const targetBot of userBots) {
+      for (const targetBot of targetBots) {
         targetBot.updateSettings({ bossHuntMode: 'type2' });
         
         const index = currentAccounts.findIndex(acc => acc.line_uid === targetBot.line_uid);
@@ -5644,7 +5752,7 @@ app.post('/api/accounts/:line_uid/action', requireAuth, async (req, res) => {
         if (targetBot.settings.teamRole !== 'member') {
           targetBot.triggerMvpCycle(true);
         } else {
-          const leader = userBots.find(b => b.settings.teamRole === 'leader');
+          const leader = targetBots.find(b => b.settings.teamRole === 'leader');
           if (leader) {
             targetBot.isMvpCycling = leader.isMvpCycling;
             targetBot.mvpCycleMapIndex = leader.mvpCycleMapIndex;
@@ -5654,11 +5762,15 @@ app.post('/api/accounts/:line_uid/action', requireAuth, async (req, res) => {
           }
         }
         
-        targetBot.addLog('SYSTEM', '🚀 [Auto Boss] Kích hoạt chế độ đi săn Boss xoay vòng cho cả Team!');
+        const msgTeam = myTeamId !== 'none' ? `cho Team [${myTeamId.toUpperCase()}]` : 'độc lập';
+        targetBot.addLog('SYSTEM', `🚀 [Auto Boss] Kích hoạt chế độ đi săn Boss xoay vòng ${msgTeam}!`);
       }
       
       saveAccounts(currentAccounts);
-      return res.json({ ok: true, msg: 'Đã kích hoạt chế độ đi săn Boss xoay vòng cho cả Team!' });
+      const successMsg = myTeamId !== 'none'
+        ? `Đã kích hoạt chế độ đi săn Boss xoay vòng cho Team [${myTeamId.toUpperCase()}]!`
+        : 'Đã kích hoạt chế độ đi săn Boss xoay vòng độc lập!';
+      return res.json({ ok: true, msg: successMsg });
     } catch (err) {
       return res.status(500).json({ error: err.message });
     }
@@ -5700,7 +5812,6 @@ app.post('/api/accounts/:line_uid/action', requireAuth, async (req, res) => {
         action: 'gwar_join',
         lang: 'vi'
       };
-      bot.enterEventMode('gw', 4);
     } else if (action === 'cwar_join') {
       url = 'https://ragnalok.online/human/xhrpg_cwar.php';
       payload = {
@@ -5709,7 +5820,6 @@ app.post('/api/accounts/:line_uid/action', requireAuth, async (req, res) => {
         action: 'cwar_join',
         lang: 'vi'
       };
-      bot.enterEventMode('cw', 4);
     } else if (action === 'warp') {
       url = 'https://ragnalok.online/human/xhrpg_warp.php';
       delete payload.action;
@@ -5744,7 +5854,18 @@ app.post('/api/accounts/:line_uid/action', requireAuth, async (req, res) => {
     }
 
     const response = await bot.sendRequest(url, payload);
-    if (response.player) {
+    
+    // Fix: Đối với gwar_join và cwar_join, server game không trả về đối tượng player, mà chỉ trả về {ok: true, map: 4, x, y}
+    if (response && response.ok && (action === 'gwar_join' || action === 'cwar_join')) {
+      bot.enterEventMode(action === 'gwar_join' ? 'gw' : 'cw', 4);
+      if (bot.player) {
+        bot.player.map = 4;
+        if (response.x !== undefined) bot.player.x = response.x;
+        if (response.y !== undefined) bot.player.y = response.y;
+      }
+    }
+
+    if (response && response.player) {
       bot.updatePlayerState(response.player);
       if (bot.player.map !== undefined) {
         const currentMapNum = Number(bot.player.map);
@@ -6345,5 +6466,6 @@ module.exports = {
   getMineUpgradeCost,
   BotInstance,
   ProxyPool,
-  proxyPool
+  proxyPool,
+  botInstances
 };

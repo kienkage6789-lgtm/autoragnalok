@@ -2,7 +2,35 @@
 
 > Changelog of actual changes implemented.
 
+## 2026-08-11 - Tích Hợp Hệ Thống Nhiều Đội Nhóm (Multiple Teams Support) (T56)
+- File đã đổi: [server.js](file:///C:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/server.js), [public/app.js](file:///C:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/public/app.js), [test.js](file:///C:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/test.js).
+- Đã làm:
+  - **Hỗ trợ cấu hình nhiều đội**: Bổ sung cài đặt `teamId` (mặc định `'none'`) vào cấu hình mặc định. Expose `botInstances` từ `server.js` để viết test.
+  - **So khớp theo Đội nhóm**: Nâng cấp logic tìm Leader và đồng bộ mục tiêu săn Boss MVP trong `pollGame()` để so khớp cả `userId` và `teamId`. Đảm bảo các Member của một Đội nhóm cụ thể chỉ đi theo và đồng bộ đúng Leader của đội đó.
+  - **Độc lập chức năng Leader**: Khi gán vai trò Leader cho một bot, hệ thống chỉ hủy vai trò Leader của các bot khác thuộc cùng Team ID, cho phép chạy nhiều Leader cho nhiều đội nhóm song song dưới một tài khoản người dùng.
+  - **Đồng bộ hóa & Kích hoạt theo Đội**:
+    - Route `/api/team/sync` chỉ đồng bộ thiết lập của Leader cho các thành viên có cùng `teamId` (bảo toàn `teamRole` và `teamId` của các thành viên).
+    - Lệnh kích hoạt săn Boss nhanh `force_mvp_hunt` chỉ tác động lên các bot cùng Đội nhóm.
+  - **Cập nhật Giao diện**: Thêm dropdown **Đội nhóm (Team ID)** (hỗ trợ chọn từ Team 1 tới Team 5) và cập nhật hiển thị nút **Đồng bộ** dựa trên sự kết hợp giữa Leader và Đội nhóm khác `none`.
+  - **Unit Tests**: Viết thêm bộ test Case 10 xác minh logic tìm kiếm, so khớp Leader và Member theo đội nhóm, chạy `npm test` thành công 100%.
+
+## 2026-08-11 - Tích Hợp Tab Lịch Sử Sự Kiện (Bang Chiến & Quốc Chiến) (T55)
+- File đã đổi: [server.js](file:///C:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/server.js), [public/app.js](file:///C:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/public/app.js).
+- Đã làm:
+  - **Lưu trữ phía Backend**: Tích hợp mảng `eventWarHistory` lưu trữ logs chiến đấu tạm thời trong bộ nhớ server. Viết phương thức `fetchWarLog()` tự động tải dữ liệu PK (kêu gọi `/xhrpg_cwar.php` action `war_log`), lọc trùng lặp và lưu trữ tối đa 150 bản ghi. Bổ sung 2 endpoint API `GET` và `DELETE` cho `/api/accounts/:line_uid/event-war-history`.
+  - **Giao diện Dashboard**: Tái thiết kế tab `🏆 Event` trên card bot, chia thành 2 tiểu tab "Cấu Hình & Lịch" và "Lịch Sử Chiến Trận" bằng cấu trúc `.subtab-btn` và `.event-subpane`. Hiển thị feed dòng tin chiến sự trực quan kèm theo màu sắc phân biệt Bang/Quốc, nút Tải lại và Xóa logs.
+  - **Tự động cập nhật**: Thêm cơ chế đặt khoảng thời gian quét tự động 8 giây cập nhật dữ liệu logs khi người dùng đang mở xem Lịch sử chiến trận và dọn dẹp interval tự động khi chuyển tab để tránh lag hệ thống.
+  - Chạy `npm test` thành công 100%.
+
+## 2026-08-11 - Khắc Phục Lỗi Dịch Chuyển Vòng Lặp Khi Vào Bang Chiến & Quốc Chiến (T54)
+- File đã đổi: [server.js](file:///C:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/server.js).
+- Đã làm:
+  - Di chuyển việc kích hoạt chế độ Event Mode (`bot.enterEventMode`) xuống phía sau khi nhận phản hồi đăng ký thành công (`response.ok`) từ game server.
+  - Cập nhật trực tiếp trạng thái bản đồ `bot.player.map = 4` và tọa độ x, y tương ứng của người chơi khi người dùng kích hoạt tham gia Bang Chiến hoặc Quốc Chiến thủ công từ Dashboard. Điều này ngăn chặn việc bot hiểu nhầm nhân vật vẫn đang ở bản đồ cũ (Map 1) và cố gắng gọi API warp thường (`xhrpg_warp.php`) liên tục gây ra lỗi vòng lặp dịch chuyển.
+  - Chạy `npm test` thành công 100%.
+
 ## 2026-08-10 - Hỗ Trợ Proxy SOCKS5 trong Proxy Pool (T64)
+
 - File đã đổi: [server.js](file:///C:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/server.js), [public/index.html](file:///C:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/public/index.html), [public/app.js](file:///C:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/public/app.js), [public/app.css](file:///C:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/public/app.css), [test.js](file:///C:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/test.js).
 - Đã làm:
   - **Thêm dropdown chọn loại proxy (HTTP / SOCKS5) trên giao diện**: Tích hợp thẻ `<select id="proxy-new-type">` vào Form thêm proxy của Admin Dashboard để người dùng lựa chọn giao thức muốn sử dụng.

@@ -235,6 +235,26 @@ Chúng ta đã xây dựng thành công một hệ thống **Headless Bot Manage
     *   Nạp bộ từ điển `xhrpg_lang_vi.js` dịch 100% Tên quái vật sang Tiếng Việt chuẩn.
     *   Đồng bộ Level (`Lv`), Emoji và Stat chính xác 100% nguyên bản của Game.
 
+### CC. Khắc Phục Lỗi Dịch Chuyển Vòng Lặp Khi Vào Bang Chiến & Quốc Chiến (T54)
+*   **Vấn đề**: API đăng ký chiến trường (`xhrpg_guild.php` và `xhrpg_cwar.php`) không trả về đối tượng `player` mà chỉ trả về `{ok: true, map: 4, x, y}`, khiến bot không biết mình đã ở Map 4 và liên tục kích hoạt API warp thường gây lỗi kẹt vòng lặp.
+*   **Giải pháp**:
+    *   Chuyển lệnh kích hoạt chế độ Event Mode (`bot.enterEventMode`) xuống sau khi đăng ký sự kiện thành công (`response.ok`).
+    *   Cập nhật thủ công `bot.player.map = 4` và tọa độ x, y từ dữ liệu trả về để đồng bộ hóa trạng thái tức thì.
+
+### DD. Tích Hợp Tab Lịch Sử Sự Kiện (Bang Chiến & Quốc Chiến) (T55)
+*   **Lưu trữ Backend**: Tích hợp mảng `eventWarHistory` lưu trữ logs chiến đấu tạm thời trong bộ nhớ in-memory của server. Tự động tải dữ liệu PK từ `/xhrpg_cwar.php` (action `war_log`) định kỳ mỗi 30 giây khi bot đang ở Map 4 đấu trường.
+*   **API REST**: Expose API GET & DELETE đối với `/api/accounts/:line_uid/event-war-history` để phục vụ Dashboard.
+*   **Giao diện Dashboard**: Tái thiết kế tab `🏆 Event` thành hai tiểu tab "Cấu Hình & Lịch" và "Lịch Sử Chiến Trận". Hiển thị dòng tin PK đẹp mắt phân biệt Bang/Quốc, hỗ trợ nút Tải lại thủ công, Xóa logs và tự động làm mới mỗi 8 giây khi tab đang hiển thị.
+
+### EE. Tích Hợp Hệ Thống Nhiều Đội Nhóm (Multiple Teams Support) (T56)
+*   **Hỗ trợ phân rã nhiều đội**: Thêm thuộc tính cấu hình `teamId` (mặc định `'none'`) cho phép chia người dùng thành tối đa 5 đội nhóm độc lập (Team 1 tới Team 5).
+*   **So khớp Leader và kích hoạt Boss theo đội**:
+    *   Thành viên (Member) chỉ tìm kiếm và đồng bộ di chuyển/mục tiêu theo Leader **có cùng Team ID** (khác `none`).
+    *   Hành động thủ công **Kích hoạt săn Boss cả Team** (`force_mvp_hunt`) và đồng bộ chu kỳ chỉ tác động lên các bot cùng đội với bot ra lệnh.
+    *   Việc gán vai trò Leader cho một bot chỉ tự động giải phóng vai trò Leader của các bot khác **trong cùng một Team ID**, cho phép chạy nhiều Leader cho các đội khác nhau song song.
+*   **Đồng bộ thiết lập theo đội**: Nút **Đồng bộ cài đặt Team** (`/api/team/sync`) chỉ nhân rộng cấu hình của Leader tới các Member có cùng Team ID (giữ nguyên vai trò Member và Team ID của các tài khoản đó).
+*   **Dropdown UI**: Tích hợp thêm dropdown chọn Đội nhóm bên cạnh dropdown Vai trò nhóm trên Dashboard.
+
 ---
 
 ## 🚀 2. Các hạng mục CHƯA HOÀN THÀNH (Roadmap / Future Upgrades)

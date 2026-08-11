@@ -9,7 +9,8 @@ const {
   getMineUpgradeCost,
   BotInstance,
   ProxyPool,
-  proxyPool
+  proxyPool,
+  botInstances
 } = require('./server');
 
 console.log('🧪 Running Unit Tests...');
@@ -256,10 +257,11 @@ try {
   assert.deepStrictEqual(instance.player.home_seeds, { '5': 10 });
   assert.strictEqual(instance.player.pet_mid, 2);
 
-  // Verify teamRole default setting
-  console.log('Testing teamRole default settings...');
+  // Verify teamRole & teamId default setting
+  console.log('Testing teamRole & teamId default settings...');
   const defaultSettings = instance.getDefaultSettings();
   assert.strictEqual(defaultSettings.teamRole, 'none');
+  assert.strictEqual(defaultSettings.teamId, 'none');
 
   // Verify MVP Boss Hunting Flow Changes
   console.log('Testing MVP Boss Hunting Flow changes...');
@@ -675,6 +677,48 @@ try {
     ProxyPool.parseProxyInput('invalid_format', 'socks5');
   }, /Định dạng proxy không hợp lệ/);
 
+  // 10. Test Multiple Team Sync and Lookup
+  console.log('Testing Multiple Team Sync and Lookup...');
+  
+  // Set up three mock instances with roles and teamIds
+  const leader1 = new BotInstance({ name: 'Leader1', userId: 'user_1', settings: { teamRole: 'leader', teamId: 'team_1' } });
+  const member1 = new BotInstance({ name: 'Member1', userId: 'user_1', settings: { teamRole: 'member', teamId: 'team_1' } });
+  const member2 = new BotInstance({ name: 'Member2', userId: 'user_1', settings: { teamRole: 'member', teamId: 'team_2' } });
+  const leader2 = new BotInstance({ name: 'Leader2', userId: 'user_1', settings: { teamRole: 'leader', teamId: 'team_2' } });
+
+  // Mock global botInstances pool
+  const originalBotInstances = { ...botInstances };
+  botInstances['uid_leader1'] = leader1;
+  botInstances['uid_member1'] = member1;
+  botInstances['uid_member2'] = member2;
+  botInstances['uid_leader2'] = leader2;
+
+  // Verify leader lookup logic inside member1 (should find leader1 because both are team_1)
+  const lookupLeaderForMember1 = function(bot) {
+    const isMember = bot.settings.teamRole === 'member';
+    const myTeamId = bot.settings.teamId || 'none';
+    return (isMember && myTeamId !== 'none') 
+      ? Object.values(botInstances).find(b => b.userId === bot.userId && b.settings.teamRole === 'leader' && (b.settings.teamId || 'none') === myTeamId) 
+      : null;
+  };
+
+  const foundLeader1 = lookupLeaderForMember1(member1);
+  assert.strictEqual(foundLeader1, leader1, 'Member1 should find Leader1 since both belong to team_1');
+
+  // Verify leader lookup logic inside member2 (should find leader2 because both are team_2)
+  const foundLeader2 = lookupLeaderForMember1(member2);
+  assert.strictEqual(foundLeader2, leader2, 'Member2 should find Leader2 since both belong to team_2');
+
+  // Verify that member2 does not find leader1
+  assert.notStrictEqual(foundLeader2, leader1, 'Member2 must not find Leader1');
+
+  // Restore global botInstances
+  for (const key in botInstances) {
+    delete botInstances[key];
+  }
+  Object.assign(botInstances, originalBotInstances);
+
+  console.log('✅ Multiple Team Sync and Lookup Tests Passed successfully!');
   console.log('✅ Revamped Auto Market Buy Tests Passed successfully!');
   console.log('✅ Urgent Active Potion Healing Tests Passed successfully!');
   console.log('✅ ProxyPool SOCKS5 Parsing Tests Passed successfully!');

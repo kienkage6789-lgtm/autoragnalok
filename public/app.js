@@ -118,6 +118,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const activeTabs = {}; // line_uid -> tab_id
   const rateUnits = {}; // line_uid -> 'min' | 'hour' | 'day'
   const activeLogSubTabs = {}; // line_uid -> sub_tab_id
+  const activeEventSubTabs = {}; // line_uid -> sub_tab_id
   let expandedUserGroups = new Set();
   let isUserGroupInitialized = false;
   window.lastFetchedAccounts = [];
@@ -1241,57 +1242,80 @@ document.addEventListener('DOMContentLoaded', () => {
       <div class="card-tab-content">
         <!-- Event Tab Pane -->
         <div class="tab-pane" id="pane-event-${acc.line_uid}">
-          <div class="settings-group">
-            <div class="toggle-control" style="grid-column: span 2; margin-bottom: 6px;">
-              <span class="toggle-label">🏆 Tự Động Tham Gia Sự Kiện</span>
-              <label class="switch">
-                <input type="checkbox" id="chk-autoeventjoin-${acc.line_uid}" onchange="toggleSetting('${acc.line_uid}', 'autoEventJoin')">
-                <span class="slider"></span>
-              </label>
-            </div>
-            
-            <div class="input-control" style="grid-column: span 2; margin-bottom: 6px;">
-              <label for="sel-event-potion-threshold-${acc.line_uid}">💊 HP Bơm Máu Trong Event</label>
-              <select id="sel-event-potion-threshold-${acc.line_uid}" onchange="updateNumericSetting('${acc.line_uid}', 'eventPotionThreshold')" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; padding: 6px; font-family: inherit; font-size: 0.85rem; outline: none; margin-top:2px; width: 100%;">
-                <option value="0">❌ Tắt tự động bơm máu</option>
-                <option value="10">10%</option>
-                <option value="20">20%</option>
-                <option value="30">30%</option>
-                <option value="40">40%</option>
-                <option value="50">50%</option>
-                <option value="60">60%</option>
-                <option value="70">70%</option>
-                <option value="80">80%</option>
-                <option value="90">90%</option>
-              </select>
+          <!-- Navigation Tiểu tab -->
+          <div class="subtabs-nav" style="display: flex; gap: 6px; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 6px;">
+            <button class="subtab-btn active" id="event-subtab-btn-cfg-${acc.line_uid}" onclick="switchEventSubTab('${acc.line_uid}', 'cfg')">⚙️ Cấu Hình & Lịch</button>
+            <button class="subtab-btn" id="event-subtab-btn-history-${acc.line_uid}" onclick="switchEventSubTab('${acc.line_uid}', 'history')">📜 Lịch Sử Chiến Trận</button>
+          </div>
+
+          <!-- Tiểu tab 1: Cấu hình & Lịch -->
+          <div class="event-subpane" id="event-subpane-cfg-${acc.line_uid}">
+            <div class="settings-group">
+              <div class="toggle-control" style="grid-column: span 2; margin-bottom: 6px;">
+                <span class="toggle-label">🏆 Tự Động Tham Gia Sự Kiện</span>
+                <label class="switch">
+                  <input type="checkbox" id="chk-autoeventjoin-${acc.line_uid}" onchange="toggleSetting('${acc.line_uid}', 'autoEventJoin')">
+                  <span class="slider"></span>
+                </label>
+              </div>
+              
+              <div class="input-control" style="grid-column: span 2; margin-bottom: 6px;">
+                <label for="sel-event-potion-threshold-${acc.line_uid}">💊 HP Bơm Máu Trong Event</label>
+                <select id="sel-event-potion-threshold-${acc.line_uid}" onchange="updateNumericSetting('${acc.line_uid}', 'eventPotionThreshold')" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; padding: 6px; font-family: inherit; font-size: 0.85rem; outline: none; margin-top:2px; width: 100%;">
+                  <option value="0">❌ Tắt tự động bơm máu</option>
+                  <option value="10">10%</option>
+                  <option value="20">20%</option>
+                  <option value="30">30%</option>
+                  <option value="40">40%</option>
+                  <option value="50">50%</option>
+                  <option value="60">60%</option>
+                  <option value="70">70%</option>
+                  <option value="80">80%</option>
+                  <option value="90">90%</option>
+                </select>
+              </div>
+
+              <div class="toggle-control" style="grid-column: span 2; margin-bottom: 6px;">
+                <span class="toggle-label">⚔️ PK Ưu Tiên Giáp Thấp Nhất</span>
+                <label class="switch">
+                  <input type="checkbox" id="chk-event-target-mindef-${acc.line_uid}" onchange="toggleSetting('${acc.line_uid}', 'eventTargetMinDef')">
+                  <span class="slider"></span>
+                </label>
+              </div>
+
+              <div class="input-control" style="grid-column: span 2; margin-bottom: 6px;">
+                <label for="sel-event-attack-range-${acc.line_uid}">🔍 Phạm Vi Quét Mục Tiêu PK</label>
+                <select id="sel-event-attack-range-${acc.line_uid}" onchange="updateNumericSetting('${acc.line_uid}', 'eventAttackRange')" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; padding: 6px; font-family: inherit; font-size: 0.85rem; outline: none; margin-top:2px; width: 100%;">
+                  <option value="100">100m</option>
+                  <option value="200">200m</option>
+                  <option value="300">300m (Khuyến nghị)</option>
+                  <option value="500">500m</option>
+                  <option value="9999">Toàn bản đồ</option>
+                </select>
+              </div>
             </div>
 
-            <div class="toggle-control" style="grid-column: span 2; margin-bottom: 6px;">
-              <span class="toggle-label">⚔️ PK Ưu Tiên Giáp Thấp Nhất</span>
-              <label class="switch">
-                <input type="checkbox" id="chk-event-target-mindef-${acc.line_uid}" onchange="toggleSetting('${acc.line_uid}', 'eventTargetMinDef')">
-                <span class="slider"></span>
-              </label>
-            </div>
-
-            <div class="input-control" style="grid-column: span 2; margin-bottom: 6px;">
-              <label for="sel-event-attack-range-${acc.line_uid}">🔍 Phạm Vi Quét Mục Tiêu PK</label>
-              <select id="sel-event-attack-range-${acc.line_uid}" onchange="updateNumericSetting('${acc.line_uid}', 'eventAttackRange')" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; padding: 6px; font-family: inherit; font-size: 0.85rem; outline: none; margin-top:2px; width: 100%;">
-                <option value="100">100m</option>
-                <option value="200">200m</option>
-                <option value="300">300m (Khuyến nghị)</option>
-                <option value="500">500m</option>
-                <option value="9999">Toàn bản đồ</option>
-              </select>
+            <div style="margin-top: 12px; border-top: 1px dashed rgba(255,255,255,0.08); padding-top: 8px;">
+              <div style="font-size: 0.78rem; font-weight: 700; color: #fbbf24; margin-bottom: 6px;">📅 Lịch Trình Sự Kiện Hàng Ngày</div>
+              <div style="font-size: 0.72rem; color: #94a3b8; display: flex; flex-direction: column; gap: 4px; line-height: 1.45;">
+                <div>🌳 <b>19:30</b> - Bảo vệ Cây Thế Giới (Map 2)</div>
+                <div>🚩 <b>20:30</b> - Bang Chiến / Guild Flag War (Map 4)</div>
+                <div>🌍 <b>21:30</b> - Quốc Chiến / Country Flag War (Map 4)</div>
+              </div>
             </div>
           </div>
 
-          <div style="margin-top: 12px; border-top: 1px dashed rgba(255,255,255,0.08); padding-top: 8px;">
-            <div style="font-size: 0.78rem; font-weight: 700; color: #fbbf24; margin-bottom: 6px;">📅 Lịch Trình Sự Kiện Hàng Ngày</div>
-            <div style="font-size: 0.72rem; color: #94a3b8; display: flex; flex-direction: column; gap: 4px; line-height: 1.45;">
-              <div>🌳 <b>19:30</b> - Bảo vệ Cây Thế Giới (Map 2)</div>
-              <div>🚩 <b>20:30</b> - Bang Chiến / Guild Flag War (Map 4)</div>
-              <div>🌍 <b>21:30</b> - Quốc Chiến / Country Flag War (Map 4)</div>
+          <!-- Tiểu tab 2: Lịch sử chiến đấu -->
+          <div class="event-subpane" id="event-subpane-history-${acc.line_uid}" style="display: none;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+              <span style="font-size: 0.75rem; color: #94a3b8;">Lịch sử chiến trận (phiên hiện tại):</span>
+              <div style="display: flex; gap: 4px;">
+                <button class="btn-action-sm" onclick="fetchEventWarHistory('${acc.line_uid}')" style="font-size: 0.7rem; padding: 2px 6px; border: 1px solid var(--border-color); border-radius: 4px; background: transparent; color: #fff; cursor: pointer;">🔄 Cập nhật</button>
+                <button class="btn-action-sm" onclick="clearEventWarHistory('${acc.line_uid}')" style="font-size: 0.7rem; padding: 2px 6px; border: 1px solid rgba(239, 68, 68, 0.4); border-radius: 4px; background: rgba(239, 68, 68, 0.15); color: #fca5a5; cursor: pointer;">🗑️ Xóa</button>
+              </div>
+            </div>
+            <div id="event-history-list-${acc.line_uid}" style="max-height: 250px; overflow-y: auto; font-size: 0.72rem; border: 1px solid var(--border-color); border-radius: 8px; background: rgba(0,0,0,0.25); padding: 6px;">
+              <div style="text-align: center; color: #64748b; padding: 20px 0;">Không có dữ liệu lịch sử.</div>
             </div>
           </div>
         </div>
@@ -1473,16 +1497,27 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
 
           <div class="settings-group" style="border-top: 1px dashed rgba(255,255,255,0.05); padding-top: 10px; margin-top: 10px;">
-            <div class="input-control" style="grid-column: span 2;">
+            <div class="input-control">
               <label for="sel-team-role-${acc.line_uid}">👥 Vai trò nhóm (Team Role)</label>
-              <div style="display: flex; gap: 8px; align-items: center; margin-top: 2px;">
-                <select id="sel-team-role-${acc.line_uid}" onchange="updateStringSetting('${acc.line_uid}', 'teamRole')" style="flex: 1; background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; padding: 5px 6px; font-family: inherit; font-size: 0.85rem; outline: none;">
-                  <option value="none">🚫 Không tham gia (None)</option>
-                  <option value="leader">👑 Trưởng nhóm (Leader)</option>
-                  <option value="member">👥 Thành viên (Member)</option>
-                </select>
-                <button type="button" id="btn-sync-team-${acc.line_uid}" onclick="syncTeamSetup('${acc.line_uid}')" style="display: none; background: rgba(16,185,129,0.2); border: 1px solid rgba(16,185,129,0.4); color: #34d399; border-radius: 6px; padding: 5px 12px; font-size: 0.82rem; cursor: pointer; font-weight: 600; white-space: nowrap; transition: all 0.2s;" onmouseover="this.style.background='rgba(16,185,129,0.3)'" onmouseout="this.style.background='rgba(16,185,129,0.2)'">🔄 Đồng bộ cho Team</button>
-              </div>
+              <select id="sel-team-role-${acc.line_uid}" onchange="updateStringSetting('${acc.line_uid}', 'teamRole')" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; padding: 5px 6px; font-family: inherit; font-size: 0.85rem; outline: none; margin-top: 2px; width: 100%;">
+                <option value="none">🚫 Không tham gia (None)</option>
+                <option value="leader">👑 Trưởng nhóm (Leader)</option>
+                <option value="member">👥 Thành viên (Member)</option>
+              </select>
+            </div>
+            <div class="input-control">
+              <label for="sel-team-id-${acc.line_uid}">🛡️ Đội nhóm (Team ID)</label>
+              <select id="sel-team-id-${acc.line_uid}" onchange="updateStringSetting('${acc.line_uid}', 'teamId')" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; padding: 5px 6px; font-family: inherit; font-size: 0.85rem; outline: none; margin-top: 2px; width: 100%;">
+                <option value="none">🚫 Không có (None)</option>
+                <option value="team_1">🛡️ Team 1</option>
+                <option value="team_2">🛡️ Team 2</option>
+                <option value="team_3">🛡️ Team 3</option>
+                <option value="team_4">🛡️ Team 4</option>
+                <option value="team_5">🛡️ Team 5</option>
+              </select>
+            </div>
+            <div style="grid-column: span 2; margin-top: 4px; display: flex; justify-content: flex-end;">
+              <button type="button" id="btn-sync-team-${acc.line_uid}" onclick="syncTeamSetup('${acc.line_uid}')" style="display: none; background: rgba(16,185,129,0.2); border: 1px solid rgba(16,185,129,0.4); color: #34d399; border-radius: 6px; padding: 5px 12px; font-size: 0.82rem; cursor: pointer; font-weight: 600; white-space: nowrap; transition: all 0.2s;" onmouseover="this.style.background='rgba(16,185,129,0.3)'" onmouseout="this.style.background='rgba(16,185,129,0.2)'">🔄 Đồng bộ cài đặt Team</button>
             </div>
           </div>
 
@@ -2256,9 +2291,14 @@ document.addEventListener('DOMContentLoaded', () => {
     if (selTeamRole && document.activeElement !== selTeamRole) {
       selTeamRole.value = acc.settings.teamRole || 'none';
     }
+    const selTeamId = document.getElementById(`sel-team-id-${acc.line_uid}`);
+    if (selTeamId && document.activeElement !== selTeamId) {
+      selTeamId.value = acc.settings.teamId || 'none';
+    }
     const btnSyncTeam = document.getElementById(`btn-sync-team-${acc.line_uid}`);
     if (btnSyncTeam) {
-      btnSyncTeam.style.display = (acc.settings.teamRole === 'leader') ? 'block' : 'none';
+      const isLeaderWithTeam = acc.settings.teamRole === 'leader' && (acc.settings.teamId || 'none') !== 'none';
+      btnSyncTeam.style.display = isLeaderWithTeam ? 'block' : 'none';
     }
 
 
@@ -2730,15 +2770,23 @@ document.addEventListener('DOMContentLoaded', () => {
       content.classList.toggle('active', targetTabId !== null);
     }
 
+    // Cleanup active sub-pane intervals when switching away
+    if (targetTabId !== 'event' && window._eventHistoryIntervals && window._eventHistoryIntervals[uid]) {
+      clearInterval(window._eventHistoryIntervals[uid]);
+      delete window._eventHistoryIntervals[uid];
+    }
+    if (targetTabId !== 'log' && window._bossLogIntervals && window._bossLogIntervals[uid]) {
+      clearInterval(window._bossLogIntervals[uid]);
+      delete window._bossLogIntervals[uid];
+    }
+
     if (targetTabId === 'log') {
       const subTabId = activeLogSubTabs[uid] || 'act';
       switchLogSubTab(uid, subTabId);
+    } else if (targetTabId === 'event') {
+      const subTabId = activeEventSubTabs[uid] || 'cfg';
+      switchEventSubTab(uid, subTabId);
     } else {
-      // Clear the boss log interval if switching away from log tab or collapsing card
-      if (window._bossLogIntervals && window._bossLogIntervals[uid]) {
-        clearInterval(window._bossLogIntervals[uid]);
-        delete window._bossLogIntervals[uid];
-      }
       if (targetTabId) {
         fetchAccounts();
       }
@@ -3319,6 +3367,123 @@ document.addEventListener('DOMContentLoaded', () => {
       marketTerm.innerHTML = `<div class="log-line"><span class="log-text-content" style="color:#ef4444; font-size:0.6rem;">❌ Lỗi kết nối máy chủ: ${err.message}</span></div>`;
     }
   };
+
+  // Switch Event Sub-Tab
+  window.switchEventSubTab = function(uid, subTabId) {
+    activeEventSubTabs[uid] = subTabId;
+    
+    const btnCfg = document.getElementById(`event-subtab-btn-cfg-${uid}`);
+    const btnHistory = document.getElementById(`event-subtab-btn-history-${uid}`);
+    
+    const paneCfg = document.getElementById(`event-subpane-cfg-${uid}`);
+    const paneHistory = document.getElementById(`event-subpane-history-${uid}`);
+    
+    if (btnCfg) btnCfg.classList.toggle('active', subTabId === 'cfg');
+    if (btnHistory) btnHistory.classList.toggle('active', subTabId === 'history');
+    
+    if (paneCfg) paneCfg.style.display = subTabId === 'cfg' ? 'block' : 'none';
+    if (paneHistory) paneHistory.style.display = subTabId === 'history' ? 'block' : 'none';
+    
+    // Clear existing interval for this bot event history
+    if (!window._eventHistoryIntervals) window._eventHistoryIntervals = {};
+    if (window._eventHistoryIntervals[uid]) {
+      clearInterval(window._eventHistoryIntervals[uid]);
+      delete window._eventHistoryIntervals[uid];
+    }
+    
+    if (subTabId === 'history') {
+      fetchEventWarHistory(uid);
+      // Auto-refresh event history every 8 seconds while active
+      window._eventHistoryIntervals[uid] = setInterval(() => {
+        const pane = document.getElementById(`pane-event-${uid}`);
+        const subpane = document.getElementById(`event-subpane-history-${uid}`);
+        if (pane && pane.classList.contains('active') && subpane && subpane.style.display !== 'none') {
+          fetchEventWarHistory(uid);
+        } else {
+          clearInterval(window._eventHistoryIntervals[uid]);
+          delete window._eventHistoryIntervals[uid];
+        }
+      }, 8000);
+    }
+  };
+
+  // Fetch bot event war history
+  window.fetchEventWarHistory = async function(uid) {
+    const listContainer = document.getElementById(`event-history-list-${uid}`);
+    if (!listContainer) return;
+
+    try {
+      const response = await fetch(`/api/accounts/${uid}/event-war-history`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      if (data.ok) {
+        renderEventWarHistory(uid, data.history);
+      } else {
+        listContainer.innerHTML = `<div style="text-align: center; color: #ef4444; padding: 20px 0;">Lỗi: ${data.error || 'Không thể lấy lịch sử'}</div>`;
+      }
+    } catch (err) {
+      console.error('Error fetching event war history:', err);
+      listContainer.innerHTML = `<div style="text-align: center; color: #ef4444; padding: 20px 0;">Lỗi kết nối: ${err.message}</div>`;
+    }
+  };
+
+  // Clear bot event war history
+  window.clearEventWarHistory = async function(uid) {
+    if (!confirm('Bạn có chắc chắn muốn xóa lịch sử chiến trận của tài khoản này không?')) return;
+    const listContainer = document.getElementById(`event-history-list-${uid}`);
+    if (listContainer) {
+      listContainer.innerHTML = `<div style="text-align: center; color: #64748b; padding: 20px 0;">⏳ Đang xóa...</div>`;
+    }
+
+    try {
+      const response = await fetch(`/api/accounts/${uid}/event-war-history`, {
+        method: 'DELETE'
+      });
+      const data = await response.json();
+      if (response.ok && data.ok) {
+        fetchEventWarHistory(uid);
+      } else {
+        alert('🔴 Lỗi: ' + (data.error || 'Không thể xóa lịch sử'));
+        fetchEventWarHistory(uid);
+      }
+    } catch (err) {
+      alert(`❌ Lỗi kết nối: ${err.message}`);
+      fetchEventWarHistory(uid);
+    }
+  };
+
+  // Render event war history
+  function renderEventWarHistory(uid, history) {
+    const container = document.getElementById(`event-history-list-${uid}`);
+    if (!container) return;
+
+    if (!history || history.length === 0) {
+      container.innerHTML = `<div style="text-align: center; color: #64748b; padding: 20px 0;">Chưa có lịch sử chiến đấu. Lịch sử được tự động thu thập từ server khi bot tham gia Bang Chiến/Quốc Chiến.</div>`;
+      return;
+    }
+
+    container.innerHTML = history.map((item, idx) => {
+      const d = new Date(item.time);
+      const timeStr = ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2) + ':' + ('0' + d.getSeconds()).slice(-2);
+      
+      const eventBadge = item.eventKind === 'gw' 
+        ? `<span style="background: rgba(168, 85, 247, 0.15); color: #e9d5ff; padding: 1px 4px; border-radius: 4px; font-size: 0.62rem; margin-right: 4px; border: 1px solid rgba(168, 85, 247, 0.3)">Bang</span>`
+        : `<span style="background: rgba(14, 165, 233, 0.15); color: #bae6fd; padding: 1px 4px; border-radius: 4px; font-size: 0.62rem; margin-right: 4px; border: 1px solid rgba(14, 165, 233, 0.3)">Quốc</span>`;
+        
+      const killerStr = item.killerTag ? `<b>[${item.killerTag}] ${item.killer}</b>` : `<b>${item.killer}</b>`;
+      const victimStr = item.victimTag ? `<b>[${item.victimTag}] ${item.victim}</b>` : `<b>${item.victim}</b>`;
+      const pointStr = item.points > 0 ? `<span style="color: #4ade80; font-weight: 800; float: right;">+${item.points}</span>` : `<span style="color: #6b7280; float: right;">--</span>`;
+
+      return `
+        <div style="padding: 4px 6px; border-bottom: 1px solid rgba(255,255,255,0.03); display: block; line-height: 1.45; overflow: hidden; ${idx % 2 ? 'background: rgba(255,255,255,0.01);' : ''}">
+          <span style="color: #64748b; margin-right: 6px; font-variant-numeric: tabular-nums;">${timeStr}</span>
+          ${eventBadge}
+          <span>${killerStr} ⚔️ ${victimStr}</span>
+          ${pointStr}
+        </div>
+      `;
+    }).join('');
+  }
 
   // Helper formatting for milliseconds
   function fmtMs(ms) {

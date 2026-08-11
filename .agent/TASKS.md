@@ -824,7 +824,43 @@
   - [x] Frontend: Render ô nhập số giới hạn chợ trực tiếp trên Accordion Header và bảng quản lý user, đồng bộ hóa thay đổi thời gian thực qua hàm `changeUserMarketLimit`.
   - [x] Frontend & Backend: Định dạng dấu chấm hàng nghìn cho Giá Mua Chợ, nhãn viết tắt K/M Gold live, và chế độ khớp đúng giá cố định `marketExactPrice` hỗ trợ chuyển đồ an toàn.
   - [x] Test: Chạy unit test `npm test` thành công không có lỗi.
+### [x] T54 - Khắc Phục Lỗi Dịch Chuyển Vòng Lặp Khi Vào Bang Chiến & Quốc Chiến
+- Description: Sửa lỗi bot tự động warp ngược về bản đồ farm chính sau khi nhấn "Tham Gia Event" Bang Chiến / Quốc Chiến do server game không trả về đối tượng `player` (khiến `bot.player.map` không cập nhật).
+- Files related: `server.js`
+- Acceptance criteria:
+  - [x] Chuyển `bot.enterEventMode` xuống sau khi đăng ký sự kiện thành công (`response.ok`).
+  - [x] Cập nhật thủ công `bot.player.map = 4` và tọa độ người chơi từ dữ liệu trả về để đồng bộ hóa trạng thái tức thì.
+  - [x] Test: Chạy unit test `npm test` thành công không có lỗi.
 - Status: done
+
+### [x] T55 - Tích Hợp Tab Lịch Sử Sự Kiện (Bang Chiến & Quốc Chiến)
+- Description: Bổ sung tiểu tab Lịch sử bên trong tab Event của Dashboard, hỗ trợ lấy trực tiếp và lưu trữ tạm thời nhật ký chiến đấu (kills/deaths, points) từ game server khi tham gia Bang Chiến & Quốc Chiến.
+- Files related: `server.js`, `public/app.js`
+- Acceptance criteria:
+  - [x] Backend: Thêm biến lưu trữ in-memory `eventWarHistory` cho mỗi BotInstance.
+  - [x] Backend: Viết phương thức `fetchWarLog()` tự động poll nhật ký từ `/xhrpg_cwar.php` định kỳ mỗi 30 giây khi trong Map 4 và lọc trùng lặp bản ghi.
+  - [x] Backend: Expose REST API endpoint GET & DELETE đối với `/api/accounts/:line_uid/event-war-history`.
+  - [x] Frontend: Cấu trúc lại tab Event thành hai tiểu tab "Cấu Hình & Lịch" và "Lịch Sử Chiến Trận".
+  - [x] Frontend: Thiết kế giao diện hiển thị danh sách dòng tin PK trực quan, nút cập nhật thủ công, nút xóa logs.
+  - [x] Frontend: Tự động chạy interval 8 giây cập nhật lịch sử khi tab Lịch sử đang hiển thị và sự kiện đang hoạt động, tự động dọn dẹp interval khi đóng.
+  - [x] Test: Chạy unit test `npm test` thành công không có lỗi.
+- Status: done
+
+### [x] T56 - Tích Hợp Hệ Thống Nhiều Đội Nhóm (Multiple Teams Support)
+- Description: Cho phép chia nhiều đội nhóm (Team 1, Team 2...) độc lập. Mỗi đội có Leader và Member riêng, các thành viên chỉ đồng bộ cấu hình và di chuyển theo Leader của chính đội mình.
+- Files related: `server.js`, `public/app.js`, `test.js`
+- Acceptance criteria:
+  - [x] Backend: Thêm thuộc tính cấu hình `teamId` (mặc định `'none'`) vào `getDefaultSettings()`.
+  - [x] Backend: Cập nhật cơ chế tìm kiếm `leader` trong `pollGame()` để so khớp cả `userId` và `teamId` (bắt buộc `teamId !== 'none'`).
+  - [x] Backend: Cập nhật route chỉnh sửa cấu hình `PUT /api/accounts/:line_uid` để chỉ chuyển giao/hủy vai trò Leader cũ của các bot **thuộc cùng một Team ID**.
+  - [x] Backend: Cập nhật route `/api/team/sync` để chỉ copy cấu hình của Leader tới các Member có cùng `teamId` (và bảo toàn giá trị `teamRole`, `teamId` của Member).
+  - [x] Backend: Cập nhật hành động thủ công `force_mvp_hunt` để chỉ kích hoạt săn Boss xoay vòng cho các bot thuộc cùng đội với bot ra lệnh.
+  - [x] Frontend: Thêm dropdown chọn Đội nhóm (Team ID) từ Team 1 tới Team 5 vào giao diện và hiển thị/ẩn nút đồng bộ thông minh.
+  - [x] Test: Viết unit test tự động xác minh logic đồng bộ & tìm kiếm Leader theo nhiều đội nhóm và chạy `npm test` thành công.
+- Status: done
+
+
+
 
 
 
