@@ -2,6 +2,13 @@
 
 > Changelog of actual changes implemented.
 
+## 2026-08-12 - Khắc Phục Lỗi Tự Động Tham Gia & Kẹt Vòng Lặp Map Event (Map 4) (T65)
+- File đã đổi: [server.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/server.js).
+- Đã làm:
+  - **Khắc phục lỗi warp Map 4**: Thay thế cuộc gọi `warpToMap(4)` (vốn dùng `xhrpg_warp.php` bị game server cấm) trong cả 2 khối định tuyến bản đồ khẩn cấp (Urgent Map Routing) và định tuyến bản đồ thường (Normal Map Routing) bằng các cuộc gọi API đăng ký chuyên dụng `joinGuildWar` / `joinCountryWar`. Nếu sự kiện không hoạt động, bot tự động thoát chế độ Event.
+  - **Tối ưu hóa Auto-join**: Bổ sung điều kiện kiểm tra nếu nhân vật đã ở sẵn Map 4 thì kích hoạt trực tiếp `enterEventMode` tương ứng mà không cần gửi lại yêu cầu đăng ký lên server game, tránh việc server báo lỗi do gửi lại nhiều lần.
+  - Chạy `npm test` thành công 100%.
+
 ## 2026-08-11 - Tích Hợp Hệ Thống Nhiều Đội Nhóm (Multiple Teams Support) (T56)
 - File đã đổi: [server.js](file:///C:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/server.js), [public/app.js](file:///C:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/public/app.js), [test.js](file:///C:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/test.js).
 - Đã làm:

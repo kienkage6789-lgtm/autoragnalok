@@ -2245,9 +2245,30 @@ class BotInstance {
             this.addLog('SYSTEM', `🗺️ [Tự động] Phát hiện sai bản đồ (Đang ở: Map ${this.player.map}, Cần đi: Map ${targetMapId}). Tiến hành di chuyển...`);
           }
           try {
-            await this.warpToMap(targetMapId);
-            // Warp thành công, kết thúc sớm nhịp poll hiện tại để nhịp tiếp theo chạy trên map mới
-            return;
+            if (targetMapId === 4) {
+              const currentEpoch = Math.floor(Date.now() / 1000);
+              const isGwActive = this.lastGw && (this.lastGw.st === 'open' || this.lastGw.st === 'fight') && (!this.lastGw.ends || this.lastGw.ends > currentEpoch);
+              const isCwActive = this.lastCw && (this.lastCw.st === 'open' || this.lastCw.st === 'fight') && (!this.lastCw.ends || this.lastCw.ends > currentEpoch);
+
+              let ok = false;
+              if (isGwActive) {
+                ok = await this.joinGuildWar();
+              } else if (isCwActive) {
+                ok = await this.joinCountryWar();
+              } else {
+                this.addLog('WARNING', `⚠️ Sự kiện Bang/Quốc chiến không hoạt động hoặc đã kết thúc. Tự động thoát chế độ Event.`);
+                this.exitEventMode();
+                return;
+              }
+              if (ok) {
+                this.enterEventMode(isGwActive ? 'gw' : 'cw', 4);
+                return;
+              }
+            } else {
+              await this.warpToMap(targetMapId);
+              // Warp thành công, kết thúc sớm nhịp poll hiện tại để nhịp tiếp theo chạy trên map mới
+              return;
+            }
           } catch (e) {
             this.addLog('ERROR', `Lỗi di chuyển bản đồ khẩn cấp: ${e.message}`);
           }
@@ -2758,9 +2779,13 @@ class BotInstance {
             const map4Def = getMapDefs().find(m => m.id === 4);
             const req4 = map4Def ? map4Def.req : 20;
             if (playerLv >= req4) {
-              const ok = await this.joinGuildWar();
-              if (ok) {
+              if (playerMap === 4) {
                 this.enterEventMode('gw', 4);
+              } else {
+                const ok = await this.joinGuildWar();
+                if (ok) {
+                  this.enterEventMode('gw', 4);
+                }
               }
             } else if (this.pollCount % 30 === 0) {
               this.addLog('WARNING', `⚠️ [Auto Event] Không thể tham gia Guild War: Cấp độ nhân vật (Lv.${playerLv}) chưa đủ yêu cầu (Lv.${req4}+)`);
@@ -2769,9 +2794,13 @@ class BotInstance {
             const map4Def = getMapDefs().find(m => m.id === 4);
             const req4 = map4Def ? map4Def.req : 20;
             if (playerLv >= req4) {
-              const ok = await this.joinCountryWar();
-              if (ok) {
+              if (playerMap === 4) {
                 this.enterEventMode('cw', 4);
+              } else {
+                const ok = await this.joinCountryWar();
+                if (ok) {
+                  this.enterEventMode('cw', 4);
+                }
               }
             } else if (this.pollCount % 30 === 0) {
               this.addLog('WARNING', `⚠️ [Auto Event] Không thể tham gia Country War: Cấp độ nhân vật (Lv.${playerLv}) chưa đủ yêu cầu (Lv.${req4}+)`);
@@ -3380,8 +3409,27 @@ class BotInstance {
         const targetMapId = activeTargetMapId;
         const mapDef = getMapDefs().find(m => m.id === targetMapId);
         if (mapDef && (this.player.lv || 1) >= mapDef.req) {
-          this.addLog('SYSTEM', `🗺️ [Tự động] Di chuyển sang bản đồ: ${mapDef.name}`);
-          await this.warpToMap(targetMapId);
+          if (targetMapId === 4) {
+            const currentEpoch = Math.floor(Date.now() / 1000);
+            const isGwActive = this.lastGw && (this.lastGw.st === 'open' || this.lastGw.st === 'fight') && (!this.lastGw.ends || this.lastGw.ends > currentEpoch);
+            const isCwActive = this.lastCw && (this.lastCw.st === 'open' || this.lastCw.st === 'fight') && (!this.lastCw.ends || this.lastCw.ends > currentEpoch);
+
+            let ok = false;
+            if (isGwActive) {
+              ok = await this.joinGuildWar();
+            } else if (isCwActive) {
+              ok = await this.joinCountryWar();
+            } else {
+              this.addLog('WARNING', `⚠️ Sự kiện Bang/Quốc chiến đã kết thúc. Tự động thoát chế độ Event.`);
+              this.exitEventMode();
+            }
+            if (ok) {
+              this.enterEventMode(isGwActive ? 'gw' : 'cw', 4);
+            }
+          } else {
+            this.addLog('SYSTEM', `🗺️ [Tự động] Di chuyển sang bản đồ: ${mapDef.name}`);
+            await this.warpToMap(targetMapId);
+          }
         }
       }
     }

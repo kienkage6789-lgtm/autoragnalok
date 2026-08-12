@@ -3,6 +3,18 @@
 > Work Breakdown Structure. Update task states immediately upon changes.
 > Statuses: todo | doing | blocked | review | done
 
+### [x] T65 - Khắc Phục Lỗi Tự Động Tham Gia & Kẹt Vòng Lặp Map Event (Map 4)
+- Description: Sửa lỗi bot không tự động tham gia Bang Chiến / Quốc Chiến (Map 4) hoặc kẹt vòng lặp warp do cố gắng di chuyển bằng `xhrpg_warp.php` (vốn bị cấm ở Map 4). Cập nhật logic để gọi API đăng ký chuyên dụng (`joinGuildWar` / `joinCountryWar`) khi cần di chuyển sang Map 4 trong cả 2 luồng Urgent và Normal Map Routing, đồng thời kiểm tra nếu nhân vật đã ở Map 4 thì kích hoạt thẳng Event Mode thay vì gọi lại API.
+- Files related: `server.js`
+- Acceptance criteria:
+  - [x] Sửa Urgent Map Routing ở đầu `pollGame()` để khi `targetMapId === 4` sẽ tự động gọi `joinGuildWar` / `joinCountryWar` hoặc thoát Event Mode nếu sự kiện đã kết thúc, thay vì gọi `warpToMap(4)`.
+  - [x] Sửa Normal Map Routing ở cuối `pollGame()` để xử lý Map 4 tương tự bằng API đăng ký chuyên dụng.
+  - [x] Cập nhật điều kiện Auto-join Event để nếu nhân vật đã ở Map 4 thì kích hoạt thẳng Event Mode thay vì gọi API đăng ký lần nữa.
+  - [x] Chạy `npm test` thành công.
+- Status: done
+
+---
+
 ### [x] T64 - Hỗ trợ Proxy SOCKS5 trong Proxy Pool
 - Description: Bổ sung hỗ trợ đầy đủ cho proxy SOCKS5 (socks5://) trong hệ thống Proxy Pool. Cung cấp tùy chọn loại proxy (HTTP / SOCKS5) trên giao diện admin, tự động phân tích định dạng thô (IP:PORT:USER:PASS hoặc IP:PORT) tương ứng với giao thức đã chọn, đồng thời cấu hình `undici` ProxyAgent tương thích SOCKS5 và viết unit test kiểm thử.
 - Files related: `server.js`, `public/index.html`, `public/app.js`, `public/app.css`, `test.js`
