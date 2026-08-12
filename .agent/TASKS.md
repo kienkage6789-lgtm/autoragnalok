@@ -3,6 +3,18 @@
 > Work Breakdown Structure. Update task states immediately upon changes.
 > Statuses: todo | doing | blocked | review | done
 
+### [x] T66 - Khắc Phục Lỗi Giao Diện & Logic Thoát Chế Độ Event
+- Description: Sửa lỗi các nút chức năng tự động tham gia Event không lưu được trạng thái trên giao diện và lỗi nhân vật không tự động di chuyển về bản đồ farm gốc sau khi kết thúc Event.
+- Files related: `server.js`, `public/app.js`, `test.js`
+- Acceptance criteria:
+  - [x] Sửa hàm `toggleSetting` trong `public/app.js` để so khớp chính xác ID phần tử HTML của các checkbox sự kiện (`chk-auto-event-join-...`).
+  - [x] Cải tiến hàm `enterEventMode` trong `server.js` để lưu trữ bản đồ farm cũ (`eventOriginalMap`) từ cấu hình `settings.targetMap` thay vì sử dụng map hiện tại của người chơi.
+  - [x] Thêm unit test trong `test.js` xác nhận cơ chế lưu và tự động khôi phục cấu hình bản đồ sau khi kết thúc Event.
+  - [x] Chạy `npm test` thành công.
+- Status: done
+
+---
+
 ### [x] T65 - Khắc Phục Lỗi Tự Động Tham Gia & Kẹt Vòng Lặp Map Event (Map 4)
 - Description: Sửa lỗi bot không tự động tham gia Bang Chiến / Quốc Chiến (Map 4) hoặc kẹt vòng lặp warp do cố gắng di chuyển bằng `xhrpg_warp.php` (vốn bị cấm ở Map 4). Cập nhật logic để gọi API đăng ký chuyên dụng (`joinGuildWar` / `joinCountryWar`) khi cần di chuyển sang Map 4 trong cả 2 luồng Urgent và Normal Map Routing, đồng thời kiểm tra nếu nhân vật đã ở Map 4 thì kích hoạt thẳng Event Mode thay vì gọi lại API.
 - Files related: `server.js`

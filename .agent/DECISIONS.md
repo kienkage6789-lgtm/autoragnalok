@@ -2,6 +2,25 @@
 
 > Captured architectural decisions and trade-offs.
 
+## 2026-08-12 - Khắc Phục Lỗi Giao Diện & Logic Thoát Chế Độ Event (T66)
+
+- Bối cảnh:
+  - Khi người dùng bật các nút cấu hình "Tự động tham gia sự kiện" (Invasion, Guild War, Country War), trạng thái checkbox không được lưu xuống database do lỗi sai lệch ID phần tử HTML trên giao diện frontend.
+  - Sau khi các sự kiện giờ vàng kết thúc, bot không tự động đưa nhân vật trở về bản đồ farm cũ mà tiếp tục đứng im tại bản đồ event (Map 4 hoặc Map 2) do khi lưu `eventOriginalMap`, bot lấy giá trị từ `this.player.map` ngay sau khi nhân vật đã dịch chuyển đến map event.
+- Quyết định:
+  - **Ánh xạ ID thủ công cho các key checkbox sự kiện**:
+    - Trong hàm `toggleSetting` của `app.js`, thực hiện ánh xạ cụ thể cho các key dạng camelCase thành các chuỗi ID có dấu gạch ngang tương ứng với các checkbox HTML.
+  - **Sửa đổi cơ chế lưu bản đồ farm gốc**:
+    - Trong hàm `enterEventMode` của `server.js`, ưu tiên lấy bản đồ farm gốc từ `this.settings.targetMap` (nếu khác bản đồ sự kiện). Đây là bản thiết kế map farm do người dùng cài đặt trước đó.
+    - Thêm cơ chế phòng ngừa: Nếu bản đồ gốc được phát hiện là Map 4 (bản đồ Đấu trường/Chiến trường PVP), bot sẽ tự động đưa về Map 1 để tránh kẹt.
+  - **Viết Unit Test kiểm thử**:
+    - Bổ sung test case giả lập nhân vật ở Map 4 và kích hoạt Event Mode để kiểm tra `eventOriginalMap` được lưu đúng từ `settings.targetMap`, đồng thời kiểm tra hàm `exitEventMode` khôi phục đúng cấu hình bản đồ và các thông số auto map/zone.
+- Kết quả:
+  - Sửa đổi hoàn tất cả 2 lỗi lớn của tính năng Event.
+  - Chạy `npm test` thành công 100%.
+
+---
+
 ## 2026-08-10 - Hỗ trợ Proxy SOCKS5 trong Proxy Pool (T64)
 
 - Bối cảnh:

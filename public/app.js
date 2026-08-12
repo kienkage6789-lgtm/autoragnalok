@@ -3837,6 +3837,12 @@ document.addEventListener('DOMContentLoaded', () => {
       idKey = 'event-target-mindef';
     } else if (settingKey === 'autoHomeUpgrade') {
       idKey = 'autohomeup';
+    } else if (settingKey === 'autoEventJoinInv') {
+      idKey = 'auto-event-join-inv';
+    } else if (settingKey === 'autoEventJoinGw') {
+      idKey = 'auto-event-join-gw';
+    } else if (settingKey === 'autoEventJoinCw') {
+      idKey = 'auto-event-join-cw';
     }
     
     let chk = document.getElementById(`chk-${idKey}-${uid}`);

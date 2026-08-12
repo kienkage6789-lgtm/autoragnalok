@@ -289,6 +289,29 @@ try {
   stuckBot.exitEventMode();
   assert.strictEqual(stuckBot.settings.targetMap, 1, 'stuck targetMap must be self-healed and reset to 1');
 
+  // Verify eventOriginalMap saving logic
+  console.log('Testing enterEventMode original map saving logic...');
+  const eventBot = new BotInstance({
+    line_uid: 'event_test',
+    settings: { targetMap: 3, autoMap: true, autoZone: true, lock_zone_center: true, targetZone: 5 }
+  });
+  // Mock player state, currently on the event map (Map 4) after join action
+  eventBot.player = { map: 4, lv: 50 };
+  
+  // Enter Event Mode (GW on Map 4)
+  eventBot.enterEventMode('gw', 4);
+  // eventOriginalMap should be saved as 3 (the original settings.targetMap, NOT the player's current map 4)
+  assert.strictEqual(eventBot.eventOriginalMap, 3, 'eventOriginalMap must save the configured targetMap 3');
+  assert.strictEqual(eventBot.settings.targetMap, 4, 'targetMap must be overridden to the event map 4');
+  
+  // Exit Event Mode
+  eventBot.exitEventMode();
+  assert.strictEqual(eventBot.settings.targetMap, 3, 'targetMap must be restored to 3 after exitEventMode');
+  assert.strictEqual(eventBot.settings.autoMap, true, 'autoMap must be restored');
+  assert.strictEqual(eventBot.settings.autoZone, true, 'autoZone must be restored');
+  assert.strictEqual(eventBot.settings.lock_zone_center, true, 'lock_zone_center must be restored');
+  assert.strictEqual(eventBot.settings.targetZone, 5, 'targetZone must be restored');
+
   // Verify MVP Boss Hunting Flow Changes
   console.log('Testing MVP Boss Hunting Flow changes...');
   

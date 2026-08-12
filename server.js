@@ -1599,7 +1599,15 @@ class BotInstance {
     this.currentEventKind = kind;
     
     // Save original states
-    this.eventOriginalMap = this.player ? Number(this.player.map) : Number(this.settings.targetMap || 1);
+    let originalMap = 1;
+    if (this.settings.targetMap && Number(this.settings.targetMap) !== Number(mapId)) {
+      originalMap = Number(this.settings.targetMap);
+    } else if (this.player && Number(this.player.map) !== Number(mapId)) {
+      originalMap = Number(this.player.map);
+    } else if (this.settings.targetMap) {
+      originalMap = Number(this.settings.targetMap) === 4 ? 1 : Number(this.settings.targetMap);
+    }
+    this.eventOriginalMap = originalMap;
     this.eventOriginalAutoMap = this.settings.autoMap;
     this.eventOriginalAutoZone = this.settings.autoZone;
     this.eventOriginalLockZoneCenter = this.settings.lock_zone_center;

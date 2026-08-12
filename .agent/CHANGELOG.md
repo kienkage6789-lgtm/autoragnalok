@@ -2,6 +2,16 @@
 
 > Changelog of actual changes implemented.
 
+## 2026-08-12 - Khắc Phục Lỗi Giao Diện & Logic Thoát Chế Độ Event (T66)
+- File đã đổi: [server.js](file:///C:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/server.js), [public/app.js](file:///C:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/public/app.js), [test.js](file:///C:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/test.js).
+- Đã làm:
+  - **Sửa lỗi lưu trạng thái checkbox Event**: Cập nhật hàm `toggleSetting` trong `public/app.js` tự động ánh xạ chính xác các key camelCase (`autoEventJoinInv`, `autoEventJoinGw`, `autoEventJoinCw`) sang các ID HTML tương ứng có dấu gạch ngang (`chk-auto-event-join-...`).
+  - **Sửa lỗi không quay về map farm gốc sau Event**: Thay thế logic lưu bản đồ farm gốc từ `this.player.map` thành `this.settings.targetMap` để tránh trường hợp nhân vật đã warp sang map event rồi mới lưu (khiến map gốc lưu nhầm thành map event). Bổ sung cơ chế tự động reset về Map 1 nếu map farm gốc bị lưu nhầm thành Map 4.
+  - **Thêm unit test tự động**: Viết test case xác minh cơ chế lưu/khôi phục bản đồ farm gốc khi kích hoạt và kết thúc Event Mode.
+  - Chạy `npm test` thành công 100%.
+
+---
+
 ## 2026-08-12 - Khắc Phục Lỗi Tự Động Tham Gia & Kẹt Vòng Lặp Map Event (Map 4) (T65)
 - File đã đổi: [server.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/server.js).
 - Đã làm:
