@@ -1210,7 +1210,13 @@ class BotInstance {
     this.session_token = account.session_token;
     this.name = account.name;
     this.userId = account.userId || 'usr_admin';
-    this.settings = { ...this.getDefaultSettings(), ...(account.settings || {}) };
+    const userSettings = account.settings || {};
+    this.settings = { ...this.getDefaultSettings(), ...userSettings };
+    if (this.settings.autoEventJoin) {
+      if (userSettings.autoEventJoinInv === undefined) this.settings.autoEventJoinInv = true;
+      if (userSettings.autoEventJoinGw === undefined) this.settings.autoEventJoinGw = true;
+      if (userSettings.autoEventJoinCw === undefined) this.settings.autoEventJoinCw = true;
+    }
     if (this.settings.bossHuntMode === undefined) {
       if (this.settings.autoMVP) {
         this.settings.bossHuntMode = this.settings.autoMvpCycle !== false ? 'type2' : 'type1';
@@ -1380,9 +1386,13 @@ class BotInstance {
       activeHealEnabled: false,
       activeHealThreshold: 50,
       autoEventJoin: false,
+      autoEventJoinInv: false,
+      autoEventJoinGw: false,
+      autoEventJoinCw: false,
       eventPotionThreshold: 0,
       eventTargetMinDef: false,
-      eventAttackRange: 300
+      eventAttackRange: 300,
+      pollInterval: 2000
     };
   }
 
@@ -1613,7 +1623,19 @@ class BotInstance {
   }
 
   exitEventMode() {
-    if (!this.inEventMode) return;
+    if (!this.inEventMode) {
+      if (Number(this.settings.targetMap) === 4) {
+        this.settings.targetMap = 1;
+        this.addLog('SYSTEM', '🔄 [Cảnh báo] Phát hiện targetMap bị kẹt ở Map 4 trong khi không có sự kiện. Đã tự động reset về Map 1.');
+        const currentAccounts = loadAccounts();
+        const index = currentAccounts.findIndex(acc => acc.line_uid === this.line_uid);
+        if (index !== -1) {
+          currentAccounts[index].settings = this.settings;
+          saveAccounts(currentAccounts);
+        }
+      }
+      return;
+    }
     this.inEventMode = false;
     
     const returnMap = this.eventOriginalMap || 1;
@@ -1868,11 +1890,25 @@ class BotInstance {
         this.isPolling = false;
         // Schedule next poll staggering
         if (this.status === 'running') {
+          const userPollInterval = this.settings.pollInterval || 2000;
           const isSnipe = this.targetedMvp && this._bossSnipeActive;
           const isPkEvent = this.inEventMode && (this.currentEventKind === 'gw' || this.currentEventKind === 'cw');
-          const baseDelay = (isSnipe || isPkEvent) ? 1200 : 2000;
-          const jitter = Math.floor(Math.random() * 300) - 150; // Jitter ngẫu nhiên ±150ms né Cloudflare pattern
-          this.timer = setTimeout(runPoll, Math.max(1000, baseDelay + jitter));
+          
+          let baseDelay = userPollInterval;
+          if (isSnipe || isPkEvent) {
+            baseDelay = Math.min(baseDelay, 1200);
+          }
+
+          // Dynamic jitter range: ±100ms for <= 1100ms, ±120ms for <= 1500ms, ±150ms for slower
+          let jitterBound = 150;
+          if (baseDelay <= 1100) {
+            jitterBound = 100;
+          } else if (baseDelay <= 1500) {
+            jitterBound = 120;
+          }
+          const jitter = Math.floor(Math.random() * (jitterBound * 2)) - jitterBound;
+          
+          this.timer = setTimeout(runPoll, Math.max(500, baseDelay + jitter));
         }
       }
     };
@@ -2752,7 +2788,8 @@ class BotInstance {
     const isCwActive = this.lastCw && (this.lastCw.st === 'open' || this.lastCw.st === 'fight') && (!this.lastCw.ends || this.lastCw.ends > currentEpoch);
 
     // Auto-join event
-    if (this.settings.autoEventJoin && !this.inEventMode) {
+    const shouldCheckEventJoin = (this.settings.autoEventJoinInv || this.settings.autoEventJoinGw || this.settings.autoEventJoinCw);
+    if (shouldCheckEventJoin && !this.inEventMode) {
       const currentPlayer = d.player || this.player;
       if (currentPlayer && !currentPlayer.is_dead) {
         const playerLv = currentPlayer.lv || 1;
@@ -2760,7 +2797,7 @@ class BotInstance {
         const isAtHome = !this.isMvpCycling && playerMap === 5 && (currentPlayer.home_crops !== undefined || currentPlayer.home_lv !== undefined);
 
         if (!isAtHome) {
-          if (isInvActive) {
+          if (isInvActive && this.settings.autoEventJoinInv) {
             const map2Def = getMapDefs().find(m => m.id === 2);
             const req2 = map2Def ? map2Def.req : 25;
             if (playerLv >= req2) {
@@ -2775,7 +2812,7 @@ class BotInstance {
             } else if (this.pollCount % 30 === 0) {
               this.addLog('WARNING', `⚠️ [Auto Event] Không thể tham gia Invasion: Cấp độ nhân vật (Lv.${playerLv}) chưa đủ yêu cầu (Lv.${req2}+)`);
             }
-          } else if (isGwActive) {
+          } else if (isGwActive && this.settings.autoEventJoinGw) {
             const map4Def = getMapDefs().find(m => m.id === 4);
             const req4 = map4Def ? map4Def.req : 20;
             if (playerLv >= req4) {
@@ -2790,7 +2827,7 @@ class BotInstance {
             } else if (this.pollCount % 30 === 0) {
               this.addLog('WARNING', `⚠️ [Auto Event] Không thể tham gia Guild War: Cấp độ nhân vật (Lv.${playerLv}) chưa đủ yêu cầu (Lv.${req4}+)`);
             }
-          } else if (isCwActive) {
+          } else if (isCwActive && this.settings.autoEventJoinCw) {
             const map4Def = getMapDefs().find(m => m.id === 4);
             const req4 = map4Def ? map4Def.req : 20;
             if (playerLv >= req4) {
@@ -3032,17 +3069,17 @@ class BotInstance {
     const isCwActive = this.lastCw && (this.lastCw.st === 'open' || this.lastCw.st === 'fight') && (!this.lastCw.ends || this.lastCw.ends > currentEpoch);
     
     let isEventActive = false;
-    if (this.settings.autoEventJoin && this.player) {
+    if (this.player) {
       const playerLv = this.player.lv || 1;
-      if (isInvActive) {
+      if (isInvActive && this.settings.autoEventJoinInv) {
         const map2Def = getMapDefs().find(m => m.id === 2);
         const req2 = map2Def ? map2Def.req : 25;
         if (playerLv >= req2) isEventActive = true;
-      } else if (isGwActive) {
+      } else if (isGwActive && this.settings.autoEventJoinGw) {
         const map4Def = getMapDefs().find(m => m.id === 4);
         const req4 = map4Def ? map4Def.req : 20;
         if (playerLv >= req4) isEventActive = true;
-      } else if (isCwActive) {
+      } else if (isCwActive && this.settings.autoEventJoinCw) {
         const map4Def = getMapDefs().find(m => m.id === 4);
         const req4 = map4Def ? map4Def.req : 20;
         if (playerLv >= req4) isEventActive = true;

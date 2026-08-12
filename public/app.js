@@ -119,6 +119,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const rateUnits = {}; // line_uid -> 'min' | 'hour' | 'day'
   const activeLogSubTabs = {}; // line_uid -> sub_tab_id
   const activeEventSubTabs = {}; // line_uid -> sub_tab_id
+  const activeMvpSubTabs = {}; // line_uid -> sub_tab_id
   let expandedUserGroups = new Set();
   let isUserGroupInitialized = false;
   window.lastFetchedAccounts = [];
@@ -1251,12 +1252,32 @@ document.addEventListener('DOMContentLoaded', () => {
           <!-- Tiểu tab 1: Cấu hình & Lịch -->
           <div class="event-subpane" id="event-subpane-cfg-${acc.line_uid}">
             <div class="settings-group">
-              <div class="toggle-control" style="grid-column: span 2; margin-bottom: 6px;">
-                <span class="toggle-label">🏆 Tự Động Tham Gia Sự Kiện</span>
-                <label class="switch">
-                  <input type="checkbox" id="chk-autoeventjoin-${acc.line_uid}" onchange="toggleSetting('${acc.line_uid}', 'autoEventJoin')">
-                  <span class="slider"></span>
-                </label>
+              <div class="toggle-control" style="grid-column: span 2; margin-bottom: 6px; flex-direction: column; align-items: stretch; gap: 8px;">
+                <span class="toggle-label" style="font-weight: 600; font-size: 0.9rem; margin-bottom: 4px; display: block; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 4px;">🏆 Tự Động Tham Gia Sự Kiện</span>
+                
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px;">
+                  <span class="toggle-label" style="font-size: 0.82rem; color: #d1d5db;">👾 Event Invasion (Quái xâm lăng - Map 2)</span>
+                  <label class="switch">
+                    <input type="checkbox" id="chk-auto-event-join-inv-${acc.line_uid}" onchange="toggleSetting('${acc.line_uid}', 'autoEventJoinInv')">
+                    <span class="slider"></span>
+                  </label>
+                </div>
+                
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px;">
+                  <span class="toggle-label" style="font-size: 0.82rem; color: #d1d5db;">⚔️ Event Bang Chiến (Guild War - Map 4)</span>
+                  <label class="switch">
+                    <input type="checkbox" id="chk-auto-event-join-gw-${acc.line_uid}" onchange="toggleSetting('${acc.line_uid}', 'autoEventJoinGw')">
+                    <span class="slider"></span>
+                  </label>
+                </div>
+                
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px;">
+                  <span class="toggle-label" style="font-size: 0.82rem; color: #d1d5db;">👑 Event Quốc Chiến (Country War - Map 4)</span>
+                  <label class="switch">
+                    <input type="checkbox" id="chk-auto-event-join-cw-${acc.line_uid}" onchange="toggleSetting('${acc.line_uid}', 'autoEventJoinCw')">
+                    <span class="slider"></span>
+                  </label>
+                </div>
               </div>
               
               <div class="input-control" style="grid-column: span 2; margin-bottom: 6px;">
@@ -1453,6 +1474,21 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
 
           <div class="settings-group">
+            <div class="input-control" style="grid-column: span 2;">
+              <label for="sel-poll-interval-${acc.line_uid}">⚡ Nhịp Polling (Tần suất gửi request)</label>
+              <select id="sel-poll-interval-${acc.line_uid}" onchange="updateNumericSetting('${acc.line_uid}', 'pollInterval')" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; padding: 4px 6px; font-family: inherit; font-size: 0.85rem; outline: none; margin-top:2px; width: 100%;">
+                <option value="2000">2000ms (Mặc định - Chậm & An toàn)</option>
+                <option value="1800">1800ms</option>
+                <option value="1500">1500ms</option>
+                <option value="1300">1300ms</option>
+                <option value="1100">1100ms (Nhanh - Khuyên dùng)</option>
+                <option value="1000">1000ms (Rất nhanh)</option>
+                <option value="800">800ms (Siêu nhanh - Dễ phát hiện bot)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="settings-group">
             <div class="toggle-control">
               <span class="toggle-label">🗺️ Auto Warp Map</span>
               <label class="switch">
@@ -1537,57 +1573,81 @@ document.addEventListener('DOMContentLoaded', () => {
 
         <!-- Săn Boss Tab Pane -->
         <div class="tab-pane" id="pane-mvp-${acc.line_uid}">
-          <div class="settings-group">
-            <div class="input-control" style="grid-column: span 2; margin-bottom: 6px;">
-              <label for="sel-boss-hunt-mode-${acc.line_uid}">👿 Chế độ Săn Boss</label>
-              <select id="sel-boss-hunt-mode-${acc.line_uid}" onchange="updateStringSetting('${acc.line_uid}', 'bossHuntMode')" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; padding: 6px; font-family: inherit; font-size: 0.85rem; outline: none; margin-top:2px; width: 100%;">
-                <option value="off">❌ Tắt tự động săn Boss</option>
-                <option value="type1">📍 Loại 1: Săn tại bản đồ hiện tại</option>
-                <option value="type2">🗺️ Loại 2: Săn theo bản đồ chỉ định</option>
-              </select>
+          <!-- Sub-tabs Navigation -->
+          <div class="subtabs-nav" style="display:flex; gap:6px; margin-bottom:10px; border-bottom:1px solid rgba(255,255,255,0.08); padding-bottom:6px; overflow-x:auto;">
+            <button class="subtab-btn active" id="mvp-subtab-btn-cfg-${acc.line_uid}" onclick="switchMvpSubTab('${acc.line_uid}', 'cfg')">⚙️ Cấu Hình</button>
+            <button class="subtab-btn" id="mvp-subtab-btn-monitor-${acc.line_uid}" onclick="switchMvpSubTab('${acc.line_uid}', 'monitor')">📊 Theo Dõi</button>
+          </div>
+
+          <!-- Sub-pane 1: Cấu Hình -->
+          <div id="mvp-subpane-cfg-${acc.line_uid}" style="display:block;">
+            <div class="settings-group">
+              <div class="input-control" style="grid-column: span 2; margin-bottom: 6px;">
+                <label for="sel-boss-hunt-mode-${acc.line_uid}">👿 Chế độ Săn Boss</label>
+                <select id="sel-boss-hunt-mode-${acc.line_uid}" onchange="updateStringSetting('${acc.line_uid}', 'bossHuntMode')" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; padding: 6px; font-family: inherit; font-size: 0.85rem; outline: none; margin-top:2px; width: 100%;">
+                  <option value="off">❌ Tắt tự động săn Boss</option>
+                  <option value="type1">📍 Loại 1: Săn tại bản đồ hiện tại</option>
+                  <option value="type2">🗺️ Loại 2: Săn theo bản đồ chỉ định</option>
+                </select>
+              </div>
+              
+              <div class="toggle-control" style="margin-top: 4px;">
+                <span class="toggle-label">🏟️ Auto Đấu Trường</span>
+                <label class="switch">
+                  <input type="checkbox" id="chk-autoarena-${acc.line_uid}" onchange="toggleSetting('${acc.line_uid}', 'autoArena')">
+                  <span class="slider"></span>
+                </label>
+              </div>
             </div>
-            
-            <div class="toggle-control" style="margin-top: 4px;">
-              <span class="toggle-label">🏟️ Auto Đấu Trường</span>
-              <label class="switch">
-                <input type="checkbox" id="chk-autoarena-${acc.line_uid}" onchange="toggleSetting('${acc.line_uid}', 'autoArena')">
-                <span class="slider"></span>
-              </label>
+
+            <!-- Section cho Loại 1 -->
+            <div id="group-boss-type1-${acc.line_uid}" class="settings-group" style="margin-top: 10px; display: none;">
+              <div class="input-control" style="grid-column: span 2;">
+                <label for="sel-mvp-priority-mode-${acc.line_uid}">🎯 Tiêu chí ưu tiên săn Boss</label>
+                <select id="sel-mvp-priority-mode-${acc.line_uid}" onchange="updateStringSetting('${acc.line_uid}', 'mvpPriorityMode')" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; padding: 6px; font-family: inherit; font-size: 0.85rem; outline: none; margin-top:2px; width: 100%;">
+                  <option value="distance">📍 Gần nhất (Khoảng cách)</option>
+                  <option value="level_asc">🐣 Cấp độ thấp nhất (Lv tăng dần)</option>
+                  <option value="level_desc">🦅 Cấp độ cao nhất (Lv giảm dần)</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Section cho Loại 2 -->
+            <div id="group-boss-type2-${acc.line_uid}" class="settings-group" style="margin-top: 10px; display: none;">
+              <div class="input-control" style="grid-column: span 2;">
+                <label for="txt-mvp-target-maps-${acc.line_uid}">🗺️ Bản đồ chỉ định (VD: 1, 2, 3, 5, 6)</label>
+                <input type="text" id="txt-mvp-target-maps-${acc.line_uid}" placeholder="VD: 1, 2, 3, 5, 6" onchange="updateStringSetting('${acc.line_uid}', 'mvpTargetMaps')" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; padding: 6px; font-family: inherit; font-size: 0.85rem; outline: none; margin-top:2px; width: 100%;">
+                <span style="font-size: 0.72rem; color: #34d399; margin-top: 4px; display: block; line-height: 1.3;">💡 Săn tất cả các boss theo thứ tự map. Sắp xếp: Máu ít diệt trước. Chu kỳ chạy mỗi giờ tròn hoặc kích hoạt thủ công.</span>
+              </div>
+            </div>
+
+            <div style="margin-top: 10px;">
+              <button type="button" onclick="forceMvpHunt('${acc.line_uid}')" style="background: rgba(220, 38, 38, 0.25); border: 1px solid rgba(220, 38, 38, 0.5); color: #fca5a5; border-radius: 6px; padding: 6px 12px; font-size: 0.85rem; cursor: pointer; width: 100%; font-weight: 600; text-align: center; transition: all 0.2s;" onmouseover="this.style.background='rgba(220, 38, 38, 0.4)'" onmouseout="this.style.background='rgba(220, 38, 38, 0.25)'">⚡ Kích hoạt đi săn ngay cho cả Team (Force Team Hunt)</button>
             </div>
           </div>
 
-          <!-- Section cho Loại 1 -->
-          <div id="group-boss-type1-${acc.line_uid}" class="settings-group" style="margin-top: 10px; display: none;">
-            <div class="input-control" style="grid-column: span 2;">
-              <label for="sel-mvp-priority-mode-${acc.line_uid}">🎯 Tiêu chí ưu tiên săn Boss</label>
-              <select id="sel-mvp-priority-mode-${acc.line_uid}" onchange="updateStringSetting('${acc.line_uid}', 'mvpPriorityMode')" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; padding: 6px; font-family: inherit; font-size: 0.85rem; outline: none; margin-top:2px; width: 100%;">
-                <option value="distance">📍 Gần nhất (Khoảng cách)</option>
-                <option value="level_asc">🐣 Cấp độ thấp nhất (Lv tăng dần)</option>
-                <option value="level_desc">🦅 Cấp độ cao nhất (Lv giảm dần)</option>
-              </select>
+          <!-- Sub-pane 2: Theo Dõi -->
+          <div id="mvp-subpane-monitor-${acc.line_uid}" style="display:none;">
+            <div class="live-bosses-section" id="live-bosses-section-${acc.line_uid}" style="margin-top: 4px; border-top: none; padding-top: 0px; display: none;">
+              <div style="font-size: 0.8rem; font-weight: 700; color: #fbbf24; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">
+                <span>👹 Boss Đang Sống Trên Map</span>
+                <span id="live-boss-count-badge-${acc.line_uid}" style="font-size: 0.65rem; background: rgba(251,191,36,0.15); color: #fbbf24; border: 1px solid rgba(251,191,36,0.3); border-radius: 10px; padding: 1px 6px; font-weight: 600;">0 Boss</span>
+              </div>
+              <div class="live-bosses-list" id="live-bosses-list-${acc.line_uid}" style="display: flex; flex-direction: column; gap: 4px; max-height: 150px; overflow-y: auto;">
+                <!-- Dynamically populated -->
+              </div>
             </div>
-          </div>
 
-          <!-- Section cho Loại 2 -->
-          <div id="group-boss-type2-${acc.line_uid}" class="settings-group" style="margin-top: 10px; display: none;">
-            <div class="input-control" style="grid-column: span 2;">
-              <label for="txt-mvp-target-maps-${acc.line_uid}">🗺️ Bản đồ chỉ định (VD: 1, 2, 3, 5, 6)</label>
-              <input type="text" id="txt-mvp-target-maps-${acc.line_uid}" placeholder="VD: 1, 2, 3, 5, 6" onchange="updateStringSetting('${acc.line_uid}', 'mvpTargetMaps')" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; padding: 6px; font-family: inherit; font-size: 0.85rem; outline: none; margin-top:2px; width: 100%;">
-              <span style="font-size: 0.72rem; color: #34d399; margin-top: 4px; display: block; line-height: 1.3;">💡 Săn tất cả các boss theo thứ tự map. Sắp xếp: Máu ít diệt trước. Chu kỳ chạy mỗi giờ tròn hoặc kích hoạt thủ công.</span>
-            </div>
-          </div>
-
-          <div style="margin-top: 10px;">
-            <button type="button" onclick="forceMvpHunt('${acc.line_uid}')" style="background: rgba(220, 38, 38, 0.25); border: 1px solid rgba(220, 38, 38, 0.5); color: #fca5a5; border-radius: 6px; padding: 6px 12px; font-size: 0.85rem; cursor: pointer; width: 100%; font-weight: 600; text-align: center; transition: all 0.2s;" onmouseover="this.style.background='rgba(220, 38, 38, 0.4)'" onmouseout="this.style.background='rgba(220, 38, 38, 0.25)'">⚡ Kích hoạt đi săn ngay cho cả Team (Force Team Hunt)</button>
-          </div>
-
-          <div class="live-bosses-section" id="live-bosses-section-${acc.line_uid}" style="margin-top: 12px; border-top: 1px dashed rgba(255,255,255,0.08); padding-top: 10px; display: none;">
-            <div style="font-size: 0.8rem; font-weight: 700; color: #fbbf24; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">
-              <span>👹 Boss Đang Sống Trên Map</span>
-              <span id="live-boss-count-badge-${acc.line_uid}" style="font-size: 0.65rem; background: rgba(251,191,36,0.15); color: #fbbf24; border: 1px solid rgba(251,191,36,0.3); border-radius: 10px; padding: 1px 6px; font-weight: 600;">0 Boss</span>
-            </div>
-            <div class="live-bosses-list" id="live-bosses-list-${acc.line_uid}" style="display: flex; flex-direction: column; gap: 4px; max-height: 150px; overflow-y: auto;">
-              <!-- Dynamically populated -->
+            <!-- Nhật ký Săn Boss MVP -->
+            <div class="boss-journal-section" id="boss-journal-section-${acc.line_uid}" style="margin-top: 12px; border-top: 1px dashed rgba(255,255,255,0.08); padding-top: 10px;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; padding:0 2px;">
+                <span style="font-size:0.8rem; color:#fbbf24; font-weight:700;">👾 Nhật ký Săn Boss MVP</span>
+                <button class="btn btn-secondary btn-sm" onclick="fetchBossLog('${acc.line_uid}')" style="padding:2px 8px; font-size:0.75rem;">🔄 Cập nhật</button>
+              </div>
+              <div id="boss-stats-${acc.line_uid}" class="boss-stats-container" style="margin-bottom: 6px;"></div>
+              <div class="log-terminal boss-terminal" id="boss-terminal-${acc.line_uid}">
+                <div class="log-line"><span class="log-text-content" style="font-size:0.6rem;">Chưa có dữ liệu săn Boss.</span></div>
+              </div>
             </div>
           </div>
         </div>
@@ -1916,7 +1976,6 @@ document.addEventListener('DOMContentLoaded', () => {
             <button class="subtab-btn active" id="log-subtab-btn-act-${acc.line_uid}" onclick="switchLogSubTab('${acc.line_uid}', 'act')">📜 Hoạt Động</button>
             <button class="subtab-btn" id="log-subtab-btn-loot-${acc.line_uid}" onclick="switchLogSubTab('${acc.line_uid}', 'loot')">🎁 Vật Phẩm</button>
             <button class="subtab-btn" id="log-subtab-btn-market-${acc.line_uid}" onclick="switchLogSubTab('${acc.line_uid}', 'market')">🏪 Chợ</button>
-            <button class="subtab-btn" id="log-subtab-btn-boss-${acc.line_uid}" onclick="switchLogSubTab('${acc.line_uid}', 'boss')">👾 Boss</button>
           </div>
           
           <!-- Sub-pane 1: Activity Logs -->
@@ -1945,18 +2004,6 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
             <div class="log-terminal market-terminal" id="market-terminal-${acc.line_uid}">
               <div class="log-line"><span class="log-text-content" style="font-size:0.6rem;">Chuyển sang tab này để tải lịch sử chợ từ máy chủ.</span></div>
-            </div>
-          </div>
-
-          <!-- Sub-pane 4: Boss Hunt Journal -->
-          <div id="log-subpane-boss-${acc.line_uid}" style="display:none;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; padding:0 2px;">
-              <span style="font-size:0.8rem; color:var(--text-secondary); font-weight:600;">👾 Nhật ký Săn Boss MVP</span>
-              <button class="btn btn-secondary btn-sm" onclick="fetchBossLog('${acc.line_uid}')" style="padding:2px 8px; font-size:0.75rem;">🔄 Cập nhật</button>
-            </div>
-            <div id="boss-stats-${acc.line_uid}" class="boss-stats-container"></div>
-            <div class="log-terminal boss-terminal" id="boss-terminal-${acc.line_uid}">
-              <div class="log-line"><span class="log-text-content" style="font-size:0.6rem;">Chưa có dữ liệu săn Boss.</span></div>
             </div>
           </div>
         </div>
@@ -2263,8 +2310,18 @@ document.addEventListener('DOMContentLoaded', () => {
     if (chkAutoArena && document.activeElement !== chkAutoArena) chkAutoArena.checked = acc.settings.autoArena === true;
 
     // Event settings checkboxes sync
-    const chkAutoEventJoin = document.getElementById(`chk-autoeventjoin-${acc.line_uid}`);
-    if (chkAutoEventJoin && document.activeElement !== chkAutoEventJoin) chkAutoEventJoin.checked = acc.settings.autoEventJoin === true;
+    const chkAutoEventJoinInv = document.getElementById(`chk-auto-event-join-inv-${acc.line_uid}`);
+    if (chkAutoEventJoinInv && document.activeElement !== chkAutoEventJoinInv) {
+      chkAutoEventJoinInv.checked = acc.settings.autoEventJoinInv === true;
+    }
+    const chkAutoEventJoinGw = document.getElementById(`chk-auto-event-join-gw-${acc.line_uid}`);
+    if (chkAutoEventJoinGw && document.activeElement !== chkAutoEventJoinGw) {
+      chkAutoEventJoinGw.checked = acc.settings.autoEventJoinGw === true;
+    }
+    const chkAutoEventJoinCw = document.getElementById(`chk-auto-event-join-cw-${acc.line_uid}`);
+    if (chkAutoEventJoinCw && document.activeElement !== chkAutoEventJoinCw) {
+      chkAutoEventJoinCw.checked = acc.settings.autoEventJoinCw === true;
+    }
 
     const selEventPotion = document.getElementById(`sel-event-potion-threshold-${acc.line_uid}`);
     if (selEventPotion && document.activeElement !== selEventPotion) {
@@ -2316,6 +2373,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const selActiveHealThreshold = document.getElementById(`sel-active-heal-threshold-${acc.line_uid}`);
     if (selActiveHealThreshold && document.activeElement !== selActiveHealThreshold) {
       selActiveHealThreshold.value = acc.settings.activeHealThreshold !== undefined ? String(acc.settings.activeHealThreshold) : '50';
+    }
+
+    // Poll Interval sync
+    const selPollInterval = document.getElementById(`sel-poll-interval-${acc.line_uid}`);
+    if (selPollInterval && document.activeElement !== selPollInterval) {
+      selPollInterval.value = acc.settings.pollInterval !== undefined ? String(acc.settings.pollInterval) : '2000';
     }
 
     // Auto Map toggle & map select sync
@@ -2775,7 +2838,7 @@ document.addEventListener('DOMContentLoaded', () => {
       clearInterval(window._eventHistoryIntervals[uid]);
       delete window._eventHistoryIntervals[uid];
     }
-    if (targetTabId !== 'log' && window._bossLogIntervals && window._bossLogIntervals[uid]) {
+    if (targetTabId !== 'mvp' && window._bossLogIntervals && window._bossLogIntervals[uid]) {
       clearInterval(window._bossLogIntervals[uid]);
       delete window._bossLogIntervals[uid];
     }
@@ -2786,6 +2849,9 @@ document.addEventListener('DOMContentLoaded', () => {
     } else if (targetTabId === 'event') {
       const subTabId = activeEventSubTabs[uid] || 'cfg';
       switchEventSubTab(uid, subTabId);
+    } else if (targetTabId === 'mvp') {
+      const subTabId = activeMvpSubTabs[uid] || 'cfg';
+      switchMvpSubTab(uid, subTabId);
     } else {
       if (targetTabId) {
         fetchAccounts();
@@ -2800,29 +2866,18 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnAct = document.getElementById(`log-subtab-btn-act-${uid}`);
     const btnLoot = document.getElementById(`log-subtab-btn-loot-${uid}`);
     const btnMarket = document.getElementById(`log-subtab-btn-market-${uid}`);
-    const btnBoss = document.getElementById(`log-subtab-btn-boss-${uid}`);
 
     const paneAct = document.getElementById(`log-subpane-act-${uid}`);
     const paneLoot = document.getElementById(`log-subpane-loot-${uid}`);
     const paneMarket = document.getElementById(`log-subpane-market-${uid}`);
-    const paneBoss = document.getElementById(`log-subpane-boss-${uid}`);
 
     if (btnAct) btnAct.classList.toggle('active', subTabId === 'act');
     if (btnLoot) btnLoot.classList.toggle('active', subTabId === 'loot');
     if (btnMarket) btnMarket.classList.toggle('active', subTabId === 'market');
-    if (btnBoss) btnBoss.classList.toggle('active', subTabId === 'boss');
 
     if (paneAct) paneAct.style.display = subTabId === 'act' ? 'block' : 'none';
     if (paneLoot) paneLoot.style.display = subTabId === 'loot' ? 'block' : 'none';
     if (paneMarket) paneMarket.style.display = subTabId === 'market' ? 'block' : 'none';
-    if (paneBoss) paneBoss.style.display = subTabId === 'boss' ? 'block' : 'none';
-
-    // Reset/clear existing interval for this bot card
-    if (!window._bossLogIntervals) window._bossLogIntervals = {};
-    if (window._bossLogIntervals[uid]) {
-      clearInterval(window._bossLogIntervals[uid]);
-      delete window._bossLogIntervals[uid];
-    }
 
     if (subTabId === 'act') {
       fetchLogs(uid);
@@ -2830,19 +2885,6 @@ document.addEventListener('DOMContentLoaded', () => {
       fetchDropLogs(uid);
     } else if (subTabId === 'market') {
       fetchMarketHistory(uid);
-    } else if (subTabId === 'boss') {
-      fetchBossLog(uid);
-      // Auto-refresh boss log every 5 seconds while active
-      window._bossLogIntervals[uid] = setInterval(() => {
-        const pane = document.getElementById(`pane-log-${uid}`);
-        const subpane = document.getElementById(`log-subpane-boss-${uid}`);
-        if (pane && pane.style.display !== 'none' && subpane && subpane.style.display !== 'none' && activeLogSubTabs[uid] === 'boss') {
-          fetchBossLog(uid);
-        } else {
-          clearInterval(window._bossLogIntervals[uid]);
-          delete window._bossLogIntervals[uid];
-        }
-      }, 5000);
     }
   };
 
@@ -3404,6 +3446,45 @@ document.addEventListener('DOMContentLoaded', () => {
           delete window._eventHistoryIntervals[uid];
         }
       }, 8000);
+    }
+  };
+
+  // Switch MVP Sub-Tab
+  window.switchMvpSubTab = function(uid, subTabId) {
+    activeMvpSubTabs[uid] = subTabId;
+
+    const btnCfg = document.getElementById(`mvp-subtab-btn-cfg-${uid}`);
+    const btnMonitor = document.getElementById(`mvp-subtab-btn-monitor-${uid}`);
+
+    const paneCfg = document.getElementById(`mvp-subpane-cfg-${uid}`);
+    const paneMonitor = document.getElementById(`mvp-subpane-monitor-${uid}`);
+
+    if (btnCfg) btnCfg.classList.toggle('active', subTabId === 'cfg');
+    if (btnMonitor) btnMonitor.classList.toggle('active', subTabId === 'monitor');
+
+    if (paneCfg) paneCfg.style.display = subTabId === 'cfg' ? 'block' : 'none';
+    if (paneMonitor) paneMonitor.style.display = subTabId === 'monitor' ? 'block' : 'none';
+
+    // Clear existing interval for boss log
+    if (!window._bossLogIntervals) window._bossLogIntervals = {};
+    if (window._bossLogIntervals[uid]) {
+      clearInterval(window._bossLogIntervals[uid]);
+      delete window._bossLogIntervals[uid];
+    }
+
+    if (subTabId === 'monitor') {
+      fetchBossLog(uid);
+      // Auto-refresh boss log every 5 seconds while active
+      window._bossLogIntervals[uid] = setInterval(() => {
+        const pane = document.getElementById(`pane-mvp-${uid}`);
+        const subpane = document.getElementById(`mvp-subpane-monitor-${uid}`);
+        if (pane && pane.classList.contains('active') && subpane && subpane.style.display !== 'none' && activeTabs[uid] === 'mvp' && activeMvpSubTabs[uid] === 'monitor') {
+          fetchBossLog(uid);
+        } else {
+          clearInterval(window._bossLogIntervals[uid]);
+          delete window._bossLogIntervals[uid];
+        }
+      }, 5000);
     }
   };
 

@@ -263,6 +263,32 @@ try {
   assert.strictEqual(defaultSettings.teamRole, 'none');
   assert.strictEqual(defaultSettings.teamId, 'none');
 
+  // Verify legacy settings migration and specific event defaults
+  console.log('Testing legacy settings migration and specific event defaults...');
+  assert.strictEqual(defaultSettings.autoEventJoinInv, false);
+  assert.strictEqual(defaultSettings.autoEventJoinGw, false);
+  assert.strictEqual(defaultSettings.autoEventJoinCw, false);
+
+  const migratedBot = new BotInstance({
+    line_uid: 'migrated_test',
+    settings: { autoEventJoin: true }
+  });
+  assert.strictEqual(migratedBot.settings.autoEventJoinInv, true, 'autoEventJoinInv must be migrated to true');
+  assert.strictEqual(migratedBot.settings.autoEventJoinGw, true, 'autoEventJoinGw must be migrated to true');
+  assert.strictEqual(migratedBot.settings.autoEventJoinCw, true, 'autoEventJoinCw must be migrated to true');
+
+  // Verify exitEventMode stuck map self-healing reset logic
+  console.log('Testing exitEventMode self-healing stuck map reset logic...');
+  const stuckBot = new BotInstance({
+    line_uid: 'stuck_test',
+    settings: { targetMap: 4 }
+  });
+  assert.strictEqual(stuckBot.settings.targetMap, 4);
+  assert.strictEqual(stuckBot.inEventMode, false);
+  // calling exitEventMode when inEventMode is false and targetMap is 4 should trigger self-healing reset to Map 1
+  stuckBot.exitEventMode();
+  assert.strictEqual(stuckBot.settings.targetMap, 1, 'stuck targetMap must be self-healed and reset to 1');
+
   // Verify MVP Boss Hunting Flow Changes
   console.log('Testing MVP Boss Hunting Flow changes...');
   
