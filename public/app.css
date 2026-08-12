@@ -30,6 +30,7 @@ body {
   overflow-x: hidden;
   position: relative;
   line-height: 1.5;
+  zoom: 1.15;
 }
 
 /* Glowing background effects */

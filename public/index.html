@@ -498,6 +498,32 @@
     </div>
   </div>
 
+  <!-- Edit User Modal (Admin) -->
+  <div class="modal-backdrop" id="edit-user-modal">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h2>✏️ Chỉnh Sửa Người Dùng</h2>
+        <button class="modal-close" onclick="closeEditUserModal()">&times;</button>
+      </div>
+      <form id="edit-user-form" onsubmit="submitEditUser(event)">
+        <input type="hidden" id="edit-user-id">
+        <div class="form-group">
+          <label for="edit-user-username">👤 Tên đăng nhập</label>
+          <input type="text" id="edit-user-username" placeholder="Tên đăng nhập" disabled style="opacity: 0.6; cursor: not-allowed;">
+        </div>
+        <div class="form-group">
+          <label for="edit-user-new-password">🔑 Mật khẩu mới (Để trống nếu giữ nguyên)</label>
+          <input type="text" id="edit-user-new-password" placeholder="Nhập mật khẩu mới...">
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" onclick="closeEditUserModal()">Hủy Bỏ</button>
+          <button type="submit" class="btn btn-primary">💾 Lưu Thay Đổi</button>
+        </div>
+        <div class="error-msg" id="edit-user-error"></div>
+      </form>
+    </div>
+  </div>
+
   <script src="/app.js"></script>
 </body>
 </html>

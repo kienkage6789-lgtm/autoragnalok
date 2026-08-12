@@ -606,11 +606,12 @@ document.addEventListener('DOMContentLoaded', () => {
           </td>
           <td style="padding:8px;">${expiryHtml}</td>
           <td style="padding:8px; text-align:right;">
-            ${isAdmin ? '<span style="font-size:0.75rem; color:var(--text-secondary);">Gốc</span>' : `
+            ${isAdmin ? `<button class="btn-mini" style="width:auto; padding:3px 6px; background:rgba(16,185,129,0.2); color:#34d399; border-color:rgba(16,185,129,0.3);" onclick="openEditUserModal('${u.id}', '${u.username}')" title="Đổi mật khẩu Admin">✏️ Đổi MK</button>` : `
               <div style="display:flex; justify-content:flex-end; gap:4px; flex-wrap:wrap;">
                 <button class="btn-mini" style="width:auto; padding:3px 6px; background:rgba(234,88,12,0.25); color:#fb923c; border-color:rgba(234,88,12,0.4);" onclick="setTestUserExpiry1Min('${u.id}')" title="Set đúng 1 Phút để TEST">1Phút⚡</button>
                 <button class="btn-mini" style="width:auto; padding:3px 6px; background:rgba(168,85,247,0.2); color:#c084fc; border-color:rgba(168,85,247,0.3);" onclick="extendUserExpiry('${u.id}', 1)" title="Gia hạn thêm 1 Ngày">+1Ngày</button>
                 <button class="btn-mini" style="width:auto; padding:3px 6px; background:rgba(59,130,246,0.2); color:#60a5fa; border-color:rgba(59,130,246,0.3);" onclick="extendUserExpiry('${u.id}', 30)" title="Gia hạn thêm 30 Ngày">+30Ngày</button>
+                <button class="btn-mini" style="width:auto; padding:3px 6px; background:rgba(16,185,129,0.2); color:#34d399; border-color:rgba(16,185,129,0.3);" onclick="openEditUserModal('${u.id}', '${u.username}')" title="Chỉnh sửa tài khoản">✏️ Sửa</button>
                 <button class="btn-mini" style="width:auto; padding:3px 6px; background:rgba(239,68,68,0.2); color:#ef4444; border-color:rgba(239,68,68,0.4);" onclick="deleteAdminUser('${u.id}', '${u.username}')">Xóa</button>
               </div>
             `}
@@ -732,6 +733,54 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     } catch (e) {
       console.error(e);
+    }
+  };
+
+  // Edit User modal functions
+  window.openEditUserModal = function(userId, username) {
+    document.getElementById('edit-user-id').value = userId;
+    document.getElementById('edit-user-username').value = username;
+    document.getElementById('edit-user-new-password').value = '';
+    document.getElementById('edit-user-error').textContent = '';
+    document.getElementById('edit-user-modal').classList.add('open');
+  };
+
+  window.closeEditUserModal = function() {
+    document.getElementById('edit-user-modal').classList.remove('open');
+  };
+
+  window.submitEditUser = async function(e) {
+    e.preventDefault();
+    const userId = document.getElementById('edit-user-id').value;
+    const newPassword = document.getElementById('edit-user-new-password').value.trim();
+    const errorEl = document.getElementById('edit-user-error');
+    errorEl.textContent = '';
+
+    if (!newPassword) {
+      errorEl.textContent = 'Vui lòng nhập mật khẩu mới';
+      return;
+    }
+    if (newPassword.length < 4) {
+      errorEl.textContent = 'Mật khẩu phải có ít nhất 4 ký tự';
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/admin/users/${userId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: newPassword })
+      });
+      const data = await response.json();
+      if (response.ok && data.success) {
+        closeEditUserModal();
+        alert(`✅ Đã đổi mật khẩu thành công cho người dùng "${document.getElementById('edit-user-username').value}"`);
+        fetchAdminUsers();
+      } else {
+        errorEl.textContent = data.error || 'Không thể cập nhật mật khẩu';
+      }
+    } catch (err) {
+      errorEl.textContent = 'Không thể kết nối đến server';
     }
   };
 
