@@ -2,6 +2,32 @@
 
 > Changelog of actual changes implemented.
 
+## 2026-08-13 - Điều Chỉnh Khoảng Cách An Toàn Kiting Săn Boss Theo Loại Vũ Khí (T69)
+- File đã đổi: [server.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [play_battle.html](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/play_battle.html), [test.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/test.js).
+- Đã làm:
+  - **Phân biệt khoảng cách an toàn với Boss theo Vũ khí**:
+    - Sử dụng `active_gun === 1` để xác định người chơi đang trang bị Dao dài (Rifle).
+    - **Khi dùng Dao dài** (`active_gun === 1`): Cập nhật dải khoảng cách an toàn thành **55m - 65m** (Kiting tại **60m**).
+    - **Khi không dùng Dao dài** (Dao găm / cận chiến): Cập nhật dải khoảng cách an toàn thành **30m - 40m** (Kiting tại **35m**).
+  - **Đồng bộ Backend & Client Battle Radar**:
+    - Triển khai logic tính khoảng cách an toàn động trong luồng săn Boss ở `server.js` và logic chặn gói tin AJAX di chuyển trong `play_battle.html`.
+  - **Unit Tests**:
+    - Cập nhật Test Case 7 trong `test.js` để tự động hóa việc xác minh tọa độ kiting đối với cả hai trường hợp dùng Dao dài và Dao găm. Chạy `npm test` thành công 100%.
+
+---
+
+## 2026-08-13 - Hoàn Thiện Logic Săn Boss Xoay Vòng: Chống Deadlock 5 Phút & Xác Minh 3 Nhịp (T68)
+- File đã đổi: [server.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/server.js).
+- Đã làm:
+  - **Khắc phục lỗi Kẹt map vĩnh viễn (Deadlock)**:
+    - Bổ sung logic tính toán khoảng thời gian `timeSpentMs` ở lại map từ `this.mvpCycleStats.mapStartTs`.
+    - Kiểm tra và kích hoạt sự kiện timeout `map_timeout` nếu bot ở lại một map quá **5 phút** (`300000ms`), tự động chuyển sang map tiếp theo để tránh kẹt vĩnh viễn khi boss lỗi.
+  - **Tránh bỏ sót Boss do độ trễ Server (Race Condition)**:
+    - Nâng điều kiện xác minh map sạch boss (`isDoneWithCurrentMap`) từ `1` nhịp poll lên `3` nhịp poll sạch boss liên tiếp (`this.mvpConfirmClearCount >= 3`).
+    - Giúp bot duy trì ở lại map từ 3-6 giây sau khi warp để đảm bảo server game đã tải xong danh sách boss trước khi đưa ra quyết định chuyển map.
+
+---
+
 ## 2026-08-13 - Chuyển Cấu Hình Nhịp Polling Thành Cài Đặt Theo Tài Khoản User & Tùy Chọn Cấp Quyền Tự Chỉnh (T67)
 - File đã đổi: [server.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [public/index.html](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/public/index.html), [public/app.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/public/app.js), [test.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/test.js).
 - Đã làm:

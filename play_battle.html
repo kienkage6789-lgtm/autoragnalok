@@ -774,12 +774,13 @@ $.post = function(url, data, success, dataType) {
         const dx = px - tx;
         const dy = py - ty;
         const dist = Math.sqrt(dx * dx + dy * dy);
-        const MIN_DIST = 15;
-        const MAX_DIST = 20;
-        const TARGET_KITE_DIST = 17.5;
+        const isUsingDaoDai = window.lastGameData && window.lastGameData.player && (Number(window.lastGameData.player.active_gun) === 1);
+        const MIN_DIST = isUsingDaoDai ? 55 : 30;
+        const MAX_DIST = isUsingDaoDai ? 65 : 40;
+        const TARGET_KITE_DIST = isUsingDaoDai ? 60 : 35;
 
         if (dist > MAX_DIST || dist < MIN_DIST) {
-          // Tính vector kiting/áp sát duy trì 17.5m
+          // Tính vector kiting/áp sát duy trì khoảng cách an toàn
           const ux = dist > 0 ? dx / dist : 1;
           const uy = dist > 0 ? dy / dist : 0;
           data.explore_cx = Math.round((tx + ux * TARGET_KITE_DIST) * 100) / 100;
@@ -788,7 +789,7 @@ $.post = function(url, data, success, dataType) {
           data.lock_pos = 0;
           data.explore_radius = 300;
         } else {
-          // Đã ở vùng an toàn 15m - 20m: Khóa vị trí xả skill/DPS
+          // Đã ở vùng an toàn: Khóa vị trí xả skill/DPS
           data.explore_cx = tx;
           data.explore_cy = ty;
           data.traveling = 0;

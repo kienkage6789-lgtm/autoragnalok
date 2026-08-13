@@ -388,15 +388,15 @@ try {
   const isDoneFast = (instance.mvpConfirmClearCount >= 1);
   assert.strictEqual(isDoneFast, true, 'isDoneWithCurrentMap must be true on 1st poll when bosses array is empty');
 
-  // Test Case 7: Boss Safe Distance 15m - 20m & Kiting Vector Engine
-  console.log('Testing Boss Safe Distance (15m - 20m) & Kiting Vector Engine...');
-  const calcBossDistState = (playerPos, bossPos) => {
+  // Test Case 7: Boss Safe Distance & Kiting Vector Engine
+  console.log('Testing Boss Safe Distance & Kiting Vector Engine (Short knife vs Long knife)...');
+  const calcBossDistState = (playerPos, bossPos, isUsingDaoDai = false) => {
     const dx = playerPos.x - bossPos.x;
     const dy = playerPos.y - bossPos.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
-    const MIN_BOSS_DIST = 15;
-    const MAX_BOSS_DIST = 20;
-    const TARGET_KITE_DIST = 17.5;
+    const MIN_BOSS_DIST = isUsingDaoDai ? 55 : 30;
+    const MAX_BOSS_DIST = isUsingDaoDai ? 65 : 40;
+    const TARGET_KITE_DIST = isUsingDaoDai ? 60 : 35;
     let expCx, expCy, traveling, lockPos;
 
     if (dist > MAX_BOSS_DIST || dist < MIN_BOSS_DIST) {
@@ -415,22 +415,43 @@ try {
     return { dist, expCx, expCy, traveling, lockPos };
   };
 
-  // Scenario A: Far away (30m > 20m) -> Approach target 17.5m
-  const resFar = calcBossDistState({ x: 100, y: 130 }, { x: 100, y: 100 });
-  assert.strictEqual(resFar.traveling, 1, 'Far away: traveling must be 1');
-  assert.strictEqual(resFar.lockPos, 0, 'Far away: lockPos must be 0');
-  assert.strictEqual(resFar.expCy, 117.5, 'Far away: target Y must be 100 + 17.5 = 117.5');
+  // --- Scenario 1: Short Knife / No Dao Dai (35 +/- 5m: Range [30m, 40m], Target 35m) ---
+  console.log('  Testing Short knife distance (35m)...');
+  // Scenario A: Far away (50m > 40m) -> Approach target 35m
+  const resFarShort = calcBossDistState({ x: 100, y: 150 }, { x: 100, y: 100 }, false);
+  assert.strictEqual(resFarShort.traveling, 1, 'Far away: traveling must be 1');
+  assert.strictEqual(resFarShort.lockPos, 0, 'Far away: lockPos must be 0');
+  assert.strictEqual(resFarShort.expCy, 135, 'Far away (Short): target Y must be 100 + 35 = 135');
 
-  // Scenario B: Perfect distance (17m in [15, 20]) -> Stand still & Lock DPS
-  const resOptimal = calcBossDistState({ x: 100, y: 117 }, { x: 100, y: 100 });
-  assert.strictEqual(resOptimal.traveling, 0, 'Optimal distance: traveling must be 0');
-  assert.strictEqual(resOptimal.lockPos, 1, 'Optimal distance: lockPos must be 1');
+  // Scenario B: Perfect distance (37m in [30, 40]) -> Stand still & Lock DPS
+  const resOptimalShort = calcBossDistState({ x: 100, y: 137 }, { x: 100, y: 100 }, false);
+  assert.strictEqual(resOptimalShort.traveling, 0, 'Optimal distance (Short): traveling must be 0');
+  assert.strictEqual(resOptimalShort.lockPos, 1, 'Optimal distance (Short): lockPos must be 1');
 
-  // Scenario C: Too close (8m < 15m) -> Kite back to 17.5m
-  const resTooClose = calcBossDistState({ x: 100, y: 108 }, { x: 100, y: 100 });
-  assert.strictEqual(resTooClose.traveling, 1, 'Too close: traveling must be 1 to kite');
-  assert.strictEqual(resTooClose.lockPos, 0, 'Too close: lockPos must be 0');
-  assert.strictEqual(resTooClose.expCy, 117.5, 'Too close: target Y must kite back to 117.5');
+  // Scenario C: Too close (15m < 30m) -> Kite back to 35m
+  const resTooCloseShort = calcBossDistState({ x: 100, y: 115 }, { x: 100, y: 100 }, false);
+  assert.strictEqual(resTooCloseShort.traveling, 1, 'Too close (Short): traveling must be 1 to kite');
+  assert.strictEqual(resTooCloseShort.lockPos, 0, 'Too close (Short): lockPos must be 0');
+  assert.strictEqual(resTooCloseShort.expCy, 135, 'Too close (Short): target Y must kite back to 135');
+
+  // --- Scenario 2: Long Knife / Dao Dai (60 +/- 5m: Range [55m, 65m], Target 60m) ---
+  console.log('  Testing Long knife distance (60m)...');
+  // Scenario A: Far away (80m > 65m) -> Approach target 60m
+  const resFarLong = calcBossDistState({ x: 100, y: 180 }, { x: 100, y: 100 }, true);
+  assert.strictEqual(resFarLong.traveling, 1, 'Far away (Long): traveling must be 1');
+  assert.strictEqual(resFarLong.lockPos, 0, 'Far away (Long): lockPos must be 0');
+  assert.strictEqual(resFarLong.expCy, 160, 'Far away (Long): target Y must be 100 + 60 = 160');
+
+  // Scenario B: Perfect distance (62m in [55, 65]) -> Stand still & Lock DPS
+  const resOptimalLong = calcBossDistState({ x: 100, y: 162 }, { x: 100, y: 100 }, true);
+  assert.strictEqual(resOptimalLong.traveling, 0, 'Optimal distance (Long): traveling must be 0');
+  assert.strictEqual(resOptimalLong.lockPos, 1, 'Optimal distance (Long): lockPos must be 1');
+
+  // Scenario C: Too close (45m < 55m) -> Kite back to 60m
+  const resTooCloseLong = calcBossDistState({ x: 100, y: 145 }, { x: 100, y: 100 }, true);
+  assert.strictEqual(resTooCloseLong.traveling, 1, 'Too close (Long): traveling must be 1 to kite');
+  assert.strictEqual(resTooCloseLong.lockPos, 0, 'Too close (Long): lockPos must be 0');
+  assert.strictEqual(resTooCloseLong.expCy, 160, 'Too close (Long): target Y must kite back to 160');
 
   // Test Case 7: Advanced Market Filtering
   console.log('Testing Advanced Market Filtering (Card, Module, Collectibles)...');

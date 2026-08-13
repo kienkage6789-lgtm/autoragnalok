@@ -2202,18 +2202,30 @@ class BotInstance {
       this.mvpConfirmClearCount = 0;
     }
 
-    const isDoneWithCurrentMap = (this.mvpConfirmClearCount >= 1); // Chỉ chuyển map khi đã dọn sạch Boss (không bị timeout)
+    const timeSpentMs = Date.now() - (this.mvpCycleStats ? (this.mvpCycleStats.mapStartTs || Date.now()) : Date.now());
+    const isMapTimeout = (timeSpentMs >= 300000); // 5 phút (5 * 60 * 1000)
+    const isDoneWithCurrentMap = (this.mvpConfirmClearCount >= 3) || isMapTimeout; // Xác minh 3 nhịp poll (~6s) hoặc quá thời gian chờ 5p
     
     if (isDoneWithCurrentMap) {
       const killedCount = this.mvpCycleStats ? (this.mvpCycleStats.bossKilledInMap || 0) : 0;
-      let reason = killedCount > 0 ? `Đã dọn sạch Boss (Đã diệt ${killedCount} Boss)` : 'Không có Boss mục tiêu';
-      const timeSpentMs = Date.now() - (this.mvpCycleStats ? (this.mvpCycleStats.mapStartTs || Date.now()) : Date.now());
+      let reason = '';
       
-      this.addMvpLog('map_clear', {
-        mapId: currentMap,
-        bossKilledCount: killedCount,
-        timeSpentMs
-      });
+      if (isMapTimeout) {
+        reason = `Quá thời gian chờ 5 phút (Đã diệt ${killedCount} Boss)`;
+        this.addLog('WARNING', `⏳ [Auto Boss] Quá thời gian lưu lại (5 phút) tại Map ${currentMap}. Tự động chuyển bản đồ.`);
+        this.addMvpLog('map_timeout', {
+          mapId: currentMap,
+          bossKilledCount: killedCount,
+          timeSpentMs
+        });
+      } else {
+        reason = killedCount > 0 ? `Đã dọn sạch Boss (Đã diệt ${killedCount} Boss)` : 'Không có Boss mục tiêu';
+        this.addMvpLog('map_clear', {
+          mapId: currentMap,
+          bossKilledCount: killedCount,
+          timeSpentMs
+        });
+      }
 
       this.mvpCycleMapIndex++;
       this.mvpCycleMapStayCount = 0;
@@ -2582,10 +2594,11 @@ class BotInstance {
             const dy = this.player.y - activeBoss.y;
             const dist = Math.sqrt(dx * dx + dy * dy);
 
-            // Cấu hình duy trì khoảng cách an toàn 15m - 20m với Boss
-            const MIN_BOSS_DIST = 15;
-            const MAX_BOSS_DIST = 20;
-            const TARGET_KITE_DIST = 17.5;
+            // Cấu hình duy trì khoảng cách an toàn với Boss (Động theo loại vũ khí: Dao dài vs Dao găm)
+            const isUsingDaoDai = this.player && (Number(this.player.active_gun) === 1);
+            const MIN_BOSS_DIST = isUsingDaoDai ? 55 : 30;
+            const MAX_BOSS_DIST = isUsingDaoDai ? 65 : 40;
+            const TARGET_KITE_DIST = isUsingDaoDai ? 60 : 35;
 
             // Kiểm tra trạng thái kích hoạt Snipe Mode (HP <= 30%)
             const bossHpPct = Math.round((activeBoss.hp || 0) / (activeBoss.hp_max || 1) * 100);
@@ -2604,7 +2617,7 @@ class BotInstance {
               const ux = dist > 0 ? dx / dist : 1;
               const uy = dist > 0 ? dy / dist : 0;
 
-              // Tọa độ mục tiêu di chuyển/kiting duy trì khoảng cách 17.5m
+              // Tọa độ mục tiêu di chuyển/kiting duy trì khoảng cách an toàn
               exploreCx = Math.round((activeBoss.x + ux * TARGET_KITE_DIST) * 100) / 100;
               exploreCy = Math.round((activeBoss.y + uy * TARGET_KITE_DIST) * 100) / 100;
               traveling = 1;
@@ -2613,14 +2626,15 @@ class BotInstance {
 
               if (shouldLogStatus) {
                 this._lastBossStatusLogAt = nowMs;
+                const distRangeStr = `${MIN_BOSS_DIST}-${MAX_BOSS_DIST}m`;
                 if (dist > MAX_BOSS_DIST) {
-                  this.addLog('SYSTEM', `⚔️ [Auto Boss] Đang di chuyển lại gần Boss: ${activeBoss.emoji || '👾'} ${activeBoss.name || 'Boss'} (Khoảng cách: ${Math.round(dist)}m -> Ngưỡng an toàn 15-20m)`);
+                  this.addLog('SYSTEM', `⚔️ [Auto Boss] Đang di chuyển lại gần Boss: ${activeBoss.emoji || '👾'} ${activeBoss.name || 'Boss'} (Khoảng cách: ${Math.round(dist)}m -> Ngưỡng an toàn ${distRangeStr})`);
                 } else {
-                  this.addLog('SYSTEM', `🛡️ [Auto Boss] Boss lại quá gần (${Math.round(dist)}m < 15m) -> Lùi lại giữ khoảng cách an toàn 17.5m`);
+                  this.addLog('SYSTEM', `🛡️ [Auto Boss] Boss lại quá gần (${Math.round(dist)}m < ${MIN_BOSS_DIST}m) -> Lùi lại giữ khoảng cách an toàn ${TARGET_KITE_DIST}m`);
                 }
               }
             } else {
-              // Đã ở khoảng cách an toàn hoàn hảo (15m - 20m)
+              // Đã ở khoảng cách an toàn hoàn hảo
               exploreCx = activeBoss.x;
               exploreCy = activeBoss.y;
               traveling = 0;
@@ -2629,7 +2643,7 @@ class BotInstance {
 
               if (shouldLogStatus) {
                 this._lastBossStatusLogAt = nowMs;
-                this.addLog('SYSTEM', `⚔️ [Auto Boss] Đang tấn công Boss ở khoảng cách an toàn: ${activeBoss.emoji || '👾'} ${activeBoss.name || 'Boss'} (Khoảng cách: ${Math.round(dist)}m [15-20m], HP: ${bossHpPct}%)`);
+                this.addLog('SYSTEM', `⚔️ [Auto Boss] Đang tấn công Boss ở khoảng cách an toàn: ${activeBoss.emoji || '👾'} ${activeBoss.name || 'Boss'} (Khoảng cách: ${Math.round(dist)}m [${MIN_BOSS_DIST}-${MAX_BOSS_DIST}m], HP: ${bossHpPct}%)`);
               }
             }
           } else {

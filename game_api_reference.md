@@ -106,19 +106,23 @@ Dưới đây là danh sách các API và Endpoint nội bộ của Server Bot M
     *   **Mô tả**: Trả về danh sách tài khoản game của user hiện tại (hoặc tất cả nếu là admin).
     *   **Bảo mật**: Trường `proxyInfo` chỉ được trả về nếu người dùng đăng nhập có vai trò `admin`.
     *   **Thống kê hiệu suất**: Trả về trường `combatRates` chứa các chỉ số `{ killsPerMin, goldPerMin, expPerMin }` được tính toán thời gian thực theo cơ chế Sliding Window (cửa sổ trượt 5 phút).
-    *   **Thông tin săn Boss thời gian thực (Mới)**: Trả về thêm các trường phục vụ hiển thị banner trạng thái và live list:
+    *   **Thông tin săn Boss thời gian thực**: Trả về thêm các trường phục vụ hiển thị banner trạng thái và live list:
         *   `bossHuntActive`: Boolean (`true` nếu đang bật chế độ săn boss khác `'off'`).
         *   `isMvpCycling`: Boolean (`true` nếu đang chạy chu kỳ xoay vòng map săn boss).
         *   `currentMvpBossInfo`: Object `{ id, name, emoji, lv, mapId, startTs }` chứa thông tin chi tiết boss đang bị khóa mục tiêu di chuyển/tấn công (hoặc `null` nếu chưa có target).
         *   `aliveBossCount`: Số lượng boss còn sống trên map hiện tại.
-        *   `aliveBosses`: Mảng chứa thông tin các boss đang sống trên map hiện tại: `[{ id, name, emoji, lv, hp, hp_max, x, y, isTarget }]`, trong đó `isTarget: true` cho biết boss đang được bot khóa mục tiêu tấn công.
+        *   `aliveBosses`: Mảng chứa thông tin các boss đang sống trên map hiện tại.
+    *   **Cấu hình Phân quyền Polling**: Trả về thêm thông tin cấu hình nhịp polling của User sở hữu bot:
+        *   `ownerPollInterval` (number): Nhịp Polling mặc định của tài khoản User sở hữu (ví dụ `1500` hoặc `1100`).
+        *   `ownerAllowEditPollInterval` (boolean): Trạng thái cấp quyền tự chỉnh sửa Nhịp Polling cho User này.
 *   **API Cập nhật Cấu hình**: `PUT /api/accounts/:line_uid`
-    *   **Tham số**: `{ settings: { targetMap, bossHuntMode, mvpPriorityMode, mvpTargetMaps, ... }, proxyId }`
+    *   **Tham số**: `{ settings: { targetMap, bossHuntMode, mvpPriorityMode, mvpTargetMaps, pollInterval, ... }, proxyId }`
     *   **Chi tiết Săn Boss**:
-        *   `bossHuntMode`: Chế độ săn boss (`'off'` = Tắt, `'type1'` = Săn tại map hiện tại, `'type2'` = Săn theo map chỉ định).
-        *   `mvpPriorityMode`: Tiêu chí ưu tiên của Loại 1 (`'distance'` = Gần nhất, `'level_asc'` = Cấp độ tăng dần, `'level_desc'` = Cấp độ giảm dần).
-        *   `mvpTargetMaps`: Chuỗi danh sách map chỉ định cho Loại 2 (ví dụ: `1, 2, 3, 5, 6`).
-        *   *Lưu ý*: Whitelist (`mvpNamePriority`) và Blacklist (`mvpNameBlacklist`) đã bị loại bỏ.
+        *   `bossHuntActive` / `bossHuntMode`: Chế độ săn boss.
+        *   `mvpTargetMaps`: Bản đồ chỉ định cho Loại 2.
+    *   **Ràng buộc Nhịp Polling (`pollInterval`)**:
+        *   Chỉ cho phép cập nhật `settings.pollInterval` nếu người gọi là `admin` hoặc User được cấp quyền `allowEditPollInterval === true`.
+        *   Nếu User thường không có quyền cố tình gửi `pollInterval`, trường này sẽ tự động bị loại bỏ trước khi lưu cấu hình.
     *   **Cấu hình Proxy (Chỉ Admin)**: Hỗ trợ trường `proxyId` (`'auto'`, `'direct'`, hoặc ID proxy cụ thể) để thay đổi proxy gán cho bot và cập nhật cấu hình tài khoản.
     *   **Xác thực bản đồ**: Xác thực cấp độ yêu cầu của bản đồ đích. Trả về mã lỗi HTTP 400 nếu cấp độ của nhân vật (`bot.player.lv`) nhỏ hơn yêu cầu tối thiểu của bản đồ đó.
 *   **API Kích hoạt Hành động**: `POST /api/accounts/:line_uid/action`
