@@ -11,6 +11,8 @@
   - [x] Sửa script load sang Line CDN và tải local `sdk.js` làm fallback, giải quyết triệt để lỗi MIME type.
   - [x] Dùng cờ `isEventReturning` để tránh map change detector ghi đè cấu hình Zone sau khi kết thúc sự kiện.
   - [x] Thêm bảng thống kê Kills, Deaths, K/D, Points và 3 tab lọc log All/Kills/Deaths, highlight bản thân (xanh lá/đỏ).
+  - [x] Sửa lỗi không hiển thị K/D của bản thân: Tích hợp bộ chặn response trong `proxyRequest` để tự cập nhật `player` và các trạng thái sự kiện (`inv`, `gw`, `cw`) từ trình duyệt về bot ngầm khi đang tạm dừng chơi tay.
+  - [x] Thiết lập dò quét thông minh song song (`gw`/`cw`) trong `fetchWarLog()` và đánh chặn yêu cầu `action: 'war_log'` từ trình duyệt để đồng bộ dữ liệu chiến tích 100% chuẩn xác.
   - [x] Chạy `npm test` thành công 100%.
 - Status: done
 

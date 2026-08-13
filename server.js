@@ -1760,8 +1760,22 @@ class BotInstance {
   async fetchWarLog() {
     try {
       const kind = this.currentEventKind; // 'gw' or 'cw'
-      if (!kind) return;
-      
+      if (kind) {
+        await this._fetchWarLogSingle(kind);
+      } else {
+        // Fallback parallel fetch if event kind is unknown
+        await Promise.allSettled([
+          this._fetchWarLogSingle('gw'),
+          this._fetchWarLogSingle('cw')
+        ]);
+      }
+    } catch (e) {
+      console.error(`Failed to fetch event war log for ${this.name}:`, e.message);
+    }
+  }
+
+  async _fetchWarLogSingle(kind) {
+    try {
       const res = await this.sendRequest('https://ragnalok.online/human/xhrpg_cwar.php', {
         line_uid: this.line_uid,
         session_token: this.session_token,
@@ -1795,9 +1809,14 @@ class BotInstance {
         if (this.eventWarHistory.length > 150) {
           this.eventWarHistory = this.eventWarHistory.slice(0, 150);
         }
+
+        // Auto-assign event kind if we found active data
+        if (res.feed.length > 0) {
+          this.currentEventKind = kind;
+        }
       }
     } catch (e) {
-      console.error(`Failed to fetch event war log for ${this.name}:`, e.message);
+      // Silent catch for individual parallel attempts
     }
   }
 
@@ -6192,6 +6211,33 @@ async function proxyRequest(req, res, targetUrl, uid = null) {
             if (playerMap === 4 && (isGwActive || isCwActive)) {
               if (!bot.inEventMode) {
                 bot.enterEventMode(isGwActive ? 'gw' : 'cw', 4);
+              }
+            }
+
+            // Intercept war log feed from proxy responses (e.g. manual play requests to xhrpg_cwar.php)
+            if (json.feed && Array.isArray(json.feed)) {
+              const feedKind = req.body.kind || req.query.kind || bot.currentEventKind || 'gw';
+              if (!bot.eventWarHistory) bot.eventWarHistory = [];
+              const existingKeys = new Set(bot.eventWarHistory.map(h => `${h.time}_${h.killer}_${h.victim}`));
+              
+              json.feed.forEach(r => {
+                const timeMs = (r.t | 0) * 1000;
+                const key = `${timeMs}_${r.k}_${r.v}`;
+                if (!existingKeys.has(key)) {
+                  bot.eventWarHistory.unshift({
+                    time: timeMs,
+                    eventKind: feedKind,
+                    killer: r.k,
+                    killerTag: r.kt || null,
+                    victim: r.v,
+                    victimTag: r.vt || null,
+                    points: r.p | 0
+                  });
+                }
+              });
+              
+              if (bot.eventWarHistory.length > 150) {
+                bot.eventWarHistory = bot.eventWarHistory.slice(0, 150);
               }
             }
           }
