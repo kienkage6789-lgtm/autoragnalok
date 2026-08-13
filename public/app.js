@@ -3684,8 +3684,18 @@ document.addEventListener('DOMContentLoaded', () => {
       if (data.ok) {
         // Initialize client-side cache
         window._warHistoryCache = window._warHistoryCache || {};
+        
+        let pName = data.playerName || '';
+        // Fallback: lookup in lastFetchedAccounts if server hasn't polled player name yet
+        if (!pName && window.lastFetchedAccounts) {
+          const matchedAcc = window.lastFetchedAccounts.find(a => a.line_uid === uid);
+          if (matchedAcc && matchedAcc.player && matchedAcc.player.name) {
+            pName = matchedAcc.player.name;
+          }
+        }
+
         window._warHistoryCache[uid] = {
-          playerName: data.playerName || '',
+          playerName: pName,
           history: data.history || [],
           currentTab: (window._warHistoryCache[uid] && window._warHistoryCache[uid].currentTab) || 'all'
         };
@@ -3772,8 +3782,16 @@ document.addEventListener('DOMContentLoaded', () => {
     const currentTab = cache.currentTab || 'all';
 
     // Calculate self-centric statistics
-    const selfKills = history.filter(item => item.killer === playerName);
-    const selfDeaths = history.filter(item => item.victim === playerName);
+    const selfKills = history.filter(item => {
+      const k = (item.killer || '').toLowerCase().trim();
+      const p = (playerName || '').toLowerCase().trim();
+      return k && p && k === p;
+    });
+    const selfDeaths = history.filter(item => {
+      const v = (item.victim || '').toLowerCase().trim();
+      const p = (playerName || '').toLowerCase().trim();
+      return v && p && v === p;
+    });
     const totalPoints = selfKills.reduce((sum, item) => sum + item.points, 0);
     const kdRatio = selfDeaths.length === 0 ? selfKills.length.toFixed(1) : (selfKills.length / selfDeaths.length).toFixed(2);
 
@@ -3822,8 +3840,8 @@ document.addEventListener('DOMContentLoaded', () => {
         ? `<span style="background: rgba(168, 85, 247, 0.15); color: #e9d5ff; padding: 1px 4px; border-radius: 4px; font-size: 0.62rem; margin-right: 4px; border: 1px solid rgba(168, 85, 247, 0.3)">Bang</span>`
         : `<span style="background: rgba(14, 165, 233, 0.15); color: #bae6fd; padding: 1px 4px; border-radius: 4px; font-size: 0.62rem; margin-right: 4px; border: 1px solid rgba(14, 165, 233, 0.3)">Quốc</span>`;
         
-      const isSelfKill = item.killer === playerName;
-      const isSelfDeath = item.victim === playerName;
+      const isSelfKill = (item.killer || '').toLowerCase().trim() === (playerName || '').toLowerCase().trim();
+      const isSelfDeath = (item.victim || '').toLowerCase().trim() === (playerName || '').toLowerCase().trim();
 
       let killerStr = '';
       let victimStr = '';

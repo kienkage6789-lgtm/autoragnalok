@@ -8,12 +8,12 @@
   - Khi PK/Battle, việc bơm máu bằng request POST thô gây lag hiển thị và không kích hoạt được hoạt ảnh canvas của game engine.
   - Lỗi MIME type `text/html` khi tải `/js/sdk.js` do game server trả về 404 qua proxy và kích hoạt fallback HTML.
   - Bot tự động quay về đúng map sau khi sự kiện kết thúc nhưng quên cài đặt Zone (do map change detector reset cài đặt Zone về giá trị mặc định).
-  - Người dùng không có cách nào thống kê nhanh số mạng giết được, bị giết và tỉ lệ K/D của bản thân trong sự kiện PvP.
+  - Người dùng không có cách nào thống kê nhanh số mạng giết được, bị giết và tỉ lệ K/D của bản thân trong sự kiện PvP. Ngoài ra khi chơi tay trên trình duyệt, dữ liệu nhân vật trên server bị đóng băng do bot tự động tạm dừng, dẫn đến tên nhân vật rỗng.
 - Quyết định:
   - **Chuyển đổi phương thức gọi Potion trong PK**: Chuyển sang gọi hàm chính thức `xhrpg.usePotionManual()` của game engine và đè `$.post` để cập nhật Radar tức thì.
   - **Khắc phục MIME SDK**: Tải Line SDK CDN lưu trữ cục bộ thành `sdk.js` tĩnh và đổi đường dẫn thẻ script trực tiếp sang Line CDN.
   - **Bảo toàn Zone sau Event**: Thiết lập cờ `isEventReturning` và `eventReturnMapTarget` khi kết thúc sự kiện để ngăn bộ đổi map reset cấu hình Zone của người dùng.
-  - **Dashboard Thống kê PK**: Cung cấp `playerName` từ backend API, thiết kế panel K/D/Points và các tab filter lọc logs tự động trên frontend.
+  - **Dashboard Thống kê PK & Đánh chặn Proxy**: Cung cấp `playerName` từ backend API, thiết kế panel K/D/Points và các tab filter lọc logs tự động trên frontend. Đồng thời tích hợp bộ phân tích JSON trung gian trong `proxyRequest` để tự động cập nhật trạng thái `player`/`spots`/`bosses` của bot từ trình duyệt ngay cả khi bot đang dừng. Thêm cơ chế so khớp mềm và fallback client-side để đảm bảo nhận diện 100% chính xác.
 - Kết quả:
   - Sửa lỗi triệt để, chạy `npm test` thành công 100%.
 

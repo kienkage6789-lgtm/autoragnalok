@@ -18,6 +18,7 @@
     - Trả về thêm `playerName` từ backend trong endpoint `/api/accounts/:line_uid/event-war-history`.
     - Thiết kế bảng thống kê chiến tích dạng lưới (🗡️ Hạ gục, 💀 Bị hạ, 📊 K/D, 🏆 Điểm PK) và tích hợp các bộ lọc Tab (Tất cả, Hạ gục, Bị hạ) cùng bộ nhớ đệm client (`window._warHistoryCache`).
     - Tô màu nổi bật dòng log liên quan đến bản thân (viền xanh lá cho Kills, viền đỏ kèm icon đầu lâu cho Deaths).
+    - **Sửa lỗi không nhận diện bản thân khi chơi tay**: Cải tiến hàm trung chuyển `proxyRequest` để tự động phân tích và trích xuất dữ liệu `player` từ phản hồi game server để cập nhật vào `BotInstance` ngầm. Đồng thời bổ sung tìm kiếm fallback phía client trong `window.lastFetchedAccounts` và so khớp so sánh mềm không phân biệt chữ hoa/thường để nhận diện K/D bản thân 100% chuẩn xác.
 
 ---
 

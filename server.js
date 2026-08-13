@@ -6147,6 +6147,28 @@ async function proxyRequest(req, res, targetUrl, uid = null) {
       res.send(Buffer.from(buffer));
     } else {
       const text = await response.text();
+      
+      // Update bot state if response is valid JSON from a game API call
+      if (uid && botInstances[uid]) {
+        try {
+          const json = JSON.parse(text);
+          if (json && json.ok) {
+            if (json.player) {
+              botInstances[uid].updatePlayerState(json.player);
+              botInstances[uid].lastUpdate = Date.now();
+            }
+            if (json.spots) {
+              botInstances[uid].spots = json.spots;
+            }
+            if (json.bosses) {
+              botInstances[uid].bosses = json.bosses;
+            }
+          }
+        } catch (e) {
+          // Ignore parse errors for HTML, JS, or non-JSON resources
+        }
+      }
+      
       res.send(text);
     }
   } catch (err) {
