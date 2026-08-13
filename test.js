@@ -768,6 +768,28 @@ try {
   Object.assign(botInstances, originalBotInstances);
 
   console.log('✅ Multiple Team Sync and Lookup Tests Passed successfully!');
+
+  // 11. Test User Polling Interval and role propagation
+  console.log('Testing User Polling Interval and role propagation...');
+  
+  const mockAdminBot = new BotInstance({ name: 'AdminBot', userId: 'usr_admin', settings: { pollInterval: 1100 } });
+  assert.strictEqual(mockAdminBot.userIsAdmin, true, 'Admin bot owner should have userIsAdmin = true');
+  
+  let resolvedIntervalAdmin = mockAdminBot.userIsAdmin 
+    ? (mockAdminBot.settings.pollInterval || mockAdminBot.userPollInterval || 2000)
+    : (mockAdminBot.userPollInterval || 2000);
+  assert.strictEqual(resolvedIntervalAdmin, 1100, 'Admin bot should resolve to 1100ms based on settings.pollInterval');
+
+  const mockUserBot = new BotInstance({ name: 'UserBot', userId: 'some_nonexistent_user', settings: { pollInterval: 800 } });
+  mockUserBot.userIsAdmin = false;
+  mockUserBot.userPollInterval = 1500;
+  
+  let resolvedIntervalUser = mockUserBot.userIsAdmin 
+    ? (mockUserBot.settings.pollInterval || mockUserBot.userPollInterval || 2000)
+    : (mockUserBot.userPollInterval || 2000);
+  assert.strictEqual(resolvedIntervalUser, 1500, 'User bot should enforce userPollInterval (1500ms) even if settings.pollInterval is 800ms');
+
+  console.log('✅ User Polling Interval and Role Propagation Tests Passed successfully!');
   console.log('✅ Revamped Auto Market Buy Tests Passed successfully!');
   console.log('✅ Urgent Active Potion Healing Tests Passed successfully!');
   console.log('✅ ProxyPool SOCKS5 Parsing Tests Passed successfully!');

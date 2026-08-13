@@ -1210,6 +1210,13 @@ class BotInstance {
     this.session_token = account.session_token;
     this.name = account.name;
     this.userId = account.userId || 'usr_admin';
+    
+    // Load user-level poll configuration
+    const users = loadUsers();
+    const user = users.find(u => u.id === this.userId);
+    this.userPollInterval = user ? user.pollInterval : undefined;
+    this.userIsAdmin = user ? (user.role === 'admin') : false;
+
     const userSettings = account.settings || {};
     this.settings = { ...this.getDefaultSettings(), ...userSettings };
     if (this.settings.autoEventJoin) {
@@ -1898,7 +1905,13 @@ class BotInstance {
         this.isPolling = false;
         // Schedule next poll staggering
         if (this.status === 'running') {
-          const userPollInterval = this.settings.pollInterval || 2000;
+          // If the user is admin, they can configure it per-bot; otherwise, enforce user-level pollInterval
+          let userPollInterval = 2000;
+          if (this.userIsAdmin) {
+            userPollInterval = this.settings.pollInterval !== undefined ? this.settings.pollInterval : (this.userPollInterval || 2000);
+          } else {
+            userPollInterval = this.userPollInterval || 2000;
+          }
           const isSnipe = this.targetedMvp && this._bossSnipeActive;
           const isPkEvent = this.inEventMode && (this.currentEventKind === 'gw' || this.currentEventKind === 'cw');
           
@@ -4182,6 +4195,7 @@ app.get('/api/admin/users', requireAdmin, (req, res) => {
       maxAccounts: u.maxAccounts || 1,
       expiresAt: u.expiresAt || null,
       allowMarket: u.allowMarket === true,
+      pollInterval: u.pollInterval !== undefined ? u.pollInterval : 2000,
       createdAt: u.createdAt,
       botCount: userBots.length,
       onlineBotCount: onlineCount
@@ -4251,7 +4265,7 @@ app.post('/api/admin/users', requireAdmin, (req, res) => {
 // Update user settings/password/expiration (Admin only)
 app.put('/api/admin/users/:userId', requireAdmin, (req, res) => {
   const { userId } = req.params;
-  const { password, maxAccounts, extendDays, extendMinutes, expiresAt } = req.body;
+  const { password, maxAccounts, extendDays, extendMinutes, expiresAt, pollInterval } = req.body;
 
   const users = loadUsers();
   const index = users.findIndex(u => u.id === userId);
@@ -4291,7 +4305,23 @@ app.put('/api/admin/users/:userId', requireAdmin, (req, res) => {
     users[index].expiresAt = expiresAt ? new Date(expiresAt).toISOString() : null;
   }
 
+  if (pollInterval !== undefined) {
+    const parsed = parseInt(pollInterval);
+    if (!isNaN(parsed) && parsed >= 500) {
+      users[index].pollInterval = parsed;
+    }
+  }
+
   saveUsers(users);
+
+  // Update live bot instances in-memory
+  const updatedUser = users[index];
+  Object.values(botInstances).forEach(bot => {
+    if (bot.userId === userId) {
+      bot.userPollInterval = updatedUser.pollInterval;
+      bot.userIsAdmin = updatedUser.role === 'admin';
+    }
+  });
 
   // Update live session quota if active
   Object.values(userSessions).forEach(sess => {
@@ -4300,7 +4330,7 @@ app.put('/api/admin/users/:userId', requireAdmin, (req, res) => {
     }
   });
 
-  res.json({ success: true, user: { id: users[index].id, username: users[index].username, role: users[index].role, maxAccounts: users[index].maxAccounts } });
+  res.json({ success: true, user: { id: users[index].id, username: users[index].username, role: users[index].role, maxAccounts: users[index].maxAccounts, pollInterval: users[index].pollInterval } });
 });
 
 // Toggle market permission for a specific user (Admin only)
@@ -5228,6 +5258,10 @@ app.put('/api/accounts/:line_uid', requireAuth, async (req, res) => {
   if (!checkAccountOwnership(req, res, bot)) return;
 
   const { session_token, name, proxyId, ...settings } = req.body;
+
+  if (settings.pollInterval !== undefined && req.user.role !== 'admin') {
+    delete settings.pollInterval;
+  }
 
   try {
     if (session_token && session_token !== bot.session_token) {

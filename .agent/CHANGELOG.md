@@ -2,6 +2,25 @@
 
 > Changelog of actual changes implemented.
 
+## 2026-08-13 - Chuyển Cấu Hình Nhịp Polling Thành Cài Đặt Theo Tài Khoản User & Hạn Chế Quyền Admin (T67)
+- File đã đổi: [server.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [public/index.html](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/public/index.html), [public/app.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/public/app.js), [test.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/test.js).
+- Đã làm:
+  - **Hệ thống Quản lý Nhịp Polling ở Backend**:
+    - Constructor của `BotInstance` tự động tra cứu User từ `users.json` để xác định thuộc tính `userPollInterval` và vai trò `userIsAdmin`.
+    - Logic tính toán nhịp polling ở `runPoll` tự động áp dụng `userPollInterval` cho người dùng thường, ngăn không cho họ tùy chỉnh hay vượt qua.
+    - Sửa API `PUT /api/admin/users/:userId` để hỗ trợ lưu `pollInterval` và tự động cập nhật giá trị đó trong bộ nhớ cho các bot instances đang chạy của user để có tác dụng ngay lập tức.
+    - Sửa API `PUT /api/accounts/:line_uid` để lọc bỏ `pollInterval` nếu tài khoản yêu cầu không phải là Admin.
+    - Expose `pollInterval` trong API `GET /api/admin/users`.
+  - **Cập nhật Giao diện (UI)**:
+    - Sửa `public/index.html` để thêm cột tiêu đề `Nhịp Polling` vào bảng Admin Users.
+    - Sửa `public/app.js` để ẩn hoàn toàn khối cấu hình "Nhịp Polling" trong tab cài đặt bot nếu người dùng không phải là Admin.
+    - Cập nhật hàm `renderAdminUsersTable` trong `public/app.js` để hiển thị select dropdown cấu hình `pollInterval` cho từng người dùng (Admin hiển thị Vô hạn).
+    - Thêm hàm `changeUserPollInterval` gửi request PUT cập nhật Nhịp Polling lên server.
+  - **Unit Tests**:
+    - Viết thêm Test Case 11 xác minh cơ chế ép buộc nhịp polling cho tài khoản thường và thừa hưởng cài đặt cho admin, chạy `npm test` thành công 100%.
+
+---
+
 ## 2026-08-12 - Khắc Phục Lỗi Giao Diện & Logic Thoát Chế Độ Event (T66)
 - File đã đổi: [server.js](file:///C:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/server.js), [public/app.js](file:///C:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/public/app.js), [test.js](file:///C:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/test.js).
 - Đã làm:

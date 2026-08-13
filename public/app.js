@@ -187,6 +187,27 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   };
 
+  window.changeUserPollInterval = async function(userId, username, val) {
+    const parsed = parseInt(val) || 2000;
+    try {
+      const res = await fetch(`/api/admin/users/${userId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pollInterval: parsed })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        alert(`✅ Đã cập nhật nhịp Polling (${parsed}ms) cho user ${username}!`);
+        fetchAdminUsers();
+      } else {
+        alert(`🔴 Lỗi cập nhật nhịp Polling: ${data.error || 'Thất bại'}`);
+      }
+    } catch (e) {
+      console.error('Error changing user poll interval:', e);
+      alert('Không thể kết nối máy chủ');
+    }
+  };
+
   window.stepUserMarketLimit = async function(userId, username, delta) {
     const inp = document.getElementById(`user-market-limit-${userId}`) || document.getElementById(`market-limit-inp-${userId}`);
     let current = inp ? parseInt(inp.value) || 0 : 0;
@@ -602,6 +623,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 <input type="number" class="quota-input-field" id="market-limit-inp-${u.id}" value="${u.marketBotLimit !== undefined ? u.marketBotLimit : (u.allowMarket ? u.maxAccounts : 0)}" min="0" onchange="changeUserMarketLimit('${u.id}', '${u.username}', this.value)" style="width: 35px; height: 20px; text-align: center; font-size: 0.8rem; padding: 2px 4px; background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 4px; color: #fff; margin: 0 4px;">
                 <button type="button" class="btn-quota-step" onclick="stepUserMarketLimit('${u.id}', '${u.username}', 1)" title="Tăng 1 bot" style="width: 20px; height: 20px; min-width: 20px; font-size: 0.8rem; line-height: 1; border-radius: 4px; border: 1px solid rgba(165, 180, 252, 0.3); background: rgba(99, 102, 241, 0.2); color: #fff; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; padding: 0;">+</button>
               </div>
+            `}
+          </td>
+          <td style="padding:8px; text-align:center;">
+            ${isAdmin ? '<span style="font-size:0.8rem; color:#a5b4fc;">Vô hạn</span>' : `
+              <select onchange="changeUserPollInterval('${u.id}', '${u.username}', this.value)" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 4px; color: #fff; padding: 2px 4px; font-family: inherit; font-size: 0.8rem; outline: none; text-align: center;">
+                <option value="2000" ${u.pollInterval === 2000 ? 'selected' : ''}>2000ms</option>
+                <option value="1800" ${u.pollInterval === 1800 ? 'selected' : ''}>1800ms</option>
+                <option value="1500" ${u.pollInterval === 1500 ? 'selected' : ''}>1500ms</option>
+                <option value="1300" ${u.pollInterval === 1300 ? 'selected' : ''}>1300ms</option>
+                <option value="1100" ${u.pollInterval === 1100 ? 'selected' : ''}>1100ms</option>
+                <option value="1000" ${u.pollInterval === 1000 ? 'selected' : ''}>1000ms</option>
+                <option value="800" ${u.pollInterval === 800 ? 'selected' : ''}>800ms</option>
+              </select>
             `}
           </td>
           <td style="padding:8px;">${expiryHtml}</td>
@@ -1522,6 +1556,7 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
           </div>
 
+          ${(currentUser && currentUser.role === 'admin') ? `
           <div class="settings-group">
             <div class="input-control" style="grid-column: span 2;">
               <label for="sel-poll-interval-${acc.line_uid}">⚡ Nhịp Polling (Tần suất gửi request)</label>
@@ -1536,6 +1571,7 @@ document.addEventListener('DOMContentLoaded', () => {
               </select>
             </div>
           </div>
+          ` : ''}
 
           <div class="settings-group">
             <div class="toggle-control">
