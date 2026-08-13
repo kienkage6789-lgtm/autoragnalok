@@ -885,6 +885,33 @@ try {
     : (mockUserBotPermittedNoCustom.userPollInterval || 2000);
   assert.strictEqual(resolvedIntervalUserPermittedNoCustom, 1500, 'User bot WITH permission but without bot settings should fallback to userPollInterval (1500ms)');
 
+  // Test Event War Log fetch verification with active war flags (T74 additional)
+  console.log('Testing Event War Log fetch with active war flags...');
+  const testWarBot = new BotInstance({ name: 'WarBot', line_uid: 'war_bot_test', settings: {} });
+  testWarBot.inEventMode = false; // bot is NOT in event mode (e.g. paused)
+  testWarBot.lastGw = { st: 'open', ends: Math.floor(Date.now() / 1000) + 1200 }; // GW active
+  
+  let fetchWarLogCalled = false;
+  testWarBot.fetchWarLog = async function() {
+    fetchWarLogCalled = true;
+    this.eventWarHistory = [{ time: Date.now(), eventKind: 'gw', killer: 'WarBot', victim: 'Enemy', points: 5 }];
+  };
+  
+  // Simulate API route check logic
+  const currentEpoch = Math.floor(Date.now() / 1000);
+  const isGwActiveTest = testWarBot.lastGw && (testWarBot.lastGw.st === 'open' || testWarBot.lastGw.st === 'fight') && (!testWarBot.lastGw.ends || testWarBot.lastGw.ends > currentEpoch);
+  const isCwActiveTest = testWarBot.lastCw && (testWarBot.lastCw.st === 'open' || testWarBot.lastCw.st === 'fight') && (!testWarBot.lastCw.ends || testWarBot.lastCw.ends > currentEpoch);
+  
+  if (testWarBot.inEventMode || isGwActiveTest || isCwActiveTest) {
+    if (!testWarBot.currentEventKind && (isGwActiveTest || isCwActiveTest)) {
+      testWarBot.currentEventKind = isGwActiveTest ? 'gw' : 'cw';
+    }
+    await testWarBot.fetchWarLog();
+  }
+  
+  assert.strictEqual(fetchWarLogCalled, true, 'fetchWarLog should be called because GW is active, even if inEventMode is false');
+  assert.strictEqual(testWarBot.currentEventKind, 'gw', 'currentEventKind should be set to gw');
+
   console.log('✅ User Polling Interval, Role Propagation and Edit Permissions Tests Passed successfully!');
   console.log('✅ Revamped Auto Market Buy Tests Passed successfully!');
   console.log('✅ Urgent Active Potion Healing Tests Passed successfully!');

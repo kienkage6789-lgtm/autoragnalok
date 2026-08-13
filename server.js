@@ -5774,7 +5774,14 @@ app.get('/api/accounts/:line_uid/event-war-history', requireAuth, async (req, re
   if (!checkAccountOwnership(req, res, bot)) return;
 
   // Nếu sự kiện đang chạy, ưu tiên fetch dữ liệu mới nhất
-  if (bot.inEventMode && (bot.currentEventKind === 'gw' || bot.currentEventKind === 'cw')) {
+  const currentEpoch = Math.floor(Date.now() / 1000);
+  const isGwActive = bot.lastGw && (bot.lastGw.st === 'open' || bot.lastGw.st === 'fight') && (!bot.lastGw.ends || bot.lastGw.ends > currentEpoch);
+  const isCwActive = bot.lastCw && (bot.lastCw.st === 'open' || bot.lastCw.st === 'fight') && (!bot.lastCw.ends || bot.lastCw.ends > currentEpoch);
+  
+  if (bot.inEventMode || isGwActive || isCwActive) {
+    if (!bot.currentEventKind && (isGwActive || isCwActive)) {
+      bot.currentEventKind = isGwActive ? 'gw' : 'cw';
+    }
     try {
       await bot.fetchWarLog();
     } catch (e) {}
@@ -6153,15 +6160,39 @@ async function proxyRequest(req, res, targetUrl, uid = null) {
         try {
           const json = JSON.parse(text);
           if (json && json.ok) {
+            const bot = botInstances[uid];
             if (json.player) {
-              botInstances[uid].updatePlayerState(json.player);
-              botInstances[uid].lastUpdate = Date.now();
+              bot.updatePlayerState(json.player);
+              bot.lastUpdate = Date.now();
             }
             if (json.spots) {
-              botInstances[uid].spots = json.spots;
+              bot.spots = json.spots;
             }
             if (json.bosses) {
-              botInstances[uid].bosses = json.bosses;
+              bot.bosses = json.bosses;
+            }
+            if (json.inv !== undefined) {
+              bot.lastInv = json.inv;
+            }
+            if (json.gw !== undefined) {
+              bot.lastGw = json.gw;
+            }
+            if (json.cw !== undefined) {
+              bot.lastCw = json.cw;
+            }
+
+            // If player is on Map 4 and GW/CW is active, ensure bot inEventMode is true
+            const playerMap = json.player ? Number(json.player.map) : (bot.player ? Number(bot.player.map) : 0);
+            const currentEpoch = Math.floor(Date.now() / 1000);
+            const lastGw = json.gw !== undefined ? json.gw : bot.lastGw;
+            const lastCw = json.cw !== undefined ? json.cw : bot.lastCw;
+            const isGwActive = lastGw && (lastGw.st === 'open' || lastGw.st === 'fight') && (!lastGw.ends || lastGw.ends > currentEpoch);
+            const isCwActive = lastCw && (lastCw.st === 'open' || lastCw.st === 'fight') && (!lastCw.ends || lastCw.ends > currentEpoch);
+
+            if (playerMap === 4 && (isGwActive || isCwActive)) {
+              if (!bot.inEventMode) {
+                bot.enterEventMode(isGwActive ? 'gw' : 'cw', 4);
+              }
             }
           }
         } catch (e) {
