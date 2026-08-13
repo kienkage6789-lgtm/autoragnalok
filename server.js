@@ -1535,11 +1535,21 @@ class BotInstance {
     let totalKills = 0;
     let totalGold = 0;
     let totalExp = 0;
+    let totalWood = 0;
+    let totalStone = 0;
+    let totalIron = 0;
+    let totalCopper = 0;
+    let totalHerb = 0;
     
     this.combatStatsHistory.forEach(h => {
       totalKills += (h.kills || 0);
       totalGold += (h.gold || 0);
       totalExp += (h.exp || 0);
+      totalWood += (h.wood || 0);
+      totalStone += (h.stone || 0);
+      totalIron += (h.iron || 0);
+      totalCopper += (h.copper || 0);
+      totalHerb += (h.herb || 0);
     });
     
     // Window start time is either when bot started running or 5 mins ago (cutoff)
@@ -1550,7 +1560,12 @@ class BotInstance {
     return {
       killsPerMin: Math.round((totalKills / elapsedMin) * 10) / 10,
       goldPerMin: Math.round(totalGold / elapsedMin),
-      expPerMin: Math.round(totalExp / elapsedMin)
+      expPerMin: Math.round(totalExp / elapsedMin),
+      woodPerMin: Math.round(totalWood / elapsedMin),
+      stonePerMin: Math.round(totalStone / elapsedMin),
+      ironPerMin: Math.round(totalIron / elapsedMin),
+      copperPerMin: Math.round(totalCopper / elapsedMin),
+      herbPerMin: Math.round(totalHerb / elapsedMin)
     };
   }
 
@@ -3052,13 +3067,33 @@ class BotInstance {
         }
       });
 
+      // Calculate resource differences (Wood, Stone, Iron, Copper, Herb)
+      let diffWood = 0;
+      let diffStone = 0;
+      let diffIron = 0;
+      let diffCopper = 0;
+      let diffHerb = 0;
+
+      if (prevP && this.player) {
+        diffWood = Math.max(0, (this.player.wood | 0) - (prevP.wood | 0));
+        diffStone = Math.max(0, (this.player.stone | 0) - (prevP.stone | 0));
+        diffIron = Math.max(0, (this.player.iron | 0) - (prevP.iron | 0));
+        diffCopper = Math.max(0, (this.player.copper | 0) - (prevP.copper | 0));
+        diffHerb = Math.max(0, (this.player.herb | 0) - (prevP.herb | 0));
+      }
+
       // Save history
-      if (pollKills > 0 || pollGold > 0 || pollExp > 0) {
+      if (pollKills > 0 || pollGold > 0 || pollExp > 0 || diffWood > 0 || diffStone > 0 || diffIron > 0 || diffCopper > 0 || diffHerb > 0) {
         this.combatStatsHistory.push({
           time: Date.now(),
           kills: pollKills,
           gold: pollGold,
-          exp: pollExp
+          exp: pollExp,
+          wood: diffWood,
+          stone: diffStone,
+          iron: diffIron,
+          copper: diffCopper,
+          herb: diffHerb
         });
       }
 
@@ -5014,7 +5049,10 @@ app.get('/api/accounts', requireAuth, (req, res) => {
           inEventMode: bot.inEventMode || false,
           currentEventKind: bot.currentEventKind || null,
           proxyInfo: req.user.role === 'admin' ? proxyPool.getBotProxyInfo(bot.line_uid) : null,
-          combatRates: bot.getCombatRates ? bot.getCombatRates() : { killsPerMin: 0, goldPerMin: 0, expPerMin: 0 },
+          combatRates: bot.getCombatRates ? bot.getCombatRates() : { 
+            killsPerMin: 0, goldPerMin: 0, expPerMin: 0,
+            woodPerMin: 0, stonePerMin: 0, ironPerMin: 0, copperPerMin: 0, herbPerMin: 0
+          },
           spots: bot.spots || null,
           // Truyền danh sách bản đồ động từ cache xuống frontend (luôn dùng mới nhất)
           mapsList: getMapDefs(),
@@ -6129,6 +6167,23 @@ async function fetchGameHtml(req) {
     `$1\n<script src="/js/xhrpg_lang_vi.js?v=${now}"></script>`
   );
 
+  // 4.5. Phục dựng các tab bảng xếp hạng (Người chơi & Gold) bị ẩn
+  // Gỡ comment của nút tab 'lv' (Người chơi)
+  html = html.replace(
+    /<!--\s*<button class="rank-tab"\s+data-tab="lv"[\s\S]*?<\/button>\s*-->/,
+    `<button class="rank-tab active" data-tab="lv" onclick="xhrpg.rankTab('lv')"><span class="rt-ico">🏆</span><span class="rt-txt">ผู้เล่น</span></button>`
+  );
+  // Thay đổi nút 'mvp' từ active thành thường
+  html = html.replace(
+    /<button class="rank-tab active"\s+data-tab="mvp"[\s\S]*?<\/button>/,
+    `<button class="rank-tab" data-tab="mvp" onclick="xhrpg.rankTab('mvp')"><span class="rt-ico">⭐</span><span class="rt-txt">MVP</span></button>`
+  );
+  // Gỡ comment của nút tab 'gold' (Gold)
+  html = html.replace(
+    /<!--\s*<button class="rank-tab"\s+data-tab="gold"[\s\S]*?<\/button>\s*-->/,
+    `<button class="rank-tab" data-tab="gold" onclick="xhrpg.rankTab('gold')"><span class="rt-ico">💰</span><span class="rt-txt">Gold</span></button>`
+  );
+
   // 5. Thay thế Script Khởi động LIFF bằng Proxy Startup Script
   const customScript = `
 <script>
@@ -6477,7 +6532,9 @@ async function fetchGameAsset(urlPath) {
 
 app.get(['/js/xhrpg_canvas.js', '/human/js/xhrpg_canvas.js'], async (req, res) => {
   try {
-    const data = await fetchGameAsset('/js/xhrpg_canvas.js');
+    let data = await fetchGameAsset('/js/xhrpg_canvas.js');
+    // Phục dựng rankCurrentTab mặc định thành 'lv' thay vì 'mvp'
+    data = data.replace("let rankCurrentTab = 'mvp';", "let rankCurrentTab = 'lv';");
     res.set({
       'Cache-Control': 'public, max-age=1800',
       'Content-Type': 'application/javascript; charset=utf-8'
@@ -6485,7 +6542,13 @@ app.get(['/js/xhrpg_canvas.js', '/human/js/xhrpg_canvas.js'], async (req, res) =
     res.send(data);
   } catch (e) {
     console.error('Fetch canvas error:', e.message);
-    res.sendFile(path.join(__dirname, 'xhrpg_canvas.js')); // fallback
+    let fallback = fs.readFileSync(path.join(__dirname, 'xhrpg_canvas.js'), 'utf8');
+    fallback = fallback.replace("let rankCurrentTab = 'mvp';", "let rankCurrentTab = 'lv';");
+    res.set({
+      'Cache-Control': 'public, max-age=1800',
+      'Content-Type': 'application/javascript; charset=utf-8'
+    });
+    res.send(fallback);
   }
 });
 

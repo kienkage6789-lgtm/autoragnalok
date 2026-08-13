@@ -602,7 +602,13 @@
       <div class="panel-popup" id="panel-arena"><div class="popup-header"><span>🏟️ ดันท้าสู้บอส 1-1</span><button class="popup-close" onclick="xhrpg.closePanel()">✕</button></div><div id="arena-root"></div></div>
       <div class="panel-popup" id="panel-pvp"><div class="popup-header"><span>⚔️ ประลองฝีมือ (PVP)</span><button class="popup-close" onclick="xhrpg.closePanel()">✕</button></div><div id="pvp-root"></div></div>
       <div class="panel-popup" id="panel-log"><div class="popup-header"><span>📖 บันทึกเหตุการณ์ (200 บรรทัด)</span><button class="popup-close" onclick="xhrpg.closePanel()">✕</button></div><div id="event-log"></div></div>
-      <div class="panel-popup" id="panel-rank"><div class="popup-header"><span>🏆 ทำเนียบจัดอันดับ</span><button class="popup-close" onclick="xhrpg.closePanel()">✕</button></div><div id="rank-root"></div></div>
+      <div class="panel-popup" id="panel-rank"><div class="popup-header"><span>🏆 ทำเนียบจัดอันดับ</span><button class="popup-close" onclick="xhrpg.closePanel()">✕</button></div><div id="rank-tabs" class="rank-tabs">
+        <button class="rank-tab active" data-tab="lv"   onclick="xhrpg.rankTab('lv')"><span class="rt-ico">🏆</span><span class="rt-txt">ผู้เล่น</span></button>
+        <button class="rank-tab"        data-tab="mvp"  onclick="xhrpg.rankTab('mvp')"><span class="rt-ico">⭐</span><span class="rt-txt">MVP</span></button>
+        <button class="rank-tab"        data-tab="gold" onclick="xhrpg.rankTab('gold')"><span class="rt-ico">💰</span><span class="rt-txt">Gold</span></button>
+        <button class="rank-tab"        data-tab="colosseum" onclick="xhrpg.rankTab('colosseum')"><span class="rt-ico">🏛️</span><span class="rt-txt">ประลอง</span></button>
+        <button class="rank-tab"        data-tab="country" onclick="xhrpg.rankTab('country')"><span class="rt-ico">🌍</span><span class="rt-txt">ประเทศ</span></button>
+      </div><div id="rank-list"></div></div>
       <div class="panel-popup" id="panel-premium"><div class="popup-header"><span>🅿️ ร้านค้า Premium</span><button class="popup-close" onclick="xhrpg.closePanel()">✕</button></div><div id="premium-list"></div></div>
     </div><!-- #game-screen -->
   </div><!-- .game-column -->

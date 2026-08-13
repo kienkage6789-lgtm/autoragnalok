@@ -2,6 +2,60 @@
 
 > Changelog of actual changes implemented.
 
+## 2026-08-13 - Đưa Cấu Hình Nhịp Polling Ra Ngoài Mặt Thẻ Bot Dashboard (T73)
+- File đã đổi: [public/app.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/public/app.js).
+- Đã làm:
+  - **Đưa cài đặt Nhịp Polling ra màn hình chính**:
+    - Di chuyển dropdown lựa chọn Nhịp Polling ra ngoài các tab phụ, đặt trực tiếp dưới dải tài nguyên (Resources Strip) trên thẻ hiển thị chính của Bot.
+    - **Đối với User có quyền (hoặc Admin)**: Hiển thị dropdown select cho phép tự chỉnh Nhịp Polling.
+    - **Đối với User không có quyền**: Hiển thị nhãn chỉ đọc (read-only label) dạng `⚡ Nhịp Polling: Xms (Theo Admin)` để hiển thị rõ ràng cấu hình đang chạy mà không gây hiểu nhầm.
+  - **Di chuyển nút gạt phân quyền của Admin**:
+    - Chuyển nút gạt `"Cấp quyền tự chỉnh Nhịp Polling cho User này"` ra ngoài mặt thẻ bot (hiển thị ngay bên dưới dropdown Nhịp Polling nếu người đăng nhập là Admin).
+  - **Dọn dẹp mã nguồn**:
+    - Loại bỏ hoàn toàn khối cài đặt cũ bên trong tab `pane-event` để tránh trùng lặp ID DOM (`sel-poll-interval-*`) gây lỗi điều khiển.
+
+---
+
+## 2026-08-13 - Tích Hợp Nút Gạt Cấp Quyền Tự Chỉnh Nhịp Polling Trực Tiếp Trên Thẻ Cài Đặt Bot (T72)
+- File đã đổi: [public/app.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/public/app.js).
+- Đã làm:
+  - **Tích hợp giao diện quản lý phân quyền Nhịp Polling**:
+    - Bổ sung toggle control `"Cấp quyền tự chỉnh Nhịp Polling cho User này"` hiển thị ngay bên dưới dropdown Nhịp Polling trên thẻ tài khoản bot, **chỉ hiển thị đối với tài khoản Admin**.
+    - Đồng bộ trạng thái bật/tắt của toggle theo giá trị `ownerAllowEditPollInterval` (phản ánh phân quyền của chủ sở hữu bot).
+  - **Phản hồi tức thì trên Dashboard**:
+    - Cập nhật hàm `toggleUserPollIntervalPermission` để tự động gọi `fetchAccounts()` làm mới giao diện dashboard ngay sau khi Admin cập nhật quyền thành công, giúp đồng bộ hóa các thay đổi tức thì mà không cần tải lại trang.
+
+---
+
+## 2026-08-13 - Đo Lường và Hiển Thị Tốc Độ Thu Thập Tài Nguyên Phụ (Gỗ, Đá, Sắt, Đồng, Thảo dược) (T71)
+- File đã đổi: [server.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [public/app.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/public/app.js), [test.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/test.js).
+- Đã làm:
+  - **Theo dõi hiệu số tài nguyên ở Backend**:
+    - So sánh chênh lệch tài nguyên giữa `this.player` và `prevP` sau mỗi nhịp polling để ghi nhận giá trị tăng trưởng thực tế.
+    - Lưu các giá trị hiệu số tài nguyên `wood`, `stone`, `iron`, `copper`, `herb` vào `combatStatsHistory`.
+    - Nâng cấp `getCombatRates()` để tính toán cả 8 chỉ số rates tương ứng (Kills, Gold, EXP và 5 loại tài nguyên phụ).
+  - **Đồng bộ hiển thị lên Frontend UI**:
+    - Cập nhật hàm render tài nguyên trong `public/app.js` để tự động hiển thị tốc độ thu thập ngay bên cạnh số lượng tài nguyên hiện tại dưới định dạng `Số lượng (+Tốc độ/Đơn vị)`.
+    - Đồng bộ thay đổi đơn vị thời gian tốc độ tài nguyên phụ theo đơn vị đang kích hoạt của Vàng/EXP (phút, giờ, ngày).
+    - Thêm tooltip chi tiết về tốc độ phút/giờ/ngày khi hover vào từng loại tài nguyên.
+  - **Cập nhật Unit Tests**:
+    - Cập nhật test case tính toán Combat Rates trong `test.js` để xác minh và khẳng định độ chính xác của các chỉ số tài nguyên phụ.
+
+---
+
+## 2026-08-13 - Phục Dựng Chức Năng Bảng Xếp Hạng Bị Ẩn (Người chơi & Gold) (T70)
+- File đã đổi: [server.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [play.html](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/play.html), [play_battle.html](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/play_battle.html).
+- Đã làm:
+  - **Khôi phục hiển thị nút bấm Tab**:
+    - Sử dụng Regex replacement trong hàm `fetchGameHtml` của `server.js` để tìm và bỏ comment (`<!-- -->`) cho nút `lv` (Người chơi) và `gold` (Vàng) trên file HTML tải từ game server.
+    - Chuyển trạng thái hoạt động mặc định (`active`) từ tab `mvp` sang tab `lv` (Người chơi) trong HTML.
+  - **Đặt tab mặc định trong Javascript**:
+    - Bổ sung logic xử lý trong API route `/js/xhrpg_canvas.js` để tự động thay thế giá trị khởi tạo `let rankCurrentTab = 'mvp';` thành `let rankCurrentTab = 'lv';` nhằm đồng bộ tab kích hoạt đầu tiên khi mở bảng xếp hạng.
+  - **Đồng bộ File Local Fallback**:
+    - Thay đổi thẻ rỗng `<div id="rank-root"></div>` thành cấu trúc đầy đủ `#rank-tabs` và `#rank-list` chứa 5 nút bấm tab tương đương trong cả hai file local fallback `play.html` và `play_battle.html`.
+
+---
+
 ## 2026-08-13 - Điều Chỉnh Khoảng Cách An Toàn Kiting Săn Boss Theo Loại Vũ Khí (T69)
 - File đã đổi: [server.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [play_battle.html](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/play_battle.html), [test.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/test.js).
 - Đã làm:

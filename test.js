@@ -94,27 +94,46 @@ try {
   const mockBot = {
     startTime: Date.now() - 2 * 60 * 1000, // started 2 minutes ago
     combatStatsHistory: [
-      { time: Date.now() - 30 * 1000, kills: 4, gold: 100, exp: 200 }
+      { time: Date.now() - 30 * 1000, kills: 4, gold: 100, exp: 200, wood: 10, stone: 20, iron: 30, copper: 40, herb: 50 }
     ],
     getCombatRates: function() {
       const now = Date.now();
       const cutoff = now - 5 * 60 * 1000;
       this.combatStatsHistory = (this.combatStatsHistory || []).filter(h => h.time >= cutoff);
-      let totalKills = 0, totalGold = 0, totalExp = 0;
-      this.combatStatsHistory.forEach(h => { totalKills += h.kills; totalGold += h.gold; totalExp += h.exp; });
+      let totalKills = 0, totalGold = 0, totalExp = 0, totalWood = 0, totalStone = 0, totalIron = 0, totalCopper = 0, totalHerb = 0;
+      this.combatStatsHistory.forEach(h => {
+        totalKills += h.kills || 0;
+        totalGold += h.gold || 0;
+        totalExp += h.exp || 0;
+        totalWood += h.wood || 0;
+        totalStone += h.stone || 0;
+        totalIron += h.iron || 0;
+        totalCopper += h.copper || 0;
+        totalHerb += h.herb || 0;
+      });
       const startOfMeasurement = this.startTime ? Math.max(this.startTime, cutoff) : cutoff;
       const diffMs = now - startOfMeasurement;
       const elapsedMin = Math.max(0.1, diffMs / 60000);
       return {
         killsPerMin: Math.round((totalKills / elapsedMin) * 10) / 10,
         goldPerMin: Math.round(totalGold / elapsedMin),
-        expPerMin: Math.round(totalExp / elapsedMin)
+        expPerMin: Math.round(totalExp / elapsedMin),
+        woodPerMin: Math.round(totalWood / elapsedMin),
+        stonePerMin: Math.round(totalStone / elapsedMin),
+        ironPerMin: Math.round(totalIron / elapsedMin),
+        copperPerMin: Math.round(totalCopper / elapsedMin),
+        herbPerMin: Math.round(totalHerb / elapsedMin)
       };
     }
   };
   const rates = mockBot.getCombatRates();
   // 4 kills over 2 minutes = 2.0 kills/min
   assert.strictEqual(rates.killsPerMin, 2.0);
+  assert.strictEqual(rates.woodPerMin, 5);
+  assert.strictEqual(rates.stonePerMin, 10);
+  assert.strictEqual(rates.ironPerMin, 15);
+  assert.strictEqual(rates.copperPerMin, 20);
+  assert.strictEqual(rates.herbPerMin, 25);
 
   // T46: Act Flag State Machine Tests
   console.log('Testing T46 Act Flag State Machine...');

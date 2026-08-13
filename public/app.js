@@ -218,7 +218,8 @@ document.addEventListener('DOMContentLoaded', () => {
       const data = await res.json();
       if (res.ok && data.success) {
         alert(`✅ Đã ${checked ? 'cấp quyền' : 'thu hồi quyền'} tự chỉnh Nhịp Polling cho user ${username}!`);
-        fetchAdminUsers();
+        if (typeof fetchAdminUsers === 'function') fetchAdminUsers();
+        if (typeof fetchAccounts === 'function') fetchAccounts();
       } else {
         alert(`🔴 Lỗi cập nhật quyền tự chỉnh Nhịp Polling: ${data.error || 'Thất bại'}`);
       }
@@ -1338,6 +1339,37 @@ document.addEventListener('DOMContentLoaded', () => {
         <span class="stat-pill" title="Thảo dược (Herb)">🌿 <strong id="res-herb-${acc.line_uid}">--</strong></span>
       </div>
 
+      <div class="poll-interval-outer-container" style="margin-bottom: 8px; padding: 0 4px;">
+        ${(currentUser && (currentUser.role === 'admin' || currentUser.allowEditPollInterval === true)) ? `
+        <div class="poll-interval-outer-strip" style="padding: 5px 10px; background: rgba(255,255,255,0.03); border-radius: 6px; border: 1px solid rgba(255,255,255,0.05); display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+          <span style="font-size: 0.78rem; color: #d1d5db; font-weight: 500; display: flex; align-items: center; gap: 4px;">⚡ Nhịp Polling:</span>
+          <select id="sel-poll-interval-${acc.line_uid}" onchange="updateNumericSetting('${acc.line_uid}', 'pollInterval')" style="background: rgba(0,0,0,0.5); border: 1px solid var(--border-color); border-radius: 5px; color: #fff; padding: 2px 6px; font-family: inherit; font-size: 0.78rem; outline: none; max-width: 170px; width: 100%;">
+            <option value="2000">2000ms (Mặc định)</option>
+            <option value="1800">1800ms</option>
+            <option value="1500">1500ms</option>
+            <option value="1300">1300ms</option>
+            <option value="1100">1100ms (Khuyên dùng)</option>
+            <option value="1000">1000ms (Rất nhanh)</option>
+            <option value="800">800ms (Siêu nhanh)</option>
+          </select>
+        </div>
+        ${(currentUser && currentUser.role === 'admin') ? `
+        <div style="display: flex; align-items: center; gap: 8px; margin-top: 5px; padding: 0 4px;">
+          <label class="switch" style="width: 32px; height: 18px; margin: 0;">
+            <input type="checkbox" onchange="toggleUserPollIntervalPermission('${acc.userId}', '${acc.ownerUsername}', this.checked)" ${acc.ownerAllowEditPollInterval ? 'checked' : ''} style="cursor: pointer;">
+            <span class="slider" style="border-radius: 18px;"></span>
+          </label>
+          <span style="font-size: 0.75rem; color: #a3a3a3;">Cấp quyền tự chỉnh Nhịp Polling cho User này</span>
+        </div>
+        ` : ''}
+        ` : `
+        <div class="poll-interval-outer-strip" style="padding: 5px 10px; background: rgba(255,255,255,0.02); border-radius: 6px; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+          <span style="font-size: 0.78rem; color: #a3a3a3; display: flex; align-items: center; gap: 4px;">⚡ Nhịp Polling:</span>
+          <span style="font-size: 0.78rem; color: #e2e8f0; font-weight: bold;">${acc.settings.pollInterval || acc.ownerPollInterval || 2000}ms <span style="font-weight: normal; font-size: 0.7rem; color: #858585;">(Theo Admin)</span></span>
+        </div>
+        `}
+      </div>
+
       <div class="card-tabs-nav">
         <button class="tab-link" id="tab-btn-core-${acc.line_uid}" onclick="switchTab('${acc.line_uid}', 'core')">Cơ Bản</button>
         <button class="tab-link" id="tab-btn-home-${acc.line_uid}" onclick="switchTab('${acc.line_uid}', 'home')">🏡 Nông Trại</button>
@@ -1581,22 +1613,7 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
           </div>
 
-          ${(currentUser && (currentUser.role === 'admin' || currentUser.allowEditPollInterval === true)) ? `
-          <div class="settings-group">
-            <div class="input-control" style="grid-column: span 2;">
-              <label for="sel-poll-interval-${acc.line_uid}">⚡ Nhịp Polling (Tần suất gửi request)</label>
-              <select id="sel-poll-interval-${acc.line_uid}" onchange="updateNumericSetting('${acc.line_uid}', 'pollInterval')" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; padding: 4px 6px; font-family: inherit; font-size: 0.85rem; outline: none; margin-top:2px; width: 100%;">
-                <option value="2000">2000ms (Mặc định - Chậm & An toàn)</option>
-                <option value="1800">1800ms</option>
-                <option value="1500">1500ms</option>
-                <option value="1300">1300ms</option>
-                <option value="1100">1100ms (Nhanh - Khuyên dùng)</option>
-                <option value="1000">1000ms (Rất nhanh)</option>
-                <option value="800">800ms (Siêu nhanh - Dễ phát hiện bot)</option>
-              </select>
-            </div>
-          </div>
-          ` : ''}
+
 
           <div class="settings-group">
             <div class="toggle-control">
@@ -2250,11 +2267,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Resource row
     document.getElementById(`res-gold-${acc.line_uid}`).textContent = p.gold ? p.gold.toLocaleString() : '0';
-    document.getElementById(`res-wood-${acc.line_uid}`).textContent = p.wood ? p.wood.toLocaleString() : '0';
-    document.getElementById(`res-stone-${acc.line_uid}`).textContent = p.stone ? p.stone.toLocaleString() : '0';
-    document.getElementById(`res-iron-${acc.line_uid}`).textContent = p.iron ? p.iron.toLocaleString() : '0';
-    document.getElementById(`res-copper-${acc.line_uid}`).textContent = p.copper ? p.copper.toLocaleString() : '0';
-    document.getElementById(`res-herb-${acc.line_uid}`).textContent = p.herb ? p.herb.toLocaleString() : '0';
 
     // Combat rates
     const rates = acc.combatRates || { killsPerMin: 0, goldPerMin: 0, expPerMin: 0 };
@@ -2326,6 +2338,56 @@ document.addEventListener('DOMContentLoaded', () => {
       elExp.textContent = formatRateValue(expMin, false, unit);
       const pill = elExp.closest('.stat-pill') || elExp.parentElement;
       if (pill) pill.setAttribute('title', expTooltip);
+    }
+
+    // Render wood, stone, iron, copper, herb counts and rates
+    const woodMin = rates.woodPerMin || 0;
+    const stoneMin = rates.stonePerMin || 0;
+    const ironMin = rates.ironPerMin || 0;
+    const copperMin = rates.copperPerMin || 0;
+    const herbMin = rates.herbPerMin || 0;
+
+    const rateStr = (minVal) => {
+      if (!minVal) return '';
+      const formatted = formatRateValue(minVal, false, unit);
+      return ` (${formatted.replace(/\s+/g, '')})`;
+    };
+
+    const woodTooltip = `Gỗ: ${p.wood ? p.wood.toLocaleString() : '0'} | Tốc độ: ${fmtShort(woodMin)}/m | ${fmtShort(woodMin * 60)}/h | ${fmtShort(woodMin * 1440)}/d (Click dải tốc độ để đổi)`;
+    const stoneTooltip = `Đá: ${p.stone ? p.stone.toLocaleString() : '0'} | Tốc độ: ${fmtShort(stoneMin)}/m | ${fmtShort(stoneMin * 60)}/h | ${fmtShort(stoneMin * 1440)}/d (Click dải tốc độ để đổi)`;
+    const ironTooltip = `Sắt: ${p.iron ? p.iron.toLocaleString() : '0'} | Tốc độ: ${fmtShort(ironMin)}/m | ${fmtShort(ironMin * 60)}/h | ${fmtShort(ironMin * 1440)}/d (Click dải tốc độ để đổi)`;
+    const copperTooltip = `Đồng: ${p.copper ? p.copper.toLocaleString() : '0'} | Tốc độ: ${fmtShort(copperMin)}/m | ${fmtShort(copperMin * 60)}/h | ${fmtShort(copperMin * 1440)}/d (Click dải tốc độ để đổi)`;
+    const herbTooltip = `Thảo dược: ${p.herb ? p.herb.toLocaleString() : '0'} | Tốc độ: ${fmtShort(herbMin)}/m | ${fmtShort(herbMin * 60)}/h | ${fmtShort(herbMin * 1440)}/d (Click dải tốc độ để đổi)`;
+
+    const elWood = document.getElementById(`res-wood-${acc.line_uid}`);
+    if (elWood) {
+      elWood.innerHTML = `${p.wood ? p.wood.toLocaleString() : '0'}<span class="rate-sub" style="font-size:0.7rem; color:#85e085; font-weight:normal;">${rateStr(woodMin)}</span>`;
+      const pill = elWood.closest('.stat-pill') || elWood.parentElement;
+      if (pill) pill.setAttribute('title', woodTooltip);
+    }
+    const elStone = document.getElementById(`res-stone-${acc.line_uid}`);
+    if (elStone) {
+      elStone.innerHTML = `${p.stone ? p.stone.toLocaleString() : '0'}<span class="rate-sub" style="font-size:0.7rem; color:#85e085; font-weight:normal;">${rateStr(stoneMin)}</span>`;
+      const pill = elStone.closest('.stat-pill') || elStone.parentElement;
+      if (pill) pill.setAttribute('title', stoneTooltip);
+    }
+    const elIron = document.getElementById(`res-iron-${acc.line_uid}`);
+    if (elIron) {
+      elIron.innerHTML = `${p.iron ? p.iron.toLocaleString() : '0'}<span class="rate-sub" style="font-size:0.7rem; color:#85e085; font-weight:normal;">${rateStr(ironMin)}</span>`;
+      const pill = elIron.closest('.stat-pill') || elIron.parentElement;
+      if (pill) pill.setAttribute('title', ironTooltip);
+    }
+    const elCopper = document.getElementById(`res-copper-${acc.line_uid}`);
+    if (elCopper) {
+      elCopper.innerHTML = `${p.copper ? p.copper.toLocaleString() : '0'}<span class="rate-sub" style="font-size:0.7rem; color:#85e085; font-weight:normal;">${rateStr(copperMin)}</span>`;
+      const pill = elCopper.closest('.stat-pill') || elCopper.parentElement;
+      if (pill) pill.setAttribute('title', copperTooltip);
+    }
+    const elHerb = document.getElementById(`res-herb-${acc.line_uid}`);
+    if (elHerb) {
+      elHerb.innerHTML = `${p.herb ? p.herb.toLocaleString() : '0'}<span class="rate-sub" style="font-size:0.7rem; color:#85e085; font-weight:normal;">${rateStr(herbMin)}</span>`;
+      const pill = elHerb.closest('.stat-pill') || elHerb.parentElement;
+      if (pill) pill.setAttribute('title', herbTooltip);
     }
 
     // Render skills tab content
