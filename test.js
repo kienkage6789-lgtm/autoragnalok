@@ -770,26 +770,50 @@ try {
   console.log('✅ Multiple Team Sync and Lookup Tests Passed successfully!');
 
   // 11. Test User Polling Interval and role propagation
-  console.log('Testing User Polling Interval and role propagation...');
+  console.log('Testing User Polling Interval, role propagation and edit permissions...');
   
   const mockAdminBot = new BotInstance({ name: 'AdminBot', userId: 'usr_admin', settings: { pollInterval: 1100 } });
   assert.strictEqual(mockAdminBot.userIsAdmin, true, 'Admin bot owner should have userIsAdmin = true');
   
-  let resolvedIntervalAdmin = mockAdminBot.userIsAdmin 
-    ? (mockAdminBot.settings.pollInterval || mockAdminBot.userPollInterval || 2000)
+  let resolvedIntervalAdmin = (mockAdminBot.userIsAdmin || mockAdminBot.allowEditPollInterval)
+    ? (mockAdminBot.settings.pollInterval !== undefined ? mockAdminBot.settings.pollInterval : (mockAdminBot.userPollInterval || 2000))
     : (mockAdminBot.userPollInterval || 2000);
   assert.strictEqual(resolvedIntervalAdmin, 1100, 'Admin bot should resolve to 1100ms based on settings.pollInterval');
 
+  // Normal user without permission
   const mockUserBot = new BotInstance({ name: 'UserBot', userId: 'some_nonexistent_user', settings: { pollInterval: 800 } });
   mockUserBot.userIsAdmin = false;
   mockUserBot.userPollInterval = 1500;
+  mockUserBot.allowEditPollInterval = false;
   
-  let resolvedIntervalUser = mockUserBot.userIsAdmin 
-    ? (mockUserBot.settings.pollInterval || mockUserBot.userPollInterval || 2000)
+  let resolvedIntervalUser = (mockUserBot.userIsAdmin || mockUserBot.allowEditPollInterval)
+    ? (mockUserBot.settings.pollInterval !== undefined ? mockUserBot.settings.pollInterval : (mockUserBot.userPollInterval || 2000))
     : (mockUserBot.userPollInterval || 2000);
-  assert.strictEqual(resolvedIntervalUser, 1500, 'User bot should enforce userPollInterval (1500ms) even if settings.pollInterval is 800ms');
+  assert.strictEqual(resolvedIntervalUser, 1500, 'User bot without permission should enforce userPollInterval (1500ms)');
 
-  console.log('✅ User Polling Interval and Role Propagation Tests Passed successfully!');
+  // Normal user WITH permission
+  const mockUserBotPermitted = new BotInstance({ name: 'UserBotPermitted', userId: 'some_permitted_user', settings: { pollInterval: 800 } });
+  mockUserBotPermitted.userIsAdmin = false;
+  mockUserBotPermitted.userPollInterval = 1500;
+  mockUserBotPermitted.allowEditPollInterval = true;
+  
+  let resolvedIntervalUserPermitted = (mockUserBotPermitted.userIsAdmin || mockUserBotPermitted.allowEditPollInterval)
+    ? (mockUserBotPermitted.settings.pollInterval !== undefined ? mockUserBotPermitted.settings.pollInterval : (mockUserBotPermitted.userPollInterval || 2000))
+    : (mockUserBotPermitted.userPollInterval || 2000);
+  assert.strictEqual(resolvedIntervalUserPermitted, 800, 'User bot WITH permission should respect settings.pollInterval (800ms)');
+
+  // Normal user WITH permission but WITHOUT bot-level customized pollInterval (should fallback to userPollInterval)
+  const mockUserBotPermittedNoCustom = new BotInstance({ name: 'UserBotPermittedNoCustom', userId: 'some_permitted_user', settings: {} });
+  mockUserBotPermittedNoCustom.userIsAdmin = false;
+  mockUserBotPermittedNoCustom.userPollInterval = 1500;
+  mockUserBotPermittedNoCustom.allowEditPollInterval = true;
+
+  let resolvedIntervalUserPermittedNoCustom = (mockUserBotPermittedNoCustom.userIsAdmin || mockUserBotPermittedNoCustom.allowEditPollInterval)
+    ? (mockUserBotPermittedNoCustom.settings.pollInterval !== undefined ? mockUserBotPermittedNoCustom.settings.pollInterval : (mockUserBotPermittedNoCustom.userPollInterval || 2000))
+    : (mockUserBotPermittedNoCustom.userPollInterval || 2000);
+  assert.strictEqual(resolvedIntervalUserPermittedNoCustom, 1500, 'User bot WITH permission but without bot settings should fallback to userPollInterval (1500ms)');
+
+  console.log('✅ User Polling Interval, Role Propagation and Edit Permissions Tests Passed successfully!');
   console.log('✅ Revamped Auto Market Buy Tests Passed successfully!');
   console.log('✅ Urgent Active Potion Healing Tests Passed successfully!');
   console.log('✅ ProxyPool SOCKS5 Parsing Tests Passed successfully!');

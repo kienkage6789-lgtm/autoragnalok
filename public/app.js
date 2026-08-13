@@ -208,6 +208,26 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   };
 
+  window.toggleUserPollIntervalPermission = async function(userId, username, checked) {
+    try {
+      const res = await fetch(`/api/admin/users/${userId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ allowEditPollInterval: checked })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        alert(`✅ Đã ${checked ? 'cấp quyền' : 'thu hồi quyền'} tự chỉnh Nhịp Polling cho user ${username}!`);
+        fetchAdminUsers();
+      } else {
+        alert(`🔴 Lỗi cập nhật quyền tự chỉnh Nhịp Polling: ${data.error || 'Thất bại'}`);
+      }
+    } catch (e) {
+      console.error('Error toggling user poll interval permission:', e);
+      alert('Không thể kết nối máy chủ');
+    }
+  };
+
   window.stepUserMarketLimit = async function(userId, username, delta) {
     const inp = document.getElementById(`user-market-limit-${userId}`) || document.getElementById(`market-limit-inp-${userId}`);
     let current = inp ? parseInt(inp.value) || 0 : 0;
@@ -636,6 +656,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 <option value="1000" ${u.pollInterval === 1000 ? 'selected' : ''}>1000ms</option>
                 <option value="800" ${u.pollInterval === 800 ? 'selected' : ''}>800ms</option>
               </select>
+            `}
+          </td>
+          <td style="padding:8px; text-align:center;">
+            ${isAdmin ? '<span style="font-size:0.8rem; color:#a5b4fc;">Cho phép</span>' : `
+              <input type="checkbox" onchange="toggleUserPollIntervalPermission('${u.id}', '${u.username}', this.checked)" ${u.allowEditPollInterval ? 'checked' : ''} style="cursor: pointer; width: 16px; height: 16px; margin: 0 auto; display: block;">
             `}
           </td>
           <td style="padding:8px;">${expiryHtml}</td>
@@ -1556,7 +1581,7 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
           </div>
 
-          ${(currentUser && currentUser.role === 'admin') ? `
+          ${(currentUser && (currentUser.role === 'admin' || currentUser.allowEditPollInterval === true)) ? `
           <div class="settings-group">
             <div class="input-control" style="grid-column: span 2;">
               <label for="sel-poll-interval-${acc.line_uid}">⚡ Nhịp Polling (Tần suất gửi request)</label>
@@ -2463,7 +2488,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // Poll Interval sync
     const selPollInterval = document.getElementById(`sel-poll-interval-${acc.line_uid}`);
     if (selPollInterval && document.activeElement !== selPollInterval) {
-      selPollInterval.value = acc.settings.pollInterval !== undefined ? String(acc.settings.pollInterval) : '2000';
+      const defaultPoll = acc.ownerPollInterval !== undefined ? String(acc.ownerPollInterval) : '2000';
+      selPollInterval.value = acc.settings.pollInterval !== undefined ? String(acc.settings.pollInterval) : defaultPoll;
     }
 
     // Auto Map toggle & map select sync

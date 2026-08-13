@@ -2,22 +2,26 @@
 
 > Changelog of actual changes implemented.
 
-## 2026-08-13 - Chuyển Cấu Hình Nhịp Polling Thành Cài Đặt Theo Tài Khoản User & Hạn Chế Quyền Admin (T67)
+## 2026-08-13 - Chuyển Cấu Hình Nhịp Polling Thành Cài Đặt Theo Tài Khoản User & Tùy Chọn Cấp Quyền Tự Chỉnh (T67)
 - File đã đổi: [server.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [public/index.html](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/public/index.html), [public/app.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/public/app.js), [test.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/test.js).
 - Đã làm:
-  - **Hệ thống Quản lý Nhịp Polling ở Backend**:
-    - Constructor của `BotInstance` tự động tra cứu User từ `users.json` để xác định thuộc tính `userPollInterval` và vai trò `userIsAdmin`.
-    - Logic tính toán nhịp polling ở `runPoll` tự động áp dụng `userPollInterval` cho người dùng thường, ngăn không cho họ tùy chỉnh hay vượt qua.
-    - Sửa API `PUT /api/admin/users/:userId` để hỗ trợ lưu `pollInterval` và tự động cập nhật giá trị đó trong bộ nhớ cho các bot instances đang chạy của user để có tác dụng ngay lập tức.
-    - Sửa API `PUT /api/accounts/:line_uid` để lọc bỏ `pollInterval` nếu tài khoản yêu cầu không phải là Admin.
-    - Expose `pollInterval` trong API `GET /api/admin/users`.
+  - **Hệ thống Quản lý Nhịp Polling và Cấp quyền**:
+    - Constructor của `BotInstance` tự động tra cứu User từ `users.json` để xác định thuộc tính `userPollInterval`, vai trò `userIsAdmin` và quyền `allowEditPollInterval`.
+    - Logic định thời chu kỳ poll (`runPoll`) tự động cho phép sử dụng `settings.pollInterval` riêng của bot nếu `userIsAdmin === true` hoặc `allowEditPollInterval === true`. Ngược lại, bắt buộc sử dụng `userPollInterval` của tài khoản để chạy.
+    - Sửa các endpoint authentication `/api/auth/login` và `/api/auth/me` để trả về thuộc tính `allowEditPollInterval` cho Client.
+    - Sửa API `PUT /api/admin/users/:userId` để hỗ trợ lưu `allowEditPollInterval` và tự động cập nhật thuộc tính này cho các bot instance đang hoạt động của user trong bộ nhớ.
+    - Sửa API `PUT /api/accounts/:line_uid` để cho phép cập nhật `pollInterval` của bot nếu người gọi là Admin hoặc User được cấp quyền `allowEditPollInterval`.
+  - **Khắc phục lỗi sai lệch Nhịp Polling (4M Investigation)**:
+    - Loại bỏ cấu hình mặc định cứng `pollInterval: 2000` trong `getDefaultSettings()` để tránh việc ghi đè vô hiệu hóa cấu hình user-level (`userPollInterval`) khi bot được khởi chạy.
+    - Bổ sung các thuộc tính `ownerPollInterval` và `ownerAllowEditPollInterval` vào dữ liệu phản hồi của API `GET /api/accounts`.
+    - Cập nhật frontend `app.js` tự động đồng bộ giá trị dropdown Nhịp Polling sang `acc.ownerPollInterval` thay vì mặc định cứng `'2000'`.
   - **Cập nhật Giao diện (UI)**:
-    - Sửa `public/index.html` để thêm cột tiêu đề `Nhịp Polling` vào bảng Admin Users.
-    - Sửa `public/app.js` để ẩn hoàn toàn khối cấu hình "Nhịp Polling" trong tab cài đặt bot nếu người dùng không phải là Admin.
-    - Cập nhật hàm `renderAdminUsersTable` trong `public/app.js` để hiển thị select dropdown cấu hình `pollInterval` cho từng người dùng (Admin hiển thị Vô hạn).
-    - Thêm hàm `changeUserPollInterval` gửi request PUT cập nhật Nhịp Polling lên server.
+    - Sửa `public/index.html` để thêm cột tiêu đề `Tự chỉnh Polling` vào bảng Admin Users.
+    - Sửa `public/app.js` để ẩn/hiện Nhịp Polling trong tab cài đặt bot dựa trên quyền của `currentUser` (`currentUser.role === 'admin' || currentUser.allowEditPollInterval === true`).
+    - Cập nhật hàm `renderAdminUsersTable` để hiển thị checkbox cấp quyền tự chỉnh Nhịp Polling cho từng user thường.
+    - Thêm hàm `toggleUserPollIntervalPermission` gửi request PUT cập nhật quyền tự chỉnh của user lên server.
   - **Unit Tests**:
-    - Viết thêm Test Case 11 xác minh cơ chế ép buộc nhịp polling cho tài khoản thường và thừa hưởng cài đặt cho admin, chạy `npm test` thành công 100%.
+    - Cập nhật Test Case 11 xác minh logic phân quyền Nhịp Polling (cho cả 3 trường hợp: Admin, User thường không có quyền, User thường có quyền, và trường hợp thừa hưởng nhịp user-level khi được cấp quyền), chạy `npm test` thành công 100%.
 
 ---
 

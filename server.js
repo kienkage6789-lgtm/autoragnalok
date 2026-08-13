@@ -1216,6 +1216,7 @@ class BotInstance {
     const user = users.find(u => u.id === this.userId);
     this.userPollInterval = user ? user.pollInterval : undefined;
     this.userIsAdmin = user ? (user.role === 'admin') : false;
+    this.allowEditPollInterval = user ? (user.allowEditPollInterval === true) : false;
 
     const userSettings = account.settings || {};
     this.settings = { ...this.getDefaultSettings(), ...userSettings };
@@ -1398,8 +1399,7 @@ class BotInstance {
       autoEventJoinCw: false,
       eventPotionThreshold: 0,
       eventTargetMinDef: false,
-      eventAttackRange: 300,
-      pollInterval: 2000
+      eventAttackRange: 300
     };
   }
 
@@ -1905,9 +1905,9 @@ class BotInstance {
         this.isPolling = false;
         // Schedule next poll staggering
         if (this.status === 'running') {
-          // If the user is admin, they can configure it per-bot; otherwise, enforce user-level pollInterval
+          // If the user has edit permission or is admin, they can configure it per-bot; otherwise, enforce user-level pollInterval
           let userPollInterval = 2000;
-          if (this.userIsAdmin) {
+          if (this.userIsAdmin || this.allowEditPollInterval) {
             userPollInterval = this.settings.pollInterval !== undefined ? this.settings.pollInterval : (this.userPollInterval || 2000);
           } else {
             userPollInterval = this.userPollInterval || 2000;
@@ -4044,7 +4044,8 @@ app.post('/api/auth/login', (req, res) => {
       username: user.username,
       role: user.role,
       maxAccounts: user.maxAccounts || 1,
-      expiresAt: user.expiresAt || null
+      expiresAt: user.expiresAt || null,
+      allowEditPollInterval: user.role === 'admin' || user.allowEditPollInterval === true
     }
   });
 });
@@ -4068,7 +4069,8 @@ app.get('/api/auth/me', requireAuth, (req, res) => {
       role: req.user.role,
       maxAccounts: req.user.maxAccounts || 1,
       expiresAt: req.user.expiresAt || null,
-      allowMarket: req.user.role === 'admin' || req.user.allowMarket === true
+      allowMarket: req.user.role === 'admin' || req.user.allowMarket === true,
+      allowEditPollInterval: req.user.role === 'admin' || req.user.allowEditPollInterval === true
     }
   });
 });
@@ -4196,6 +4198,7 @@ app.get('/api/admin/users', requireAdmin, (req, res) => {
       expiresAt: u.expiresAt || null,
       allowMarket: u.allowMarket === true,
       pollInterval: u.pollInterval !== undefined ? u.pollInterval : 2000,
+      allowEditPollInterval: u.allowEditPollInterval === true,
       createdAt: u.createdAt,
       botCount: userBots.length,
       onlineBotCount: onlineCount
@@ -4265,7 +4268,7 @@ app.post('/api/admin/users', requireAdmin, (req, res) => {
 // Update user settings/password/expiration (Admin only)
 app.put('/api/admin/users/:userId', requireAdmin, (req, res) => {
   const { userId } = req.params;
-  const { password, maxAccounts, extendDays, extendMinutes, expiresAt, pollInterval } = req.body;
+  const { password, maxAccounts, extendDays, extendMinutes, expiresAt, pollInterval, allowEditPollInterval } = req.body;
 
   const users = loadUsers();
   const index = users.findIndex(u => u.id === userId);
@@ -4312,6 +4315,10 @@ app.put('/api/admin/users/:userId', requireAdmin, (req, res) => {
     }
   }
 
+  if (allowEditPollInterval !== undefined) {
+    users[index].allowEditPollInterval = allowEditPollInterval === true;
+  }
+
   saveUsers(users);
 
   // Update live bot instances in-memory
@@ -4320,6 +4327,7 @@ app.put('/api/admin/users/:userId', requireAdmin, (req, res) => {
     if (bot.userId === userId) {
       bot.userPollInterval = updatedUser.pollInterval;
       bot.userIsAdmin = updatedUser.role === 'admin';
+      bot.allowEditPollInterval = updatedUser.allowEditPollInterval === true;
     }
   });
 
@@ -4330,7 +4338,17 @@ app.put('/api/admin/users/:userId', requireAdmin, (req, res) => {
     }
   });
 
-  res.json({ success: true, user: { id: users[index].id, username: users[index].username, role: users[index].role, maxAccounts: users[index].maxAccounts, pollInterval: users[index].pollInterval } });
+  res.json({
+    success: true,
+    user: {
+      id: users[index].id,
+      username: users[index].username,
+      role: users[index].role,
+      maxAccounts: users[index].maxAccounts,
+      pollInterval: users[index].pollInterval,
+      allowEditPollInterval: users[index].allowEditPollInterval === true
+    }
+  });
 });
 
 // Toggle market permission for a specific user (Admin only)
@@ -4968,6 +4986,8 @@ app.get('/api/accounts', requireAuth, (req, res) => {
           ownerExpiresAt: ownerUser ? ownerUser.expiresAt : null,
           ownerMaxAccounts: ownerUser ? ownerUser.maxAccounts : 1,
           ownerMarketLimit: ownerUser ? (ownerUser.marketBotLimit !== undefined ? ownerUser.marketBotLimit : (ownerUser.allowMarket ? ownerUser.maxAccounts : 0)) : 0,
+          ownerPollInterval: ownerUser ? (ownerUser.pollInterval || 2000) : 2000,
+          ownerAllowEditPollInterval: ownerUser ? (ownerUser.allowEditPollInterval === true) : false,
           status: bot.status,
           clientActive: !!(bot.lastClientActive && (Date.now() - bot.lastClientActive < 12000)),
           error: bot.error,
@@ -5259,7 +5279,7 @@ app.put('/api/accounts/:line_uid', requireAuth, async (req, res) => {
 
   const { session_token, name, proxyId, ...settings } = req.body;
 
-  if (settings.pollInterval !== undefined && req.user.role !== 'admin') {
+  if (settings.pollInterval !== undefined && req.user.role !== 'admin' && req.user.allowEditPollInterval !== true) {
     delete settings.pollInterval;
   }
 
