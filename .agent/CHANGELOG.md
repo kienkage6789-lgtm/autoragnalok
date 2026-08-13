@@ -2,6 +2,25 @@
 
 > Changelog of actual changes implemented.
 
+## 2026-08-13 - Tối ưu hóa Bơm máu PK, Sửa lỗi MIME type sdk.js, Sửa lỗi Auto Event Zone & Thống kê Chiến tích K/D (T74)
+- File đã đổi: [server.js](file:///c:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/server.js), [public/app.js](file:///c:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/public/app.js), [play.html](file:///c:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/play.html), [play_battle.html](file:///c:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/play_battle.html), [test.js](file:///c:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/test.js).
+- Đã làm:
+  - **Tối ưu Bơm Máu Khẩn Cấp trong PK/Battle**:
+    - Thay thế các request POST thô bằng việc gọi trực tiếp hàm nội bộ `xhrpg.usePotionManual()` của game engine, giúp cập nhật trạng thái máu nhân vật tức thì và chạy mượt mà hoạt ảnh nhấp nháy xanh lá cứu thương mà không bị trễ/khựng hình.
+    - Đè phương thức `$.post` của jQuery để lắng nghe endpoint `/xhrpg_upgrade.php` khi hành động là `use_potion_manual`. Khi phát hiện phản hồi thành công, cập nhật ngay lập tức `window.lastGameData.player` để đồng bộ máu vẽ trên Radar tức thì.
+  - **Khắc phục lỗi MIME type và 404 cho `sdk.js`**:
+    - Thay đổi thẻ `<script src="/js/sdk.js"></script>` trong `play.html` và `play_battle.html` thành liên kết trực tiếp tới Line CDN: `https://static.line-scdn.net/liff/edge/2.1/sdk.js`.
+    - Tải bản sao chính thức của Line SDK và lưu thành file tĩnh `sdk.js` tại thư mục gốc của dự án để làm fallback an toàn trên proxy.
+  - **Sửa lỗi Auto Event không quay về đúng Zone ban đầu**:
+    - Thêm cờ `this.isEventReturning = true` và `this.eventReturnMapTarget` khi kết thúc sự kiện (`exitEventMode()`).
+    - Trong bộ phát hiện thay đổi bản đồ của `pollGame()`, bỏ qua việc reset cấu hình Zone của người dùng nếu nhân vật đang trong tiến trình quay về từ sự kiện.
+  - **Thống kê chiến tích K/D trong Lịch sử chiến đấu**:
+    - Trả về thêm `playerName` từ backend trong endpoint `/api/accounts/:line_uid/event-war-history`.
+    - Thiết kế bảng thống kê chiến tích dạng lưới (🗡️ Hạ gục, 💀 Bị hạ, 📊 K/D, 🏆 Điểm PK) và tích hợp các bộ lọc Tab (Tất cả, Hạ gục, Bị hạ) cùng bộ nhớ đệm client (`window._warHistoryCache`).
+    - Tô màu nổi bật dòng log liên quan đến bản thân (viền xanh lá cho Kills, viền đỏ kèm icon đầu lâu cho Deaths).
+
+---
+
 ## 2026-08-13 - Đưa Cấu Hình Nhịp Polling Ra Ngoài Mặt Thẻ Bot Dashboard (T73)
 - File đã đổi: [public/app.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/public/app.js).
 - Đã làm:

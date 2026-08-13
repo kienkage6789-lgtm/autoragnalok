@@ -1287,6 +1287,8 @@ class BotInstance {
     this.eventOriginalAutoZone = null;
     this.eventOriginalLockZoneCenter = null;
     this.eventOriginalTargetZone = null;
+    this.isEventReturning = false;
+    this.eventReturnMapTarget = null;
     this.playerDefCache = {};
     this.lastInv = null;
     this.lastGw = null;
@@ -1677,6 +1679,9 @@ class BotInstance {
     this.settings.autoZone = this.eventOriginalAutoZone !== undefined ? this.eventOriginalAutoZone : false;
     this.settings.lock_zone_center = this.eventOriginalLockZoneCenter !== undefined ? this.eventOriginalLockZoneCenter : false;
     this.settings.targetZone = this.eventOriginalTargetZone !== undefined ? this.eventOriginalTargetZone : 0;
+    
+    this.isEventReturning = true;
+    this.eventReturnMapTarget = returnMap;
     
     this.eventOriginalMap = null;
     this.eventOriginalAutoMap = null;
@@ -3009,6 +3014,15 @@ class BotInstance {
       }
     }
 
+    // Check if we arrived back at the original map after event ends
+    if (this.isEventReturning && this.player) {
+      if (Number(this.player.map) === Number(this.eventReturnMapTarget)) {
+        this.isEventReturning = false;
+        this.eventReturnMapTarget = null;
+        this.addLog('SYSTEM', `🏠 [Auto Event] Đã quay lại bản đồ farm gốc thành công.`);
+      }
+    }
+
     // 👥 Chỉ có Trưởng nhóm (Leader) hoặc bot chạy độc lập mới quản lý tiến độ chu kỳ xoay map
     if (this.isMvpCycling && this.settings.teamRole !== 'member') {
       await this.updateMvpCycleStatus();
@@ -3019,8 +3033,11 @@ class BotInstance {
       this.spots = null; // Force reload static zone details for the new map
       this.bosses = null; // Clear bosses list to refresh on new map
       
-      // Do NOT reset zone settings if transitioning to/from Home map (map 5), if in MVP cycle, or if returning to the original map
-      if (prevP.map !== 5 && this.player.map !== 5 && !this.isMvpCycling && this.mvpCycleOriginalMap === null && !wasMvpReturning) {
+      const wasMvpReturning = (!this.isMvpCycling && this.mvpCycleOriginalMap !== null);
+      const isEventReturning = this.isEventReturning || false;
+      
+      // Do NOT reset zone settings if transitioning to/from Home map (map 5), if in MVP cycle, if returning to the original map, or if returning from an event
+      if (prevP.map !== 5 && this.player.map !== 5 && !this.isMvpCycling && this.mvpCycleOriginalMap === null && !wasMvpReturning && !isEventReturning) {
         this.settings.autoZone = false;
         this.settings.lock_zone_center = false;
         this.settings.targetZone = 0;
@@ -5763,7 +5780,11 @@ app.get('/api/accounts/:line_uid/event-war-history', requireAuth, async (req, re
     } catch (e) {}
   }
 
-  res.json({ ok: true, history: bot.eventWarHistory || [] });
+  res.json({ 
+    ok: true, 
+    playerName: bot.player ? bot.player.name : '',
+    history: bot.eventWarHistory || [] 
+  });
 });
 
 // Clear bot local event war history

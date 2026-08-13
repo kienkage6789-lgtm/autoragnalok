@@ -2,6 +2,23 @@
 
 > Captured architectural decisions and trade-offs.
 
+## 2026-08-13 - Bơm máu PK, MIME SDK, Zone Event & Thống kê K/D Chiến tích (T74)
+
+- Bối cảnh:
+  - Khi PK/Battle, việc bơm máu bằng request POST thô gây lag hiển thị và không kích hoạt được hoạt ảnh canvas của game engine.
+  - Lỗi MIME type `text/html` khi tải `/js/sdk.js` do game server trả về 404 qua proxy và kích hoạt fallback HTML.
+  - Bot tự động quay về đúng map sau khi sự kiện kết thúc nhưng quên cài đặt Zone (do map change detector reset cài đặt Zone về giá trị mặc định).
+  - Người dùng không có cách nào thống kê nhanh số mạng giết được, bị giết và tỉ lệ K/D của bản thân trong sự kiện PvP.
+- Quyết định:
+  - **Chuyển đổi phương thức gọi Potion trong PK**: Chuyển sang gọi hàm chính thức `xhrpg.usePotionManual()` của game engine và đè `$.post` để cập nhật Radar tức thì.
+  - **Khắc phục MIME SDK**: Tải Line SDK CDN lưu trữ cục bộ thành `sdk.js` tĩnh và đổi đường dẫn thẻ script trực tiếp sang Line CDN.
+  - **Bảo toàn Zone sau Event**: Thiết lập cờ `isEventReturning` và `eventReturnMapTarget` khi kết thúc sự kiện để ngăn bộ đổi map reset cấu hình Zone của người dùng.
+  - **Dashboard Thống kê PK**: Cung cấp `playerName` từ backend API, thiết kế panel K/D/Points và các tab filter lọc logs tự động trên frontend.
+- Kết quả:
+  - Sửa lỗi triệt để, chạy `npm test` thành công 100%.
+
+---
+
 ## 2026-08-12 - Khắc Phục Lỗi Giao Diện & Logic Thoát Chế Độ Event (T66)
 
 - Bối cảnh:

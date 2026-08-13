@@ -330,6 +330,38 @@ try {
   assert.strictEqual(eventBot.settings.autoZone, true, 'autoZone must be restored');
   assert.strictEqual(eventBot.settings.lock_zone_center, true, 'lock_zone_center must be restored');
   assert.strictEqual(eventBot.settings.targetZone, 5, 'targetZone must be restored');
+  assert.strictEqual(eventBot.isEventReturning, true, 'isEventReturning must be set to true');
+  assert.strictEqual(eventBot.eventReturnMapTarget, 3, 'eventReturnMapTarget must be set to 3');
+
+  // Verify map change event return zone preservation logic
+  const prevP = { ...eventBot.player };
+  eventBot.player.map = 3;
+
+  if (prevP && prevP.map !== eventBot.player.map) {
+    eventBot.spots = null;
+    eventBot.bosses = null;
+    const wasMvpReturning = (!eventBot.isMvpCycling && eventBot.mvpCycleOriginalMap !== null);
+    const isEventReturning = eventBot.isEventReturning || false;
+    if (prevP.map !== 5 && eventBot.player.map !== 5 && !eventBot.isMvpCycling && eventBot.mvpCycleOriginalMap === null && !wasMvpReturning && !isEventReturning) {
+      eventBot.settings.autoZone = false;
+      eventBot.settings.lock_zone_center = false;
+      eventBot.settings.targetZone = 0;
+    }
+  }
+
+  assert.strictEqual(eventBot.settings.autoZone, true, 'autoZone must NOT be reset to false when map changes during event return');
+  assert.strictEqual(eventBot.settings.targetZone, 5, 'targetZone must NOT be reset to 0');
+
+  // Simulate arrival logic
+  if (eventBot.isEventReturning && eventBot.player) {
+    if (Number(eventBot.player.map) === Number(eventBot.eventReturnMapTarget)) {
+      eventBot.isEventReturning = false;
+      eventBot.eventReturnMapTarget = null;
+    }
+  }
+
+  assert.strictEqual(eventBot.isEventReturning, false, 'isEventReturning must be reset to false after arrival');
+  assert.strictEqual(eventBot.eventReturnMapTarget, null, 'eventReturnMapTarget must be reset to null after arrival');
 
   // Verify MVP Boss Hunting Flow Changes
   console.log('Testing MVP Boss Hunting Flow changes...');

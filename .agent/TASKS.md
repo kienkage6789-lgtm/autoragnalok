@@ -3,6 +3,19 @@
 > Work Breakdown Structure. Update task states immediately upon changes.
 > Statuses: todo | doing | blocked | review | done
 
+### [x] T74 - Tối ưu hóa Bơm máu PK, Sửa lỗi MIME type sdk.js, Sửa lỗi Auto Event Zone & Thống kê Chiến tích K/D
+- Description: Sửa các lỗi tồn đọng về bơm máu PK, MIME type của sdk.js, lưu giữ Zone sau khi thoát Event, và phát triển bảng thống kê mạng hạ gục K/D/Points cùng bộ lọc tab.
+- Files related: `server.js`, `public/app.js`, `play.html`, `play_battle.html`, `test.js`
+- Acceptance criteria:
+  - [x] Gọi `xhrpg.usePotionManual()` trực tiếp trong PK và đè `$.post` để cập nhật HP Radar tức thì.
+  - [x] Sửa script load sang Line CDN và tải local `sdk.js` làm fallback, giải quyết triệt để lỗi MIME type.
+  - [x] Dùng cờ `isEventReturning` để tránh map change detector ghi đè cấu hình Zone sau khi kết thúc sự kiện.
+  - [x] Thêm bảng thống kê Kills, Deaths, K/D, Points và 3 tab lọc log All/Kills/Deaths, highlight bản thân (xanh lá/đỏ).
+  - [x] Chạy `npm test` thành công 100%.
+- Status: done
+
+---
+
 ### [x] T66 - Khắc Phục Lỗi Giao Diện & Logic Thoát Chế Độ Event
 - Description: Sửa lỗi các nút chức năng tự động tham gia Event không lưu được trạng thái trên giao diện và lỗi nhân vật không tự động di chuyển về bản đồ farm gốc sau khi kết thúc Event.
 - Files related: `server.js`, `public/app.js`, `test.js`

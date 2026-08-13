@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Ragnalok Client (Anti-Idle Proxy)</title>
 <link rel="stylesheet" href="/css/xhrpg_style.css">
-<script src="/js/sdk.js"></script>
+<script src="https://static.line-scdn.net/liff/edge/2.1/sdk.js"></script>
 <script src="/js/jquery-3.6.0.min.js"></script>
 </head>
 <body>
@@ -409,31 +409,32 @@ function triggerManualHeal(event) {
     }, 100);
   }
 
-  fetch('/xhrpg_upgrade.php', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'
-    },
-    body: new URLSearchParams({
-      line_uid: currentUid,
-      session_token: currentToken,
-      action: 'use_potion_manual'
+  if (typeof xhrpg !== 'undefined' && typeof xhrpg.usePotionManual === 'function') {
+    xhrpg.usePotionManual();
+  } else {
+    fetch('/xhrpg_upgrade.php', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'
+      },
+      body: new URLSearchParams({
+        line_uid: currentUid,
+        session_token: currentToken,
+        action: 'use_potion_manual'
+      })
     })
-  })
-  .then(res => res.json())
-  .then(ud => {
-    if (ud && ud.ok && ud.player) {
-      if (typeof xhrpg !== 'undefined' && xhrpg.player) {
-        xhrpg.player = ud.player;
+    .then(res => res.json())
+    .then(ud => {
+      if (ud && ud.ok && ud.player) {
+        console.log(`💊 [Thủ công] Bơm máu thành công! HP hiện tại: ${ud.player.hp}/${ud.player.hp_max}`);
+      } else {
+        console.warn(`💊 [Thủ công] Bơm máu thất bại: ${ (ud && ud.error) || 'Lỗi không xác định' }`);
       }
-      console.log(`💊 [Thủ công] Bơm máu thành công! HP hiện tại: ${ud.player.hp}/${ud.player.hp_max}`);
-    } else {
-      console.warn(`💊 [Thủ công] Bơm máu thất bại: ${ (ud && ud.error) || 'Lỗi không xác định' }`);
-    }
-  })
-  .catch(err => {
-    console.error(`💊 [Thủ công] Lỗi kết nối khi bơm máu: ${err.message}`);
-  });
+    })
+    .catch(err => {
+      console.error(`💊 [Thủ công] Lỗi kết nối khi bơm máu: ${err.message}`);
+    });
+  }
 }
 </script>
 </body>

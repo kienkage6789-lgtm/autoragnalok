@@ -1475,6 +1475,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 <button class="btn-action-sm" onclick="clearEventWarHistory('${acc.line_uid}')" style="font-size: 0.7rem; padding: 2px 6px; border: 1px solid rgba(239, 68, 68, 0.4); border-radius: 4px; background: rgba(239, 68, 68, 0.15); color: #fca5a5; cursor: pointer;">🗑️ Xóa</button>
               </div>
             </div>
+            
+            <!-- Panel thống kê mạng -->
+            <div id="event-war-stats-${acc.line_uid}" style="margin-bottom: 8px;"></div>
+            
+            <!-- Tabs lọc mạng -->
+            <div id="event-war-filters-${acc.line_uid}" style="display: flex; gap: 4px; margin-bottom: 8px;">
+              <button class="btn-tab-sm war-tab-${acc.line_uid} active" onclick="switchWarHistoryTab('${acc.line_uid}', 'all')" style="font-size: 0.68rem; padding: 2px 8px; border-radius: 4px; border: 1px solid var(--border-color); background: rgba(255,255,255,0.08); color: #fff; cursor: pointer; font-weight: 700;">Tất cả</button>
+              <button class="btn-tab-sm war-tab-${acc.line_uid}" onclick="switchWarHistoryTab('${acc.line_uid}', 'kills')" style="font-size: 0.68rem; padding: 2px 8px; border-radius: 4px; border: 1px solid transparent; background: transparent; color: #94a3b8; cursor: pointer;">🗡️ Hạ gục</button>
+              <button class="btn-tab-sm war-tab-${acc.line_uid}" onclick="switchWarHistoryTab('${acc.line_uid}', 'deaths')" style="font-size: 0.68rem; padding: 2px 8px; border-radius: 4px; border: 1px solid transparent; background: transparent; color: #94a3b8; cursor: pointer;">💀 Bị hạ</button>
+            </div>
+            
             <div id="event-history-list-${acc.line_uid}" style="max-height: 250px; overflow-y: auto; font-size: 0.72rem; border: 1px solid var(--border-color); border-radius: 8px; background: rgba(0,0,0,0.25); padding: 6px;">
               <div style="text-align: center; color: #64748b; padding: 20px 0;">Không có dữ liệu lịch sử.</div>
             </div>
@@ -3671,7 +3682,14 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
       if (data.ok) {
-        renderEventWarHistory(uid, data.history);
+        // Initialize client-side cache
+        window._warHistoryCache = window._warHistoryCache || {};
+        window._warHistoryCache[uid] = {
+          playerName: data.playerName || '',
+          history: data.history || [],
+          currentTab: (window._warHistoryCache[uid] && window._warHistoryCache[uid].currentTab) || 'all'
+        };
+        renderEventWarHistory(uid);
       } else {
         listContainer.innerHTML = `<div style="text-align: center; color: #ef4444; padding: 20px 0;">Lỗi: ${data.error || 'Không thể lấy lịch sử'}</div>`;
       }
@@ -3695,6 +3713,9 @@ document.addEventListener('DOMContentLoaded', () => {
       });
       const data = await response.json();
       if (response.ok && data.ok) {
+        if (window._warHistoryCache && window._warHistoryCache[uid]) {
+          window._warHistoryCache[uid].history = [];
+        }
         fetchEventWarHistory(uid);
       } else {
         alert('🔴 Lỗi: ' + (data.error || 'Không thể xóa lịch sử'));
@@ -3706,17 +3727,94 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   };
 
-  // Render event war history
-  function renderEventWarHistory(uid, history) {
-    const container = document.getElementById(`event-history-list-${uid}`);
-    if (!container) return;
+  // Switch tabs
+  window.switchWarHistoryTab = function(uid, tab) {
+    if (!window._warHistoryCache || !window._warHistoryCache[uid]) return;
+    window._warHistoryCache[uid].currentTab = tab;
+    
+    // Update active tab class styling
+    const tabs = document.querySelectorAll(`.war-tab-${uid}`);
+    tabs.forEach(t => {
+      const isTarget = t.getAttribute('onclick').includes(`'${tab}'`);
+      if (isTarget) {
+        t.classList.add('active');
+        t.style.background = 'rgba(255,255,255,0.08)';
+        t.style.borderColor = 'var(--border-color)';
+        t.style.color = '#fff';
+        t.style.fontWeight = '700';
+      } else {
+        t.classList.remove('active');
+        t.style.background = 'transparent';
+        t.style.borderColor = 'transparent';
+        t.style.color = '#94a3b8';
+        t.style.fontWeight = 'normal';
+      }
+    });
+    
+    renderEventWarHistory(uid);
+  };
 
-    if (!history || history.length === 0) {
-      container.innerHTML = `<div style="text-align: center; color: #64748b; padding: 20px 0;">Chưa có lịch sử chiến đấu. Lịch sử được tự động thu thập từ server khi bot tham gia Bang Chiến/Quốc Chiến.</div>`;
+  // Render event war history
+  function renderEventWarHistory(uid) {
+    const listContainer = document.getElementById(`event-history-list-${uid}`);
+    const statsContainer = document.getElementById(`event-war-stats-${uid}`);
+    if (!listContainer) return;
+
+    const cache = window._warHistoryCache ? window._warHistoryCache[uid] : null;
+    if (!cache || !cache.history || cache.history.length === 0) {
+      if (statsContainer) statsContainer.innerHTML = '';
+      listContainer.innerHTML = `<div style="text-align: center; color: #64748b; padding: 20px 0;">Chưa có lịch sử chiến đấu. Lịch sử được tự động thu thập từ server khi bot tham gia Bang Chiến/Quốc Chiến.</div>`;
       return;
     }
 
-    container.innerHTML = history.map((item, idx) => {
+    const playerName = cache.playerName || '';
+    const history = cache.history;
+    const currentTab = cache.currentTab || 'all';
+
+    // Calculate self-centric statistics
+    const selfKills = history.filter(item => item.killer === playerName);
+    const selfDeaths = history.filter(item => item.victim === playerName);
+    const totalPoints = selfKills.reduce((sum, item) => sum + item.points, 0);
+    const kdRatio = selfDeaths.length === 0 ? selfKills.length.toFixed(1) : (selfKills.length / selfDeaths.length).toFixed(2);
+
+    // Update stats panel
+    if (statsContainer) {
+      statsContainer.innerHTML = `
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.06); border-radius: 8px; padding: 6px 8px; text-align: center; font-size: 0.72rem;">
+          <div>
+            <div style="color: #94a3b8; font-size: 0.65rem; margin-bottom: 2px;">🗡️ Hạ gục</div>
+            <div style="color: #4ade80; font-weight: 800; font-size: 0.85rem; font-variant-numeric: tabular-nums;">${selfKills.length}</div>
+          </div>
+          <div>
+            <div style="color: #94a3b8; font-size: 0.65rem; margin-bottom: 2px;">💀 Bị hạ</div>
+            <div style="color: #f87171; font-weight: 800; font-size: 0.85rem; font-variant-numeric: tabular-nums;">${selfDeaths.length}</div>
+          </div>
+          <div>
+            <div style="color: #94a3b8; font-size: 0.65rem; margin-bottom: 2px;">📊 Tỉ lệ K/D</div>
+            <div style="color: #38bdf8; font-weight: 800; font-size: 0.85rem; font-variant-numeric: tabular-nums;">${kdRatio}</div>
+          </div>
+          <div>
+            <div style="color: #94a3b8; font-size: 0.65rem; margin-bottom: 2px;">🏆 Điểm PK</div>
+            <div style="color: #fbbf24; font-weight: 800; font-size: 0.85rem; font-variant-numeric: tabular-nums;">+${totalPoints}</div>
+          </div>
+        </div>
+      `;
+    }
+
+    // Filter history based on tab
+    let displayList = history;
+    if (currentTab === 'kills') {
+      displayList = selfKills;
+    } else if (currentTab === 'deaths') {
+      displayList = selfDeaths;
+    }
+
+    if (displayList.length === 0) {
+      listContainer.innerHTML = `<div style="text-align: center; color: #64748b; padding: 25px 0;">Không tìm thấy bản ghi phù hợp.</div>`;
+      return;
+    }
+
+    listContainer.innerHTML = displayList.map((item, idx) => {
       const d = new Date(item.time);
       const timeStr = ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2) + ':' + ('0' + d.getSeconds()).slice(-2);
       
@@ -3724,12 +3822,35 @@ document.addEventListener('DOMContentLoaded', () => {
         ? `<span style="background: rgba(168, 85, 247, 0.15); color: #e9d5ff; padding: 1px 4px; border-radius: 4px; font-size: 0.62rem; margin-right: 4px; border: 1px solid rgba(168, 85, 247, 0.3)">Bang</span>`
         : `<span style="background: rgba(14, 165, 233, 0.15); color: #bae6fd; padding: 1px 4px; border-radius: 4px; font-size: 0.62rem; margin-right: 4px; border: 1px solid rgba(14, 165, 233, 0.3)">Quốc</span>`;
         
-      const killerStr = item.killerTag ? `<b>[${item.killerTag}] ${item.killer}</b>` : `<b>${item.killer}</b>`;
-      const victimStr = item.victimTag ? `<b>[${item.victimTag}] ${item.victim}</b>` : `<b>${item.victim}</b>`;
-      const pointStr = item.points > 0 ? `<span style="color: #4ade80; font-weight: 800; float: right;">+${item.points}</span>` : `<span style="color: #6b7280; float: right;">--</span>`;
+      const isSelfKill = item.killer === playerName;
+      const isSelfDeath = item.victim === playerName;
+
+      let killerStr = '';
+      let victimStr = '';
+      let pointStr = '';
+      let rowStyle = `padding: 5px 6px; border-bottom: 1px solid rgba(255,255,255,0.03); display: block; line-height: 1.45; overflow: hidden;`;
+      
+      if (isSelfKill) {
+        rowStyle += ` border-left: 3px solid #22c55e; background: rgba(34, 197, 94, 0.06);`;
+        killerStr = `<span style="color: #4ade80; font-weight: 700;">★ Bạn</span>`;
+        victimStr = item.victimTag ? `<span style="color: #e2e8f0;">[${item.victimTag}] ${item.victim}</span>` : `<span style="color: #e2e8f0;">${item.victim}</span>`;
+        pointStr = `<span style="color: #4ade80; font-weight: 800; float: right;">+${item.points}</span>`;
+      } else if (isSelfDeath) {
+        rowStyle += ` border-left: 3px solid #ef4444; background: rgba(239, 68, 68, 0.06);`;
+        killerStr = item.killerTag ? `<span style="color: #e2e8f0;">[${item.killerTag}] ${item.killer}</span>` : `<span style="color: #e2e8f0;">${item.killer}</span>`;
+        victimStr = `<span style="color: #f87171; font-weight: 700;">★ Bạn 💀</span>`;
+        pointStr = `<span style="color: #ef4444; font-weight: 800; float: right;">0</span>`;
+      } else {
+        if (idx % 2) {
+          rowStyle += ` background: rgba(255,255,255,0.01);`;
+        }
+        killerStr = item.killerTag ? `<span>[${item.killerTag}] ${item.killer}</span>` : `<span>${item.killer}</span>`;
+        victimStr = item.victimTag ? `<span>[${item.victimTag}] ${item.victim}</span>` : `<span>${item.victim}</span>`;
+        pointStr = item.points > 0 ? `<span style="color: #4ade80; font-weight: 800; float: right;">+${item.points}</span>` : `<span style="color: #6b7280; float: right;">--</span>`;
+      }
 
       return `
-        <div style="padding: 4px 6px; border-bottom: 1px solid rgba(255,255,255,0.03); display: block; line-height: 1.45; overflow: hidden; ${idx % 2 ? 'background: rgba(255,255,255,0.01);' : ''}">
+        <div style="${rowStyle}">
           <span style="color: #64748b; margin-right: 6px; font-variant-numeric: tabular-nums;">${timeStr}</span>
           ${eventBadge}
           <span>${killerStr} ⚔️ ${victimStr}</span>
