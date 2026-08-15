@@ -13,7 +13,10 @@ const {
   BotInstance,
   ProxyPool,
   proxyPool,
-  botInstances
+  botInstances,
+  getAccountFingerprint,
+  naturalCoordNoise,
+  logNormalActInterval
 } = require('./server');
 
 console.log('🧪 Running Unit Tests...');
@@ -1204,6 +1207,51 @@ try {
   assert.strictEqual(netReceived, 475);
 
   console.log('✅ T75 Manual Market Format & Translations Tests Passed successfully!');
+
+  // ==================== ANTI-DETECTION & HUMAN SIMULATION TESTS ====================
+  console.log('Testing Anti-Detection & Human Simulation Engine...');
+  
+  // 1. Test Deterministic Fingerprints
+  const fp1 = getAccountFingerprint('U1234567890abcdef');
+  const fp2 = getAccountFingerprint('U1234567890abcdef');
+  const fp3 = getAccountFingerprint('U9876543210fedcba');
+  assert.strictEqual(fp1.userAgent, fp2.userAgent, 'Same line_uid should generate identical User-Agent');
+  assert.strictEqual(fp1.acceptLanguage, fp2.acceptLanguage, 'Same line_uid should generate identical Accept-Language');
+  assert(fp1.userAgent.length > 20, 'User-Agent must be a valid non-empty string');
+  assert(fp1.acceptLanguage.includes('vi') || fp1.acceptLanguage.includes('en'), 'Accept-Language should include supported locale');
+
+  // 2. Test BotInstance fingerprint assignment
+  const dummyBot = new BotInstance({
+    line_uid: 'U_TEST_ANTI_BOT_1',
+    session_token: 'test_token',
+    name: 'AntiBotTester'
+  });
+  assert(dummyBot.fingerprint, 'BotInstance must have fingerprint attached');
+  assert.strictEqual(dummyBot.fingerprint.userAgent, getAccountFingerprint('U_TEST_ANTI_BOT_1').userAgent);
+  assert(dummyBot.nextActInterval >= 90000 && dummyBot.nextActInterval <= 450000, 'Initial nextActInterval must be in log-normal bounds');
+
+  // 3. Test Natural Coordinate Noise
+  const baseCx = 1125;
+  const noisyCoords = [];
+  for (let i = 0; i < 50; i++) {
+    const noisy = naturalCoordNoise(baseCx, 18);
+    assert(noisy >= baseCx - 25 && noisy <= baseCx + 25, `Coordinate noise out of expected bounds: ${noisy}`);
+    noisyCoords.push(noisy);
+  }
+  const hasVariance = noisyCoords.some(c => c !== baseCx);
+  assert.strictEqual(hasVariance, true, 'naturalCoordNoise must introduce natural variance');
+
+  // 4. Test Log-Normal Act Intervals
+  const intervals = [];
+  for (let i = 0; i < 100; i++) {
+    const interval = logNormalActInterval(90000, 450000);
+    assert(interval >= 90000 && interval <= 450000, `Interval ${interval} outside bounds [90000, 450000]`);
+    intervals.push(interval);
+  }
+  const avgInterval = intervals.reduce((a, b) => a + b, 0) / intervals.length;
+  assert(avgInterval >= 150000 && avgInterval <= 280000, `Average interval ~200s expected, got ${avgInterval}`);
+
+  console.log('✅ Anti-Detection & Human Simulation Engine Tests Passed successfully!');
 
   console.log('✅ User Polling Interval, Role Propagation and Edit Permissions Tests Passed successfully!');
   console.log('✅ Revamped Auto Market Buy Tests Passed successfully!');

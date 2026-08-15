@@ -1240,6 +1240,118 @@ function getItemCategory(item) {
   return 'resource';
 }
 
+// ==================== ANTI-DETECTION & HUMAN SIMULATION ENGINE ====================
+
+const BROWSER_PROFILES = [
+  {
+    ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+    chUa: '"Not/A)Brand";v="8", "Chromium";v="126", "Google Chrome";v="126"',
+    platform: '"Windows"',
+    mobile: '?0'
+  },
+  {
+    ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36 Edg/125.0.0.0',
+    chUa: '"Not/A)Brand";v="8", "Chromium";v="125", "Microsoft Edge";v="125"',
+    platform: '"Windows"',
+    mobile: '?0'
+  },
+  {
+    ua: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+    chUa: '"Not/A)Brand";v="8", "Chromium";v="126", "Google Chrome";v="126"',
+    platform: '"macOS"',
+    mobile: '?0'
+  },
+  {
+    ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:127.0) Gecko/20100101 Firefox/127.0',
+    chUa: null,
+    platform: null,
+    mobile: null
+  },
+  {
+    ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    chUa: '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+    platform: '"Windows"',
+    mobile: '?0'
+  },
+  {
+    ua: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+    chUa: '"Chromium";v="125", "Google Chrome";v="125", "Not.A/Brand";v="24"',
+    platform: '"Linux"',
+    mobile: '?0'
+  },
+  {
+    ua: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15',
+    chUa: null,
+    platform: null,
+    mobile: null
+  },
+  {
+    ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36 OPR/109.0.0.0',
+    chUa: '"Chromium";v="123", "Opera";v="109", "Not.A/Brand";v="24"',
+    platform: '"Windows"',
+    mobile: '?0'
+  },
+  {
+    ua: 'Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.6422.165 Mobile Safari/537.36',
+    chUa: '"Chromium";v="125", "Google Chrome";v="125", "Not.A/Brand";v="24"',
+    platform: '"Android"',
+    mobile: '?1'
+  },
+  {
+    ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 Vivaldi/6.8.3381.46',
+    chUa: '"Chromium";v="126", "Vivaldi";v="6.8", "Not-A.Brand";v="99"',
+    platform: '"Windows"',
+    mobile: '?0'
+  }
+];
+
+const ACCEPT_LANG_POOL = [
+  'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7',
+  'vi,en-US;q=0.9,en;q=0.8',
+  'vi-VN,vi;q=0.9,fr-FR;q=0.8,fr;q=0.7,en-US;q=0.6,en;q=0.5',
+  'en-US,en;q=0.9,vi;q=0.8',
+  'vi-VN,vi;q=0.9,ja-JP;q=0.8,ja;q=0.7,en-US;q=0.6,en;q=0.5'
+];
+
+function getAccountFingerprint(line_uid) {
+  let hash = 0;
+  const str = String(line_uid || 'default');
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) - hash) + str.charCodeAt(i);
+    hash |= 0;
+  }
+  const posHash = Math.abs(hash);
+  const profile = BROWSER_PROFILES[posHash % BROWSER_PROFILES.length];
+  const lang = ACCEPT_LANG_POOL[posHash % ACCEPT_LANG_POOL.length];
+  return {
+    userAgent: profile.ua,
+    chUa: profile.chUa,
+    platform: profile.platform,
+    mobile: profile.mobile,
+    acceptLanguage: lang
+  };
+}
+
+// Gaussian-like noise (triangular approximation) to mimic human non-exact coordinate clicks
+function naturalCoordNoise(base, maxRange = 18) {
+  if (base == null || isNaN(base)) return base;
+  const u = (Math.random() + Math.random() + Math.random() - 1.5) / 1.5; // [-1, 1] biased towards 0
+  const noise = Math.round(u * maxRange);
+  return Math.max(0, base + noise);
+}
+
+// Log-normal distribution for human interaction intervals:
+// Natural rhythm around ~180-240s with wide natural variance (90s - 450s)
+function logNormalActInterval(minMs = 90000, maxMs = 450000) {
+  const mu = Math.log(200000); // ~200s median
+  const sigma = 0.45;
+  const u1 = Math.max(0.0001, Math.random());
+  const u2 = Math.random();
+  const z = Math.sqrt(-2.0 * Math.log(u1)) * Math.cos(2.0 * Math.PI * u2);
+  const val = Math.exp(mu + sigma * z);
+  return Math.max(minMs, Math.min(maxMs, Math.round(val)));
+}
+
 // Background poller manager
 class BotInstance {
   constructor(account) {
@@ -1247,6 +1359,7 @@ class BotInstance {
     this.session_token = account.session_token;
     this.name = account.name;
     this.userId = account.userId || 'usr_admin';
+    this.fingerprint = getAccountFingerprint(this.line_uid);
     
     // Load user-level poll configuration
     const users = loadUsers();
@@ -1314,9 +1427,9 @@ class BotInstance {
     this.combatStatsHistory = [];
     this.startTime = null;
     // 😴 Anti-idle & Event-Driven Act-Flag Jitter Engine
-    // Mô phỏng hành vi người dùng thật: act=1 khi có tương tác (Event) hoặc nhịp Jitter 120s-300s
+    // Mô phỏng hành vi người dùng thật: act=1 khi có tương tác (Event) hoặc nhịp log-normal jitter tự nhiên (~2-6 phút)
     this.lastActSentAt = 0;
-    this.nextActInterval = 120000 + Math.random() * 180000; // jitter ngẫu nhiên 120s-300s
+    this.nextActInterval = logNormalActInterval();
     this.pendingActFlag = false;
     this.consecutiveErrors = 0;
     this.failedSeeds = {}; // Danh sách hạt giống bị lỗi gieo trồng
@@ -2095,7 +2208,10 @@ class BotInstance {
           } else if (baseDelay <= 1500) {
             jitterBound = 120;
           }
-          const jitter = Math.floor(Math.random() * (jitterBound * 2)) - jitterBound;
+          // Asymmetric jitter: 70% positive human/network lag, 30% slight lead
+          const isPositiveSkew = Math.random() < 0.7;
+          const jitterMag = Math.floor(Math.random() * jitterBound);
+          const jitter = isPositiveSkew ? jitterMag : -Math.floor(jitterMag * 0.75);
           
           this.timer = setTimeout(runPoll, Math.max(500, baseDelay + jitter));
         }
@@ -2138,11 +2254,21 @@ class BotInstance {
 
       const headers = {
         'content-type': 'application/x-www-form-urlencoded; charset=UTF-8',
-        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'user-agent': (this.fingerprint && this.fingerprint.userAgent) || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
         'accept': '*/*',
+        'accept-language': (this.fingerprint && this.fingerprint.acceptLanguage) || 'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7',
         'origin': 'https://ragnalok.online',
-        'referer': 'https://ragnalok.online/human/'
+        'referer': 'https://ragnalok.online/human/',
+        'sec-fetch-dest': 'empty',
+        'sec-fetch-mode': 'cors',
+        'sec-fetch-site': 'same-origin'
       };
+
+      if (this.fingerprint && this.fingerprint.chUa) {
+        headers['sec-ch-ua'] = this.fingerprint.chUa;
+        headers['sec-ch-ua-mobile'] = this.fingerprint.mobile;
+        headers['sec-ch-ua-platform'] = this.fingerprint.platform;
+      }
 
       const searchParams = new URLSearchParams(payload);
       const controller = new AbortController();
@@ -2578,23 +2704,23 @@ class BotInstance {
     // 😴 Anti-idle: Tính act flag mô phỏng hành vi người dùng thật
     // - Poll đầu tiên = act=1 (giống user vừa load trang/F5)
     // - Khi có tương tác người dùng / tự động (this.pendingActFlag) = act=1 ở poll tiếp theo, khớp client gốc
-    // - Khi AFK đứng yên = act=1 nhịp ngẫu nhiên 120s - 300s (jitter tự nhiên)
+    // - Khi AFK đứng yên = act=1 nhịp log-normal phân phối tự nhiên (~2 - 6 phút)
     const now = Date.now();
     let actValue = 0;
     if (this.pollCount === 1) {
       actValue = 1;
       this.lastActSentAt = now;
-      this.nextActInterval = 120000 + Math.random() * 180000;
+      this.nextActInterval = logNormalActInterval();
       this.pendingActFlag = false;
     } else if (this.pendingActFlag) {
       actValue = 1;
       this.lastActSentAt = now;
-      this.nextActInterval = 120000 + Math.random() * 160000;
+      this.nextActInterval = logNormalActInterval();
       this.pendingActFlag = false;
     } else if ((now - this.lastActSentAt) >= this.nextActInterval) {
       actValue = 1;
       this.lastActSentAt = now;
-      this.nextActInterval = 120000 + Math.random() * 160000;
+      this.nextActInterval = logNormalActInterval();
     }
     
     let exploreCx = this.player ? (this.settings.explore_cx || this.player.x) : this.settings.explore_cx;
@@ -2968,13 +3094,13 @@ class BotInstance {
       line_uid: this.line_uid,
       session_token: this.session_token,
       manual_dir: '',
-      act: actValue,  // 😴 Jitter tự nhiên: 1 mỗi 45-90s ngẫu nhiên, không phải mọi poll
+      act: actValue,  // 😴 Log-normal Jitter tự nhiên (~2-6 phút) hoặc Event-driven
       full: isFull,
       bot: this.settings.bot ? 1 : 0,
       lock_pos: lockPos,
       explore_radius: exploreRadius,
-      explore_cx: exploreCx,
-      explore_cy: exploreCy,
+      explore_cx: lockPos ? exploreCx : naturalCoordNoise(exploreCx, 18),
+      explore_cy: lockPos ? exploreCy : naturalCoordNoise(exploreCy, 18),
       traveling: traveling,
       auto_potion_threshold: this.settings.auto_potion_threshold,
       have_static: (this.spots && this.mon_masters) ? 1 : 0,
@@ -7726,5 +7852,10 @@ module.exports = {
   BotInstance,
   ProxyPool,
   proxyPool,
-  botInstances
+  botInstances,
+  getAccountFingerprint,
+  naturalCoordNoise,
+  logNormalActInterval,
+  BROWSER_PROFILES,
+  ACCEPT_LANG_POOL
 };
