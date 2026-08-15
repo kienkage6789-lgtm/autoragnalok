@@ -989,6 +989,14 @@ process.on('exit', () => {
   flushAccountsToDisk();
 });
 
+// 🛡️ Global Safety Net: Chống crash Node.js process khi gặp lỗi unhandled bất ngờ
+process.on('uncaughtException', (err) => {
+  console.error('[CRITICAL] Uncaught Exception caught by Safety Net:', err);
+});
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[CRITICAL] Unhandled Promise Rejection caught by Safety Net:', reason);
+});
+
 // Initialize default Admin and migrate accounts if needed
 function initDefaultAdminAndMigrate() {
   let users = loadUsers();
@@ -1426,6 +1434,8 @@ class BotInstance {
     this.proxyId = assigned;
     this.combatStatsHistory = [];
     this.startTime = null;
+    this.lastPollStartedAt = 0;
+    this.lastChpassSentAt = 0;
     // 😴 Anti-idle & Event-Driven Act-Flag Jitter Engine
     // Mô phỏng hành vi người dùng thật: act=1 khi có tương tác (Event) hoặc nhịp log-normal jitter tự nhiên (~2-6 phút)
     this.lastActSentAt = 0;
@@ -2132,8 +2142,17 @@ class BotInstance {
       }
 
       this.isPolling = true;
+      this.lastPollStartedAt = Date.now();
       try {
-        await this.pollGame();
+        // 🛡️ Watchdog Timeout Cứng: Nếu pollGame bị nghẽn mạng/treo quá 45s, tự động ngắt để giải phóng vòng lặp
+        const POLL_HARD_TIMEOUT = 45000;
+        await Promise.race([
+          this.pollGame(),
+          new Promise((_, reject) => setTimeout(
+            () => reject(new Error('⏱️ Watchdog: Poll bị treo quá 45s (mạng nghẽn/không phản hồi) — Tự động phục hồi')),
+            POLL_HARD_TIMEOUT
+          ))
+        ]);
         this.consecutiveErrors = 0;
         this.firstErrorAt = null;
         if (this.proxyId) {
@@ -2181,6 +2200,28 @@ class BotInstance {
               }, 1000);
             }
           }
+        }
+
+        // 🛡️ Fix C: Giới hạn lỗi liên tục 10 phút -> Tạm nghỉ 5 phút rồi tự động thử lại
+        if (elapsedTime >= 600000) {
+          this.addLog('WARNING', `⚠️ Gặp lỗi kết nối liên tục ${Math.round(elapsedTime / 1000)}s — Tự động tạm nghỉ 5 phút trước khi kết nối lại...`);
+          this.status = 'paused_error';
+          this.error = `Tạm dừng do lỗi kết nối liên tục ${Math.round(elapsedTime / 60000)} phút`;
+          if (this.timer) {
+            clearTimeout(this.timer);
+            this.timer = null;
+          }
+          this.isPolling = false;
+          setTimeout(() => {
+            if (this.status === 'paused_error') {
+              this.addLog('SYSTEM', '🔄 Hết thời gian chờ 5 phút — Tự động kích hoạt lại bot...');
+              this.consecutiveErrors = 0;
+              this.firstErrorAt = null;
+              this.status = 'running';
+              this.start();
+            }
+          }, 300000);
+          return;
         }
       } finally {
         this.isPolling = false;
@@ -3123,6 +3164,8 @@ class BotInstance {
       this.lastActSentAt = 0;   // Force act=1 ở poll tiếp theo
       this.nextActInterval = 0; // Interval = 0 → gửi ngay
       this.pendingActFlag = true;
+      this.lastUpdate = new Date().toISOString();
+      this.error = null;
       this.addLog('SYSTEM', '😴 Server phát hiện Idle Signal -> Kích hoạt khôi phục tương tác khẩn cấp (act=1 forced)');
       return;
     }
@@ -3131,6 +3174,28 @@ class BotInstance {
       this.error = d.error || 'Yêu cầu game trả về thất bại';
       this.addLog('ERROR', `Lỗi: ${this.error}`);
       return;
+    }
+
+    // 🖐️ Auto Check-in Guard: Tự động gia hạn điểm danh server khi d.ci sắp cạn
+    if (typeof d.ci === 'number') {
+      const now = Date.now();
+      // Nếu server báo ci còn dưới 150 giây (2.5 phút) và chưa gửi chpass trong 60 giây qua
+      if (d.ci <= 150 && (now - (this.lastChpassSentAt || 0) > 60000)) {
+        this.lastChpassSentAt = now;
+        this.sendRequest('https://ragnalok.online/human/xhrpg_offline.php', {
+          line_uid: this.line_uid,
+          session_token: this.session_token,
+          action: 'idlestat',
+          k: 'chpass',
+          lang: 'vi'
+        }).then(res => {
+          if (res && res.ok) {
+            this.addLog('SYSTEM', '🖐️ [Check-in Guard] Đã tự động gửi xác nhận điểm danh tương tác (chpass ok)');
+          }
+        }).catch(err => {
+          console.error(`[Check-in Guard] Failed to send chpass for ${this.name}:`, err.message);
+        });
+      }
     }
 
     // Capture Trade Invites
@@ -4416,6 +4481,30 @@ function startAllBots() {
     botInstances[acc.line_uid] = instance;
     instance.start();
   });
+}
+
+// 🛡️ Global Watchdog: Quét và tự động giải cứu các bot bị treo im lặng (Zombie Bots)
+function checkAndRecoverZombieBots() {
+  const now = Date.now();
+  let recoveredCount = 0;
+  for (const uid in botInstances) {
+    const bot = botInstances[uid];
+    if (bot && bot.status === 'running' && !bot.clientActivePaused) {
+      const lastActivity = bot.lastPollStartedAt || bot.startTime || 0;
+      const silentDuration = now - lastActivity;
+      // Nếu bot đang 'running' nhưng không có nhịp poll nào trong >90 giây
+      if (silentDuration > 90000) {
+        console.error(`[Watchdog] 🚨 Zombie bot phát hiện: "${bot.name}" (${uid}) — im lặng ${Math.round(silentDuration / 1000)}s. Đang tự động khởi động lại...`);
+        bot.addLog('WARNING', `🚨 Watchdog phát hiện bot bị treo im lặng ${Math.round(silentDuration / 1000)}s — Tự động khởi động lại poll loop`);
+        try {
+          bot.stop('idle');
+        } catch (e) {}
+        bot.start();
+        recoveredCount++;
+      }
+    }
+  }
+  return recoveredCount;
 }
 
 if (require.main === module) {
@@ -7664,6 +7753,13 @@ async function fetchGameAsset(urlPath) {
     if (text.includes(patchTarget)) {
       text = text.replace(patchTarget, bypassCode);
     }
+
+    const patchChShow = `function _chShow() {`;
+    const bypassChShow = `function _chShow() { try { _chPass(); } catch(e){} return;`;
+    if (text.includes(patchChShow)) {
+      text = text.replace(patchChShow, bypassChShow);
+    }
+    
     try {
       const canvasPath = path.join(__dirname, 'xhrpg_canvas.js');
       fs.writeFileSync(canvasPath, text, 'utf8');
@@ -7836,6 +7932,15 @@ if (require.main === module) {
       console.error('[Auto-Backup] Error running auto-backup interval:', e.message);
     }
   }, 5 * 60 * 1000);
+
+  // Setup periodic Zombie Bot Watchdog scanner (Quét mỗi 60s để cứu bot bị treo im lặng)
+  setInterval(() => {
+    try {
+      checkAndRecoverZombieBots();
+    } catch (e) {
+      console.error('[Watchdog Scanner Error]:', e.message);
+    }
+  }, 60 * 1000);
 }
 
 module.exports = {
@@ -7857,5 +7962,6 @@ module.exports = {
   naturalCoordNoise,
   logNormalActInterval,
   BROWSER_PROFILES,
-  ACCEPT_LANG_POOL
+  ACCEPT_LANG_POOL,
+  checkAndRecoverZombieBots
 };

@@ -16,7 +16,8 @@ const {
   botInstances,
   getAccountFingerprint,
   naturalCoordNoise,
-  logNormalActInterval
+  logNormalActInterval,
+  checkAndRecoverZombieBots
 } = require('./server');
 
 console.log('🧪 Running Unit Tests...');
@@ -1252,6 +1253,51 @@ try {
   assert(avgInterval >= 150000 && avgInterval <= 280000, `Average interval ~200s expected, got ${avgInterval}`);
 
   console.log('✅ Anti-Detection & Human Simulation Engine Tests Passed successfully!');
+
+  // ==================== ANTI-HANG & WATCHDOG TESTS ====================
+  console.log('Testing Anti-Hang & Zombie Bot Watchdog Engine...');
+
+  // 1. Test lastPollStartedAt tracking in BotInstance
+  const watchdogBot = new BotInstance({
+    line_uid: 'U_TEST_WATCHDOG_1',
+    session_token: 'test_token_wd',
+    name: 'WatchdogTester'
+  });
+  assert.strictEqual(watchdogBot.lastPollStartedAt, 0, 'Initial lastPollStartedAt must be 0');
+
+  // 2. Test Zombie Bot Detection & Auto-Recovery
+  botInstances['U_TEST_WATCHDOG_1'] = watchdogBot;
+  watchdogBot.status = 'running';
+  watchdogBot.startTime = Date.now() - 150000; // started 150s ago
+  watchdogBot.lastPollStartedAt = Date.now() - 120000; // poll stuck 120s ago (>90s threshold)
+
+  let recovered = checkAndRecoverZombieBots();
+  assert.strictEqual(recovered, 1, 'Watchdog must detect and recover 1 zombie bot');
+  assert.strictEqual(watchdogBot.status, 'running', 'Bot status should remain running after watchdog restart');
+  assert.strictEqual(watchdogBot.logs.some(l => l.msg.includes('Watchdog phát hiện bot bị treo im lặng')), true, 'Watchdog log must be recorded');
+
+  // Clean up test bot from botInstances
+  watchdogBot.stop();
+  delete botInstances['U_TEST_WATCHDOG_1'];
+
+  // 3. Test Active/Recent Bot is NOT falsely flagged by Watchdog
+  const healthyBot = new BotInstance({
+    line_uid: 'U_TEST_HEALTHY_1',
+    session_token: 'test_token_healthy',
+    name: 'HealthyTester'
+  });
+  botInstances['U_TEST_HEALTHY_1'] = healthyBot;
+  healthyBot.status = 'running';
+  healthyBot.lastPollStartedAt = Date.now() - 10000; // only 10s ago
+  const healthyRecovered = checkAndRecoverZombieBots();
+  assert.strictEqual(healthyRecovered, 0, 'Healthy bot must not be flagged by Watchdog');
+  healthyBot.stop();
+  delete botInstances['U_TEST_HEALTHY_1'];
+
+  // 4. Test lastChpassSentAt field in BotInstance
+  assert.strictEqual(watchdogBot.lastChpassSentAt, 0, 'Initial lastChpassSentAt must be 0');
+
+  console.log('✅ Anti-Hang & Zombie Bot Watchdog Engine Tests Passed successfully!');
 
   console.log('✅ User Polling Interval, Role Propagation and Edit Permissions Tests Passed successfully!');
   console.log('✅ Revamped Auto Market Buy Tests Passed successfully!');
