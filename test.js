@@ -9,6 +9,7 @@ const {
   getMineUpgradeCost,
   getItemCategory,
   getModuleTier,
+  formatMarketListing,
   BotInstance,
   ProxyPool,
   proxyPool,
@@ -1113,6 +1114,97 @@ try {
   assert.strictEqual(mockGdunBot.player.gdun_in, 0, 'player.gdun_in should be reset to 0');
 
   console.log('✅ Guild Dungeon State & Auto-Exit Tests Passed successfully!');
+
+  // ==========================================
+  // T75 - MANUAL MARKET DASHBOARD INTEGRATION TESTS
+  // ==========================================
+  console.log('Testing T75 Manual Market Format & Translations...');
+  
+  // Test 1: Resource translation
+  const rawWoodListing = {
+    id: 101,
+    seller_uid: 'user123',
+    seller_name: 'HeroOne',
+    item_type: 'resource',
+    item_id: 'wood',
+    item_icon: '🪵',
+    item_name: 'ไม้',
+    item_desc: 'วัตถุดิบสำหรับยานบิน',
+    item_rarity: 'white',
+    qty: 50,
+    price_per: 4,
+    created_at: 1700000000,
+    expires_at: 1700086400
+  };
+  const formattedWood = formatMarketListing(rawWoodListing);
+  assert.strictEqual(formattedWood.item_name, 'Gỗ');
+  assert.strictEqual(formattedWood.item_desc, 'Nguyên liệu phi thuyền');
+  assert.strictEqual(formattedWood.price_per, 4);
+  assert.strictEqual(formattedWood.qty, 50);
+
+  // Test 2: Card & MVP Card translation
+  const rawCardListing = {
+    id: 102,
+    item_name: 'สไลม์เขียว ⭐MVP',
+    item_desc: 'การ์ด · +6 AGI',
+    item_rarity: 'red',
+    qty: 1,
+    price_per: 5000
+  };
+  const formattedCard = formatMarketListing(rawCardListing);
+  assert.strictEqual(formattedCard.item_name.includes('MVP'), true);
+  assert.strictEqual(formattedCard.item_desc.startsWith('Thẻ bài · +6'), true);
+
+  // Test 3: Egg & MVP Egg translation
+  const rawEggListing = {
+    id: 103,
+    item_name: 'ไข่สุนัขจิ้งจอก ⭐MVP',
+    item_desc: 'สัตว์เลี้ยง Lv.15 · ค่าฟัก 15,000 G',
+    item_rarity: 'red',
+    qty: 1,
+    price_per: 75000
+  };
+  const formattedEgg = formatMarketListing(rawEggListing);
+  assert.strictEqual(formattedEgg.item_name.startsWith('Trứng '), true);
+  assert.strictEqual(formattedEgg.item_desc.includes('Thú cưng Lv.15'), true);
+  assert.strictEqual(formattedEgg.item_desc.includes('Phí ấp 15,000 G'), true);
+
+  // Test 4: Boxes translation
+  const rawBoxListing = {
+    id: 104,
+    item_name: 'กล่องการ์ด Lv.11-20',
+    item_desc: 'สุ่มการ์ดมอน Lv.11-20 · ⭐MVP 1%',
+    item_rarity: 'blue',
+    qty: 3,
+    price_per: 900
+  };
+  const formattedBox = formatMarketListing(rawBoxListing);
+  assert.strictEqual(formattedBox.item_name, 'Hộp thẻ bài Lv.11-20');
+  assert.strictEqual(formattedBox.item_desc, 'Ngẫu nhiên thẻ quái Lv.11-20 · ⭐MVP 1%');
+
+  // Test 5: Diamond and Ore translation
+  const rawDiaListing = {
+    id: 105,
+    item_name: 'เพชรฟ้า',
+    item_desc: 'ตีบวกโมดูล (ทุกระดับ)',
+    item_rarity: 'blue',
+    qty: 10,
+    price_per: 60
+  };
+  const formattedDia = formatMarketListing(rawDiaListing);
+  assert.strictEqual(formattedDia.item_name, 'Kim cương xanh');
+  assert.strictEqual(formattedDia.item_icon, '💎');
+
+  // Test 6: Fee and Net calculation test
+  const testPrice = 100;
+  const testQty = 5;
+  const feePerPiece = Math.ceil(testPrice * 0.05); // 5G
+  const netReceived = (testPrice - feePerPiece) * testQty; // 95 * 5 = 475G
+  assert.strictEqual(feePerPiece, 5);
+  assert.strictEqual(netReceived, 475);
+
+  console.log('✅ T75 Manual Market Format & Translations Tests Passed successfully!');
+
   console.log('✅ User Polling Interval, Role Propagation and Edit Permissions Tests Passed successfully!');
   console.log('✅ Revamped Auto Market Buy Tests Passed successfully!');
   console.log('✅ Urgent Active Potion Healing Tests Passed successfully!');

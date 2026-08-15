@@ -552,6 +552,156 @@
     </div>
   </div>
 
+  <!-- Modal Manual Market Buy -->
+  <div class="modal-backdrop" id="manual-market-buy-modal" style="display:none;">
+    <div class="modal-card" style="max-width: 420px;">
+      <div class="modal-header">
+        <h2>🛒 Mua Vật Phẩm Trên Chợ</h2>
+        <button class="modal-close" onclick="closeMarketBuyModal()">&times;</button>
+      </div>
+      <div style="padding: 12px 0;">
+        <input type="hidden" id="mkt-buy-acc-uid">
+        <input type="hidden" id="mkt-buy-listing-id">
+        <input type="hidden" id="mkt-buy-unit-price">
+        <input type="hidden" id="mkt-buy-max-qty">
+        <input type="hidden" id="mkt-buy-current-gold">
+
+        <div id="mkt-buy-item-preview" style="display:flex; align-items:center; gap:10px; background:rgba(255,255,255,0.05); padding:10px; border-radius:10px; border:1px solid rgba(255,255,255,0.1); margin-bottom:12px;">
+          <div id="mkt-buy-item-icon" style="font-size:2rem; flex:none;">📦</div>
+          <div style="flex:1; min-width:0;">
+            <div id="mkt-buy-item-name" style="font-weight:700; color:#fff; font-size:0.95rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">Tên Vật Phẩm</div>
+            <div id="mkt-buy-item-desc" style="font-size:0.75rem; color:#94a3b8; margin-top:2px;">Mô tả</div>
+            <div id="mkt-buy-item-seller" style="font-size:0.72rem; color:#60a5fa; margin-top:2px;">Người bán: </div>
+          </div>
+        </div>
+
+        <div style="background:rgba(15,23,42,0.6); border:1px solid rgba(255,255,255,0.08); border-radius:10px; padding:10px; display:flex; flex-direction:column; gap:8px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.8rem;">
+            <span style="color:#cbd5e1;">💰 Đơn giá:</span>
+            <span id="mkt-buy-price-disp" style="font-weight:700; color:#fbbf24;">0 G / món</span>
+          </div>
+
+          <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.8rem;">
+            <span style="color:#cbd5e1;">📦 Số lượng mua:</span>
+            <div style="display:flex; align-items:center; gap:4px;">
+              <button type="button" class="btn btn-secondary" onclick="adjustBuyModalQty(-1)" style="padding:2px 8px; font-size:0.85rem; height:28px;">-</button>
+              <input type="number" id="mkt-buy-qty-input" min="1" value="1" oninput="calcBuyModalTotal()" style="width:60px; text-align:center; padding:3px; background:rgba(0,0,0,0.4); border:1px solid rgba(255,255,255,0.2); border-radius:6px; color:#fff; font-weight:bold; font-size:0.85rem; height:28px;">
+              <button type="button" class="btn btn-secondary" onclick="adjustBuyModalQty(1)" style="padding:2px 8px; font-size:0.85rem; height:28px;">+</button>
+              <button type="button" class="btn btn-secondary" onclick="adjustBuyModalQty(10)" style="padding:2px 6px; font-size:0.75rem; height:28px;">+10</button>
+              <button type="button" class="btn btn-secondary" onclick="setBuyModalMax()" style="padding:2px 6px; font-size:0.75rem; height:28px; color:#38bdf8;">MAX</button>
+            </div>
+          </div>
+
+          <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.8rem; padding-top:6px; border-top:1px dashed rgba(255,255,255,0.1);">
+            <span style="color:#cbd5e1;">💵 Tổng thanh toán:</span>
+            <span id="mkt-buy-total-cost" style="font-weight:800; color:#4ade80; font-size:0.95rem;">0 G</span>
+          </div>
+
+          <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.78rem;">
+            <span style="color:#94a3b8;">🪙 Vàng còn lại sau mua:</span>
+            <span id="mkt-buy-gold-remain" style="font-weight:700; color:#cbd5e1;">0 G</span>
+          </div>
+        </div>
+
+        <div class="error-msg" id="mkt-buy-modal-error" style="margin-top:8px;"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeMarketBuyModal()">Hủy Bỏ</button>
+        <button type="button" class="btn btn-primary" id="mkt-buy-confirm-btn" onclick="submitMarketBuy()">
+          <span class="spinner" id="mkt-buy-spinner"></span> 🛒 Xác Nhận Mua
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal Manual Market Sell -->
+  <div class="modal-backdrop" id="manual-market-sell-modal" style="display:none;">
+    <div class="modal-card" style="max-width: 520px; max-height:90vh; display:flex; flex-direction:column;">
+      <div class="modal-header">
+        <h2>🏷️ Đăng Bán Vật Phẩm Lên Chợ</h2>
+        <button class="modal-close" onclick="closeMarketSellModal()">&times;</button>
+      </div>
+      <div style="padding: 10px 0; overflow-y:auto; flex:1;">
+        <input type="hidden" id="mkt-sell-acc-uid">
+
+        <!-- Step 1: Chọn vật phẩm từ túi đồ -->
+        <div id="mkt-sell-step-1">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+            <span style="font-size:0.8rem; font-weight:700; color:#38bdf8;">🎒 Chọn vật phẩm muốn bán:</span>
+            <button class="btn btn-secondary" onclick="reloadSellInventory()" style="font-size:0.72rem; padding:2px 8px;">🔄 Tải lại rương</button>
+          </div>
+
+          <!-- Category filter chips -->
+          <div id="mkt-sell-cat-chips" style="display:flex; gap:4px; overflow-x:auto; padding-bottom:6px; margin-bottom:8px;">
+            <button class="subtab-btn active" data-cat="all" onclick="filterSellInventory('all')">Tất Cả</button>
+            <button class="subtab-btn" data-cat="resource" onclick="filterSellInventory('resource')">🪵 Nguyên Liệu</button>
+            <button class="subtab-btn" data-cat="diamond" onclick="filterSellInventory('diamond')">💎 Kim Cương</button>
+            <button class="subtab-btn" data-cat="ore" onclick="filterSellInventory('ore')">🪨 Quặng</button>
+            <button class="subtab-btn" data-cat="boxes" onclick="filterSellInventory('boxes')">📦 Hộp</button>
+            <button class="subtab-btn" data-cat="card" onclick="filterSellInventory('card')">🎴 Thẻ Bài</button>
+            <button class="subtab-btn" data-cat="egg" onclick="filterSellInventory('egg')">🥚 Trứng</button>
+            <button class="subtab-btn" data-cat="modules" onclick="filterSellInventory('modules')">🔧 Module</button>
+          </div>
+
+          <!-- Inventory items list grid -->
+          <div id="mkt-sell-inv-grid" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(130px, 1fr)); gap:6px; max-height:220px; overflow-y:auto; padding:4px;">
+            <div style="text-align:center; color:#94a3b8; padding:20px; grid-column: 1 / -1;">Đang tải vật phẩm trong túi...</div>
+          </div>
+        </div>
+
+        <!-- Step 2: Thiết lập giá & số lượng -->
+        <div id="mkt-sell-step-2" style="display:none; margin-top:10px; border-top:1px solid rgba(255,255,255,0.1); padding-top:10px;">
+          <div style="font-size:0.8rem; font-weight:700; color:#fbbf24; margin-bottom:8px;">⚙️ Thiết lập giá bán & số lượng:</div>
+          
+          <div id="mkt-sell-selected-preview" style="display:flex; align-items:center; gap:10px; background:rgba(255,255,255,0.05); padding:8px 10px; border-radius:10px; border:1px solid rgba(255,255,255,0.1); margin-bottom:10px;">
+            <div id="mkt-sell-item-icon" style="font-size:1.8rem; flex:none;">📦</div>
+            <div style="flex:1; min-width:0;">
+              <div id="mkt-sell-item-name" style="font-weight:700; color:#fff; font-size:0.88rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">Tên Vật Phẩm</div>
+              <div id="mkt-sell-item-desc" style="font-size:0.72rem; color:#94a3b8;">Mô tả</div>
+              <div id="mkt-sell-item-owned" style="font-size:0.72rem; color:#4ade80; font-weight:600; margin-top:2px;">Trong túi: 0</div>
+            </div>
+          </div>
+
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px;">
+            <div class="form-group" style="margin-bottom:0;">
+              <label for="mkt-sell-price-input" style="font-size:0.75rem; color:#fbbf24; font-weight:600;">💰 Giá Bán / 1 món (G)</label>
+              <input type="number" id="mkt-sell-price-input" min="1" value="100" oninput="calcSellModalNet()" style="background:rgba(0,0,0,0.4); border:1px solid rgba(255,255,255,0.2); border-radius:6px; color:#fff; padding:6px; font-size:0.85rem; width:100%; outline:none;">
+            </div>
+            <div class="form-group" style="margin-bottom:0;">
+              <label for="mkt-sell-qty-input" style="font-size:0.75rem; color:#38bdf8; font-weight:600; display:flex; justify-content:space-between;">
+                <span>📦 Số lượng</span>
+                <span onclick="setSellModalMax()" style="color:#a855f7; cursor:pointer; font-weight:bold;">MAX</span>
+              </label>
+              <input type="number" id="mkt-sell-qty-input" min="1" value="1" oninput="calcSellModalNet()" style="background:rgba(0,0,0,0.4); border:1px solid rgba(255,255,255,0.2); border-radius:6px; color:#fff; padding:6px; font-size:0.85rem; width:100%; outline:none;">
+            </div>
+          </div>
+
+          <div style="background:rgba(15,23,42,0.6); border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:8px 10px; font-size:0.78rem; display:flex; flex-direction:column; gap:4px;">
+            <div style="display:flex; justify-content:space-between;">
+              <span style="color:#94a3b8;">Phí sàn chợ (5%):</span>
+              <span id="mkt-sell-fee-disp" style="color:#f87171;">-0 G</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; font-weight:700; border-top:1px dashed rgba(255,255,255,0.1); padding-top:4px;">
+              <span style="color:#cbd5e1;">💵 Thực nhận khi bán hết:</span>
+              <span id="mkt-sell-net-disp" style="color:#4ade80; font-size:0.85rem;">0 G</span>
+            </div>
+            <div style="font-size:0.7rem; color:#94a3b8; font-style:italic; margin-top:2px;">
+              * Vật phẩm hết hạn sau 24 giờ. Bạn có thể bấm "Hủy Bán" bất cứ lúc nào để thu hồi lại đồ vào túi.
+            </div>
+          </div>
+        </div>
+
+        <div class="error-msg" id="mkt-sell-modal-error" style="margin-top:8px;"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeMarketSellModal()">Đóng</button>
+        <button type="button" class="btn btn-primary" id="mkt-sell-confirm-btn" onclick="submitMarketSell()" disabled style="opacity:0.5;">
+          <span class="spinner" id="mkt-sell-spinner"></span> 🏷️ Đăng Bán Ngay
+        </button>
+      </div>
+    </div>
+  </div>
+
   <script src="/app.js"></script>
 </body>
 </html>

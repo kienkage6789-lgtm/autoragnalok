@@ -3,6 +3,35 @@
 > Work Breakdown Structure. Update task states immediately upon changes.
 > Statuses: todo | doing | blocked | review | done
 
+### [x] T76 - Tái cấu trúc Tab Tiềm Năng & Kỹ Năng
+- Description: Dựng lại tab tiềm năng kỹ năng thành đúng tab chỉ số và kỹ năng trong game, yêu cầu phải 100% chức năng và nội dung và chức năng giống 90%. yêu cầu việt hóa 100%.
+- Files related: `server.js`, `public/app.js`, `public/app.css`
+- Acceptance criteria:
+  - [x] Backend: Chức năng `stat_up` và `skill_up` thông qua endpoint `POST /api/accounts/:uid/action`.
+  - [x] Frontend (app.js): Xây dựng hàm `renderStatsList(acc)` hiển thị 6 chỉ số STR, AGI, VIT, INT, DEX, LUK giống game, hiển thị điểm cơ bản, buff, kèm các nút [+1], [+10], [MAX].
+  - [x] Frontend (app.js): Xây dựng hàm `renderSkills(acc)` hiển thị lưới các kỹ năng với hình ảnh (emoji), tên tiếng Việt, mô tả cấp bậc hiện tại và điều kiện mở khóa. Thêm nút nâng cấp kỹ năng.
+  - [x] Frontend (app.css): Cập nhật style CSS UI sử dụng Inline Style tối ưu hóa đẹp mắt.
+- Status: done
+
+---
+
+### [x] T75 - Tích Hợp Toàn Bộ Giao Diện Market Vào Bảng Điều Khiển (Manual Market Dashboard)
+- Description: Đưa toàn bộ giao diện hiển thị của Market vào bảng điều khiển Dashboard với đầy đủ danh mục, icon, tên tiếng Việt, mô tả; bổ sung bộ lọc phân loại và bộ lọc sắp xếp giá (Thấp -> Cao, Cao -> Thấp); hỗ trợ Mua vật phẩm trực tiếp, Quản lý vật phẩm Đang rao bán & Hủy bán, và Đăng bán vật phẩm từ túi đồ trực tiếp mà không cần mở game.
+- Files related: `server.js`, `public/app.js`, `public/app.css`, `public/index.html`, `test.js`
+- Acceptance criteria:
+  - [x] Backend: Thêm các endpoint API trong `server.js` (`GET /api/accounts/:line_uid/market/listings`, `GET /api/accounts/:line_uid/market/my-listings`, `POST /api/accounts/:line_uid/market/buy`, `POST /api/accounts/:line_uid/market/sell`, `POST /api/accounts/:line_uid/market/cancel`, `GET /api/accounts/:line_uid/market/inventory-for-sell`).
+  - [x] Backend: Dịch thuật tự động tên và mô tả item sang Tiếng Việt chuẩn.
+  - [x] Frontend: Thêm các subtab trong tab Chợ: `🛒 Mua Chợ (Live)`, `🏷️ Đang Rao Bán`, `⚙️ Cấu Hình Auto`, `🎯 Bộ Lọc 9 Loại`, `📜 Lịch Sử Mua`.
+  - [x] Frontend: Hiển thị đầy đủ danh mục, thẻ item với icon/emoji, tên tiếng Việt, cấp bậc, mô tả, số lượng, người bán, giá/món.
+  - [x] Frontend: Thanh tìm kiếm theo tên và bộ lọc sắp xếp giá (Thấp -> Cao, Cao -> Thấp).
+  - [x] Frontend: Modal xác nhận Mua (chọn số lượng, tính tổng vàng và số dư còn lại) và thực thi mua tức thì.
+  - [x] Frontend: Xem danh sách đồ đang bán và hủy bán với 1 click.
+  - [x] Frontend: Modal đăng bán vật phẩm từ túi đồ với thiết lập giá và số lượng.
+  - [x] Unit Test: Viết test cases kiểm thử các endpoint và hàm xử lý market mới trong `test.js`, chạy `npm test` thành công 100%.
+- Status: done
+
+---
+
 ### [x] T74 - Tối ưu hóa Bơm máu PK, Sửa lỗi MIME type sdk.js, Sửa lỗi Auto Event Zone & Thống kê Chiến tích K/D
 - Description: Sửa các lỗi tồn đọng về bơm máu PK, MIME type của sdk.js, lưu giữ Zone sau khi thoát Event, và phát triển bảng thống kê mạng hạ gục K/D/Points cùng bộ lọc tab.
 - Files related: `server.js`, `public/app.js`, `play.html`, `play_battle.html`, `test.js`

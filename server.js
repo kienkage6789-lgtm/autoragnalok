@@ -475,6 +475,26 @@ try {
   console.error('Failed to load xhrpg_lang_vi.js dictionary:', e.message);
 }
 
+Object.assign(viDict, {
+  'วัตถุดิบสำหรับยานบิน': 'Nguyên liệu phi thuyền',
+  'วัตถุดิบสำหรับอาวุธ/มีดสั้น': 'Nguyên liệu vũ khí/dao găm',
+  'วัตถุดิบสำหรับมีดสั้น': 'Nguyên liệu dao găm',
+  'วัตถุดิบสำหรับยา': 'Nguyên liệu chế thuốc',
+  'ตีบวกโมดูล (ทุกระดับ)': 'Cường hóa Module (mọi cấp)',
+  'ตีบวกโมดูล +6 ขึ้นไป': 'Cường hóa Module +6 trở lên',
+  'ตีบวกโมดูล +12 ขึ้นไป': 'Cường hóa Module +12 trở lên',
+  'ใช้บริจาคอัพเลเวลกิล': 'Cống hiến nâng cấp Guild',
+  'ขุดเจอตอนเก็บเกี่ยวผัก': 'Khai thác từ nông trại',
+  'เพชรฟ้า': 'Kim cương xanh',
+  'เพชรแดง': 'Kim cương đỏ',
+  'เพชรเขียว': 'Kim cương lục',
+  'ไม้': 'Gỗ',
+  'หิน': 'Đá',
+  'เหล็ก': 'Sắt',
+  'ทองแดง': 'Đồng',
+  'สมุนไพร': 'Thảo dược'
+});
+
 function translateThaiText(text) {
   if (!text || typeof text !== 'string') return text;
   
@@ -496,8 +516,25 @@ function translateThaiText(text) {
     }
   }
   
-  // 3. Additional common replacements for combat logs if still containing Thai
+  // 3. Additional common replacements for combat logs & market items if still containing Thai
   const commonReplacements = [
+    { raw: 'วัตถุดิบสำหรับยานบิน', val: 'Nguyên liệu phi thuyền' },
+    { raw: 'วัตถุดิบสำหรับอาวุธ/มีดสั้น', val: 'Nguyên liệu vũ khí/dao găm' },
+    { raw: 'วัตถุดิบสำหรับมีดสั้น', val: 'Nguyên liệu dao găm' },
+    { raw: 'วัตถุดิบสำหรับยา', val: 'Nguyên liệu chế thuốc' },
+    { raw: 'ตีบวกโมดูล (ทุกระดับ)', val: 'Cường hóa Module (mọi cấp)' },
+    { raw: 'ตีบวกโมดูล +6 ขึ้นไป', val: 'Cường hóa Module +6 trở lên' },
+    { raw: 'ตีบวกโมดูล +12 ขึ้นไป', val: 'Cường hóa Module +12 trở lên' },
+    { raw: 'ใช้บริจาคอัพเลเวลกิล', val: 'Cống hiến nâng cấp Guild' },
+    { raw: 'ขุดเจอตอนเก็บเกี่ยวผัก', val: 'Khai thác từ nông trại' },
+    { raw: 'เพชรฟ้า', val: 'Kim cương xanh' },
+    { raw: 'เพชรแดง', val: 'Kim cương đỏ' },
+    { raw: 'เพชรเขียว', val: 'Kim cương lục' },
+    { raw: 'ไม้', val: 'Gỗ' },
+    { raw: 'หิน', val: 'Đá' },
+    { raw: 'เหล็ก', val: 'Sắt' },
+    { raw: 'ทองแดง', val: 'Đồng' },
+    { raw: 'สมุนไพร', val: 'Thảo dược' },
     { raw: 'ได้รับ', val: 'Nhận được' },
     { raw: 'ซ้ำ', val: 'trùng' },
     { raw: 'ดื่มยา', val: 'Bơm thuốc' },
@@ -2970,6 +3007,14 @@ class BotInstance {
       return;
     }
 
+    // Capture Trade Invites
+    if (d.trade_inv) {
+      this.tradeInvite = d.trade_inv;
+    } else {
+      this.tradeInvite = null;
+    }
+
+
     // Save spots list for map & process passive map discovery
     if (d.spots) {
       this.spots = d.spots;
@@ -5302,6 +5347,7 @@ app.get('/api/accounts', requireAuth, (req, res) => {
           lastGw: bot.lastGw || null,
           lastCw: bot.lastCw || null,
           inEventMode: bot.inEventMode || false,
+          tradeInvite: bot.tradeInvite || null,
           currentEventKind: bot.currentEventKind || null,
           guildDungeonActive: bot.guildDungeonActive || false,
           guildDungeonIsTeam: bot.guildDungeonIsTeam || false,
@@ -5497,7 +5543,8 @@ app.get('/api/accounts', requireAuth, (req, res) => {
             y: b.y,
             isTarget: b.id === bot.lastTargetedBossId
           })),
-          marketBuyHistory: bot.marketBuyHistory || []
+          marketBuyHistory: bot.marketBuyHistory || [],
+          tradeInvite: bot.tradeInvite || null
         };
       });
     res.json(list);
@@ -6021,6 +6068,584 @@ app.delete('/api/accounts/:line_uid/market-buy-history', requireAuth, (req, res)
   res.json({ ok: true, message: 'Đã xóa lịch sử mua tự động.' });
 });
 
+// Helper to format/translate market items
+function formatMarketListing(l) {
+  if (!l) return null;
+  const rawName = String(l.item_name || '');
+  const rawDesc = String(l.item_desc || '');
+  let transName = translateThaiText(rawName);
+  let transDesc = translateThaiText(rawDesc);
+
+  // Additional regex patterns for card/egg/box
+  let m;
+  if ((m = rawName.match(/^ไข่(.+?)( ⭐MVP)?$/u))) {
+    transName = 'Trứng ' + translateThaiText(m[1]) + (m[2] || '');
+  } else if ((m = rawName.match(/^กล่องการ์ด Lv\.(\d+)-(\d+)$/u))) {
+    transName = `Hộp thẻ bài Lv.${m[1]}-${m[2]}`;
+  } else if ((m = rawName.match(/^กล่องไข่ Lv\.(\d+)-(\d+)$/u))) {
+    transName = `Hộp trứng Lv.${m[1]}-${m[2]}`;
+  } else if ((m = rawName.match(/^กล่องโมดูล(.+)$/u))) {
+    transName = `Hộp module ${translateThaiText(m[1])}`;
+  }
+
+  if ((m = rawDesc.match(/^สัตว์เลี้ยง Lv\.(\d+) · ค่าฟัก ([\d,]+) G$/u))) {
+    transDesc = `Thú cưng Lv.${m[1]} · Phí ấp ${m[2]} G`;
+  } else if ((m = rawDesc.match(/^การ์ด · \+(\d+) (.+)$/u))) {
+    transDesc = `Thẻ bài · +${m[1]} ${translateThaiText(m[2])}`;
+  } else if ((m = rawDesc.match(/^ดาเมจ ×([\d.]+)$/u))) {
+    transDesc = `Sát thương ×${m[1]}`;
+  } else if ((m = rawDesc.match(/^สุ่มการ์ดมอน Lv\.(\d+)-(\d+) · ⭐MVP 1%$/u))) {
+    transDesc = `Ngẫu nhiên thẻ quái Lv.${m[1]}-${m[2]} · ⭐MVP 1%`;
+  } else if ((m = rawDesc.match(/^สุ่มไข่มอน Lv\.(\d+)-(\d+) · ⭐MVP 1%$/u))) {
+    transDesc = `Ngẫu nhiên trứng quái Lv.${m[1]}-${m[2]} · ⭐MVP 1%`;
+  }
+
+  // Diamond icon cleanup
+  let icon = l.item_icon || '📦';
+  if (rawName === 'เพชรฟ้า' || transName.includes('Lam Bảo') || transName.includes('Kim Cương Xanh') || transName.toLowerCase().includes('kim cương')) {
+    icon = '💎';
+  }
+
+  return {
+    id: parseInt(l.id) || l.id,
+    seller_uid: l.seller_uid,
+    seller_name: l.seller_name || 'Người bán',
+    item_type: l.item_type || 'other',
+    item_id: l.item_id,
+    item_slot: l.item_slot || '',
+    item_tier: parseInt(l.item_tier) || 0,
+    item_icon: icon,
+    item_name: transName,
+    item_name_raw: rawName,
+    item_desc: transDesc,
+    item_desc_raw: rawDesc,
+    item_rarity: l.item_rarity || 'white',
+    item_payload: l.item_payload,
+    qty: parseInt(l.qty) || 1,
+    price_per: parseInt(l.price_per) || 0,
+    created_at: l.created_at,
+    expires_at: parseInt(l.expires_at) || 0
+  };
+}
+
+// 1. Get Live Market Listings on-demand
+app.get('/api/accounts/:line_uid/market/listings', requireAuth, async (req, res) => {
+  const { line_uid } = req.params;
+  const bot = botInstances[line_uid];
+  if (!checkAccountOwnership(req, res, bot)) return;
+
+  try {
+    const rawData = await bot.sendRequest('https://ragnalok.online/human/xhrpg_market.php', {
+      action: 'get_listings',
+      line_uid: bot.line_uid,
+      session_token: bot.session_token,
+      lang: 'vi'
+    });
+
+    if (!rawData || !rawData.ok) {
+      return res.json({ ok: false, error: translateThaiText(rawData?.error || 'Không thể tải danh sách chợ từ game server') });
+    }
+
+    const listings = (rawData.listings || []).map(formatMarketListing).filter(Boolean);
+    res.json({
+      ok: true,
+      listings,
+      gold: bot.player?.gold || 0
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: `Lỗi kết nối chợ: ${err.message}` });
+  }
+});
+
+// 2. Get My Active Listings on-demand
+app.get('/api/accounts/:line_uid/market/my-listings', requireAuth, async (req, res) => {
+  const { line_uid } = req.params;
+  const bot = botInstances[line_uid];
+  if (!checkAccountOwnership(req, res, bot)) return;
+
+  try {
+    const rawData = await bot.sendRequest('https://ragnalok.online/human/xhrpg_market.php', {
+      action: 'get_my_listings',
+      line_uid: bot.line_uid,
+      session_token: bot.session_token,
+      lang: 'vi'
+    });
+
+    if (!rawData || !rawData.ok) {
+      return res.json({ ok: false, error: translateThaiText(rawData?.error || 'Không thể tải danh sách đang bán') });
+    }
+
+    const myListings = (rawData.listings || rawData.my || []).map(formatMarketListing).filter(Boolean);
+    res.json({
+      ok: true,
+      listings: myListings,
+      gold: bot.player?.gold || 0
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: `Lỗi kết nối danh sách đang bán: ${err.message}` });
+  }
+});
+
+// 3. Buy Item from Market
+app.post('/api/accounts/:line_uid/market/buy', requireAuth, async (req, res) => {
+  const { line_uid } = req.params;
+  const { listing_id, qty } = req.body;
+  const bot = botInstances[line_uid];
+  if (!checkAccountOwnership(req, res, bot)) return;
+
+  if (!listing_id) {
+    return res.status(400).json({ ok: false, error: 'Thiếu listing_id' });
+  }
+
+  const buyQty = Math.max(1, parseInt(qty) || 1);
+
+  try {
+    const rawData = await bot.sendRequest('https://ragnalok.online/human/xhrpg_market.php', {
+      action: 'buy',
+      listing_id: Number(listing_id),
+      qty: buyQty,
+      line_uid: bot.line_uid,
+      session_token: bot.session_token,
+      lang: 'vi'
+    });
+
+    if (!rawData || !rawData.ok) {
+      return res.json({ ok: false, error: translateThaiText(rawData?.error || 'Không thể mua vật phẩm') });
+    }
+
+    if (rawData.player) {
+      bot.player = rawData.player;
+    }
+
+    const msg = translateThaiText(rawData.msg || 'Mua vật phẩm thành công!');
+    bot.addLog('SUCCESS', `🛒 [Chợ Thủ Công] ${msg}`);
+
+    res.json({
+      ok: true,
+      msg,
+      gold: bot.player?.gold || 0
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: `Lỗi khi mua vật phẩm: ${err.message}` });
+  }
+});
+
+// 4. Sell Item to Market
+app.post('/api/accounts/:line_uid/market/sell', requireAuth, async (req, res) => {
+  const { line_uid } = req.params;
+  const bot = botInstances[line_uid];
+  if (!checkAccountOwnership(req, res, bot)) return;
+
+  const {
+    item_type, item_id, item_slot, item_tier,
+    item_icon, item_name, item_desc, item_rarity,
+    qty, price_per, item_payload
+  } = req.body;
+
+  if (!item_type || !price_per || price_per <= 0) {
+    return res.status(400).json({ ok: false, error: 'Thông tin vật phẩm hoặc giá bán không hợp lệ' });
+  }
+
+  try {
+    const payload = {
+      action: 'sell',
+      line_uid: bot.line_uid,
+      session_token: bot.session_token,
+      item_type,
+      item_id: item_id || 0,
+      item_slot: item_slot || '',
+      item_tier: item_tier || 0,
+      item_icon: item_icon || '📦',
+      item_name: item_name || 'Vật phẩm',
+      item_desc: item_desc || '',
+      item_rarity: item_rarity || 'white',
+      qty: Math.max(1, parseInt(qty) || 1),
+      price_per: Math.max(1, parseInt(price_per) || 1),
+      lang: 'vi'
+    };
+
+    if (item_payload) {
+      payload.item_payload = typeof item_payload === 'object' ? JSON.stringify(item_payload) : item_payload;
+    }
+
+    const rawData = await bot.sendRequest('https://ragnalok.online/human/xhrpg_market.php', payload);
+
+    if (!rawData || !rawData.ok) {
+      return res.json({ ok: false, error: translateThaiText(rawData?.error || 'Không thể đăng bán vật phẩm') });
+    }
+
+    if (rawData.player) {
+      bot.player = rawData.player;
+    }
+
+    const msg = translateThaiText(rawData.msg || 'Đăng bán vật phẩm thành công!');
+    bot.addLog('SUCCESS', `🏷️ [Chợ Thủ Công] ${msg}`);
+
+    res.json({
+      ok: true,
+      msg,
+      gold: bot.player?.gold || 0
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: `Lỗi khi đăng bán: ${err.message}` });
+  }
+});
+
+// 5. Cancel Listing from Market
+app.post('/api/accounts/:line_uid/market/cancel', requireAuth, async (req, res) => {
+  const { line_uid } = req.params;
+  const { listing_id } = req.body;
+  const bot = botInstances[line_uid];
+  if (!checkAccountOwnership(req, res, bot)) return;
+
+  if (!listing_id) {
+    return res.status(400).json({ ok: false, error: 'Thiếu listing_id' });
+  }
+
+  try {
+    const rawData = await bot.sendRequest('https://ragnalok.online/human/xhrpg_market.php', {
+      action: 'cancel',
+      listing_id: Number(listing_id),
+      line_uid: bot.line_uid,
+      session_token: bot.session_token,
+      lang: 'vi'
+    });
+
+    if (!rawData || !rawData.ok) {
+      return res.json({ ok: false, error: translateThaiText(rawData?.error || 'Không thể hủy vật phẩm rao bán') });
+    }
+
+    if (rawData.player) {
+      bot.player = rawData.player;
+    }
+
+    const msg = translateThaiText(rawData.msg || 'Hủy bán thành công, vật phẩm đã hoàn trả về túi đồ!');
+    bot.addLog('INFO', `❌ [Chợ Thủ Công] ${msg}`);
+
+    res.json({
+      ok: true,
+      msg,
+      gold: bot.player?.gold || 0
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: `Lỗi khi hủy bán: ${err.message}` });
+  }
+});
+
+// 6. Get Player Sellable Inventory
+app.get('/api/accounts/:line_uid/market/inventory-for-sell', requireAuth, (req, res) => {
+  const { line_uid } = req.params;
+  const bot = botInstances[line_uid];
+  if (!checkAccountOwnership(req, res, bot)) return;
+
+  const p = bot.player;
+  if (!p) {
+    return res.json({ ok: true, items: [] });
+  }
+
+  const items = [];
+
+  // 1. Resources
+  const resDefs = [
+    { field:'wood', icon:'🪵', name:'Gỗ (Wood)', desc:'Nguyên liệu phi thuyền', th_name:'ไม้' },
+    { field:'stone', icon:'🪨', name:'Đá (Stone)', desc:'Nguyên liệu phi thuyền', th_name:'หิน' },
+    { field:'iron', icon:'🔩', name:'Sắt (Iron)', desc:'Nguyên liệu vũ khí', th_name:'เหล็ก' },
+    { field:'copper', icon:'🟤', name:'Đồng (Copper)', desc:'Nguyên liệu vũ khí', th_name:'ทองแดง' },
+    { field:'herb', icon:'🌿', name:'Thảo Dược (Herb)', desc:'Nguyên liệu bào chế thuốc', th_name:'สมุนไพร' }
+  ];
+  for (const r of resDefs) {
+    const qty = parseInt(p[r.field]) || 0;
+    if (qty > 0) {
+      items.push({
+        id: `res_${r.field}`,
+        item_type: 'resource',
+        item_id: r.field,
+        item_slot: r.field,
+        item_tier: 0,
+        icon: r.icon,
+        name: r.name,
+        raw_name: r.th_name,
+        desc: r.desc,
+        rarity: 'white',
+        qty,
+        suggested: r.field === 'iron' ? 12 : (r.field === 'copper' ? 15 : (r.field === 'herb' ? 8 : (r.field === 'stone' ? 5 : 3)))
+      });
+    }
+  }
+
+  // 2. Diamonds
+  const diaDefs = [
+    { field:'diamond_blue', icon:'💎', name:'Kim Cương Xanh', desc:'Cường hóa Module', rarity:'blue', th_name:'เพชรฟ้า', sugg: 50 },
+    { field:'diamond_red', icon:'🔴', name:'Kim Cương Đỏ', desc:'Cường hóa Module +6 trở lên', rarity:'red', th_name:'เพชรแดง', sugg: 200 },
+    { field:'diamond_green', icon:'🟢', name:'Kim Cương Lục', desc:'Cường hóa Module +12 trở lên', rarity:'green', th_name:'เพชรเขียว', sugg: 500 }
+  ];
+  for (const d of diaDefs) {
+    const qty = parseInt(p[d.field]) || 0;
+    if (qty > 0) {
+      items.push({
+        id: `dia_${d.field}`,
+        item_type: 'diamond',
+        item_id: d.field,
+        item_slot: d.field,
+        item_tier: 0,
+        icon: d.icon,
+        name: d.name,
+        raw_name: d.th_name,
+        desc: d.desc,
+        rarity: d.rarity,
+        qty,
+        suggested: d.sugg
+      });
+    }
+  }
+
+  // 3. Ores
+  const oreDefs = [
+    { slot:'ore1', icon:'🌙', name:'Quặng Mặt Trăng', desc:'Đóng góp nâng cấp Guild', rarity:'blue', th_name:'แร่จันทรา', sugg: 1000 },
+    { slot:'ore2', icon:'☄️', name:'Mảnh Thiên Thạch', desc:'Đóng góp nâng cấp Guild', rarity:'purple', th_name:'เศษดาวตก', sugg: 3000 },
+    { slot:'ore3', icon:'🌌', name:'Tinh Thể Tinh Vân', desc:'Đóng góp nâng cấp Guild', rarity:'gold', th_name:'ผลึกเนบิวลา', sugg: 10000 },
+    { slot:'ore4', icon:'🟩', name:'Ngọc Thạch', desc:'Khai thác từ nông trại', rarity:'blue', th_name:'หินหยก', sugg: 500 },
+    { slot:'ore5', icon:'🍯', name:'Hổ Phách Cổ', desc:'Khai thác từ nông trại', rarity:'purple', th_name:'อำพันโบราณ', sugg: 1500 },
+    { slot:'ore6', icon:'🪩', name:'Tinh Thể Sương', desc:'Khai thác từ nông trại', rarity:'gold', th_name:'ผลึกน้ำค้าง', sugg: 5000 }
+  ];
+  for (const o of oreDefs) {
+    const qty = parseInt(p[o.slot]) || 0;
+    if (qty > 0) {
+      items.push({
+        id: `ore_${o.slot}`,
+        item_type: 'ore',
+        item_id: o.slot,
+        item_slot: o.slot,
+        item_tier: 0,
+        icon: o.icon,
+        name: o.name,
+        raw_name: o.th_name,
+        desc: o.desc,
+        rarity: o.rarity,
+        qty,
+        suggested: o.sugg
+      });
+    }
+  }
+
+  // 4. Boxes
+  const boxRarities = ['blue', 'purple', 'gold', 'red'];
+  const boxMetaNames = ['Cao Cấp (T2)', 'Hiếm (T3)', 'Sử Thi (T4)', 'Sử Thi+ (T5)'];
+  for (let t = 1; t <= 4; t++) {
+    const n = parseInt(p['module_box' + t]) || 0;
+    if (n > 0) {
+      items.push({
+        id: `module_box_${t}`,
+        item_type: 'module_box',
+        item_id: 0,
+        item_slot: '',
+        item_tier: t,
+        icon: '📦',
+        name: `Hộp Module ${boxMetaNames[t - 1]}`,
+        raw_name: `กล่องโมดูล T${t}`,
+        desc: `Mở ngẫu nhiên module ${t + 1} lỗ`,
+        rarity: boxRarities[t - 1],
+        qty: n,
+        suggested: [150, 400, 900, 2000][t - 1]
+      });
+    }
+  }
+
+  const cardEggRarities = ['white', 'green', 'blue', 'purple', 'gold', 'red', 'red', 'red'];
+  for (let t = 1; t <= 8; t++) {
+    const cn = parseInt(p['card_box' + t]) || 0;
+    const lo = (t - 1) * 10 + 1, hi = t * 10;
+    if (cn > 0) {
+      items.push({
+        id: `card_box_${t}`,
+        item_type: 'card_box',
+        item_id: 0,
+        item_slot: '',
+        item_tier: t,
+        icon: '🎁',
+        name: `Hộp Thẻ Bài Lv.${lo}-${hi}`,
+        raw_name: `กล่องการ์ด Lv.${lo}-${hi}`,
+        desc: `Ngẫu nhiên thẻ quái Lv.${lo}-${hi} (⭐MVP 1%)`,
+        rarity: cardEggRarities[t - 1],
+        qty: cn,
+        suggested: [150, 400, 900, 2000, 5000, 10000, 15000, 20000][t - 1]
+      });
+    }
+    const en = parseInt(p['egg_box' + t]) || 0;
+    if (en > 0) {
+      items.push({
+        id: `egg_box_${t}`,
+        item_type: 'egg_box',
+        item_id: 0,
+        item_slot: '',
+        item_tier: t,
+        icon: '🧰',
+        name: `Hộp Trứng Lv.${lo}-${hi}`,
+        raw_name: `กล่องไข่ Lv.${lo}-${hi}`,
+        desc: `Ngẫu nhiên trứng quái Lv.${lo}-${hi} (⭐MVP 1%)`,
+        rarity: cardEggRarities[t - 1],
+        qty: en,
+        suggested: [150, 400, 900, 2000, 5000, 10000, 15000, 20000][t - 1]
+      });
+    }
+  }
+
+  // 5. Cards
+  let userCards = p.cards;
+  if (typeof userCards === 'string') {
+    try { userCards = JSON.parse(userCards); } catch(e) { userCards = {}; }
+  }
+  if (userCards && typeof userCards === 'object') {
+    for (const mid in userCards) {
+      const mm = monMastersCache[mid];
+      const entry = userCards[mid] || {};
+      const monName = mm ? mm.n : `Quái #${mid}`;
+      const monIcon = mm ? (mm.e || '🎴') : '🎴';
+      const monLv = mm ? (mm.lv || 1) : 1;
+      const monStat = mm ? (mm.cs || 'STR').toUpperCase() : 'STR';
+
+      if ((entry.n | 0) > 0) {
+        items.push({
+          id: `card_n_${mid}`,
+          item_type: 'card',
+          item_id: parseInt(mid),
+          item_slot: 'normal',
+          item_tier: 0,
+          icon: monIcon,
+          name: `Thẻ ${monName}`,
+          raw_name: `${mm?.orig_n || monName}`,
+          desc: `Thẻ bài · +${Math.max(1, Math.floor(monLv / 2))} ${monStat}`,
+          rarity: monLv <= 4 ? 'white' : (monLv <= 9 ? 'green' : (monLv <= 14 ? 'blue' : (monLv <= 19 ? 'purple' : 'gold'))),
+          qty: entry.n | 0,
+          suggested: Math.max(100, monLv * 50)
+        });
+      }
+      if ((entry.m | 0) > 0) {
+        items.push({
+          id: `card_m_${mid}`,
+          item_type: 'card',
+          item_id: parseInt(mid),
+          item_slot: 'mvp',
+          item_tier: 0,
+          icon: '⭐' + monIcon,
+          name: `Thẻ ⭐MVP ${monName}`,
+          raw_name: `${mm?.orig_n || monName} ⭐MVP`,
+          desc: `Thẻ bài MVP · +${Math.max(1, Math.floor(monLv / 2)) * 3} ${monStat} & Hiệu ứng Khảm`,
+          rarity: 'red',
+          qty: entry.m | 0,
+          suggested: Math.max(500, monLv * 500)
+        });
+      }
+    }
+  }
+
+  // 6. Eggs
+  let userEggs = p.eggs;
+  if (typeof userEggs === 'string') {
+    try { userEggs = JSON.parse(userEggs); } catch(e) { userEggs = {}; }
+  }
+  if (userEggs && typeof userEggs === 'object') {
+    for (const mid in userEggs) {
+      const mm = monMastersCache[mid];
+      const entry = userEggs[mid] || {};
+      const monName = mm ? mm.n : `Quái #${mid}`;
+      const monLv = mm ? (mm.lv || 1) : 1;
+
+      if ((entry.n | 0) > 0) {
+        items.push({
+          id: `egg_n_${mid}`,
+          item_type: 'egg',
+          item_id: parseInt(mid),
+          item_slot: 'normal',
+          item_tier: 0,
+          icon: '🥚',
+          name: `Trứng ${monName}`,
+          raw_name: `ไข่${mm?.orig_n || monName}`,
+          desc: `Thú cưng Lv.${monLv} · Phí ấp ${(monLv * 100).toLocaleString()} G`,
+          rarity: monLv <= 4 ? 'white' : (monLv <= 9 ? 'green' : (monLv <= 14 ? 'blue' : (monLv <= 19 ? 'purple' : 'gold'))),
+          qty: entry.n | 0,
+          suggested: Math.max(100, monLv * 500)
+        });
+      }
+      if ((entry.m | 0) > 0) {
+        items.push({
+          id: `egg_m_${mid}`,
+          item_type: 'egg',
+          item_id: parseInt(mid),
+          item_slot: 'mvp',
+          item_tier: 0,
+          icon: '⭐🥚',
+          name: `Trứng ⭐MVP ${monName}`,
+          raw_name: `ไข่${mm?.orig_n || monName} ⭐MVP`,
+          desc: `Thú cưng MVP Lv.${monLv} · Phí ấp ${(monLv * 1000).toLocaleString()} G`,
+          rarity: 'red',
+          qty: entry.m | 0,
+          suggested: Math.max(1000, monLv * 5000)
+        });
+      }
+    }
+  }
+
+  // 7. Modules
+  const modCategories = [
+    { key: 'module_pistol', field: 'module_inventory', label: 'Dao Găm (Pistol)', ico: '🔪' },
+    { key: 'module_sniper', field: 'sniper_module_inventory', label: 'Dao Dài (Sniper)', ico: '🗡️' },
+    { key: 'module_knife', field: 'knife_module_inventory', label: 'Kiếm (Sword)', ico: '🗡️' },
+    { key: 'module_axe', field: 'axe_module_inventory', label: 'Rìu (Axe)', ico: '🪓' },
+    { key: 'module_robot', field: 'robot_module_inventory', label: 'Titan', ico: '🔋' },
+    { key: 'module_armor', field: 'armor_module_inventory', label: 'Khiên (Armor)', ico: '🛡️' },
+    { key: 'module_house', field: 'house_module_inventory', label: 'Phi Thuyền', ico: '🛸' },
+    { key: 'module_turret', field: 'turret_module_inventory', label: 'Pháo Tháp', ico: '🗼' }
+  ];
+
+  const modRarities = ['white', 'green', 'blue', 'purple', 'gold', 'red', 'red'];
+  const modRarityNames = ['Phổ thông', 'Hiếm', 'Cao cấp', 'Sử thi', 'Huyền thoại', 'Thần thoại', 'Thần thoại+'];
+
+  for (const mc of modCategories) {
+    let list = p[mc.field];
+    if (typeof list === 'string') {
+      try { list = JSON.parse(list); } catch(e) { list = []; }
+    }
+    if (Array.isArray(list)) {
+      list.forEach((m, idx) => {
+        if (!m) return;
+        const rar = parseInt(m.rarity) || 1;
+        const plus = parseInt(m.plus) || 0;
+        const slotName = m.slot === 'barrel' ? 'Nòng' : (m.slot === 'sight' ? 'Ống ngắm' : (m.slot === 'mag' ? 'Băng đạn' : m.slot));
+        const rarName = modRarityNames[rar - 1] || 'Phổ thông';
+        items.push({
+          id: `${mc.key}_${idx}`,
+          item_type: mc.key,
+          item_id: idx,
+          item_slot: m.slot || 'barrel',
+          item_tier: rar,
+          icon: mc.ico,
+          name: `${mc.ico} ${mc.label} ${slotName} +${plus}`,
+          raw_name: `${mc.label} ${m.slot} +${plus}`,
+          desc: `Phẩm chất: ${rarName} (${rar} lỗ) · ${m.stat ? m.stat.toUpperCase() + ' +' + rar : ''}`,
+          rarity: modRarities[rar - 1] || 'white',
+          qty: 1,
+          isModule: true,
+          item_payload: {
+            slot: m.slot || 'barrel',
+            rarity: rar,
+            plus: plus,
+            stat: m.stat || null,
+            cards: m.cards || []
+          },
+          suggested: [60, 150, 400, 900, 2000, 5000, 12000][rar - 1] || 100
+        });
+      });
+    }
+  }
+
+  res.json({
+    ok: true,
+    gold: p.gold || 0,
+    items
+  });
+});
+
 // Get bot local event war history
 app.get('/api/accounts/:line_uid/event-war-history', requireAuth, async (req, res) => {
   const { line_uid } = req.params;
@@ -6198,6 +6823,45 @@ app.put('/api/admin/maps/:id', requireAuth, (req, res) => {
   lastMapSyncAt = new Date().toISOString();
   saveMapsCache();
   res.json({ success: true, map: targetMap, maps: mapsCache });
+});
+
+// Proxy for xhrpg_trade.php
+app.post('/api/accounts/:line_uid/trade', requireAuth, async (req, res) => {
+  const { line_uid } = req.params;
+  const bot = botInstances[line_uid];
+  if (!checkAccountOwnership(req, res, bot)) return;
+
+  try {
+    const payload = Object.assign({
+      line_uid: bot.line_uid,
+      session_token: bot.session_token,
+      lang: 'vi'
+    }, req.body || {});
+
+    const gameRes = await bot.sendRequest('https://ragnalok.online/human/xhrpg_trade.php', payload);
+    
+    let parsedRes = gameRes;
+    if (typeof gameRes === 'string') {
+      try {
+        parsedRes = JSON.parse(gameRes);
+      } catch (e) {
+        // Not JSON, return as is or error
+      }
+    }
+
+    if (parsedRes && parsedRes.player) {
+      bot.updatePlayerState(parsedRes.player);
+    }
+
+    if (payload.action === 'respond' || payload.action === 'cancel') {
+      bot.tradeInvite = null;
+    }
+
+    res.json(parsedRes || { ok: 0, error: 'Không nhận được phản hồi từ game server' });
+  } catch (err) {
+    console.error(`[TRADE API ERROR] Bot ${line_uid}:`, err);
+    res.status(500).json({ ok: 0, error: 'Internal Server Error', details: err.message });
+  }
 });
 
 // Trigger manual action
@@ -7058,6 +7722,7 @@ module.exports = {
   getMineUpgradeCost,
   getItemCategory,
   getModuleTier,
+  formatMarketListing,
   BotInstance,
   ProxyPool,
   proxyPool,

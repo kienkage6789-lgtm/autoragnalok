@@ -2,6 +2,49 @@
 
 > Changelog of actual changes implemented.
 
+## 2026-08-15 - Tái Cấu Trúc Tab STAT & Kỹ Năng (Clone 100% Giao Diện In-Game & Đồng Bộ Dark Theme) (T76)
+- File đã đổi: [public/app.js](file:///c:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/public/app.js), [public/app.css](file:///c:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/public/app.css)
+- Đã làm:
+  - **Gộp 2 Sub-tab Tiềm Năng & Kỹ Năng thành 1 View Duy Nhất (`📊⚡ STAT Kỹ Năng`)**: Phản ánh 100% cấu trúc `#stat-list` gốc từ game engine (`xhrpg_canvas.js`).
+  - **Đồng Bộ Màu Sắc Phong Cách Space-Dark Của Tool**: Chuyển đổi toàn bộ nền trắng/sáng của bảng chỉ số thành giao diện tối (Dark Glassmorphism) với nền `rgba(17, 24, 39, 0.7)`, viền `rgba(255, 255, 255, 0.08)`, chữ sáng `#f3f4f6`, các chip chỉ số nền tối và hiệu ứng ánh sáng tím/xanh chuẩn thiết kế của Tool.
+  - **Đồ thị Radar Chart SVG Dark Theme**: Tái tạo chính xác biểu đồ Radar 6 trục (STR, AGI, DEX, INT, VIT, LUK) với lưới vòng đa giác mờ và màu tím dạ quang `#a78bfa` nổi bật trên nền tối.
+  - **Lưới 6 Chỉ Số Chuẩn Game (.stat-row)**:
+    - Hiển thị 2 cột, thanh tiến trình màu theo từng hệ, điểm chỉ số, và các nút nâng cấp **`+`** (+1), **`+5`** (+5), **`ALL`** (Toàn bộ điểm).
+  - **Khu vực 🌟 Ragnalok Lv**:
+    - Thanh tiến trình EXP Ragnalok, nhãn cấp độ (hoặc badge khóa nếu Lv < 50), 6 dòng chỉ số và các nút `+1`, `+10`.
+  - **Hệ Thống 4 Hệ Cây Kỹ Năng (Skill Trees)**:
+    - 4 nút Tab chuyển đổi hệ: `⚔️ Dao ném` (ATK), `🛡️ Phòng ngự` (DEF), `🗡️ Kiếm` (Melee), `🗼 Trụ súng` (Turret).
+    - Thẻ kỹ năng (.skill-card) phong cách thẻ tối: Icon, tên Việt hóa, tag Tự động/Bị động, dots cấp độ, nút `+ Nâng`, `+5`, Auto Switch (`✓ Bật` / `✕ Tắt`), thông số MP, CD, Tầm, hiệu ứng và điều kiện mở khóa.
+  - **Chỉ Số Trung Tâm & Thưởng**:
+    - Hiển thị đầy đủ bảng chỉ số trung tâm (ATK, CRIT, Né đòn, Giảm CD, DEF, HP, MP) với các chip nguồn gốc `STAT`, `Cường hóa`, `Module`, `✨ Thưởng`, `🛡️ Option`.
+    - Bảng thống kê thưởng EXP, Drop đồ hiếm, Vàng và lượng tài nguyên rơi.
+
+## 2026-08-15 - Tích Hợp Toàn Bộ Giao Diện Market Vào Bảng Điều Khiển (Manual Market Dashboard) (T75)
+- File đã đổi: [server.js](file:///c:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/server.js), [public/app.js](file:///c:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/public/app.js), [public/index.html](file:///c:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/public/index.html), [public/app.css](file:///c:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/public/app.css), [test.js](file:///c:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/test.js).
+- Đã làm:
+  - **Backend API Routes cho Chợ Live & Giao Dịch Thủ Công**:
+    - `GET /api/accounts/:line_uid/market/listings`: Tải toàn bộ vật phẩm đang rao bán trên chợ game theo thời gian thực (hỗ trợ `action: 'get_listings'`).
+    - `GET /api/accounts/:line_uid/market/my-listings`: Tải danh sách các món đồ chính bot đang treo bán trên chợ (`action: 'get_my_listings'`).
+    - `POST /api/accounts/:line_uid/market/buy`: Gửi lệnh mua vật phẩm trực tiếp lên game server (`action: 'buy'`) với số lượng tùy chọn, tự động trừ vàng và cập nhật tài khoản.
+    - `POST /api/accounts/:line_uid/market/sell`: Gửi lệnh đăng bán vật phẩm lên chợ (`action: 'sell'`) với thiết lập giá và số lượng, hỗ trợ gửi kèm `item_payload` đối với Module và đồ đặc biệt.
+    - `POST /api/accounts/:line_uid/market/cancel`: Gửi lệnh hủy bán vật phẩm (`action: 'cancel'`), thu hồi tức thì món đồ về túi.
+    - `GET /api/accounts/:line_uid/market/inventory-for-sell`: Lấy danh sách toàn bộ vật phẩm có thể đăng bán trong túi đồ (Nguyên liệu, Kim cương, Quặng, Hộp, Thẻ bài thường/MVP, Trứng thường/MVP, Module).
+    - **Dịch thuật Tự Động Toàn Diện**: Bổ sung hàm `formatMarketListing` và nâng cấp `translateThaiText` dịch 100% tên vật phẩm, mô tả, thẻ bài, trứng, hộp, module sang Tiếng Việt chuẩn.
+  - **Frontend Giao Diện Chợ & Bộ Lọc Nâng Cao (Dashboard UI)**:
+    - Bổ sung 2 Sub-tab mới trong Tab `🏪 Chợ`: **`🛒 Mua Chợ (Live)`** và **`📦 Đang Rao Bán`**, giữ nguyên tách biệt với **`⚙️ Cấu Hình Auto`**, **`🎯 Bộ Lọc 9 Loại`**, và **`📜 Lịch Sử Mua`**.
+    - **Bộ Lọc Đa Dạng & Sắp Xếp Giá (Thấp -> Cao / Cao -> Thấp)**:
+      - Ô tìm kiếm realtime theo tên món đồ, mô tả, người bán.
+      - Dropdown phân loại danh mục đầy đủ (Nguyên liệu, Kim cương, Quặng, Đạn, Thẻ bài, Trứng, Hộp, Module theo từng vũ khí, Trang bị D2, Đồ quý hiếm).
+      - Dropdown sắp xếp mức giá tăng dần (Thấp ➔ Cao) và giảm dần (Cao ➔ Thấp).
+    - **Lưới Hiển Thị Thẻ Vật Phẩm (Item Card Grid)**:
+      - Thẻ vật phẩm chuẩn phong cách game với viền màu phẩm chất (Rarity), Icon SVG/Emoji, Tên tiếng Việt, Huy hiệu ⭐MVP, mô tả chỉ số, số lượng, người bán và giá vàng/món.
+      - **Modal Mua Hàng Trực Tiếp**: Chọn số lượng mua (với các nút nhanh `-`, `+`, `+10`, `MAX`), tự động tính toán tổng tiền thanh toán và số dư vàng còn lại sau mua.
+      - **Modal Đăng Bán Trực Tiếp**: Duyệt rương đồ theo danh mục chip, chọn món đồ muốn bán, nhập giá và số lượng với tính toán tự động thuế sàn 5% và doanh thu thực nhận.
+      - **Quản Lý Đồ Đang Rao Bán**: Xem thời gian còn lại (h) của món đồ và nút bấm Hủy bán (Thu hồi) với 1 click.
+  - **Unit Tests**:
+    - Bổ sung bộ kiểm thử trong `test.js` xác thực tính chính xác của hàm dịch thuật `formatMarketListing`, tính toán thuế sàn 5% và cấu trúc dữ liệu. Chạy `npm test` thành công 100%.
+
+
 ## 2026-08-15 - Kiểm Tra và Tối Ưu Hệ Thống Auto Mua Chợ (Auto Market Buy System Audit & Fixes) (T58)
 - File đã đổi: [server.js](file:///c:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/server.js), [public/app.js](file:///c:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/public/app.js), [test.js](file:///c:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/test.js).
 - Đã làm:

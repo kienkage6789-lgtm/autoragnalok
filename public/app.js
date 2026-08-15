@@ -1383,6 +1383,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
       <div class="event-banner" id="event-banner-${acc.line_uid}" style="display: none; padding: 6px 10px; margin-bottom: 8px; border-radius: 8px; font-size: 0.75rem; line-height: 1.35; text-align: center; font-weight: bold; cursor: pointer;"></div>
       <div class="boss-hunt-banner" id="boss-hunt-banner-${acc.line_uid}" style="display: none; padding: 6px 10px; margin-bottom: 8px; border-radius: 8px; font-size: 0.75rem; line-height: 1.35;"></div>
+      <div id="trade-invite-banner-${acc.line_uid}" style="display: none; background: linear-gradient(90deg, rgba(16,185,129,0.2), rgba(56,189,248,0.2)); border: 1.5px solid #10b981; border-radius: 8px; padding: 6px 10px; margin-bottom: 8px; align-items: center; justify-content: space-between;">
+        <div style="font-size: 0.78rem; font-weight: 800; color: #4ade80; display: flex; align-items: center; gap: 4px;">
+          <span>🤝 Lời mời giao dịch từ:</span>
+          <span id="trade-invite-from-${acc.line_uid}" style="color: #fff; font-weight: bold;">--</span>
+        </div>
+        <div style="display: flex; gap: 4px;">
+          <button class="btn btn-primary" onclick="acceptTradeInvite('${acc.line_uid}', window._currentTradeTid?.['${acc.line_uid}'] || '')" style="padding: 2px 8px; font-size: 0.72rem; background: #16a34a; border-color: #22c55e; font-weight: 700;">Chấp Nhận</button>
+          <button class="btn btn-secondary" onclick="declineTradeInvite('${acc.line_uid}', window._currentTradeTid?.['${acc.line_uid}'] || '')" style="padding: 2px 8px; font-size: 0.72rem; color: #f87171; border-color: rgba(248,113,113,0.3); font-weight: 700;">Từ Chối</button>
+        </div>
+      </div>
 
       <div class="combat-rates-strip" onclick="toggleRateUnit('${acc.line_uid}')" style="cursor: pointer;" title="Click để chuyển đổi thống kê Phút (/m) ➔ Giờ (/h) ➔ Ngày (/d)">
         <span class="stat-pill" id="rate-pill-kills-${acc.line_uid}">⚔️ <strong id="rate-kills-${acc.line_uid}">0/m</strong></span>
@@ -1436,7 +1446,7 @@ document.addEventListener('DOMContentLoaded', () => {
         <button class="tab-link" id="tab-btn-mvp-${acc.line_uid}" onclick="switchTab('${acc.line_uid}', 'mvp')">Săn Boss</button>
         <button class="tab-link" id="tab-btn-event-${acc.line_uid}" onclick="switchTab('${acc.line_uid}', 'event')">🏆 Event</button>
         <button class="tab-link" id="tab-btn-skills-${acc.line_uid}" onclick="switchTab('${acc.line_uid}', 'skills')">👤 Nhân Vật</button>
-        <button class="tab-link" id="tab-btn-market-buy-${acc.line_uid}" onclick="switchTab('${acc.line_uid}', 'market-buy')">🏪 Chợ Auto</button>
+        <button class="tab-link" id="tab-btn-market-buy-${acc.line_uid}" onclick="switchTab('${acc.line_uid}', 'market-buy')">🏪 Chợ</button>
         <button class="tab-link" id="tab-btn-log-${acc.line_uid}" onclick="switchTab('${acc.line_uid}', 'log')">Log</button>
       </div>
 
@@ -1879,13 +1889,122 @@ document.addEventListener('DOMContentLoaded', () => {
           <div class="market-buy-unlocked-panel" id="market-buy-panel-${acc.line_uid}" style="display: block;">
             <!-- Sub-tabs Navigation -->
             <div class="subtabs-nav" style="display:flex; gap:6px; margin-bottom:10px; border-bottom:1px solid rgba(255,255,255,0.08); padding-bottom:6px; overflow-x:auto;">
-              <button class="subtab-btn active" id="subtab-btn-mkt-settings-${acc.line_uid}" onclick="switchMarketSubTab('${acc.line_uid}', 'settings')">⚙️ Cấu hình chung</button>
+              <button class="subtab-btn active" id="subtab-btn-mkt-live-${acc.line_uid}" onclick="switchMarketSubTab('${acc.line_uid}', 'live')">🛒 Mua Chợ (Live)</button>
+              <button class="subtab-btn" id="subtab-btn-mkt-mine-${acc.line_uid}" onclick="switchMarketSubTab('${acc.line_uid}', 'mine')">📦 Đang Rao Bán</button>
+              <button class="subtab-btn" id="subtab-btn-mkt-settings-${acc.line_uid}" onclick="switchMarketSubTab('${acc.line_uid}', 'settings')">⚙️ Cấu hình Auto</button>
               <button class="subtab-btn" id="subtab-btn-mkt-filters-${acc.line_uid}" onclick="switchMarketSubTab('${acc.line_uid}', 'filters')">🎯 Bộ lọc 9 loại</button>
               <button class="subtab-btn" id="subtab-btn-mkt-history-${acc.line_uid}" onclick="switchMarketSubTab('${acc.line_uid}', 'history')">📜 Lịch sử mua</button>
+              <button class="subtab-btn" id="subtab-btn-mkt-trade-${acc.line_uid}" onclick="switchMarketSubTab('${acc.line_uid}', 'trade')">🤝 Giao Dịch</button>
+            </div>
+
+            <!-- Sub-pane 0: Mua Chợ Trực Tiếp (Live Market) -->
+            <div class="subtab-pane" id="subpane-mkt-live-${acc.line_uid}" style="display:block;">
+              <!-- Toolbar Filter & Search -->
+              <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(56, 189, 248, 0.2); border-radius: 10px; padding: 8px 10px; margin-bottom: 10px; display: flex; flex-direction: column; gap: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px;">
+                  <div style="display: flex; align-items: center; gap: 6px; font-size: 0.82rem; font-weight: 700; color: #fbbf24;">
+                    <span>💰 Vàng hiện có:</span>
+                    <span id="mkt-live-gold-${acc.line_uid}" style="color: #4ade80; font-size: 0.9rem;">0</span> G
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 6px;">
+                    <button class="btn btn-secondary" onclick="loadLiveMarket('${acc.line_uid}', true)" style="font-size: 0.72rem; padding: 3px 8px; border-radius: 6px;">
+                      🔄 Làm mới
+                    </button>
+                  </div>
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1.5fr 1fr 1fr; gap: 6px;">
+                  <!-- Text Search Input -->
+                  <div style="position: relative;">
+                    <input type="text" id="mkt-live-search-${acc.line_uid}" placeholder="🔍 Tìm kiếm tên đồ..." oninput="onLiveMarketSearch('${acc.line_uid}')" style="width: 100%; background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; color: #fff; padding: 5px 8px; font-size: 0.78rem; outline: none;">
+                  </div>
+
+                  <!-- Category Filter Dropdown -->
+                  <div>
+                    <select id="mkt-live-cat-${acc.line_uid}" onchange="onLiveMarketFilterChange('${acc.line_uid}')" style="width: 100%; background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; color: #fff; padding: 5px 6px; font-size: 0.78rem; outline: none;">
+                      <option value="all">🗂️ Tất cả danh mục</option>
+                      <optgroup label="📦 Vật Phẩm Thường">
+                        <option value="resource">🪵 Nguyên liệu</option>
+                        <option value="diamond">💎 Kim cương</option>
+                        <option value="ore">🪨 Quặng không gian / Nông trại</option>
+                        <option value="ammo">🔫 Đạn dược</option>
+                      </optgroup>
+                      <optgroup label="🎴 Thẻ Bài & Trứng">
+                        <option value="card">🎴 Thẻ bài quái vật</option>
+                        <option value="egg">🥚 Trứng thú cưng</option>
+                      </optgroup>
+                      <optgroup label="📦 Hộp Ngẫu Nhiên">
+                        <option value="module_box">📦 Hộp Module</option>
+                        <option value="card_box">🎁 Hộp Thẻ bài</option>
+                        <option value="egg_box">🧰 Hộp Trứng</option>
+                      </optgroup>
+                      <optgroup label="🔧 Module Vũ Khí & Giáp">
+                        <option value="module_pistol">🔪 Module Dao găm</option>
+                        <option value="module_sniper">🗡️ Module Dao dài</option>
+                        <option value="module_knife">🗡️ Module Kiếm</option>
+                        <option value="module_axe">🪓 Module Rìu</option>
+                        <option value="module_robot">🔋 Module Titan</option>
+                        <option value="module_robot_gun">🦾 Module Cung Titan</option>
+                        <option value="module_railgun">⚡ Module Titan Beam</option>
+                        <option value="module_armor">🔰 Module Khiên</option>
+                        <option value="module_house">🛸 Module Phi thuyền</option>
+                        <option value="module_turret">🗼 Module Pháo tháp</option>
+                      </optgroup>
+                      <optgroup label="🛡️ Trang Bị & Đồ Sưu Tầm">
+                        <option value="eq2">🛡️ Trang bị D2 (Equipment)</option>
+                        <option value="treasure">🗃️ Đồ quý hiếm</option>
+                        <option value="hardware">🗃️ Linh kiện Titan</option>
+                        <option value="weapon_parts">🗃️ Linh kiện Vũ khí</option>
+                        <option value="house_parts">🗃️ Linh kiện Phi thuyền</option>
+                        <option value="stat_parts">🗃️ Linh kiện Chỉ số</option>
+                      </optgroup>
+                    </select>
+                  </div>
+
+                  <!-- Price Sort Dropdown (Thấp -> Cao, Cao -> Thấp) -->
+                  <div>
+                    <select id="mkt-live-sort-${acc.line_uid}" onchange="onLiveMarketFilterChange('${acc.line_uid}')" style="width: 100%; background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; color: #fbbf24; padding: 5px 6px; font-size: 0.78rem; font-weight: 600; outline: none;">
+                      <option value="asc">🔽 Giá: Thấp ➔ Cao</option>
+                      <option value="desc">🔼 Giá: Cao ➔ Thấp</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Live Market Cards Grid -->
+              <div id="mkt-live-grid-${acc.line_uid}" class="mkt-live-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; max-height: 480px; overflow-y: auto; padding: 2px;">
+                <div style="text-align: center; color: #94a3b8; padding: 24px 0; grid-column: 1 / -1;">
+                  <span class="spinner" style="display:inline-block; margin-right:6px;"></span> Đang tải danh sách chợ...
+                </div>
+              </div>
+            </div>
+
+            <!-- Sub-pane 0.5: Đang Rao Bán (My Listings) -->
+            <div class="subtab-pane" id="subpane-mkt-mine-${acc.line_uid}" style="display:none;">
+              <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(168, 85, 247, 0.2); border-radius: 10px; padding: 8px 10px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px;">
+                <div style="font-size: 0.82rem; font-weight: 700; color: #c084fc;">
+                  📦 Vật Phẩm Đang Treo Bán Trên Chợ
+                </div>
+                <div style="display: flex; gap: 6px;">
+                  <button class="btn btn-primary" onclick="openMarketSellModal('${acc.line_uid}')" style="font-size: 0.72rem; padding: 3px 10px; border-radius: 6px;">
+                    🏷️ + Đăng Bán Đồ
+                  </button>
+                  <button class="btn btn-secondary" onclick="loadMyListings('${acc.line_uid}', true)" style="font-size: 0.72rem; padding: 3px 8px; border-radius: 6px;">
+                    🔄 Làm mới
+                  </button>
+                </div>
+              </div>
+
+              <!-- My Listings Grid -->
+              <div id="mkt-mine-grid-${acc.line_uid}" class="mkt-live-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; max-height: 480px; overflow-y: auto; padding: 2px;">
+                <div style="text-align: center; color: #94a3b8; padding: 24px 0; grid-column: 1 / -1;">
+                  Chưa có danh sách vật phẩm đang bán.
+                </div>
+              </div>
             </div>
 
             <!-- Sub-pane 1: Cấu hình chung (Settings) -->
-            <div class="subtab-pane" id="subpane-mkt-settings-${acc.line_uid}" style="display:block;">
+            <div class="subtab-pane" id="subpane-mkt-settings-${acc.line_uid}" style="display:none;">
               <!-- Master Control Header -->
               <div style="margin-bottom: 10px; padding: 10px; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(56, 189, 248, 0.2); border-radius: 10px; display: flex; flex-direction: column; gap: 8px;">
                 <div class="toggle-control">
@@ -2046,6 +2165,16 @@ document.addEventListener('DOMContentLoaded', () => {
                       </tr>
                     </tbody>
                   </table>
+                </div>
+              </div>
+            </div>
+
+            <!-- Sub-pane 4: Giao Dịch 1-1 (Trade) -->
+            <div class="subtab-pane" id="subpane-mkt-trade-${acc.line_uid}" style="display:none;">
+              <div style="padding: 10px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.06); border-radius: 10px;">
+                <!-- Trade Container managed by app.js logic -->
+                <div id="mkt-trade-panel-${acc.line_uid}" class="tr-container">
+                  <div style="text-align:center; padding:20px; color:#94a3b8; font-size:12px;">Đang tải...</div>
                 </div>
               </div>
             </div>
@@ -2757,6 +2886,24 @@ document.addEventListener('DOMContentLoaded', () => {
     renderPetSection(acc);
     updateHomeTabUI(acc);
 
+    // Handle Trade Invites
+    window._currentTradeTid = window._currentTradeTid || {};
+    const trBanner = document.getElementById(`trade-invite-banner-${acc.line_uid}`);
+    const trFrom = document.getElementById(`trade-invite-from-${acc.line_uid}`);
+    if (acc.tradeInvite) {
+      window._currentTradeTid[acc.line_uid] = acc.tradeInvite.tid;
+      if (trBanner) trBanner.style.display = 'flex';
+      if (trFrom) trFrom.textContent = acc.tradeInvite.from_name || 'Người chơi';
+      if (typeof showTradePopup === 'function') {
+        showTradePopup(acc.line_uid, acc.tradeInvite);
+      }
+    } else {
+      if (trBanner) trBanner.style.display = 'none';
+    }
+    if (typeof tradeTimerTick === 'function') {
+      tradeTimerTick(acc.line_uid);
+    }
+
 
 
     // Render real-time event banner
@@ -3161,6 +3308,9 @@ document.addEventListener('DOMContentLoaded', () => {
     } else if (targetTabId === 'mvp') {
       const subTabId = activeMvpSubTabs[uid] || 'cfg';
       switchMvpSubTab(uid, subTabId);
+    } else if (targetTabId === 'market-buy') {
+      const subTabId = activeMarketSubTabs[uid] || 'live';
+      switchMarketSubTab(uid, subTabId);
     } else {
       if (targetTabId) {
         fetchAccounts();
@@ -3237,23 +3387,608 @@ document.addEventListener('DOMContentLoaded', () => {
     if (paneEggs) paneEggs.style.display = subTabId === 'eggs' ? 'block' : 'none';
   };
 
+  const activeMarketSubTabs = {};
+
   // Switch Sub-Tab inside Market Pane
   window.switchMarketSubTab = function(uid, subTabId) {
+    activeMarketSubTabs[uid] = subTabId;
+
+    const btnLive = document.getElementById(`subtab-btn-mkt-live-${uid}`);
+    const btnMine = document.getElementById(`subtab-btn-mkt-mine-${uid}`);
     const btnSettings = document.getElementById(`subtab-btn-mkt-settings-${uid}`);
     const btnFilters = document.getElementById(`subtab-btn-mkt-filters-${uid}`);
     const btnHistory = document.getElementById(`subtab-btn-mkt-history-${uid}`);
+    const btnTrade = document.getElementById(`subtab-btn-mkt-trade-${uid}`);
 
+    const paneLive = document.getElementById(`subpane-mkt-live-${uid}`);
+    const paneMine = document.getElementById(`subpane-mkt-mine-${uid}`);
     const paneSettings = document.getElementById(`subpane-mkt-settings-${uid}`);
     const paneFilters = document.getElementById(`subpane-mkt-filters-${uid}`);
     const paneHistory = document.getElementById(`subpane-mkt-history-${uid}`);
+    const paneTrade = document.getElementById(`subpane-mkt-trade-${uid}`);
 
+    if (btnLive) btnLive.classList.toggle('active', subTabId === 'live');
+    if (btnMine) btnMine.classList.toggle('active', subTabId === 'mine');
     if (btnSettings) btnSettings.classList.toggle('active', subTabId === 'settings');
     if (btnFilters) btnFilters.classList.toggle('active', subTabId === 'filters');
     if (btnHistory) btnHistory.classList.toggle('active', subTabId === 'history');
+    if (btnTrade) btnTrade.classList.toggle('active', subTabId === 'trade');
 
+    if (paneLive) paneLive.style.display = subTabId === 'live' ? 'block' : 'none';
+    if (paneMine) paneMine.style.display = subTabId === 'mine' ? 'block' : 'none';
     if (paneSettings) paneSettings.style.display = subTabId === 'settings' ? 'block' : 'none';
     if (paneFilters) paneFilters.style.display = subTabId === 'filters' ? 'block' : 'none';
     if (paneHistory) paneHistory.style.display = subTabId === 'history' ? 'block' : 'none';
+    if (paneTrade) paneTrade.style.display = subTabId === 'trade' ? 'block' : 'none';
+
+    if (subTabId === 'live') {
+      loadLiveMarket(uid);
+    } else if (subTabId === 'mine') {
+      loadMyListings(uid);
+    } else if (subTabId === 'trade' && typeof tradeOpen === 'function') {
+      tradeOpen(uid);
+    }
+  };
+
+  // ── 🏪 MANUAL MARKET LIVE SYSTEM (Mua Chợ Trực Tiếp, Đang Bán, Đăng Bán) ──
+  window.liveMarketCache = {};
+  window.myListingsCache = {};
+  window.sellInventoryCache = {};
+
+  const RARITY_COLORS = {
+    white: '#94a3b8',
+    green: '#22c55e',
+    blue: '#3b82f6',
+    purple: '#a855f7',
+    gold: '#f59e0b',
+    red: '#ef4444'
+  };
+
+  // 1. Tải danh sách Chợ Live từ server
+  window.loadLiveMarket = async function(uid, force = false) {
+    const grid = document.getElementById(`mkt-live-grid-${uid}`);
+    const goldElem = document.getElementById(`mkt-live-gold-${uid}`);
+    if (!grid) return;
+
+    if (!force && window.liveMarketCache[uid] && window.liveMarketCache[uid].listings) {
+      renderLiveMarketGrid(uid);
+      return;
+    }
+
+    grid.innerHTML = `<div style="text-align: center; color: #94a3b8; padding: 24px 0; grid-column: 1 / -1;"><span class="spinner" style="display:inline-block; margin-right:6px;"></span> Đang tải danh sách chợ từ server...</div>`;
+
+    try {
+      const res = await fetch(`/api/accounts/${uid}/market/listings`);
+      const data = await res.json();
+      if (!data.ok) {
+        grid.innerHTML = `<div style="text-align: center; color: #f87171; padding: 24px 0; grid-column: 1 / -1;">❌ ${data.error || 'Lỗi tải danh sách chợ'}</div>`;
+        return;
+      }
+
+      window.liveMarketCache[uid] = {
+        listings: data.listings || [],
+        gold: data.gold || 0
+      };
+
+      if (goldElem) {
+        goldElem.textContent = (data.gold || 0).toLocaleString();
+      }
+
+      renderLiveMarketGrid(uid);
+    } catch (e) {
+      grid.innerHTML = `<div style="text-align: center; color: #f87171; padding: 24px 0; grid-column: 1 / -1;">❌ Lỗi kết nối: ${e.message}</div>`;
+    }
+  };
+
+  // 2. Render lưới Live Market (Hỗ trợ Lọc Danh mục, Search và Sắp xếp Giá)
+  window.renderLiveMarketGrid = function(uid) {
+    const grid = document.getElementById(`mkt-live-grid-${uid}`);
+    if (!grid) return;
+
+    const cache = window.liveMarketCache[uid];
+    if (!cache || !cache.listings) {
+      grid.innerHTML = `<div style="text-align: center; color: #94a3b8; padding: 24px 0; grid-column: 1 / -1;">Không có dữ liệu chợ.</div>`;
+      return;
+    }
+
+    const searchInput = document.getElementById(`mkt-live-search-${uid}`);
+    const catSelect = document.getElementById(`mkt-live-cat-${uid}`);
+    const sortSelect = document.getElementById(`mkt-live-sort-${uid}`);
+
+    const q = searchInput ? searchInput.value.trim().toLowerCase() : '';
+    const selectedCat = catSelect ? catSelect.value : 'all';
+    const sortOrder = sortSelect ? sortSelect.value : 'asc';
+
+    let filtered = [...cache.listings];
+
+    // Lọc theo danh mục
+    if (selectedCat !== 'all') {
+      if (selectedCat === 'resource' || selectedCat === 'diamond' || selectedCat === 'ore' || selectedCat === 'ammo' || selectedCat === 'card' || selectedCat === 'egg' || selectedCat === 'module_box' || selectedCat === 'card_box' || selectedCat === 'egg_box' || selectedCat === 'eq2' || selectedCat === 'treasure' || selectedCat === 'hardware' || selectedCat === 'weapon_parts' || selectedCat === 'house_parts' || selectedCat === 'stat_parts') {
+        filtered = filtered.filter(l => l.item_type === selectedCat);
+      } else if (selectedCat.startsWith('module_')) {
+        filtered = filtered.filter(l => l.item_type === selectedCat);
+      }
+    }
+
+    // Lọc theo từ khóa tìm kiếm (Tên, mô tả, người bán)
+    if (q) {
+      filtered = filtered.filter(l => {
+        const name = (l.item_name || '').toLowerCase();
+        const rawName = (l.item_name_raw || '').toLowerCase();
+        const desc = (l.item_desc || '').toLowerCase();
+        const seller = (l.seller_name || '').toLowerCase();
+        return name.includes(q) || rawName.includes(q) || desc.includes(q) || seller.includes(q);
+      });
+    }
+
+    // Sắp xếp theo giá (Thấp -> Cao hoặc Cao -> Thấp)
+    filtered.sort((a, b) => {
+      const pA = a.price_per || 0;
+      const pB = b.price_per || 0;
+      return sortOrder === 'desc' ? (pB - pA) : (pA - pB);
+    });
+
+    if (filtered.length === 0) {
+      grid.innerHTML = `<div style="text-align: center; color: #94a3b8; padding: 24px 0; grid-column: 1 / -1;">🔍 Không tìm thấy vật phẩm phù hợp bộ lọc.</div>`;
+      return;
+    }
+
+    grid.innerHTML = filtered.map(item => {
+      const rarColor = RARITY_COLORS[item.item_rarity] || '#cbd5e1';
+      const itemJson = JSON.stringify(item).replace(/"/g, '&quot;');
+      const isMvp = item.item_name.includes('⭐MVP') || item.item_name.includes('MVP');
+      
+      return `
+        <div class="mkt-card-item" style="background: rgba(15, 23, 42, 0.75); border: 1px solid rgba(255, 255, 255, 0.08); border-left: 3.5px solid ${rarColor}; border-radius: 8px; padding: 8px; display: flex; flex-direction: column; justify-content: space-between; gap: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">
+          <div>
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 2px;">
+              <span style="font-size: 1.25rem; line-height: 1;">${item.item_icon || '📦'}</span>
+              <span style="font-size: 0.68rem; font-weight: 700; color: #94a3b8; background: rgba(255,255,255,0.06); padding: 1px 5px; border-radius: 4px;">
+                ×${(item.qty || 1).toLocaleString()}
+              </span>
+            </div>
+            <div style="font-weight: 700; color: #fff; font-size: 0.78rem; line-height: 1.2; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${item.item_name}">
+              ${isMvp ? '<span style="color:#ef4444; margin-right:2px;">⭐</span>' : ''}${item.item_name}
+            </div>
+            <div style="font-size: 0.68rem; color: #94a3b8; line-height: 1.3; min-height: 24px; max-height: 32px; overflow: hidden; margin-top: 2px;" title="${item.item_desc || ''}">
+              ${item.item_desc || 'Không có mô tả'}
+            </div>
+          </div>
+
+          <div style="margin-top: 6px; padding-top: 4px; border-top: 1px solid rgba(255,255,255,0.05); display: flex; flex-direction: column; gap: 4px;">
+            <div style="display: flex; justify-content: space-between; align-items: baseline;">
+              <span style="font-size: 0.68rem; color: #64748b; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:80px;" title="Người bán: ${item.seller_name}">👤 ${item.seller_name}</span>
+              <span style="font-size: 0.82rem; font-weight: 800; color: #fbbf24;">${(item.price_per || 0).toLocaleString()} <span style="font-size: 0.65rem; color: #94a3b8; font-weight: normal;">G</span></span>
+            </div>
+            <button class="btn btn-primary" onclick="openMarketBuyModal('${uid}', ${itemJson})" style="width: 100%; padding: 4px 0; font-size: 0.74rem; font-weight: 700; border-radius: 6px; background: #0284c7; border-color: #38bdf8;">
+              🛒 Mua Ngay
+            </button>
+          </div>
+        </div>
+      `;
+    }).join('');
+  };
+
+  window.onLiveMarketSearch = function(uid) {
+    renderLiveMarketGrid(uid);
+  };
+
+  window.onLiveMarketFilterChange = function(uid) {
+    renderLiveMarketGrid(uid);
+  };
+
+  // 3. Tải danh sách vật phẩm Đang Rao Bán
+  window.loadMyListings = async function(uid, force = false) {
+    const grid = document.getElementById(`mkt-mine-grid-${uid}`);
+    if (!grid) return;
+
+    if (!force && window.myListingsCache[uid] && window.myListingsCache[uid].listings) {
+      renderMyListingsGrid(uid);
+      return;
+    }
+
+    grid.innerHTML = `<div style="text-align: center; color: #94a3b8; padding: 24px 0; grid-column: 1 / -1;"><span class="spinner" style="display:inline-block; margin-right:6px;"></span> Đang tải danh sách đang bán...</div>`;
+
+    try {
+      const res = await fetch(`/api/accounts/${uid}/market/my-listings`);
+      const data = await res.json();
+      if (!data.ok) {
+        grid.innerHTML = `<div style="text-align: center; color: #f87171; padding: 24px 0; grid-column: 1 / -1;">❌ ${data.error || 'Lỗi tải danh sách'}</div>`;
+        return;
+      }
+
+      window.myListingsCache[uid] = {
+        listings: data.listings || [],
+        gold: data.gold || 0
+      };
+
+      renderMyListingsGrid(uid);
+    } catch (e) {
+      grid.innerHTML = `<div style="text-align: center; color: #f87171; padding: 24px 0; grid-column: 1 / -1;">❌ Lỗi kết nối: ${e.message}</div>`;
+    }
+  };
+
+  window.renderMyListingsGrid = function(uid) {
+    const grid = document.getElementById(`mkt-mine-grid-${uid}`);
+    if (!grid) return;
+
+    const cache = window.myListingsCache[uid];
+    if (!cache || !cache.listings || cache.listings.length === 0) {
+      grid.innerHTML = `<div style="text-align: center; color: #94a3b8; padding: 24px 0; grid-column: 1 / -1;">📭 Bạn hiện không có vật phẩm nào đang treo bán trên chợ.</div>`;
+      return;
+    }
+
+    const now = Math.floor(Date.now() / 1000);
+    grid.innerHTML = cache.listings.map(item => {
+      const rarColor = RARITY_COLORS[item.item_rarity] || '#cbd5e1';
+      const hoursLeft = Math.max(0, Math.round(((item.expires_at || 0) - now) / 3600));
+
+      return `
+        <div class="mkt-card-item" style="background: rgba(15, 23, 42, 0.75); border: 1px solid rgba(255, 255, 255, 0.08); border-left: 3.5px solid ${rarColor}; border-radius: 8px; padding: 8px; display: flex; flex-direction: column; justify-content: space-between; gap: 4px;">
+          <div>
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 2px;">
+              <span style="font-size: 1.25rem; line-height: 1;">${item.item_icon || '📦'}</span>
+              <span style="font-size: 0.65rem; font-weight: 700; color: #60a5fa; background: rgba(59,130,246,0.1); padding: 1px 5px; border-radius: 4px;">
+                ⏳ Còn ${hoursLeft}h
+              </span>
+            </div>
+            <div style="font-weight: 700; color: #fff; font-size: 0.78rem; line-height: 1.2; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+              ${item.item_name}
+            </div>
+            <div style="font-size: 0.68rem; color: #94a3b8; line-height: 1.3; min-height: 24px; max-height: 32px; overflow: hidden; margin-top: 2px;">
+              ${item.item_desc || ''}
+            </div>
+          </div>
+
+          <div style="margin-top: 6px; padding-top: 4px; border-top: 1px solid rgba(255,255,255,0.05); display: flex; flex-direction: column; gap: 4px;">
+            <div style="display: flex; justify-content: space-between; align-items: baseline;">
+              <span style="font-size: 0.7rem; color: #cbd5e1;">Số lượng: <b>×${(item.qty || 1).toLocaleString()}</b></span>
+              <span style="font-size: 0.82rem; font-weight: 800; color: #fbbf24;">${(item.price_per || 0).toLocaleString()} <span style="font-size: 0.65rem; color: #94a3b8; font-weight: normal;">G/món</span></span>
+            </div>
+            <button class="btn btn-secondary" onclick="cancelMarketListing('${uid}', ${item.id})" style="width: 100%; padding: 4px 0; font-size: 0.74rem; font-weight: 700; border-radius: 6px; color: #f87171; border-color: rgba(248, 113, 113, 0.3);">
+              ❌ Hủy Bán (Thu hồi)
+            </button>
+          </div>
+        </div>
+      `;
+    }).join('');
+  };
+
+  // 4. Modal Mua Vật Phẩm (Buy Modal)
+  window.openMarketBuyModal = function(uid, item) {
+    const modal = document.getElementById('manual-market-buy-modal');
+    if (!modal) return;
+
+    document.getElementById('mkt-buy-acc-uid').value = uid;
+    document.getElementById('mkt-buy-listing-id').value = item.id;
+    document.getElementById('mkt-buy-unit-price').value = item.price_per;
+    document.getElementById('mkt-buy-max-qty').value = item.qty;
+
+    const gold = window.liveMarketCache[uid]?.gold || 0;
+    document.getElementById('mkt-buy-current-gold').value = gold;
+
+    document.getElementById('mkt-buy-item-icon').innerHTML = item.item_icon || '📦';
+    document.getElementById('mkt-buy-item-name').textContent = item.item_name;
+    document.getElementById('mkt-buy-item-desc').textContent = item.item_desc || '';
+    document.getElementById('mkt-buy-item-seller').textContent = `Người bán: ${item.seller_name} (Có sẵn: ×${item.qty})`;
+
+    document.getElementById('mkt-buy-price-disp').textContent = `${(item.price_per || 0).toLocaleString()} G / món`;
+    
+    const qtyInput = document.getElementById('mkt-buy-qty-input');
+    qtyInput.value = 1;
+    qtyInput.max = item.qty;
+
+    document.getElementById('mkt-buy-modal-error').textContent = '';
+    calcBuyModalTotal();
+
+    modal.style.display = 'flex';
+  };
+
+  window.closeMarketBuyModal = function() {
+    const modal = document.getElementById('manual-market-buy-modal');
+    if (modal) modal.style.display = 'none';
+  };
+
+  window.adjustBuyModalQty = function(delta) {
+    const input = document.getElementById('mkt-buy-qty-input');
+    const max = parseInt(document.getElementById('mkt-buy-max-qty').value) || 1;
+    let cur = parseInt(input.value) || 1;
+    cur = Math.max(1, Math.min(max, cur + delta));
+    input.value = cur;
+    calcBuyModalTotal();
+  };
+
+  window.setBuyModalMax = function() {
+    const max = parseInt(document.getElementById('mkt-buy-max-qty').value) || 1;
+    const unitPrice = parseInt(document.getElementById('mkt-buy-unit-price').value) || 1;
+    const currentGold = parseInt(document.getElementById('mkt-buy-current-gold').value) || 0;
+    const maxAffordable = unitPrice > 0 ? Math.floor(currentGold / unitPrice) : max;
+    const finalQty = Math.max(1, Math.min(max, maxAffordable));
+    document.getElementById('mkt-buy-qty-input').value = finalQty;
+    calcBuyModalTotal();
+  };
+
+  window.calcBuyModalTotal = function() {
+    const unitPrice = parseInt(document.getElementById('mkt-buy-unit-price').value) || 0;
+    const maxQty = parseInt(document.getElementById('mkt-buy-max-qty').value) || 1;
+    const currentGold = parseInt(document.getElementById('mkt-buy-current-gold').value) || 0;
+    let qty = parseInt(document.getElementById('mkt-buy-qty-input').value) || 1;
+    qty = Math.max(1, Math.min(maxQty, qty));
+    document.getElementById('mkt-buy-qty-input').value = qty;
+
+    const total = unitPrice * qty;
+    const remain = currentGold - total;
+
+    document.getElementById('mkt-buy-total-cost').textContent = `${total.toLocaleString()} G`;
+    const remainElem = document.getElementById('mkt-buy-gold-remain');
+    remainElem.textContent = `${remain.toLocaleString()} G`;
+    remainElem.style.color = remain >= 0 ? '#4ade80' : '#f87171';
+
+    const confirmBtn = document.getElementById('mkt-buy-confirm-btn');
+    if (confirmBtn) {
+      confirmBtn.disabled = remain < 0;
+      confirmBtn.style.opacity = remain >= 0 ? '1' : '0.5';
+    }
+  };
+
+  window.submitMarketBuy = async function() {
+    const uid = document.getElementById('mkt-buy-acc-uid').value;
+    const listingId = document.getElementById('mkt-buy-listing-id').value;
+    const qty = parseInt(document.getElementById('mkt-buy-qty-input').value) || 1;
+    const errElem = document.getElementById('mkt-buy-modal-error');
+    const spinner = document.getElementById('mkt-buy-spinner');
+    const confirmBtn = document.getElementById('mkt-buy-confirm-btn');
+
+    if (!uid || !listingId) return;
+
+    errElem.textContent = '';
+    if (spinner) spinner.style.display = 'inline-block';
+    if (confirmBtn) confirmBtn.disabled = true;
+
+    try {
+      const res = await fetch(`/api/accounts/${uid}/market/buy`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ listing_id: listingId, qty })
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        errElem.textContent = data.error || 'Lỗi mua vật phẩm';
+        return;
+      }
+
+      closeMarketBuyModal();
+      alert('🛒 ' + (data.msg || 'Mua thành công!'));
+
+      // Tải lại danh sách Live chợ & Gold
+      loadLiveMarket(uid, true);
+      fetchAccounts();
+    } catch (e) {
+      errElem.textContent = `Lỗi mạng: ${e.message}`;
+    } finally {
+      if (spinner) spinner.style.display = 'none';
+      if (confirmBtn) confirmBtn.disabled = false;
+    }
+  };
+
+  // 5. Hủy Bán Vật Phẩm (Cancel Listing)
+  window.cancelMarketListing = async function(uid, listingId) {
+    if (!confirm('Bạn có chắc chắn muốn hủy bán vật phẩm này và thu hồi lại vào rương?')) return;
+
+    try {
+      const res = await fetch(`/api/accounts/${uid}/market/cancel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ listing_id: listingId })
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        alert('❌ ' + (data.error || 'Lỗi hủy bán'));
+        return;
+      }
+
+      alert('❌ ' + (data.msg || 'Hủy bán thành công!'));
+      loadMyListings(uid, true);
+      fetchAccounts();
+    } catch (e) {
+      alert(`Lỗi mạng: ${e.message}`);
+    }
+  };
+
+  // 6. Modal Đăng Bán Vật Phẩm (Sell Modal)
+  let currentSellItem = null;
+  window.openMarketSellModal = async function(uid) {
+    const modal = document.getElementById('manual-market-sell-modal');
+    if (!modal) return;
+
+    document.getElementById('mkt-sell-acc-uid').value = uid;
+    document.getElementById('mkt-sell-modal-error').textContent = '';
+    currentSellItem = null;
+
+    document.getElementById('mkt-sell-step-2').style.display = 'none';
+    const confirmBtn = document.getElementById('mkt-sell-confirm-btn');
+    if (confirmBtn) {
+      confirmBtn.disabled = true;
+      confirmBtn.style.opacity = '0.5';
+    }
+
+    modal.style.display = 'flex';
+    reloadSellInventory();
+  };
+
+  window.closeMarketSellModal = function() {
+    const modal = document.getElementById('manual-market-sell-modal');
+    if (modal) modal.style.display = 'none';
+  };
+
+  window.reloadSellInventory = async function() {
+    const uid = document.getElementById('mkt-sell-acc-uid').value;
+    const invGrid = document.getElementById('mkt-sell-inv-grid');
+    if (!uid || !invGrid) return;
+
+    invGrid.innerHTML = `<div style="text-align:center; color:#94a3b8; padding:20px; grid-column:1 / -1;"><span class="spinner" style="display:inline-block; margin-right:6px;"></span> Đang tải vật phẩm trong túi đồ...</div>`;
+
+    try {
+      const res = await fetch(`/api/accounts/${uid}/market/inventory-for-sell`);
+      const data = await res.json();
+      if (!data.ok) {
+        invGrid.innerHTML = `<div style="text-align:center; color:#f87171; padding:20px; grid-column:1 / -1;">❌ ${data.error || 'Lỗi tải túi đồ'}</div>`;
+        return;
+      }
+
+      window.sellInventoryCache[uid] = data.items || [];
+      filterSellInventory('all');
+    } catch (e) {
+      invGrid.innerHTML = `<div style="text-align:center; color:#f87171; padding:20px; grid-column:1 / -1;">❌ Lỗi kết nối: ${e.message}</div>`;
+    }
+  };
+
+  window.filterSellInventory = function(cat) {
+    const uid = document.getElementById('mkt-sell-acc-uid').value;
+    const invGrid = document.getElementById('mkt-sell-inv-grid');
+    const chipBtns = document.querySelectorAll('#mkt-sell-cat-chips .subtab-btn');
+    chipBtns.forEach(btn => btn.classList.toggle('active', btn.dataset.cat === cat));
+
+    const items = window.sellInventoryCache[uid] || [];
+    let filtered = items;
+
+    if (cat === 'resource' || cat === 'diamond' || cat === 'ore' || cat === 'card' || cat === 'egg') {
+      filtered = items.filter(it => it.item_type === cat);
+    } else if (cat === 'boxes') {
+      filtered = items.filter(it => it.item_type.endsWith('_box'));
+    } else if (cat === 'modules') {
+      filtered = items.filter(it => it.item_type.startsWith('module_') && !it.item_type.endsWith('_box'));
+    }
+
+    if (filtered.length === 0) {
+      invGrid.innerHTML = `<div style="text-align:center; color:#94a3b8; padding:20px; grid-column:1 / -1;">Túi đồ không có vật phẩm nào thuộc nhóm này.</div>`;
+      return;
+    }
+
+    invGrid.innerHTML = filtered.map(item => {
+      const rarColor = RARITY_COLORS[item.rarity] || '#cbd5e1';
+      const isSel = currentSellItem && currentSellItem.id === item.id;
+      const itemJson = JSON.stringify(item).replace(/"/g, '&quot;');
+
+      return `
+        <div onclick="selectSellItem(${itemJson})" style="background: ${isSel ? 'rgba(56, 189, 248, 0.15)' : 'rgba(0,0,0,0.3)'}; border: 1.5px solid ${isSel ? '#38bdf8' : 'rgba(255,255,255,0.08)'}; border-left: 3px solid ${rarColor}; border-radius: 6px; padding: 6px; cursor: pointer; display: flex; flex-direction: column; justify-content: space-between; gap: 2px;">
+          <div style="display:flex; align-items:center; justify-content:space-between;">
+            <span style="font-size:1.1rem;">${item.icon || '📦'}</span>
+            <span style="font-size:0.65rem; font-weight:700; color:#4ade80;">×${item.qty}</span>
+          </div>
+          <div style="font-size:0.75rem; font-weight:600; color:#fff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${item.name}">
+            ${item.name}
+          </div>
+          <div style="font-size:0.65rem; color:#94a3b8; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+            ${item.desc || ''}
+          </div>
+        </div>
+      `;
+    }).join('');
+  };
+
+  window.selectSellItem = function(item) {
+    currentSellItem = item;
+    const uid = document.getElementById('mkt-sell-acc-uid').value;
+    filterSellInventory(document.querySelector('#mkt-sell-cat-chips .subtab-btn.active')?.dataset.cat || 'all');
+
+    const step2 = document.getElementById('mkt-sell-step-2');
+    step2.style.display = 'block';
+
+    document.getElementById('mkt-sell-item-icon').innerHTML = item.icon || '📦';
+    document.getElementById('mkt-sell-item-name').textContent = item.name;
+    document.getElementById('mkt-sell-item-desc').textContent = item.desc || '';
+    document.getElementById('mkt-sell-item-owned').textContent = `Trong túi: ×${item.qty}`;
+
+    const priceInput = document.getElementById('mkt-sell-price-input');
+    const qtyInput = document.getElementById('mkt-sell-qty-input');
+
+    priceInput.value = item.suggested || 100;
+    qtyInput.value = 1;
+    qtyInput.max = item.qty;
+
+    calcSellModalNet();
+
+    const confirmBtn = document.getElementById('mkt-sell-confirm-btn');
+    if (confirmBtn) {
+      confirmBtn.disabled = false;
+      confirmBtn.style.opacity = '1';
+    }
+  };
+
+  window.setSellModalMax = function() {
+    if (!currentSellItem) return;
+    document.getElementById('mkt-sell-qty-input').value = currentSellItem.qty;
+    calcSellModalNet();
+  };
+
+  window.calcSellModalNet = function() {
+    if (!currentSellItem) return;
+    const price = Math.max(1, parseInt(document.getElementById('mkt-sell-price-input').value) || 1);
+    let qty = parseInt(document.getElementById('mkt-sell-qty-input').value) || 1;
+    qty = Math.max(1, Math.min(currentSellItem.qty, qty));
+    document.getElementById('mkt-sell-qty-input').value = qty;
+
+    const totalGross = price * qty;
+    const feePerPiece = Math.ceil(price * 0.05);
+    const totalFee = feePerPiece * qty;
+    const net = (price - feePerPiece) * qty;
+
+    document.getElementById('mkt-sell-fee-disp').textContent = `-${totalFee.toLocaleString()} G (${feePerPiece} G/món)`;
+    document.getElementById('mkt-sell-net-disp').textContent = `${net.toLocaleString()} G`;
+  };
+
+  window.submitMarketSell = async function() {
+    if (!currentSellItem) return;
+    const uid = document.getElementById('mkt-sell-acc-uid').value;
+    const price = parseInt(document.getElementById('mkt-sell-price-input').value) || 1;
+    const qty = parseInt(document.getElementById('mkt-sell-qty-input').value) || 1;
+    const errElem = document.getElementById('mkt-sell-modal-error');
+    const spinner = document.getElementById('mkt-sell-spinner');
+    const confirmBtn = document.getElementById('mkt-sell-confirm-btn');
+
+    errElem.textContent = '';
+    if (spinner) spinner.style.display = 'inline-block';
+    if (confirmBtn) confirmBtn.disabled = true;
+
+    try {
+      const payload = {
+        item_type: currentSellItem.item_type,
+        item_id: currentSellItem.item_id,
+        item_slot: currentSellItem.item_slot,
+        item_tier: currentSellItem.item_tier,
+        item_icon: currentSellItem.icon,
+        item_name: currentSellItem.raw_name || currentSellItem.name,
+        item_desc: currentSellItem.desc,
+        item_rarity: currentSellItem.rarity,
+        qty: qty,
+        price_per: price,
+        item_payload: currentSellItem.item_payload || null
+      };
+
+      const res = await fetch(`/api/accounts/${uid}/market/sell`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        errElem.textContent = data.error || 'Lỗi đăng bán';
+        return;
+      }
+
+      closeMarketSellModal();
+      alert('🏷️ ' + (data.msg || 'Đăng bán thành công!'));
+
+      // Chuyển sang subtab "Đang Rao Bán" và làm mới
+      switchMarketSubTab(uid, 'mine');
+      fetchAccounts();
+    } catch (e) {
+      errElem.textContent = `Lỗi mạng: ${e.message}`;
+    } finally {
+      if (spinner) spinner.style.display = 'none';
+      if (confirmBtn) confirmBtn.disabled = false;
+    }
   };
 
   const MONSTER_DICT = {
@@ -6330,4 +7065,712 @@ window.clearMarketBuyHistory = async function(uid) {
   } catch (err) {
     console.error('Error clearing market buy history:', err);
   }
+};
+
+// =========================================================
+// TRADE SYSTEM (Giao Dịch 1-1) & DIRECT AUTO TRANSFER (100% PORT FROM GAME)
+// =========================================================
+window.tradeStates = {};
+window._seenTradeInv = window._seenTradeInv || {};
+
+// Khởi tạo state trade cho từng bot giống 100% game client
+function initTradeState(uid) {
+  if (!window.tradeStates[uid]) {
+    window.tradeStates[uid] = {
+      view: 'idle', // idle | sent | room | ended
+      room: null,
+      searchRes: [],
+      hist: null,
+      items: [],
+      inventory: [],
+      cat: 'diamond',
+      selIdx: -1,
+      lastQ: '',
+      busy: false,
+      sig: '',
+      timer: null,
+      tickCount: 0
+    };
+  }
+  return window.tradeStates[uid];
+}
+
+// 1. Vào Tab Giao Dịch
+window.tradeOpen = function(uid) {
+  const st = initTradeState(uid);
+  st.searchRes = [];
+  st.selIdx = -1;
+  st.busy = false;
+
+  // Lấy danh sách đồ trong túi đồ của bot để chuẩn bị cho picker
+  loadTradeInventory(uid);
+
+  // Gửi lấy status
+  tradePost(uid, { action: 'status' }).then(d => {
+    if (d) tradeApplyStatus(uid, d);
+  });
+
+  // Gửi lấy history
+  st.hist = null;
+  tradePost(uid, { action: 'history' }).then(d => {
+    st.hist = (d && d.rows) || [];
+    tradeRefresh(uid, false);
+  });
+
+  // Bắt đầu timer tick 1s
+  tradeTickStart(uid);
+};
+
+// 2. Tải túi đồ bot cho Trade Picker
+async function loadTradeInventory(uid) {
+  try {
+    const res = await fetch(`/api/accounts/${uid}/market/inventory-for-sell`);
+    const data = await res.json();
+    if (data && data.ok) {
+      initTradeState(uid).inventory = data.items || [];
+      const st = initTradeState(uid);
+      if (st.view === 'room' && !st.room?.me?.locked) {
+        tradeRefresh(uid, true);
+      }
+    }
+  } catch (e) {
+    console.error('[Trade Inv Error]', e);
+  }
+}
+
+// 3. Gửi Request tới endpoint Trade proxy
+window.tradePost = async function(uid, data) {
+  try {
+    const res = await fetch(`/api/accounts/${uid}/trade`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    return await res.json();
+  } catch (e) {
+    console.error('[Trade Post Error]', e);
+    return null;
+  }
+};
+
+// 4. Áp dụng Status trả về từ game server (giống 100% _trApplyStatus)
+window.tradeApplyStatus = function(uid, d) {
+  const st = initTradeState(uid);
+  if (!d || !d.ok) return;
+
+  if (d.msg) showToast(d.msg, 'info');
+
+  if (d.st === 'sent') {
+    st.view = 'sent';
+    st.room = { partner: d.to_name || 'Đối tác' };
+  } else if (d.st === 'room') {
+    const prevLocked = st.room && st.room.me && st.room.me.locked;
+    st.view = 'room';
+    st.room = d.room;
+    if (prevLocked === undefined && d.room.me && !d.room.me.locked) {
+      st.selIdx = -1;
+    }
+  } else if (d.st === 'ended') {
+    st.view = 'ended';
+    st.room = d.room;
+  } else {
+    const wasActive = st.view === 'room' || st.view === 'sent';
+    st.view = 'idle';
+    st.room = null;
+    if (wasActive) {
+      st.hist = null;
+      tradePost(uid, { action: 'history' }).then(h => {
+        st.hist = (h && h.rows) || [];
+        tradeRefresh(uid, true);
+      });
+    }
+  }
+  tradeRefresh(uid, false);
+};
+
+// 5. Tính Signature để chống rebuild giật input (giống 100% _trCalcSig)
+function tradeCalcSig(uid) {
+  const st = initTradeState(uid);
+  const r = st.room || {};
+  return [
+    st.view,
+    r.st || '',
+    r.ver || 0,
+    r.partner || '',
+    r.me && r.me.locked ? 1 : 0,
+    r.me && (r.me.confirm || r.me.confirmed) ? 1 : 0,
+    r.other && r.other.locked ? 1 : 0,
+    r.other && (r.other.confirm || r.other.confirmed) ? 1 : 0,
+    st.hist === null ? -1 : st.hist.length
+  ].join('|');
+}
+
+// 6. Timer Tick và Polling (giống 100% _trTickStart & _trTimerTick)
+function tradeTickStart(uid) {
+  const st = initTradeState(uid);
+  if (st.timer) return;
+
+  st.timer = setInterval(() => {
+    const panel = document.getElementById(`mkt-trade-panel-${uid}`);
+    if (!panel || panel.closest('.subtab-pane')?.style.display === 'none') {
+      clearInterval(st.timer);
+      st.timer = null;
+      return;
+    }
+
+    // Cập nhật đồng hồ đếm ngược
+    tradeTimerTick(uid);
+
+    // Nếu trạng thái thay đổi thì refresh
+    const sig = tradeCalcSig(uid);
+    if (sig !== st.sig) {
+      tradeRefresh(uid, false);
+    }
+
+    // Poll status mỗi 2 giây khi đang ở phòng hoặc đang gửi mời
+    st.tickCount = (st.tickCount || 0) + 1;
+    if (st.tickCount >= 2) {
+      st.tickCount = 0;
+      if (st.view === 'sent' || st.view === 'room') {
+        tradePost(uid, { action: 'status' }).then(d => tradeApplyStatus(uid, d));
+      }
+    }
+  }, 1000);
+}
+
+window.tradeTimerTick = function(uid) {
+  const st = initTradeState(uid);
+  const el = document.getElementById(`tr-timer-${uid}`);
+  if (!el || !st.room || !st.room.deadline) return;
+
+  const left = Math.max(0, (st.room.deadline | 0) - Math.floor(Date.now() / 1000));
+  const tstr = Math.floor(left / 60) + ':' + ('0' + (left % 60)).slice(-2);
+  el.textContent = '⏳ ' + tstr;
+  el.style.color = left < 60 ? '#ef4444' : '#94a3b8';
+};
+
+// 7. Render giao diện Trade (100% port layout game sang Dark Theme)
+window.tradeRefresh = function(uid, force = false) {
+  const st = initTradeState(uid);
+  const panel = document.getElementById(`mkt-trade-panel-${uid}`);
+  if (!panel) return;
+
+  const ae = document.activeElement;
+  if (!force && ae && ae.tagName === 'INPUT' && ae.closest && ae.closest(`#mkt-trade-panel-${uid}`)) {
+    return; // Đang gõ phím -> hoãn rebuild tránh mất focus
+  }
+
+  const sig = tradeCalcSig(uid);
+  if (!force && sig === st.sig) {
+    tradeTimerTick(uid);
+    return;
+  }
+  st.sig = sig;
+
+  // Lưu lại giá trị ô input trước khi render
+  const prevG = document.getElementById(`tr-gold-${uid}`)?.value;
+  const prevQ = document.getElementById(`tr-qty-${uid}`)?.value;
+
+  panel.innerHTML = tradeBuildBodyHtml(uid, st);
+
+  // Khôi phục giá trị đã nhập
+  const newG = document.getElementById(`tr-gold-${uid}`);
+  const newQ = document.getElementById(`tr-qty-${uid}`);
+  if (newG && prevG) newG.value = prevG;
+  if (newQ && prevQ && prevQ !== '1') newQ.value = prevQ;
+};
+
+// Xây dựng nội dung HTML tương ứng từng trạng thái (giống 100% _trBody)
+function tradeBuildBodyHtml(uid, st) {
+  // A. Trạng thái SENT: Đang chờ đối tác trả lời
+  if (st.view === 'sent') {
+    return `
+      <div style="text-align:center; padding:24px 10px; background:rgba(15,23,42,0.6); border:1px dashed rgba(56,189,248,0.3); border-radius:12px;">
+        <div style="font-size:38px; line-height:1; animation:pulse 1.5s infinite;">🤝</div>
+        <div style="font-size:14px; font-weight:800; color:#fbbf24; margin-top:8px;">
+          Đang chờ <span style="color:#38bdf8;">${st.room?.partner || 'đối tác'}</span> trả lời...
+        </div>
+        <div style="font-size:11px; color:#94a3b8; margin-top:4px;">Lời mời hết hạn sau 60 giây — Không trả lời = Tự động hủy</div>
+        <div style="margin-top:16px;">
+          <button class="btn btn-secondary" onclick="tradeCancel('${uid}')" style="color:#f87171; border-color:rgba(248,113,113,0.3); padding:6px 16px; font-weight:700;">
+            ❌ Hủy Lời Mời
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
+  // B. Trạng thái ROOM: Phòng giao dịch 1-1
+  if (st.view === 'room' && st.room) {
+    const r = st.room;
+    const left = Math.max(0, (r.deadline | 0) - Math.floor(Date.now() / 1000));
+    const tstr = Math.floor(left / 60) + ':' + ('0' + (left % 60)).slice(-2);
+    
+    const me = r.me || {};
+    const other = r.other || r.partner || {};
+    const meL = !!me.locked, otL = !!other.locked;
+    const meC = !!(me.confirm || me.confirmed), otC = !!(other.confirm || other.confirmed);
+
+    let stTxt = 'Chọn đồ và tiền rồi bấm Khóa Lời Đề Nghị';
+    if (meL && !otL) stTxt = 'Đang chờ đối tác khóa lời đề nghị...';
+    else if (!meL && otL) stTxt = 'Đối tác đã khóa! Hãy chọn đồ và bấm Khóa Lời Đề Nghị';
+    else if (meL && otL && !meC) stTxt = 'Kiểm tra kỹ vật phẩm 2 bên rồi bấm Xác Nhận Giao Dịch';
+    else if (meC && !otC) stTxt = 'Bạn đã xác nhận. Đang chờ đối tác bấm xác nhận...';
+
+    let myEscHtml = tradeBuildEscRowHtml(me.esc, me.gold);
+    let otherEscHtml = tradeBuildEscRowHtml(other.esc, other.gold);
+
+    let feeHtml = '';
+    if (r.initiator && r.fee) {
+      const p = r.fee.p | 0;
+      feeHtml = `
+        <div style="margin-top:8px; border:1px solid rgba(192,132,252,0.3); background:rgba(192,132,252,0.1); border-radius:8px; padding:6px 10px; font-size:11px; color:#c084fc;">
+          💎 Phí dịch vụ: <b>${p} P</b> (Người bắt đầu giao dịch chi trả khi hoàn tất)
+        </div>
+      `;
+    }
+
+    return `
+      <div style="display:flex; justify-content:space-between; align-items:center; font-size:13px; font-weight:800; color:#f1f5f9; margin-bottom:8px;">
+        <span>🤝 Giao dịch với: <span style="color:#38bdf8;">${r.partner || other.name || 'Đối tác'}</span></span>
+        <span id="tr-timer-${uid}" style="color:${left < 60 ? '#ef4444' : '#94a3b8'};">⏳ ${tstr}</span>
+      </div>
+
+      <!-- 2 Cột Thẻ Đề Nghị -->
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px;">
+        <!-- Của Tôi -->
+        <div style="border:1.5px solid ${meL ? '#10b981' : 'rgba(255,255,255,0.1)'}; border-radius:10px; padding:8px; background:${meL ? 'rgba(16,185,129,0.12)' : 'rgba(30,41,59,0.5)'};">
+          <div style="font-size:11px; font-weight:800; color:#38bdf8; display:flex; justify-content:space-between;">
+            <span>BẠN ĐƯA ${meL ? '🔒' : ''} ${meC ? '✅' : ''}</span>
+          </div>
+          ${myEscHtml}
+          ${meL && !meC ? `<button onclick="tradeUnlock('${uid}')" style="width:100%; margin-top:6px; background:rgba(255,255,255,0.1); color:#cbd5e1; border:1px solid rgba(255,255,255,0.2); border-radius:6px; padding:4px; font-size:10px; font-weight:700; cursor:pointer;">🔓 Mở Khóa / Chỉnh Lại</button>` : ''}
+        </div>
+
+        <!-- Của Đối Tác -->
+        <div style="border:1.5px solid ${otL ? '#10b981' : 'rgba(255,255,255,0.1)'}; border-radius:10px; padding:8px; background:${otL ? 'rgba(16,185,129,0.12)' : 'rgba(30,41,59,0.5)'};">
+          <div style="font-size:11px; font-weight:800; color:#c084fc; display:flex; justify-content:space-between;">
+            <span>ĐỐI TÁC ĐƯA ${otL ? '🔒' : ''} ${otC ? '✅' : ''}</span>
+          </div>
+          ${otherEscHtml}
+        </div>
+      </div>
+
+      <!-- Bộ chọn vật phẩm (Picker) khi chưa khóa -->
+      ${!meL ? tradeBuildPickerHtml(uid, st) : ''}
+
+      ${feeHtml}
+
+      <div style="font-size:11px; color:#fbbf24; text-align:center; margin:8px 0; font-weight:600;">${stTxt}</div>
+
+      <!-- Nút Hành Động -->
+      <div style="display:flex; flex-direction:column; gap:6px;">
+        <button onclick="tradeConfirm('${uid}')" ${meL && otL && !meC ? '' : 'disabled'} style="width:100%; padding:9px; border-radius:8px; border:none; font-size:13px; font-weight:800; cursor:${meL && otL && !meC ? 'pointer' : 'default'}; background:${meL && otL && !meC ? '#16a34a' : 'rgba(255,255,255,0.1)'}; color:${meL && otL && !meC ? '#fff' : '#64748b'};">
+          ✅ Xác Nhận Giao Dịch
+        </button>
+        <button onclick="tradeCancel('${uid}')" style="width:100%; padding:6px; border-radius:8px; border:1px solid rgba(248,113,113,0.3); background:rgba(248,113,113,0.1); color:#f87171; font-size:11px; font-weight:700; cursor:pointer;">
+          ❌ Hủy Giao Dịch
+        </button>
+      </div>
+    `;
+  }
+
+  // C. Trạng thái ENDED: Kết thúc
+  if (st.view === 'ended' && st.room) {
+    const done = st.room.st === 'done';
+    setTimeout(() => {
+      if (st.view === 'ended') {
+        st.view = 'idle';
+        st.room = null;
+        st.hist = null;
+        tradePost(uid, { action: 'history' }).then(d => {
+          st.hist = (d && d.rows) || [];
+          tradeRefresh(uid, true);
+        });
+      }
+    }, 4000);
+
+    return `
+      <div style="text-align:center; padding:20px 10px; background:rgba(15,23,42,0.6); border:1px solid ${done ? '#16a34a' : '#f59e0b'}; border-radius:12px;">
+        <div style="font-size:38px;">${done ? '🎉' : '↩️'}</div>
+        <div style="font-size:14px; font-weight:800; color:${done ? '#4ade80' : '#fbbf24'}; margin-top:6px;">
+          ${done ? 'Giao dịch thành công!' : 'Giao dịch đã bị hủy'}
+        </div>
+        <div style="font-size:11px; color:#94a3b8; margin-top:4px;">
+          ${done ? 'Vật phẩm và Vàng đã vào túi đồ của bạn.' : 'Toàn bộ vật phẩm đã được hoàn trả về rương.'}
+        </div>
+      </div>
+    `;
+  }
+
+  // D. Trạng thái IDLE: Mặc định (Tìm kiếm người chơi + Lịch sử)
+  const hist = st.hist == null
+    ? '<div style="text-align:center; padding:10px; color:#94a3b8; font-size:11px;"><span class="spinner" style="display:inline-block; margin-right:4px;"></span> Đang tải lịch sử...</div>'
+    : (!st.hist.length
+      ? '<div style="font-size:10px; color:#94a3b8; text-align:center; padding:8px 0;">Chưa có lịch sử giao dịch</div>'
+      : st.hist.map(h => {
+          const ok = h.status === 'done';
+          const gv = (h.gave_item ? `${h.gave_item.icon || '📦'} ${h.gave_item.name} ×${h.gave_item.q | 0}` : '') + ((h.gave_gold | 0) > 0 ? ` 💰${(h.gave_gold | 0).toLocaleString()}G` : '');
+          const gt = (h.got_item ? `${h.got_item.icon || '📦'} ${h.got_item.name} ×${h.got_item.q | 0}` : '') + ((h.got_gold | 0) > 0 ? ` 💰${(h.got_gold | 0).toLocaleString()}G` : '');
+          return `
+            <div style="border-bottom:1px dashed rgba(255,255,255,0.08); padding:6px 4px; font-size:11px;">
+              <div style="display:flex; justify-content:space-between; margin-bottom:2px;">
+                <span style="font-weight:700; color:${ok ? '#4ade80' : '#94a3b8'};">${ok ? '✅' : '↩️'} ${h.partner || 'Đối tác'}</span>
+                <span style="color:#64748b; font-size:10px;">${String(h.when || '').slice(5, 16)}</span>
+              </div>
+              ${ok ? `
+                <div style="color:#f87171; font-size:10.5px;">↗ Gửi: ${gv || '---'}</div>
+                <div style="color:#4ade80; font-size:10.5px;">↘ Nhận: ${gt || '---'}</div>
+                ${(h.fee | 0) > 0 ? `<div style="color:#c084fc; font-size:10px;">💎 -${h.fee | 0} P</div>` : ''}
+              ` : `
+                <div style="color:#64748b; font-size:10px;">Đã hủy / hết hạn</div>
+              `}
+            </div>
+          `;
+        }).join(''));
+
+  return `
+    <div>
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+        <div style="font-size:12px; font-weight:800; color:#fbbf24;">🤝 Giao Dịch 1-1</div>
+      </div>
+      <div style="font-size:10.5px; color:#94a3b8; margin-bottom:8px;">
+        Tìm kiếm người chơi đang online để gửi lời mời giao dịch (mỗi bên tối đa 1 vật phẩm + Vàng).
+      </div>
+
+      <!-- Ô Nhập Tìm Kiếm -->
+      <input id="tr-search-input-${uid}" class="tr-search-input" type="text" placeholder="🔍 Nhập tên người chơi (ít nhất 2 ký tự)..." value="${st.lastQ || ''}" oninput="tradeSearchInput('${uid}', this.value)">
+      
+      <!-- Hộp Danh Sách Kết Quả Tìm Kiếm -->
+      <div id="tr-results-${uid}" style="margin-top:4px; max-height:150px; overflow-y:auto; background:rgba(15,23,42,0.6); border:1px solid rgba(255,255,255,0.08); border-radius:8px; ${st.lastQ ? 'display:block;' : 'display:none;'}">
+        ${tradeBuildResultsHtml(uid, st)}
+      </div>
+
+      <!-- Lịch Sử -->
+      <div style="font-size:11px; font-weight:700; color:#cbd5e1; margin-top:12px; border-top:1px solid rgba(255,255,255,0.08); padding-top:8px; margin-bottom:4px;">
+        📜 Lịch Sử Giao Dịch
+      </div>
+      <div style="max-height:160px; overflow-y:auto; background:rgba(15,23,42,0.4); border-radius:8px; padding:4px 6px;">
+        ${hist}
+      </div>
+    </div>
+  `;
+}
+
+// 8. Hiển thị đề nghị đồ và tiền
+function tradeBuildEscRowHtml(esc, gold) {
+  let h = '';
+  if (esc) {
+    h += `
+      <div style="display:flex; align-items:center; gap:5px; font-size:11px; color:#f1f5f9; margin-top:4px;">
+        <span style="font-size:15px;">${esc.icon || '📦'}</span>
+        <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600;">${esc.name}</span>
+        <b style="color:#4ade80;">×${esc.q | 0}</b>
+      </div>
+    `;
+    if (esc.desc) {
+      h += `<div style="font-size:9.5px; color:#94a3b8; margin-top:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${esc.desc}</div>`;
+    }
+  }
+  if ((gold | 0) > 0) {
+    h += `<div style="font-size:11.5px; color:#fbbf24; font-weight:700; margin-top:4px;">💰 ${(gold | 0).toLocaleString()} G</div>`;
+  }
+  if (!h) {
+    h = '<div style="font-size:10px; color:#64748b; margin-top:4px;">(Chưa đặt gì)</div>';
+  }
+  return h;
+}
+
+// 9. Bộ Chọn Vật Phẩm trong phòng (giống 100% _trPickerHtml)
+function tradeBuildPickerHtml(uid, st) {
+  const inv = st.inventory || [];
+  let items = inv;
+
+  if (st.cat === 'diamond' || st.cat === 'resource' || st.cat === 'ore' || st.cat === 'card' || st.cat === 'egg') {
+    items = inv.filter(it => it.item_type === st.cat);
+  } else if (st.cat === 'boxes') {
+    items = inv.filter(it => it.item_type && it.item_type.endsWith('_box'));
+  } else if (st.cat === 'modules') {
+    items = inv.filter(it => it.item_type && it.item_type.startsWith('module_') && !it.item_type.endsWith('_box'));
+  }
+  st.items = items;
+
+  const cats = [
+    { k: 'diamond', n: '💎 Kim Cương' },
+    { k: 'resource', n: '🪵 Nguyên Liệu' },
+    { k: 'ore', n: '🪨 Quặng' },
+    { k: 'boxes', n: '📦 Hộp' },
+    { k: 'card', n: '🎴 Thẻ Bài' },
+    { k: 'egg', n: '🥚 Trứng' },
+    { k: 'modules', n: '🔧 Module' }
+  ];
+
+  const catBtns = cats.map(c => `
+    <button class="subtab-btn ${st.cat === c.k ? 'active' : ''}" onclick="tradeSetCat('${uid}', '${c.k}')" style="font-size:10px; padding:2px 6px;">
+      ${c.n}
+    </button>
+  `).join('');
+
+  const grid = items.length ? items.map((it, i) => `
+    <div onclick="tradePickItem('${uid}', ${i})" style="display:flex; align-items:center; gap:4px; border:1.5px solid ${i === st.selIdx ? '#38bdf8' : 'rgba(255,255,255,0.08)'}; background:${i === st.selIdx ? 'rgba(56,189,248,0.2)' : 'rgba(0,0,0,0.3)'}; border-radius:6px; padding:4px 6px; font-size:10px; cursor:pointer; overflow:hidden;">
+      <span style="font-size:14px;">${it.icon || '📦'}</span>
+      <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#fff; flex:1;">${it.name}</span>
+      <b style="color:#4ade80;">×${it.qty | 0}</b>
+    </div>
+  `).join('') : '<div style="font-size:10px; color:#94a3b8; padding:8px; grid-column:1/-1; text-align:center;">Không có vật phẩm trong nhóm này.</div>';
+
+  const sel = st.selIdx >= 0 ? items[st.selIdx] : null;
+  const maxQ = sel ? Math.max(1, sel.qty | 0) : 1;
+
+  return `
+    <div style="background:rgba(15,23,42,0.7); border:1px solid rgba(255,255,255,0.08); border-radius:10px; padding:8px; margin-top:6px;">
+      <div style="display:flex; gap:4px; overflow-x:auto; padding-bottom:4px; margin-bottom:4px;">${catBtns}</div>
+      <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(110px, 1fr)); gap:4px; max-height:120px; overflow-y:auto;">
+        ${grid}
+      </div>
+      <div style="display:flex; align-items:center; gap:8px; margin-top:8px; font-size:11px;">
+        <span>Số lượng:</span>
+        <input id="tr-qty-${uid}" type="number" min="1" max="${maxQ}" value="1" ${sel && maxQ > 1 ? '' : 'disabled'} style="width:60px; padding:3px 6px; background:rgba(0,0,0,0.4); border:1px solid rgba(255,255,255,0.2); border-radius:6px; color:#fff; text-align:center;">
+        <span>💰 Vàng:</span>
+        <input id="tr-gold-${uid}" type="number" min="0" value="0" placeholder="0" style="width:80px; padding:3px 6px; background:rgba(0,0,0,0.4); border:1px solid rgba(255,255,255,0.2); border-radius:6px; color:#fbbf24; font-weight:700;">
+      </div>
+      <button onclick="tradeLock('${uid}')" style="width:100%; margin-top:8px; background:#0284c7; color:#fff; border:none; border-radius:8px; padding:7px; font-size:12px; font-weight:700; cursor:pointer;">
+        🔒 Khóa Lời Đề Nghị
+      </button>
+    </div>
+  `;
+}
+
+// 10. Tìm kiếm người chơi (giống 100% _trSearchInput & _trResultsHtml)
+let _tradeSearchTimeout = {};
+window.tradeSearchInput = function(uid, val) {
+  const st = initTradeState(uid);
+  st.lastQ = String(val || '');
+  clearTimeout(_tradeSearchTimeout[uid]);
+
+  const resEl = document.getElementById(`tr-results-${uid}`);
+  if (!val || val.trim().length < 2) {
+    st.searchRes = [];
+    if (resEl) {
+      resEl.innerHTML = tradeBuildResultsHtml(uid, st);
+      resEl.style.display = val.trim() ? 'block' : 'none';
+    }
+    return;
+  }
+
+  _tradeSearchTimeout[uid] = setTimeout(async () => {
+    const d = await tradePost(uid, { action: 'search', q: st.lastQ.trim() });
+    st.searchRes = (d && d.players) || [];
+    if (resEl) {
+      resEl.innerHTML = tradeBuildResultsHtml(uid, st);
+      resEl.style.display = 'block';
+    }
+  }, 350);
+};
+
+function tradeBuildResultsHtml(uid, st) {
+  if (!st.searchRes.length) {
+    return `<div style="font-size:10px; color:#94a3b8; text-align:center; padding:8px 0;">${st.lastQ.trim().length >= 2 ? 'Không tìm thấy người chơi online' : 'Nhập ít nhất 2 ký tự...'}</div>`;
+  }
+  return st.searchRes.map(p => `
+    <div style="display:flex; align-items:center; gap:6px; padding:6px 8px; border-bottom:1px dashed rgba(255,255,255,0.05);">
+      <span style="width:7px; height:7px; border-radius:50%; background:#22c55e; flex:none;"></span>
+      <span style="flex:1; font-size:12px; font-weight:700; color:#f1f5f9; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${p.name}</span>
+      <span style="font-size:10px; color:#94a3b8;">Lv.${p.lv | 0}</span>
+      ${(p.vip | 0) > 0 ? `<span style="font-size:9px; font-weight:800; color:#fbbf24;">VIP${p.vip | 0}</span>` : ''}
+      <button onclick="tradeInvite('${uid}', '${p.uid || p.id}', '${p.name}')" style="flex:none; font-size:10px; font-weight:700; border:none; border-radius:6px; background:#0d9488; color:#fff; padding:4px 10px; cursor:pointer;">
+        Mời
+      </button>
+    </div>
+  `).join('');
+}
+
+// 11. Các hành động Mời, Phản hồi, Khóa, Mở Khóa, Xác Nhận, Hủy (giống 100% game client)
+window.tradeInvite = function(uid, targetUid, targetName) {
+  const st = initTradeState(uid);
+  if (st.busy) return;
+  st.busy = true;
+
+  tradePost(uid, { action: 'invite', target: targetUid }).then(d => {
+    st.busy = false;
+    if (!d) return;
+    if (!d.ok) {
+      showToast('Lỗi: ' + (d.error || '?'), 'error');
+      return;
+    }
+    showToast(`Đã gửi lời mời tới ${targetName}`);
+    tradeApplyStatus(uid, Object.assign({ ok: 1, st: 'sent', to_name: targetName }, d));
+  });
+};
+
+window.tradeRespond = function(uid, accept) {
+  tradePost(uid, { action: 'respond', accept: accept ? 1 : 0 }).then(d => {
+    if (!d) return;
+    if (!d.ok) {
+      if (d.error) showToast('❌ ' + d.error, 'error');
+      return;
+    }
+    if (accept && d.st === 'room') {
+      switchTab(uid, 'market-buy');
+      switchMarketSubTab(uid, 'trade');
+      tradeApplyStatus(uid, d);
+    } else {
+      tradeApplyStatus(uid, { ok: 1, st: 'none' });
+    }
+  });
+};
+
+window.tradeSetCat = function(uid, c) {
+  const st = initTradeState(uid);
+  st.cat = c;
+  st.selIdx = -1;
+  tradeRefresh(uid, true);
+};
+
+window.tradePickItem = function(uid, i) {
+  const st = initTradeState(uid);
+  st.selIdx = (st.selIdx === i ? -1 : i);
+  tradeRefresh(uid, true);
+};
+
+window.tradeLock = function(uid) {
+  const st = initTradeState(uid);
+  if (st.busy) return;
+
+  const gold = Math.max(0, parseInt(document.getElementById(`tr-gold-${uid}`)?.value || 0) || 0);
+  const sel = st.selIdx >= 0 ? st.items[st.selIdx] : null;
+  const qty = sel ? Math.max(1, Math.min(sel.qty | 0 || 1, parseInt(document.getElementById(`tr-qty-${uid}`)?.value || 1) || 1)) : 0;
+
+  if (!sel && gold <= 0) {
+    showToast('Vui lòng chọn ít nhất 1 vật phẩm hoặc nhập số Vàng', 'warning');
+    return;
+  }
+
+  st.busy = true;
+  const data = { action: 'lock', gold: gold };
+  if (sel) {
+    Object.assign(data, {
+      item_type: sel.item_type,
+      item_id: sel.item_id || 0,
+      item_slot: sel.item_slot || sel.slot || '',
+      item_tier: sel.tier || 0,
+      qty: sel.isModule ? 1 : qty,
+      item_icon: sel.icon,
+      item_name: sel.name,
+      item_desc: sel.desc,
+      item_rarity: sel.rarity || 'white'
+    });
+  }
+
+  tradePost(uid, data).then(d => {
+    st.busy = false;
+    if (!d) return;
+    if (!d.ok) {
+      showToast('Lỗi: ' + (d.error || '?'), 'error');
+      tradePost(uid, { action: 'status' }).then(s => tradeApplyStatus(uid, s));
+      return;
+    }
+    st.selIdx = -1;
+    tradeApplyStatus(uid, d);
+  });
+};
+
+window.tradeUnlock = function(uid) {
+  const st = initTradeState(uid);
+  if (st.busy) return;
+  st.busy = true;
+  tradePost(uid, { action: 'unlock' }).then(d => {
+    st.busy = false;
+    if (d && !d.ok && d.error) showToast('Lỗi: ' + d.error, 'error');
+    if (d) tradeApplyStatus(uid, d);
+  });
+};
+
+window.tradeConfirm = function(uid) {
+  const st = initTradeState(uid);
+  if (st.busy || !st.room) return;
+  st.busy = true;
+  tradePost(uid, { action: 'confirm', ver: st.room.ver | 0 }).then(d => {
+    st.busy = false;
+    if (d && !d.ok && d.error) {
+      showToast('⚠️ ' + d.error, 'error');
+      if (d.room) {
+        st.room = d.room;
+        tradeRefresh(uid, false);
+      }
+      return;
+    }
+    if (d) tradeApplyStatus(uid, d);
+  });
+};
+
+window.tradeCancel = function(uid) {
+  const st = initTradeState(uid);
+  if (st.busy) return;
+  st.busy = true;
+  tradePost(uid, { action: 'cancel' }).then(d => {
+    st.busy = false;
+    if (d) tradeApplyStatus(uid, d);
+    st.hist = null;
+  });
+};
+
+// 12. Popup Lời Mời Giao Dịch Nổi (Giống 100% _trInvitePopup trong game)
+window.showTradePopup = function(uid, inv) {
+  if (!inv || !inv.tid) return;
+  if (window._seenTradeInv[uid] === inv.tid) return;
+  if (document.getElementById(`tr-inv-pop-${inv.tid}`)) return;
+
+  window._seenTradeInv[uid] = inv.tid;
+
+  const accounts = window.lastFetchedAccounts || [];
+  const bot = accounts.find(a => a.line_uid === uid);
+  const botName = bot ? bot.name : 'Bot';
+  const fromName = inv.from_name || 'Người chơi';
+
+  const ov = document.createElement('div');
+  ov.id = `tr-inv-pop-${inv.tid}`;
+  ov.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.65); z-index:10007; display:flex; align-items:center; justify-content:center; padding:16px; backdrop-filter:blur(3px); animation:fadeIn 0.2s ease-out;';
+
+  const box = document.createElement('div');
+  box.style.cssText = 'background:#1e293b; border:1.5px solid rgba(56,189,248,0.5); border-radius:16px; padding:20px 22px; max-width:320px; width:100%; text-align:center; box-shadow:0 15px 40px rgba(0,0,0,0.6); color:#f1f5f9;';
+  box.innerHTML = `
+    <div style="font-size:38px; line-height:1; animation:pulse 1.5s infinite;">🤝</div>
+    <div style="font-size:14px; font-weight:800; color:#fbbf24; margin-top:8px;">
+      <span style="color:#38bdf8;">${fromName}</span> muốn giao dịch với <span style="color:#a855f7;">${botName}</span>
+    </div>
+    <div style="font-size:10.5px; color:#94a3b8; margin-top:4px;">Lời mời hết hạn sau 60 giây</div>
+  `;
+
+  const row = document.createElement('div');
+  row.style.cssText = 'display:flex; gap:8px; margin-top:16px;';
+
+  const bA = document.createElement('button');
+  bA.textContent = '✅ Chấp Nhận';
+  bA.style.cssText = 'flex:1; background:#16a34a; color:#fff; border:none; border-radius:10px; padding:10px; font-size:12.5px; font-weight:700; cursor:pointer; transition:0.2s;';
+  bA.onclick = () => {
+    ov.remove();
+    tradeRespond(uid, true);
+    // Scroll tới bot card
+    const card = document.getElementById(`card-${uid}`);
+    if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  };
+
+  const bD = document.createElement('button');
+  bD.textContent = '❌ Từ Chối';
+  bD.style.cssText = 'flex:1; background:rgba(255,255,255,0.1); color:#cbd5e1; border:1px solid rgba(255,255,255,0.2); border-radius:10px; padding:10px; font-size:12.5px; font-weight:700; cursor:pointer; transition:0.2s;';
+  bD.onclick = () => {
+    ov.remove();
+    tradeRespond(uid, false);
+  };
+
+  row.appendChild(bA);
+  row.appendChild(bD);
+  box.appendChild(row);
+  ov.appendChild(box);
+  document.body.appendChild(ov);
+
+  setTimeout(() => {
+    if (ov.parentNode) ov.remove();
+  }, 60000);
 };
