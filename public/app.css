@@ -2731,3 +2731,61 @@ input:checked + .slider:before {
   background: rgba(239, 68, 68, 0.2);
   color: #fca5a5;
 }
+
+/* Team Header Tag Badge */
+.team-tag-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  font-size: 0.73rem;
+  font-weight: 700;
+  white-space: nowrap;
+  letter-spacing: 0.3px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+}
+
+.team-tag-leader {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.25), rgba(217, 119, 6, 0.35));
+  border: 1px solid rgba(245, 158, 11, 0.6);
+  color: #fbbf24;
+}
+
+.team-tag-member {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.2), rgba(37, 99, 235, 0.3));
+  border: 1px solid rgba(59, 130, 246, 0.5);
+  color: #60a5fa;
+}
+
+/* Ping Network Latency Badge */
+.ping-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px;
+  border-radius: 5px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  white-space: nowrap;
+  font-family: monospace;
+  letter-spacing: -0.2px;
+}
+
+.ping-good {
+  background: rgba(34, 197, 94, 0.15);
+  color: #4ade80;
+  border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+.ping-medium {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.ping-poor {
+  background: rgba(239, 68, 68, 0.15);
+  color: #fca5a5;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}

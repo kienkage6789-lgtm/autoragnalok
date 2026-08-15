@@ -1137,7 +1137,7 @@ function getCardStars(translatedName) {
 }
 
 function getModuleTier(translatedName) {
-  if (!translatedName) return 'T1';
+  if (!translatedName) return null;
   const match = translatedName.match(/\bT([1-5])\b/i) || translatedName.match(/tier\s*([1-5])\b/i) || translatedName.match(/bậc\s*([1-5])\b/i) || translatedName.match(/cấp\s*([1-5])\b/i);
   if (match) return `T${match[1]}`;
   const nameLower = translatedName.toLowerCase();
@@ -1146,7 +1146,7 @@ function getModuleTier(translatedName) {
       return `T${i}`;
     }
   }
-  return 'T1';
+  return null;
 }
 
 function getModuleType(translatedName) {
@@ -1238,6 +1238,7 @@ class BotInstance {
     this.lastUpdate = null;
     this.error = null;
     this.status = 'idle';
+    this.ping = 0;
     this.pollCount = 0;
     this.timer = null;
     this.isPolling = false;
@@ -1248,7 +1249,13 @@ class BotInstance {
     this.bossSpawnTimes = {}; // Tracker for when each boss starts appearing: bossId -> timestamp
     this._bossNameCache = {}; // Cache boss names for logging when they disappear
     this._lastBossStatusLogAt = 0; // Track last time boss status log was sent to prevent spamming
-    this.firstErrorAt = null; // Mốc thời gian bắt đầu lỗi liên tục
+    this.guildDungeonActive = false;
+    this.guildDungeonIsTeam = false;
+    this.monsters = null;
+    this.gdunEmptyPolls = 0;
+    this.gdunEnteredAt = 0;         // Timestamp khi vào Phụ Bản Guild (dùng cho timer-based auto-exit)
+    this.gdunLastKillAt = 0;        // Timestamp khi hạ gục Boss Guild gần nhất
+    this._exitingGuildDungeon = false; // Guard chống gọi exitGuildDungeon() liên tiếp
     this.isMvpCycling = false;
     this.mvpCycleMapIndex = 0;
     this.mvpCycleMapStayCount = 0;
@@ -1315,7 +1322,7 @@ class BotInstance {
       'house_parts','house_parts_qty','stat_parts','stat_parts_qty',
       'home_crops','home_seeds','home_lv','home_guards','home_return',
       'pet_mid','pet_exp','pet_mvp','pet_olv','pet_up_atk','pet_up_hp','pet_up_reco','pet_batk','pet_bhp',
-      'pvp_today','pvp_won','pvp_lost','pvp_pts'
+      'pvp_today','pvp_won','pvp_lost','pvp_pts','gdun_in'
     ];
     for (const f of COLD_FIELDS) {
       if (newPlayer[f] === undefined && this.player[f] !== undefined) {
@@ -1727,6 +1734,91 @@ class BotInstance {
     }
   }
 
+  async enterGuildDungeon(isTeam = false) {
+    try {
+      const res = await this.sendRequest('https://ragnalok.online/human/xhrpg_guild.php', {
+        line_uid: this.line_uid,
+        session_token: this.session_token,
+        action: 'gdun_enter',
+        lang: 'vi'
+      });
+      if (res && res.ok) {
+        if (res.player) {
+          this.updatePlayerState(res.player);
+        }
+        if (!this.player) this.player = {};
+        // Luôn đặt gdun_in = 1 khi enter thành công, bất kể server có trả res.map hay không
+        this.player.map = (res.map | 0) || 12;
+        this.player.gdun_in = 1;
+        this.player.x = (res.x != null) ? res.x : 1125;
+        this.player.y = (res.y != null) ? res.y : 1125;
+        this.player.explore_cx = this.player.x;
+        this.player.explore_cy = this.player.y;
+        this.spots = null;
+        this.bosses = null;
+        this.monsters = null;
+        this.guildDungeonActive = true;
+        this.guildDungeonIsTeam = !!isTeam;
+        this.gdunEmptyPolls = 0;
+        this.gdunEnteredAt = Date.now(); // Bắt đầu bộ đếm thời gian auto-exit
+        this.gdunLastKillAt = 0;         // Reset kill timestamp khi vào dungeon mới
+        this._exitingGuildDungeon = false;
+        const modeTxt = isTeam ? 'Cả Team' : 'Đi 1 Mình (Solo)';
+        this.addLog('SUCCESS', `🏰 [Guild Dungeon] Đã vào Phụ Bản Guild (Chế độ: ${modeTxt}) - Map ${this.player ? this.player.map : 12}! Tiến hành săn Boss...`);
+        return true;
+      } else {
+        this.addLog('WARNING', `🏰 [Guild Dungeon] Không thể vào Phụ Bản Guild: ${(res && res.error) || 'Lỗi không xác định'}`);
+        return false;
+      }
+    } catch (e) {
+      this.addLog('ERROR', `Lỗi vào Phụ Bản Guild: ${e.message}`);
+      return false;
+    }
+  }
+
+  async exitGuildDungeon() {
+    try {
+      const res = await this.sendRequest('https://ragnalok.online/human/xhrpg_guild.php', {
+        line_uid: this.line_uid,
+        session_token: this.session_token,
+        action: 'gdun_exit',
+        lang: 'vi'
+      });
+      if (res && res.ok) {
+        if (res.player) {
+          this.updatePlayerState(res.player);
+        }
+        if (!this.player) this.player = {};
+        // Luôn reset gdun_in = 0 khi exit thành công, bất kể server có trả res.map hay không
+        this.player.gdun_in = 0;
+        const returnMap = (res.map | 0) || parseInt(this.settings.targetMap) || 1;
+        this.player.map = returnMap;
+        if (res.x != null) this.player.x = res.x;
+        if (res.y != null) this.player.y = res.y;
+        this.spots = null;
+        this.bosses = null;
+        this.monsters = null;
+        this.guildDungeonActive = false;
+        this.guildDungeonIsTeam = false;
+        this.gdunEmptyPolls = 0;
+        this.gdunEnteredAt = 0;
+        this.gdunLastKillAt = 0;
+        this._exitingGuildDungeon = false;
+        this.addLog('SUCCESS', `↩️ [Guild Dungeon] Đã hoàn thành/thoát khỏi Phụ Bản Guild (Về Map ${returnMap})`);
+        await this.warpToMap(returnMap).catch(() => {});
+        return true;
+      } else {
+        this._exitingGuildDungeon = false; // Cho phép thử lại nếu server từ chối
+        this.addLog('WARNING', `↩️ [Guild Dungeon] Không thể thoát Phụ Bản Guild: ${(res && res.error) || 'Lỗi không xác định'}`);
+        return false;
+      }
+    } catch (e) {
+      this._exitingGuildDungeon = false; // Cho phép thử lại nếu exception
+      this.addLog('ERROR', `Lỗi thoát Phụ Bản Guild: ${e.message}`);
+      return false;
+    }
+  }
+
   async joinCountryWar() {
     try {
       const res = await this.sendRequest('https://ragnalok.online/human/xhrpg_cwar.php', {
@@ -2020,6 +2112,7 @@ class BotInstance {
       const timeoutMs = url.includes('xhrpg_game.php') ? 8000 : 10000;
       const timeout = setTimeout(() => controller.abort(), timeoutMs); // 8-10s timeout chịu trễ mạng tốt hơn
       
+      const reqStartTime = Date.now();
       try {
         const response = await fetch(url, {
           method: 'POST',
@@ -2034,6 +2127,9 @@ class BotInstance {
         }
 
         const text = await response.text();
+        const elapsed = Date.now() - reqStartTime;
+        this.ping = Math.round(this.ping ? (0.7 * this.ping + 0.3 * elapsed) : elapsed);
+
         try {
           const parsed = JSON.parse(text);
           clearTimeout(timeout);
@@ -2311,6 +2407,48 @@ class BotInstance {
 
     this.pollCount++;
 
+    // 🏰 Kiểm tra Đồng bộ Guild Dungeon đối với Member hoặc Tự động Thoát khi hạ Boss xong
+    if (this.player) {
+      const isMem = this.settings.teamRole === 'member';
+      const mTeamId = this.settings.teamId || 'none';
+      const ldr = (isMem && mTeamId !== 'none') 
+        ? Object.values(botInstances).find(b => b.userId === this.userId && b.settings.teamRole === 'leader' && (b.settings.teamId || 'none') === mTeamId) 
+        : null;
+
+      if (isMem && ldr && ldr.status === 'running' && ldr.player && this.settings.teamSynced === true) {
+        if (ldr.guildDungeonActive && ldr.guildDungeonIsTeam && !this.guildDungeonActive && Number(this.player.gdun_in) !== 1) {
+          this.addLog('SYSTEM', `🏰 [Team Member] Đồng bộ vào Phụ Bản Guild theo Trưởng nhóm (${ldr.name})...`);
+          await this.enterGuildDungeon(true);
+        } else if (!ldr.guildDungeonActive && (this.guildDungeonActive || Number(this.player.gdun_in) === 1)) {
+          this.addLog('SYSTEM', `↩️ [Team Member] Đồng bộ thoát Phụ Bản Guild theo Trưởng nhóm (${ldr.name})...`);
+          await this.exitGuildDungeon();
+        }
+      }
+
+      // Tự động thoát Phụ Bản Guild - 2 điều kiện:
+      // 1. Kill-based: 5 giây sau khi hạ gục Boss Guild (phát hiện qua d.events is_mvp kill)
+      // 2. Timer-based: 10 phút tối đa kể từ khi vào (fallback an toàn)
+      // NOTE: Boss Guild KHÔNG xuất hiện trong this.bosses (poll từ xhrpg_main.php)
+      if (this.guildDungeonActive && !this._exitingGuildDungeon) {
+        const now = Date.now();
+        const timeInDungeon = this.gdunEnteredAt ? (now - this.gdunEnteredAt) : 0;
+        const timeSinceKill = this.gdunLastKillAt ? (now - this.gdunLastKillAt) : 0;
+
+        const shouldExitByKill = (this.gdunLastKillAt > 0 && timeSinceKill >= 5000); // 5s sau kill Boss Guild
+        const shouldExitByTimer = (timeInDungeon >= 10 * 60 * 1000);                 // 10 phút tối đa
+
+        if (shouldExitByKill) {
+          this._exitingGuildDungeon = true;
+          this.addLog('SUCCESS', `🎉 [Guild Dungeon] Đã sạch Boss Guild! Tự động thoát Phụ Bản ra ngoài.`);
+          await this.exitGuildDungeon();
+        } else if (shouldExitByTimer) {
+          this._exitingGuildDungeon = true;
+          this.addLog('WARNING', `⏳ [Guild Dungeon] Đã ở trong Phụ Bản quá 10 phút. Tự động thoát ra ngoài.`);
+          await this.exitGuildDungeon();
+        }
+      }
+    }
+
     // 🗺️ Định tuyến bản đồ khẩn cấp (Map Routing) & Đồng bộ Trưởng nhóm (Leader)
     if (this.player) {
       const isMember = this.settings.teamRole === 'member';
@@ -2322,7 +2460,7 @@ class BotInstance {
       let activeTargetMapId;
       let shouldWarpCheck = false;
 
-      if (isMember && leader && leader.settings.bossHuntMode !== 'off') {
+      if (isMember && leader && leader.status === 'running' && leader.player && this.settings.teamSynced === true && this.settings.bossHuntMode && this.settings.bossHuntMode !== 'off' && leader.settings.bossHuntMode && leader.settings.bossHuntMode !== 'off') {
         // Đồng bộ trạng thái Cycle và Map từ Leader trước
         this.isMvpCycling = leader.isMvpCycling;
         this.mvpCycleMapIndex = leader.mvpCycleMapIndex;
@@ -2340,10 +2478,10 @@ class BotInstance {
           ? this.getCurrentMvpCycleMap() 
           : (isMvpReturning ? Number(this.mvpCycleOriginalMap) : (parseInt(this.settings.targetMap) || 1));
           
-        shouldWarpCheck = (this.settings.autoMap || this.isMvpCycling || isMvpReturning);
+        shouldWarpCheck = (this.settings.autoMap || (this.settings.bossHuntMode && this.settings.bossHuntMode !== 'off') || this.isMvpCycling || isMvpReturning);
       }
 
-      if (shouldWarpCheck && Number(this.player.map) !== Number(activeTargetMapId) && Number(this.player.map) !== 5) {
+      if (shouldWarpCheck && !this.guildDungeonActive && !this.inEventMode && Number(this.player.gdun_in) !== 1 && Number(this.player.map) !== Number(activeTargetMapId) && Number(this.player.map) !== 5) {
         const targetMapId = activeTargetMapId;
         const mapDef = getMapDefs().find(m => m.id === targetMapId);
         if (mapDef && (this.player.lv || 1) >= mapDef.req) {
@@ -2398,7 +2536,7 @@ class BotInstance {
 
     // Request full payload every 5 polls if boss hunt is active OR every 10 polls if idle
     // OR on every poll while actively hunting a boss or when bosses list is null.
-    const isFull = ((this.pollCount % (this.settings.bossHuntMode !== 'off' ? 5 : 10) === 0) || this.targetedMvp || this.bosses === null) ? 1 : 0;
+    const isFull = ((this.pollCount % (this.settings.bossHuntMode !== 'off' ? 5 : 10) === 0) || this.targetedMvp || this.bosses === null || this.guildDungeonActive || (this.player && Number(this.player.gdun_in) === 1)) ? 1 : 0;
 
     // 😴 Anti-idle: Tính act flag mô phỏng hành vi người dùng thật
     // - Poll đầu tiên = act=1 (giống user vừa load trang/F5)
@@ -2529,6 +2667,23 @@ class BotInstance {
       }
     }
 
+    // 0.5 Guild Dungeon Targeting (Chủ động nhắm và tấn công Boss/Quái trong Phụ Bản Guild)
+    if (this.guildDungeonActive) {
+      const dungeonTargets = [
+        ...(this.bosses || []).filter(b => (b.hp === undefined || (b.hp || 0) > 0)),
+        ...(this.monsters || []).filter(m => (m.hp === undefined || (m.hp || 0) > 0))
+      ];
+      if (dungeonTargets.length > 0) {
+        const target = dungeonTargets[0];
+        exploreCx = target.x !== undefined ? target.x : 1125;
+        exploreCy = target.y !== undefined ? target.y : 1125;
+        exploreRadius = 100;
+        traveling = 0;
+        lockPos = 0;
+        this.targetedMvp = true;
+      }
+    }
+
     // 1. Auto MVP Hunting (Priority 1)
     const isCorrectMvpMap = !this.isMvpCycling || (this.player && Number(this.player.map) === Number(this.getCurrentMvpCycleMap()));
     const isHuntingEnabled = this.settings.bossHuntMode !== 'off';
@@ -2570,7 +2725,7 @@ class BotInstance {
           const leader = myTeamId !== 'none' 
             ? Object.values(botInstances).find(b => b.userId === this.userId && b.settings.teamRole === 'leader' && (b.settings.teamId || 'none') === myTeamId) 
             : null;
-          if (leader && leader.settings.bossHuntMode !== 'off') {
+          if (leader && leader.status === 'running' && leader.player && this.settings.teamSynced === true && this.settings.bossHuntMode && this.settings.bossHuntMode !== 'off' && leader.settings.bossHuntMode && leader.settings.bossHuntMode !== 'off') {
             const leaderTargetId = leader.manualTargetBossId !== null ? leader.manualTargetBossId : leader.lastTargetedBossId;
             if (leaderTargetId !== null) {
               activeBoss = aliveBosses.find(b => b.id === leaderTargetId);
@@ -2826,6 +2981,13 @@ class BotInstance {
       }
     }
 
+    // Save monsters list
+    if (d.monsters) {
+      this.monsters = d.monsters;
+    } else if (isFull) {
+      this.monsters = [];
+    }
+
     // Save bosses list and track spawn times
     if (d.bosses) {
       this.bosses = d.bosses;
@@ -2854,6 +3016,26 @@ class BotInstance {
       this.lastCw = d.cw;
     } else if (isFull) {
       this.lastCw = null;
+    }
+
+    // 🏰 Tự động thoát Phụ Bản Guild khi sạch Quái & Boss (monsters: [] và bosses: [])
+    if (this.guildDungeonActive && !this._exitingGuildDungeon) {
+      if (this.monsters !== null || this.bosses !== null) {
+        const aliveMonsters = (this.monsters || []).filter(m => (m.hp === undefined || (m.hp || 0) > 0));
+        const aliveBosses = (this.bosses || []).filter(b => (b.hp === undefined || (b.hp || 0) > 0));
+        const hasTargets = (aliveMonsters.length > 0 || aliveBosses.length > 0);
+
+        if (!hasTargets) {
+          this.gdunEmptyPolls = (this.gdunEmptyPolls || 0) + 1;
+          if (this.gdunEmptyPolls >= 2) {
+            this._exitingGuildDungeon = true;
+            this.addLog('SUCCESS', `🎉 [Guild Dungeon] Đã sạch Boss/Quái trong Phụ Bản (monsters: [])! Tự động thoát Phụ Bản ra ngoài.`);
+            await this.exitGuildDungeon();
+          }
+        } else {
+          this.gdunEmptyPolls = 0;
+        }
+      }
     }
 
     const currentEpoch = Math.floor(Date.now() / 1000);
@@ -3087,6 +3269,11 @@ class BotInstance {
           pollKills++;
           if (e.is_mvp) {
             this.weKilledCurrentMvp = true;
+            // 🏰 Nếu đang ở trong Phụ Bản Guild và kill được MVP (Boss Guild) → ghi nhận thời gian
+            if (this.guildDungeonActive) {
+              this.gdunLastKillAt = Date.now();
+              this.addLog('SUCCESS', `🎉 [Guild Dungeon] Đã hạ gục Boss Guild! Đợi ${5}s rồi tự động thoát Phụ Bản...`);
+            }
           }
         }
         
@@ -3543,12 +3730,29 @@ class BotInstance {
       }
 
       // Di chuyển bản đồ mục tiêu thường hoặc bản đồ săn Boss xoay vòng
-      const isMvpReturning = (!this.isMvpCycling && this.mvpCycleOriginalMap !== null);
-      const activeTargetMapId = this.isMvpCycling 
-        ? this.getCurrentMvpCycleMap() 
-        : (isMvpReturning ? Number(this.mvpCycleOriginalMap) : (parseInt(this.settings.targetMap) || 1));
+      const isMember = this.settings.teamRole === 'member';
+      const myTeamId = this.settings.teamId || 'none';
+      const leader = (isMember && myTeamId !== 'none') 
+        ? Object.values(botInstances).find(b => b.userId === this.userId && b.settings.teamRole === 'leader' && (b.settings.teamId || 'none') === myTeamId) 
+        : null;
 
-      if ((this.settings.autoMap || this.isMvpCycling || isMvpReturning) && Number(this.player.map) !== Number(activeTargetMapId)) {
+      const isMvpReturning = (!this.isMvpCycling && this.mvpCycleOriginalMap !== null);
+      let activeTargetMapId;
+      let shouldWarpCheck = false;
+
+      if (isMember && leader && leader.status === 'running' && leader.player && this.settings.teamSynced === true && this.settings.bossHuntMode && this.settings.bossHuntMode !== 'off' && leader.settings.bossHuntMode && leader.settings.bossHuntMode !== 'off') {
+        activeTargetMapId = leader.isMvpCycling 
+          ? leader.getCurrentMvpCycleMap() 
+          : (leader.player ? Number(leader.player.map) : (parseInt(leader.settings.targetMap) || 1));
+        shouldWarpCheck = true;
+      } else {
+        activeTargetMapId = this.isMvpCycling 
+          ? this.getCurrentMvpCycleMap() 
+          : (isMvpReturning ? Number(this.mvpCycleOriginalMap) : (parseInt(this.settings.targetMap) || 1));
+        shouldWarpCheck = (this.settings.autoMap || (this.settings.bossHuntMode && this.settings.bossHuntMode !== 'off') || this.isMvpCycling || isMvpReturning);
+      }
+
+      if (shouldWarpCheck && !this.guildDungeonActive && !this.inEventMode && Number(this.player.gdun_in) !== 1 && Number(this.player.map) !== Number(activeTargetMapId)) {
         const targetMapId = activeTargetMapId;
         const mapDef = getMapDefs().find(m => m.id === targetMapId);
         if (mapDef && (this.player.lv || 1) >= mapDef.req) {
@@ -3570,7 +3774,11 @@ class BotInstance {
               this.enterEventMode(isGwActive ? 'gw' : 'cw', 4);
             }
           } else {
-            this.addLog('SYSTEM', `🗺️ [Tự động] Di chuyển sang bản đồ: ${mapDef.name}`);
+            if (isMember && leader) {
+              this.addLog('SYSTEM', `👥 [Team Member] Đồng bộ di chuyển theo Trưởng nhóm (${leader.name}) sang Map ${targetMapId}`);
+            } else {
+              this.addLog('SYSTEM', `🗺️ [Tự động] Di chuyển sang bản đồ: ${mapDef.name}`);
+            }
             await this.warpToMap(targetMapId);
           }
         }
@@ -3769,8 +3977,8 @@ class BotInstance {
     if (!this.settings.autoMarketBuy) return;
     if (this.status !== 'running') return;
     
-    // 2. Kiểm tra chu kỳ quét (cấu hình được từ 3s-60s, mặc định 10s)
-    const intervalSec = Math.max(3, Number(this.settings.marketScanInterval || 10));
+    // 2. Kiểm tra chu kỳ quét (cấu hình được từ 5s-60s, mặc định 10s)
+    const intervalSec = Math.max(5, Number(this.settings.marketScanInterval || 10));
     const now = Date.now();
     if (this.lastMarketScanAt && (now - this.lastMarketScanAt < intervalSec * 1000)) return;
     
@@ -3808,7 +4016,6 @@ class BotInstance {
     this.lastMarketScanAt = now;
 
     try {
-      this.addLog('SYSTEM', '🏪 Đang tự động quét danh sách chợ game...');
       const rawData = await this.sendRequest('https://ragnalok.online/human/xhrpg_market.php', {
         action: 'get_listings',
         line_uid: this.line_uid,
@@ -3950,6 +4157,7 @@ class BotInstance {
 
       currentGold = this.player.gold || 0;
       let successCount = 0;
+      let historyUpdated = false;
 
       for (const targetItem of matchingItems) {
         const categoryMaxQtys = this.settings.marketCategoryMaxQtys || {};
@@ -4008,9 +4216,19 @@ class BotInstance {
         if (!Array.isArray(this.marketBuyHistory)) this.marketBuyHistory = [];
         this.marketBuyHistory.unshift(historyEntry);
         if (this.marketBuyHistory.length > 50) this.marketBuyHistory.pop();
+        historyUpdated = true;
 
         // Delay nhẹ 200ms để tránh spam server game quá nhanh
         await new Promise(resolve => setTimeout(resolve, 200));
+      }
+
+      if (historyUpdated) {
+        const currentAccounts = loadAccounts();
+        const accIndex = currentAccounts.findIndex(acc => acc.line_uid === this.line_uid);
+        if (accIndex !== -1) {
+          currentAccounts[accIndex].marketBuyHistory = this.marketBuyHistory;
+          saveAccounts(currentAccounts);
+        }
       }
 
     } catch (e) {
@@ -5074,6 +5292,7 @@ app.get('/api/accounts', requireAuth, (req, res) => {
           ownerPollInterval: ownerUser ? (ownerUser.pollInterval || 2000) : 2000,
           ownerAllowEditPollInterval: ownerUser ? (ownerUser.allowEditPollInterval === true) : false,
           status: bot.status,
+          ping: bot.ping || 0,
           clientActive: !!(bot.lastClientActive && (Date.now() - bot.lastClientActive < 12000)),
           error: bot.error,
           lastUpdate: bot.lastUpdate,
@@ -5084,6 +5303,8 @@ app.get('/api/accounts', requireAuth, (req, res) => {
           lastCw: bot.lastCw || null,
           inEventMode: bot.inEventMode || false,
           currentEventKind: bot.currentEventKind || null,
+          guildDungeonActive: bot.guildDungeonActive || false,
+          guildDungeonIsTeam: bot.guildDungeonIsTeam || false,
           proxyInfo: req.user.role === 'admin' ? proxyPool.getBotProxyInfo(bot.line_uid) : null,
           combatRates: bot.getCombatRates ? bot.getCombatRates() : { 
             killsPerMin: 0, goldPerMin: 0, expPerMin: 0,
@@ -5502,10 +5723,18 @@ app.post('/api/team/sync', requireAuth, (req, res) => {
   const currentAccounts = loadAccounts();
   let syncCount = 0;
   const leaderSettings = { ...leaderBot.settings };
-  
-  // We should not copy teamRole or teamId to members, keeping their role and team membership
   delete leaderSettings.teamRole;
   delete leaderSettings.teamId;
+
+  // Force autoMap = true and teamSynced = true on Leader and Members so team auto-warps to targetMap seamlessly
+  leaderBot.updateSettings({ autoMap: true, teamSynced: true });
+  leaderSettings.autoMap = true;
+  leaderSettings.teamSynced = true;
+
+  const leaderAccIdx = currentAccounts.findIndex(acc => acc.line_uid === leaderBot.line_uid);
+  if (leaderAccIdx !== -1) {
+    currentAccounts[leaderAccIdx].settings = leaderBot.settings;
+  }
 
   currentAccounts.forEach(acc => {
     if (acc.userId === leaderBot.userId && acc.line_uid !== leaderBot.line_uid) {
@@ -5783,6 +6012,12 @@ app.delete('/api/accounts/:line_uid/market-buy-history', requireAuth, (req, res)
   const bot = botInstances[line_uid];
   if (!checkAccountOwnership(req, res, bot)) return;
   bot.marketBuyHistory = [];
+  const currentAccounts = loadAccounts();
+  const accIndex = currentAccounts.findIndex(acc => acc.line_uid === line_uid);
+  if (accIndex !== -1) {
+    currentAccounts[accIndex].marketBuyHistory = [];
+    saveAccounts(currentAccounts);
+  }
   res.json({ ok: true, message: 'Đã xóa lịch sử mua tự động.' });
 });
 
@@ -6047,6 +6282,19 @@ app.post('/api/accounts/:line_uid/action', requireAuth, async (req, res) => {
     if (param !== undefined) payload.param = param;
     if (extra && typeof extra === 'object') {
       payload = { ...payload, ...extra };
+    }
+
+    if (action === 'gdun_enter_team') {
+      const ok = await bot.enterGuildDungeon(true);
+      return res.json({ ok, msg: ok ? '🏰 Đã kích hoạt Săn Boss Guild (Cả Team)' : 'Không thể vào Phụ Bản Guild' });
+    }
+    if (action === 'gdun_enter_solo' || action === 'gdun_enter') {
+      const ok = await bot.enterGuildDungeon(false);
+      return res.json({ ok, msg: ok ? '👤 Đã kích hoạt Săn Boss Guild (Đi 1 Mình)' : 'Không thể vào Phụ Bản Guild' });
+    }
+    if (action === 'gdun_exit') {
+      const ok = await bot.exitGuildDungeon();
+      return res.json({ ok, msg: ok ? '↩️ Đã thoát khỏi Phụ Bản Guild' : 'Không thể thoát Phụ Bản Guild' });
     }
 
     let url = 'https://ragnalok.online/human/xhrpg_upgrade.php';
@@ -6808,6 +7056,8 @@ module.exports = {
   getCatUpgradeCost,
   getDroneUpgradeCost,
   getMineUpgradeCost,
+  getItemCategory,
+  getModuleTier,
   BotInstance,
   ProxyPool,
   proxyPool,

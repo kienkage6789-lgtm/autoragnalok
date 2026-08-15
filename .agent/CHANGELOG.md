@@ -2,6 +2,37 @@
 
 > Changelog of actual changes implemented.
 
+## 2026-08-15 - Kiểm Tra và Tối Ưu Hệ Thống Auto Mua Chợ (Auto Market Buy System Audit & Fixes) (T58)
+- File đã đổi: [server.js](file:///c:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/server.js), [public/app.js](file:///c:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/public/app.js), [test.js](file:///c:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/test.js).
+- Đã làm:
+  - **Sửa lỗi fallback `getModuleTier()`**: Thay đổi giá trị mặc định từ `'T1'` thành `null` khi không nhận diện được bậc Tier trong tên module. Điều này giúp ngăn chặn việc mua nhầm các module không rõ cấp bậc khi người dùng lọc mua Tier cụ thể (ví dụ T1).
+  - **Lưu bền vững lịch sử mua hàng (`marketBuyHistory`)**: Bổ sung cơ chế tự động ghi `marketBuyHistory` vào `accounts.json` thông qua `saveAccounts()` sau mỗi chu kỳ mua hàng hoặc khi người dùng thực hiện xóa lịch sử, khắc phục lỗi mất toàn bộ dữ liệu lịch sử mua tự động khi khởi động lại server.
+  - **Đồng bộ chu kỳ quét tối thiểu**: Nâng ngưỡng giới hạn chu kỳ quét tối thiểu trong `scanAndBuyMarket()` từ 3 giây lên 5 giây (`Math.max(5, ...)`), đồng bộ 100% với các tùy chọn trên giao diện người dùng (5s-60s).
+  - **Loại bỏ log rác trong terminal**: Bỏ dòng log thông báo "Đang tự động quét danh sách chợ game..." ở mỗi chu kỳ quét để tránh spam log terminal (12 lần/phút), chỉ ghi log khi phát hiện sản phẩm phù hợp hoặc có lỗi/cảnh báo.
+  - **Cải tiến UI Accordion Bộ Lọc Chợ**: Tự động phát hiện khi danh sách quái vật cập nhật động và re-render bộ checkbox lọc thẻ/trứng kịp thời.
+  - **Bổ sung Unit Tests toàn diện**: Thêm các test case 7i đến 7l trong `test.js` kiểm tra nhận diện Tier module không xác định, phân loại `getItemCategory`, mua Kim Cương tự động không cần sub-filter, và chế độ khớp đúng giá cố định `marketExactPrice`. Chạy `npm test` thành công 100%.
+
+---
+
+## 2026-08-15 - Khắc Phục Lỗi Đồng Bộ Nhóm Khi Leader Chưa Hoạt Động (Team Sync Fix) (T57)
+- File đã đổi: [server.js](file:///c:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/server.js), [test.js](file:///c:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/test.js).
+- Đã làm:
+  - **Kiểm soát đồng bộ nhóm**: Bổ sung điều kiện kiểm tra sự hoạt động của Trưởng nhóm (Leader) trước khi ép Thành viên (Member) đồng bộ bản đồ và mục tiêu Boss. Leader phải ở trạng thái `running` và có dữ liệu nhân vật hợp lệ (`leader.player !== null`).
+  - **Tự động kích hoạt `autoMap` khi Đồng bộ Team**: Khi người dùng nhấn "Đồng bộ cài đặt Team" (`/api/team/sync`), hệ thống tự động gán `autoMap = true` cho cả Leader lẫn các Member để đảm bảo cả đội tự động chuyển sang bản đồ mục tiêu đã thiết lập.
+  - **Cờ Trạng Thái `teamSynced` Ngăn Ép Đồng Bộ Trước**: Thêm cờ `teamSynced` vào cài đặt. Khi người dùng mới chọn Team Role / Team ID, `teamSynced` là `false` và Thành viên hoạt động 100% độc lập (không bị ép kéo di chuyển/khóa mục tiêu theo Leader).
+  - **Đồng bộ theo yêu cầu (Explicit Sync Only)**: Chỉ khi người dùng bấm nút "Đồng bộ cài đặt Team", cờ `teamSynced` mới bật `true` và cấu hình từ Leader mới được áp dụng sang các Thành viên.
+  - **Tự động quay về Map farm cá nhân khi ngắt Săn Boss**: Khi đã bật `teamSynced === true`, Thành viên sẽ di chuyển cùng Đội trưởng trong suốt khoảng thời gian bật Săn Boss (`bossHuntMode !== 'off'`). Khi ngắt Săn Boss (`bossHuntMode === 'off'`), Thành viên sẽ tự động quay trở về đúng bản đồ farm cá nhân của mình.
+  - **Khắc phục lỗi xung đột giật nhảy map của Thành viên**: Cập nhật khối kiểm tra định tuyến bản đồ thứ hai ở cuối hàm `pollGame()` trong `server.js` để áp dụng đồng bộ logic tìm bản đồ mục tiêu của Đội trưởng, loại bỏ tình trạng Thành viên bị giật nhảy qua lại giữa bản đồ cũ và bản đồ mới khi Đội trưởng di chuyển.
+  - **Tính năng Săn Boss Guild (Guild Dungeon)**: Bổ sung 2 nút kích hoạt thủ công **🏰 Cả Team** và **👤 Đi 1 Mình**. Hỗ trợ vào Phụ Bản Guild (`gdun_enter`), tự động tấn công hạ gục Boss Guild và tự động phát lệnh thoát Phụ Bản (`gdun_exit`) trở về bản đồ bình thường ngay khi hết Boss. Tự động đồng bộ các Thành viên nhóm đi cùng khi chọn chế độ Cả Team. Ép `isFull = 1` liên tục trong Phụ Bản Guild, lưu trữ `this.monsters` từ phản hồi game và tự động nhận diện `monsters: []` để thoát Phụ Bản ngay khi hết quái/Boss. Tự động áp sát và nhắm mục tiêu Boss trong Phụ Bản. Khắc phục lỗi Auto-Warp giật ngược nhân vật về map farm khi vừa vào Phụ Bản, bảo toàn `gdun_in` trong `COLD_FIELDS`, đồng bộ tọa độ trung tâm và đưa nhân vật về Map farm chuẩn xác khi thoát. Xây dựng hệ thống `window.showToast` hiển thị thông báo Toast mượt mà và bổ sung tự động xử lý mã lỗi HTTP 401 hết hạn phiên đăng nhập.
+  - **Đo & Hiển thị Ping Mạng (Dành riêng cho Admin)**: Tự động đo thời gian phản hồi thực tế (Round-Trip Time ms) và làm mịn theo thuật toán EMA trong `sendRequest()`. Hiển thị Badge Ping `📡 XXms` cạnh trạng thái `Đang Treo` chỉ trên tài khoản Admin. Phân loại màu sắc trực quan theo 3 mức độ (Xanh/Vàng/Đỏ).
+  - **Nâng cấp Giao diện Quản lý Đội nhóm (Team UI)**:
+    - **Hiển thị Tag Đội ở đầu tên**: Bổ sung Badge định danh Đội nhóm (ví dụ `🛡️ T1 👑` hoặc `🛡️ T1 👥`) trực quan ngay trước tên nhân vật trên Header thẻ bot.
+    - **Bộ Lọc Đội nhóm (Team Filter Bar)**: Bổ sung thanh lọc tài khoản phía trên Dashboard hỗ trợ lọc hiển thị theo từng Đội nhóm cụ thể.
+    - **Mở rộng số lượng Đội nhóm lên 10**: Hỗ trợ từ Team 1 đến Team 10 trong cấu hình cài đặt tài khoản.
+  - **Unit Tests**: Bổ sung các test case mới trong `test.js` để kiểm chứng logic đồng bộ mới. Chạy `npm test` thành công 100%.
+
+---
+
 ## 2026-08-13 - Tối ưu hóa Bơm máu PK, Sửa lỗi MIME type sdk.js, Sửa lỗi Auto Event Zone & Thống kê Chiến tích K/D (T74)
 - File đã đổi: [server.js](file:///c:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/server.js), [public/app.js](file:///c:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/public/app.js), [play.html](file:///c:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/play.html), [play_battle.html](file:///c:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/play_battle.html), [test.js](file:///c:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/test.js).
 - Đã làm:

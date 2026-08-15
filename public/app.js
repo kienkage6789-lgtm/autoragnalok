@@ -237,6 +237,32 @@ document.addEventListener('DOMContentLoaded', () => {
     await window.changeUserMarketLimit(userId, username, next);
   };
 
+  window.showToast = function(msg, isError = false) {
+    let toastContainer = document.getElementById('toast-container');
+    if (!toastContainer) {
+      toastContainer = document.createElement('div');
+      toastContainer.id = 'toast-container';
+      toastContainer.style.cssText = 'position:fixed; bottom:20px; right:20px; z-index:9999; display:flex; flex-direction:column; gap:8px; pointer-events:none;';
+      document.body.appendChild(toastContainer);
+    }
+
+    const toast = document.createElement('div');
+    toast.style.cssText = `padding: 10px 16px; border-radius: 8px; font-size: 0.88rem; font-weight: 600; color: #fff; background: ${isError ? 'rgba(220, 38, 38, 0.92)' : 'rgba(16, 185, 129, 0.92)'}; box-shadow: 0 4px 12px rgba(0,0,0,0.3); backdrop-filter: blur(8px); transition: all 0.3s ease; opacity: 0; transform: translateY(10px); pointer-events: auto;`;
+    toast.textContent = msg;
+    toastContainer.appendChild(toast);
+
+    requestAnimationFrame(() => {
+      toast.style.opacity = '1';
+      toast.style.transform = 'translateY(0)';
+    });
+
+    setTimeout(() => {
+      toast.style.opacity = '0';
+      toast.style.transform = 'translateY(10px)';
+      setTimeout(() => toast.remove(), 300);
+    }, 3500);
+  };
+
   function formatNumberWithDots(val) {
     if (val === undefined || val === null) return '';
     return val.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
@@ -1037,15 +1063,47 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   window.fetchAccounts = fetchAccounts;
 
+  window.currentTeamFilter = 'all';
+  window.setTeamFilter = function(val) {
+    window.currentTeamFilter = val;
+    const sel = document.getElementById('sel-dashboard-team-filter');
+    if (sel && sel.value !== val) sel.value = val;
+    if (window.lastFetchedAccounts) {
+      window.renderAccounts(window.lastFetchedAccounts);
+    }
+  };
+
   // Render accounts list (Grouped by User for Admin)
   function renderAccounts(accounts) {
     if (!Array.isArray(accounts) || accounts.length === 0) {
       noAccountsMsg.style.display = 'block';
       accountsGrid.style.display = 'none';
+      const filterBar = document.getElementById('dashboard-filter-bar');
+      if (filterBar) filterBar.style.display = 'none';
       return;
     }
 
     window.lastFetchedAccounts = accounts;
+
+    const filterBar = document.getElementById('dashboard-filter-bar');
+    if (filterBar) {
+      filterBar.style.display = 'flex';
+    }
+
+    let displayAccounts = accounts;
+    if (window.currentTeamFilter && window.currentTeamFilter !== 'all') {
+      if (window.currentTeamFilter === 'none') {
+        displayAccounts = displayAccounts.filter(a => !a.settings || !a.settings.teamId || a.settings.teamId === 'none');
+      } else {
+        displayAccounts = displayAccounts.filter(a => a.settings && a.settings.teamId === window.currentTeamFilter);
+      }
+    }
+
+    const countTxt = document.getElementById('filter-count-txt');
+    if (countTxt) {
+      countTxt.textContent = displayAccounts.length;
+    }
+
     noAccountsMsg.style.display = 'none';
 
     // Auto fetch proxies list if Admin and list empty
@@ -1066,7 +1124,7 @@ document.addEventListener('DOMContentLoaded', () => {
       accountsGrid.style.flexDirection = 'column';
 
       const userGroups = {};
-      accounts.forEach(acc => {
+      displayAccounts.forEach(acc => {
         const uid = acc.userId || 'default';
         if (!userGroups[uid]) userGroups[uid] = [];
         userGroups[uid].push(acc);
@@ -1229,7 +1287,7 @@ document.addEventListener('DOMContentLoaded', () => {
       accountsGrid.style.gridTemplateColumns = 'repeat(auto-fill, minmax(360px, 1fr))';
       accountsGrid.style.flexDirection = '';
 
-      accounts.forEach(acc => {
+      displayAccounts.forEach(acc => {
         if (activeTabs[acc.line_uid] === undefined) {
           activeTabs[acc.line_uid] = null;
         }
@@ -1250,11 +1308,11 @@ document.addEventListener('DOMContentLoaded', () => {
         accountsGrid.dataset.dragInit = "true";
       }
 
-      // Remove deleted cards
+      // Remove deleted cards or cards filtered out
       const cardElements = accountsGrid.querySelectorAll('.account-card');
       cardElements.forEach(cardEl => {
         const uid = cardEl.id.replace('card-', '');
-        if (!accounts.some(acc => acc.line_uid === uid)) {
+        if (!displayAccounts.some(acc => acc.line_uid === uid)) {
           cardEl.remove();
           delete activeTabs[uid];
         }
@@ -1269,9 +1327,11 @@ document.addEventListener('DOMContentLoaded', () => {
       <div class="card-header">
         <div class="acc-info-compact">
           <span class="drag-handle" title="Kéo thả để sắp xếp">☰</span>
+          <span id="team-badge-${acc.line_uid}"></span>
           <span class="acc-name" id="name-${acc.line_uid}">${acc.name}</span>
           <span class="acc-lv" id="lv-txt-${acc.line_uid}">Lv.--</span>
           <span class="badge badge-${acc.status}" id="status-badge-${acc.line_uid}">${acc.status}</span>
+          <span id="ping-badge-${acc.line_uid}" style="display: none;"></span>
           <span id="proxy-badge-${acc.line_uid}" style="font-size:0.7rem; padding:1px 5px; border-radius:4px; background:rgba(99,102,241,0.15); color:#818cf8; border:1px solid rgba(99,102,241,0.3); white-space:nowrap; display: none;">🌐 —</span>
         </div>
         <div class="header-actions-compact">
@@ -1688,6 +1748,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 <option value="team_3">🛡️ Team 3</option>
                 <option value="team_4">🛡️ Team 4</option>
                 <option value="team_5">🛡️ Team 5</option>
+                <option value="team_6">🛡️ Team 6</option>
+                <option value="team_7">🛡️ Team 7</option>
+                <option value="team_8">🛡️ Team 8</option>
+                <option value="team_9">🛡️ Team 9</option>
+                <option value="team_10">🛡️ Team 10</option>
               </select>
             </div>
             <div style="grid-column: span 2; margin-top: 4px; display: flex; justify-content: flex-end;">
@@ -1761,6 +1826,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
             <div style="margin-top: 10px;">
               <button type="button" onclick="forceMvpHunt('${acc.line_uid}')" style="background: rgba(220, 38, 38, 0.25); border: 1px solid rgba(220, 38, 38, 0.5); color: #fca5a5; border-radius: 6px; padding: 6px 12px; font-size: 0.85rem; cursor: pointer; width: 100%; font-weight: 600; text-align: center; transition: all 0.2s;" onmouseover="this.style.background='rgba(220, 38, 38, 0.4)'" onmouseout="this.style.background='rgba(220, 38, 38, 0.25)'">⚡ Kích hoạt đi săn ngay cho cả Team (Force Team Hunt)</button>
+            </div>
+
+            <!-- Section Săn Boss Guild (Guild Dungeon) -->
+            <div style="margin-top: 10px; border-top: 1px dashed rgba(255,255,255,0.1); padding-top: 10px;">
+              <div style="font-size: 0.8rem; font-weight: 700; color: #c084fc; margin-bottom: 6px; display: flex; align-items: center; justify-content: space-between;">
+                <span>🏰 Phụ Bản Boss Guild</span>
+                <span id="gdun-status-badge-${acc.line_uid}" style="display:none; font-size:0.65rem; background:rgba(192,132,252,0.2); color:#c084fc; border:1px solid rgba(192,132,252,0.4); border-radius:4px; padding:1px 5px;">Trong Phụ Bản</span>
+              </div>
+              <div style="display: flex; gap: 6px;">
+                <button type="button" id="btn-gdun-team-${acc.line_uid}" onclick="sendAccountAction('${acc.line_uid}', 'gdun_enter_team')" style="flex: 1; background: linear-gradient(135deg, rgba(147,51,234,0.3), rgba(126,34,206,0.4)); border: 1px solid rgba(192,132,252,0.5); color: #e9d5ff; border-radius: 6px; padding: 6px 4px; font-size: 0.78rem; cursor: pointer; font-weight: 600; text-align: center; transition: all 0.2s;" title="Đội trưởng kéo cả Team vào Phụ Bản Guild">🏰 Cả Team</button>
+                <button type="button" id="btn-gdun-solo-${acc.line_uid}" onclick="sendAccountAction('${acc.line_uid}', 'gdun_enter_solo')" style="flex: 1; background: linear-gradient(135deg, rgba(14,165,233,0.25), rgba(3,105,161,0.35)); border: 1px solid rgba(56,189,248,0.5); color: #7dd3fc; border-radius: 6px; padding: 6px 4px; font-size: 0.78rem; cursor: pointer; font-weight: 600; text-align: center; transition: all 0.2s;" title="Chỉ bot này vào Phụ Bản Guild (không kéo team)">👤 Đi 1 Mình</button>
+                <button type="button" id="btn-gdun-exit-${acc.line_uid}" onclick="sendAccountAction('${acc.line_uid}', 'gdun_exit')" style="display: none; flex: 1; background: linear-gradient(135deg, rgba(239,68,68,0.25), rgba(185,28,28,0.35)); border: 1px solid rgba(248,113,113,0.5); color: #fca5a5; border-radius: 6px; padding: 6px 4px; font-size: 0.78rem; cursor: pointer; font-weight: 600; text-align: center; transition: all 0.2s;" title="Thoát khỏi Phụ Bản Guild ngay">🚪 Thoát Phụ Bản</button>
+              </div>
             </div>
           </div>
 
@@ -2220,6 +2298,53 @@ document.addEventListener('DOMContentLoaded', () => {
       badge.className = `badge badge-${acc.status}`;
       badge.textContent = acc.status === 'running' ? 'Đang Treo' : acc.status === 'idle' ? 'Tạm Dừng' : 'Lỗi';
     }
+
+    // Ping Network Latency Badge update (Admin Only)
+    const pingBadgeEl = document.getElementById(`ping-badge-${acc.line_uid}`);
+    if (pingBadgeEl) {
+      const isAdmin = currentUser && currentUser.role === 'admin';
+      if (isAdmin && acc.status === 'running' && acc.ping !== undefined && acc.ping > 0) {
+        const pingVal = acc.ping;
+        let pingClass = 'ping-good';
+        if (pingVal > 400) pingClass = 'ping-poor';
+        else if (pingVal > 150) pingClass = 'ping-medium';
+
+        pingBadgeEl.className = `ping-badge ${pingClass}`;
+        pingBadgeEl.style.display = 'inline-flex';
+        pingBadgeEl.innerHTML = `📡 ${pingVal}ms`;
+      } else {
+        pingBadgeEl.style.display = 'none';
+      }
+    }
+
+    // Team Tag Badge update
+    const teamBadgeEl = document.getElementById(`team-badge-${acc.line_uid}`);
+    if (teamBadgeEl) {
+      const tId = (acc.settings && acc.settings.teamId) || 'none';
+      if (tId !== 'none') {
+        const teamNum = tId.replace('team_', 'T');
+        const isLeader = acc.settings && acc.settings.teamRole === 'leader';
+        const badgeClass = isLeader ? 'team-tag-badge team-tag-leader' : 'team-tag-badge team-tag-member';
+        const roleIcon = isLeader ? '👑' : '👥';
+        teamBadgeEl.className = badgeClass;
+        teamBadgeEl.style.display = 'inline-flex';
+        teamBadgeEl.innerHTML = `🛡️ ${teamNum} ${roleIcon}`;
+      } else {
+        teamBadgeEl.style.display = 'none';
+      }
+    }
+
+    // Guild Dungeon Buttons & Status Update
+    const inGdun = acc.guildDungeonActive || (acc.player && Number(acc.player.gdun_in) === 1);
+    const gdunBadge = document.getElementById(`gdun-status-badge-${acc.line_uid}`);
+    const btnGdunTeam = document.getElementById(`btn-gdun-team-${acc.line_uid}`);
+    const btnGdunSolo = document.getElementById(`btn-gdun-solo-${acc.line_uid}`);
+    const btnGdunExit = document.getElementById(`btn-gdun-exit-${acc.line_uid}`);
+
+    if (gdunBadge) gdunBadge.style.display = inGdun ? 'inline-block' : 'none';
+    if (btnGdunTeam) btnGdunTeam.style.display = inGdun ? 'none' : 'block';
+    if (btnGdunSolo) btnGdunSolo.style.display = inGdun ? 'none' : 'block';
+    if (btnGdunExit) btnGdunExit.style.display = inGdun ? 'block' : 'none';
 
     if (!acc.player) {
       return;
@@ -5247,6 +5372,44 @@ window.triggerHomeUpgrade = async function(line_uid) {
   }
 };
 
+window.sendAccountAction = async function(line_uid, action, extra = null) {
+  try {
+    const payload = { action };
+    if (extra && typeof extra === 'object') {
+      Object.assign(payload, extra);
+    }
+    const res = await fetch(`/api/accounts/${line_uid}/action`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    if (res.status === 401) {
+      if (typeof window.showToast === 'function') {
+        window.showToast('⚠️ Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại!', true);
+      }
+      setTimeout(() => location.reload(), 1500);
+      return;
+    }
+
+    const data = await res.json();
+    if (data.ok) {
+      if (typeof window.showToast === 'function') {
+        window.showToast(`✅ ${data.msg || 'Thao tác thành công'}`);
+      }
+      if (typeof fetchAccounts === 'function') fetchAccounts();
+    } else {
+      if (typeof window.showToast === 'function') {
+        window.showToast(`❌ Thao tác thất bại: ${data.error || data.msg || 'Lỗi không xác định'}`, true);
+      }
+    }
+  } catch (e) {
+    if (typeof window.showToast === 'function') {
+      window.showToast(`❌ Lỗi kết nối: ${e.message}`, true);
+    }
+  }
+};
+
 // 🐾 Pet Stats & Upgrade Helper
 function expNextPet(lv) {
   if (lv >= 41) return 100000000 + (lv - 41) * 15000000;
@@ -5735,8 +5898,13 @@ function renderMarketCategoryAccordion(acc) {
 
   const { normal, mvp } = getMonsterLists(acc);
 
-  if (!container.getAttribute('data-rendered')) {
+  const totalMonsters = normal.length + mvp.length;
+  const prevMonsterCount = parseInt(container.getAttribute('data-monster-count') || '0');
+  const needsReRender = !container.getAttribute('data-rendered') || (totalMonsters > prevMonsterCount);
+
+  if (needsReRender) {
     container.setAttribute('data-rendered', 'true');
+    container.setAttribute('data-monster-count', String(totalMonsters));
 
     let html = '';
     MARKET_CATEGORY_DEFS.forEach(cat => {

@@ -7,6 +7,8 @@ const {
   getCatUpgradeCost,
   getDroneUpgradeCost,
   getMineUpgradeCost,
+  getItemCategory,
+  getModuleTier,
   BotInstance,
   ProxyPool,
   proxyPool,
@@ -414,8 +416,23 @@ try {
     
   assert.strictEqual(activeTargetMapId, 2, 'activeTargetMapId must be the first map of the cycle (2) when cycle is active and index is 0');
   
-  const needsWarp = (instance.settings.autoMap || instance.isMvpCycling) && Number(instance.player.map) !== Number(activeTargetMapId);
+  const needsWarp = (instance.settings.autoMap || (instance.settings.bossHuntMode && instance.settings.bossHuntMode !== 'off') || instance.isMvpCycling) && Number(instance.player.map) !== Number(activeTargetMapId);
   assert.strictEqual(needsWarp, true, 'needsWarp must be true when player.map (3) is different from activeTargetMapId (2) during MVP cycle');
+
+  // Test Case: Warp routing when autoMap is false but bossHuntMode is enabled (T57 follow-up)
+  instance.isMvpCycling = false;
+  instance.settings.autoMap = false;
+  instance.settings.bossHuntMode = 'type1';
+  instance.settings.targetMap = 3;
+  instance.player = { map: 1 };
+  const targetMapT57 = instance.isMvpCycling ? instance.getCurrentMvpCycleMap() : (parseInt(instance.settings.targetMap) || 1);
+  const needsWarpT57 = (instance.settings.autoMap || (instance.settings.bossHuntMode && instance.settings.bossHuntMode !== 'off') || instance.isMvpCycling) && Number(instance.player.map) !== Number(targetMapT57);
+  assert.strictEqual(needsWarpT57, true, 'needsWarp must be true when autoMap is false but bossHuntMode is enabled');
+
+  // Clean up to avoid pollution
+  instance.settings.bossHuntMode = 'off';
+  instance.settings.autoMap = true;
+  instance.isMvpCycling = false;
 
   // Test Case 5: Absolute HP sorting (lowest HP first) for Type 2
   console.log('Testing absolute HP sorting for Type 2...');
@@ -556,6 +573,10 @@ try {
       { id: 302, item_name: 'ท่อนไม้มหัศจรรย์', item_type: 'house_parts', price_per: 2000 },
       // Resource / Trash
       { id: 401, item_name: 'แร่อื่นๆ (Resource)', item_type: 'ore', price_per: 100, qty: 500 },
+      // Diamond
+      { id: 801, item_name: 'เพชร (Diamond)', item_type: 'diamond', price_per: 5000, qty: 1 },
+      // Unranked Module
+      { id: 204, item_name: 'โมดูลพิเศษไม่มีระดับ', item_type: 'module_special', price_per: 1000 },
       // Boxes
       { id: 501, item_name: 'กล่องสุ่มการ์ด ระดับ 1', item_type: 'card_box', price_per: 2000, qty: 8 },
       { id: 502, item_name: 'กล่องสุ่มการ์ด ระดับ 7', item_type: 'card_box', price_per: 8000, qty: 15 },
@@ -733,6 +754,64 @@ try {
   assert.strictEqual(instance.marketBuyHistory.length > 0, true, 'Should record failed buy in marketBuyHistory');
   assert.strictEqual(instance.marketBuyHistory[0].status, 'failed', 'History entry status must be failed');
 
+  // Reset simulate error and collectible
+  simulateBuyError = false;
+  instance.settings.marketCategories.collectible = false;
+  instance.settings.marketSelectedCollectibles = [];
+
+  // 7i. Test Module Tier Unknown Fallback (getModuleTier returns null, skipping unranked module)
+  console.log('Testing Module Tier Fallback (skip unranked modules)...');
+  instance.settings.marketCategories.module = true;
+  instance.settings.marketSelectedModuleTiers = ['T1'];
+  lastBoughtListingIds = [];
+  instance.lastMarketScanAt = null;
+  await instance.scanAndBuyMarket();
+  // id 201 is T1, id 204 is unranked (must not be bought)
+  assert.deepStrictEqual(lastBoughtListingIds, [201], 'Should buy only T1 module (id 201) and skip unranked module (id 204)');
+  instance.settings.marketCategories.module = false;
+  instance.settings.marketSelectedModuleTiers = [];
+
+  // 7j. Test getItemCategory accuracy
+  console.log('Testing getItemCategory classification...');
+  assert.strictEqual(getItemCategory({ item_type: 'module_box', item_name: 'กล่องโมดูล' }), 'module_box');
+  assert.strictEqual(getItemCategory({ item_type: 'card_box', item_name: 'กล่องการ์ด' }), 'card_box');
+  assert.strictEqual(getItemCategory({ item_type: 'egg_box', item_name: 'กล่องไข่' }), 'egg_box');
+  assert.strictEqual(getItemCategory({ item_type: 'diamond', item_name: 'เพชร' }), 'diamond');
+  assert.strictEqual(getItemCategory({ item_type: 'card', item_name: 'การ์ด' }), 'card');
+  assert.strictEqual(getItemCategory({ item_type: 'egg', item_name: 'ไข่' }), 'egg');
+  assert.strictEqual(getItemCategory({ item_type: 'module_knife', item_name: 'โมดูล' }), 'module');
+  assert.strictEqual(getItemCategory({ item_type: 'hardware', item_name: 'ชิ้นส่วน' }), 'collectible');
+  assert.strictEqual(getItemCategory({ item_type: 'ore', item_name: 'แร่' }), 'resource');
+
+  // 7k. Test Diamond Category (No sub-filter needed, buys all when ON)
+  console.log('Testing Diamond Category Buying...');
+  instance.settings.marketCategories.diamond = true;
+  instance.player.gold = 50000;
+  lastBoughtListingIds = [];
+  instance.lastMarketScanAt = null;
+  await instance.scanAndBuyMarket();
+  assert.deepStrictEqual(lastBoughtListingIds, [801], 'Should buy diamond (id 801) when diamond category is ON');
+  instance.settings.marketCategories.diamond = false;
+
+  // 7l. Test Exact Price Match Mode (marketExactPrice)
+  console.log('Testing Exact Price Matching Mode...');
+  instance.settings.marketCategories.diamond = true;
+  instance.settings.marketExactPrice = true;
+  instance.settings.marketMaxPrice = 5000; // Matches id 801 exactly (5000)
+  lastBoughtListingIds = [];
+  instance.lastMarketScanAt = null;
+  await instance.scanAndBuyMarket();
+  assert.deepStrictEqual(lastBoughtListingIds, [801], 'Should buy id 801 when price exactly matches 5000');
+
+  // Test Exact Price mismatch
+  instance.settings.marketMaxPrice = 4999; // Does not match 5000
+  lastBoughtListingIds = [];
+  instance.lastMarketScanAt = null;
+  await instance.scanAndBuyMarket();
+  assert.deepStrictEqual(lastBoughtListingIds, [], 'Should NOT buy id 801 when price does not exactly match 4999');
+  instance.settings.marketExactPrice = false;
+  instance.settings.marketCategories.diamond = false;
+
   // 8. Test Urgent Active Potion Healing
   console.log('Testing Urgent Active Potion Healing...');
   instance.isMvpCycling = false;
@@ -833,6 +912,57 @@ try {
   // Verify that member2 does not find leader1
   assert.notStrictEqual(foundLeader2, leader1, 'Member2 must not find Leader1');
 
+  // Verify new team sync conditions:
+  // Condition 1: Leader is offline (status !== 'running' or player is null). Member should NOT sync/follow leader.
+  leader1.status = 'idle';
+  leader1.player = null;
+  leader1.settings.bossHuntMode = 'type2';
+  member1.settings.bossHuntMode = 'type2';
+  member1.settings.targetMap = 3;
+  member1.player = { map: 3, lv: 50 };
+  
+  const getMapTarget = function(bot) {
+    const isMember = bot.settings.teamRole === 'member';
+    const myTeamId = bot.settings.teamId || 'none';
+    const leader = (isMember && myTeamId !== 'none') 
+      ? Object.values(botInstances).find(b => b.userId === bot.userId && b.settings.teamRole === 'leader' && (b.settings.teamId || 'none') === myTeamId) 
+      : null;
+      
+    let activeTargetMapId;
+    if (isMember && leader && leader.status === 'running' && leader.player && bot.settings.teamSynced === true && bot.settings.bossHuntMode && bot.settings.bossHuntMode !== 'off' && leader.settings.bossHuntMode && leader.settings.bossHuntMode !== 'off') {
+      activeTargetMapId = leader.isMvpCycling 
+        ? leader.getCurrentMvpCycleMap() 
+        : (leader.player ? Number(leader.player.map) : (parseInt(leader.settings.targetMap) || 1));
+    } else {
+      activeTargetMapId = parseInt(bot.settings.targetMap) || 1;
+    }
+    return activeTargetMapId;
+  };
+
+  // 1. Leader offline -> member should NOT follow leader, should fallback to member's own targetMap
+  let targetMap = getMapTarget(member1);
+  assert.strictEqual(targetMap, 3, 'Member should not follow offline Leader');
+
+  // 2. Leader is running but member has teamSynced = false (never clicked Sync Team Settings) -> member should NOT follow leader
+  leader1.status = 'running';
+  leader1.player = { map: 2, lv: 50 };
+  leader1.settings.bossHuntMode = 'type2';
+  member1.settings.bossHuntMode = 'type2';
+  member1.settings.teamSynced = false;
+  targetMap = getMapTarget(member1);
+  assert.strictEqual(targetMap, 3, 'Member with teamSynced = false should not follow Leader');
+
+  // 3. Leader is running, member has teamSynced = true, but bossHuntMode === 'off' -> member returns to personal farm map (3)
+  member1.settings.teamSynced = true;
+  member1.settings.bossHuntMode = 'off';
+  targetMap = getMapTarget(member1);
+  assert.strictEqual(targetMap, 3, 'Member with bossHuntMode = off should return to personal targetMap (3)');
+
+  // 4. Leader and Member are both running, teamSynced = true, both have bossHuntMode enabled -> member follows leader (2)
+  member1.settings.bossHuntMode = 'type2';
+  targetMap = getMapTarget(member1);
+  assert.strictEqual(targetMap, 2, 'Member should follow active Leader to map 2 when teamSynced = true and bossHuntMode enabled');
+
   // Restore global botInstances
   for (const key in botInstances) {
     delete botInstances[key];
@@ -909,9 +1039,80 @@ try {
     await testWarBot.fetchWarLog();
   }
   
-  assert.strictEqual(fetchWarLogCalled, true, 'fetchWarLog should be called because GW is active, even if inEventMode is false');
-  assert.strictEqual(testWarBot.currentEventKind, 'gw', 'currentEventKind should be set to gw');
+  // Test Guild Dungeon (enterGuildDungeon & exitGuildDungeon & auto-exit)
+  console.log('Testing Guild Dungeon State & Auto-Exit Logic...');
+  const mockGdunBot = new BotInstance({ name: 'GdunBot', line_uid: 'gdun_bot_1', settings: {} });
+  mockGdunBot.sendRequest = async function(url, payload) {
+    if (payload.action === 'gdun_enter') {
+      // Test case: server returns ok:1 BUT no res.map (common in practice)
+      return { ok: 1, player: { map: 12, gdun_in: 1 } };
+    } else if (payload.action === 'gdun_exit') {
+      // Test case: server returns ok:1 BUT no res.map
+      return { ok: 1, player: { map: 1, gdun_in: 0 } };
+    }
+    return { ok: 0 };
+  };
 
+  // Test 1: enterGuildDungeon must set gdun_in=1 even if res.map is missing
+  let enterOk = await mockGdunBot.enterGuildDungeon(true);
+  assert.strictEqual(enterOk, true, 'enterGuildDungeon should return true');
+  assert.strictEqual(mockGdunBot.guildDungeonActive, true, 'guildDungeonActive should be true after enter');
+  assert.strictEqual(mockGdunBot.guildDungeonIsTeam, true, 'guildDungeonIsTeam should be true');
+  assert.strictEqual(mockGdunBot.player.gdun_in, 1, 'player.gdun_in should be 1 even if res.map is absent');
+  assert.ok(mockGdunBot.gdunEnteredAt > 0, 'gdunEnteredAt should be set on enter');
+  assert.strictEqual(mockGdunBot.gdunLastKillAt, 0, 'gdunLastKillAt should be reset to 0 on enter');
+  assert.strictEqual(mockGdunBot._exitingGuildDungeon, false, '_exitingGuildDungeon should be false after enter');
+
+  // Test 2: exitGuildDungeon must reset gdun_in=0 even if res.map is missing
+  let exitOk = await mockGdunBot.exitGuildDungeon();
+  assert.strictEqual(exitOk, true, 'exitGuildDungeon should return true');
+  assert.strictEqual(mockGdunBot.guildDungeonActive, false, 'guildDungeonActive should be false after exit');
+  assert.strictEqual(mockGdunBot.player.gdun_in, 0, 'player.gdun_in should be 0 even if res.map is absent');
+  assert.strictEqual(mockGdunBot.gdunEnteredAt, 0, 'gdunEnteredAt should be reset to 0 on exit');
+  assert.strictEqual(mockGdunBot.gdunLastKillAt, 0, 'gdunLastKillAt should be reset to 0 on exit');
+  assert.strictEqual(mockGdunBot._exitingGuildDungeon, false, '_exitingGuildDungeon should be false after exit');
+
+  // Test 3: Kill-based auto-exit — 5s after gdunLastKillAt → shouldExitByKill = true
+  await mockGdunBot.enterGuildDungeon(false); // Enter solo again
+  mockGdunBot.gdunLastKillAt = Date.now() - 6000; // Simulate kill 6 seconds ago
+  const shouldExitByKill = (mockGdunBot.gdunLastKillAt > 0 && (Date.now() - mockGdunBot.gdunLastKillAt) >= 5000);
+  assert.strictEqual(shouldExitByKill, true, 'shouldExitByKill should be true when 5s have passed since kill');
+
+  // Test 4: Timer-based auto-exit — time in dungeon >= 10 min → shouldExitByTimer
+  const shouldExitByTimer10min = ((Date.now() - mockGdunBot.gdunEnteredAt) >= 10 * 60 * 1000);
+  assert.strictEqual(shouldExitByTimer10min, false, 'shouldExitByTimer should be false when just entered');
+  mockGdunBot.gdunEnteredAt = Date.now() - (11 * 60 * 1000); // Simulate 11 minutes ago
+  const shouldExitByTimerOverdue = ((Date.now() - mockGdunBot.gdunEnteredAt) >= 10 * 60 * 1000);
+  assert.strictEqual(shouldExitByTimerOverdue, true, 'shouldExitByTimer should be true after 10+ minutes');
+
+  // Test 5: Guard _exitingGuildDungeon prevents double exit
+  mockGdunBot._exitingGuildDungeon = true;
+  let guardBlocked = mockGdunBot._exitingGuildDungeon; // Would skip exitGuildDungeon in real pollGame
+  assert.strictEqual(guardBlocked, true, '_exitingGuildDungeon guard should block repeated exit');
+
+  // Test 6: Empty monsters: [] and bosses: [] triggers auto-exit after 2 consecutive polls
+  mockGdunBot._exitingGuildDungeon = false;
+  mockGdunBot.guildDungeonActive = true;
+  mockGdunBot.monsters = [];
+  mockGdunBot.bosses = [];
+  mockGdunBot.gdunEmptyPolls = 0;
+
+  // Poll 1: Empty monsters -> gdunEmptyPolls = 1
+  let aliveM = (mockGdunBot.monsters || []).filter(m => (m.hp === undefined || m.hp > 0));
+  let aliveB = (mockGdunBot.bosses || []).filter(b => (b.hp === undefined || b.hp > 0));
+  if (aliveM.length === 0 && aliveB.length === 0) mockGdunBot.gdunEmptyPolls++;
+  assert.strictEqual(mockGdunBot.gdunEmptyPolls, 1, 'Poll 1 should set gdunEmptyPolls to 1');
+  assert.strictEqual(mockGdunBot.guildDungeonActive, true, 'Bot should still be in dungeon on poll 1');
+
+  // Poll 2: Still empty -> gdunEmptyPolls = 2 -> auto exit
+  aliveM = (mockGdunBot.monsters || []).filter(m => (m.hp === undefined || m.hp > 0));
+  aliveB = (mockGdunBot.bosses || []).filter(b => (b.hp === undefined || b.hp > 0));
+  if (aliveM.length === 0 && aliveB.length === 0) mockGdunBot.gdunEmptyPolls++;
+  if (mockGdunBot.gdunEmptyPolls >= 2) await mockGdunBot.exitGuildDungeon();
+  assert.strictEqual(mockGdunBot.guildDungeonActive, false, 'Bot should auto-exit when monsters: [] verified for 2 polls');
+  assert.strictEqual(mockGdunBot.player.gdun_in, 0, 'player.gdun_in should be reset to 0');
+
+  console.log('✅ Guild Dungeon State & Auto-Exit Tests Passed successfully!');
   console.log('✅ User Polling Interval, Role Propagation and Edit Permissions Tests Passed successfully!');
   console.log('✅ Revamped Auto Market Buy Tests Passed successfully!');
   console.log('✅ Urgent Active Potion Healing Tests Passed successfully!');

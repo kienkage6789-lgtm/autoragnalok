@@ -78,6 +78,32 @@
       </div>
     </div>
 
+    <!-- Dashboard Controls & Team Filter Bar -->
+    <div class="dashboard-filter-bar" id="dashboard-filter-bar" style="display: none; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255, 255, 255, 0.08); padding: 10px 16px; border-radius: 12px; backdrop-filter: blur(10px);">
+      <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+        <span style="font-weight: 600; font-size: 0.9rem; color: #cbd5e1; display: flex; align-items: center; gap: 6px;">
+          🛡️ Bộ Lọc Đội Nhóm:
+        </span>
+        <select id="sel-dashboard-team-filter" onchange="window.setTeamFilter(this.value)" style="background: rgba(0, 0, 0, 0.4); border: 1px solid rgba(124, 58, 237, 0.4); color: #fff; padding: 6px 12px; border-radius: 8px; font-family: inherit; font-size: 0.85rem; outline: none; cursor: pointer; transition: all 0.2s;">
+          <option value="all">🌟 Tất cả Đội nhóm (All Teams)</option>
+          <option value="none">🚫 Không thuộc Team nào</option>
+          <option value="team_1">🛡️ Team 1</option>
+          <option value="team_2">🛡️ Team 2</option>
+          <option value="team_3">🛡️ Team 3</option>
+          <option value="team_4">🛡️ Team 4</option>
+          <option value="team_5">🛡️ Team 5</option>
+          <option value="team_6">🛡️ Team 6</option>
+          <option value="team_7">🛡️ Team 7</option>
+          <option value="team_8">🛡️ Team 8</option>
+          <option value="team_9">🛡️ Team 9</option>
+          <option value="team_10">🛡️ Team 10</option>
+        </select>
+      </div>
+      <div id="team-filter-stats" style="font-size: 0.82rem; color: #94a3b8;">
+        Hiển thị: <strong id="filter-count-txt" style="color: #38bdf8;">0</strong> bot
+      </div>
+    </div>
+
     <div class="accounts-grid" id="accounts-grid">
       <!-- Account cards will be dynamically rendered here -->
     </div>

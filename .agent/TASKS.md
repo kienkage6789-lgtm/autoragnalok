@@ -898,6 +898,15 @@
   - [x] Test: Viết unit test tự động xác minh logic đồng bộ & tìm kiếm Leader theo nhiều đội nhóm và chạy `npm test` thành công.
 - Status: done
 
+### [x] T57 - Khắc Phục Lỗi Đồng Bộ Nhóm Khi Leader Chưa Hoạt Động
+- Description: Sửa lỗi thành viên tự động di chuyển và khóa mục tiêu theo Leader khi Leader chưa hoạt động (chưa online, chưa chạy, hoặc chưa đồng bộ thiết lập).
+- Files related: `server.js`, `test.js`
+- Acceptance criteria:
+  - [x] Backend: Thêm các kiểm tra `leader.status === 'running'` và `leader.player !== null` trước khi ép Thành viên đồng bộ.
+  - [x] Backend: Thêm kiểm tra `this.settings.bossHuntMode !== 'off'` trên Thành viên trước khi ép đồng bộ để ngăn ngừa việc di chuyển khi chưa cấu hình.
+  - [x] Test: Bổ sung 4 unit test kiểm chứng hành vi mới và chạy thành công thông qua `npm test`.
+- Status: done
+
 
 
 

@@ -247,13 +247,41 @@ Chúng ta đã xây dựng thành công một hệ thống **Headless Bot Manage
 *   **Giao diện Dashboard**: Tái thiết kế tab `🏆 Event` thành hai tiểu tab "Cấu Hình & Lịch" và "Lịch Sử Chiến Trận". Hiển thị dòng tin PK đẹp mắt phân biệt Bang/Quốc, hỗ trợ nút Tải lại thủ công, Xóa logs và tự động làm mới mỗi 8 giây khi tab đang hiển thị.
 
 ### EE. Tích Hợp Hệ Thống Nhiều Đội Nhóm (Multiple Teams Support) (T56)
-*   **Hỗ trợ phân rã nhiều đội**: Thêm thuộc tính cấu hình `teamId` (mặc định `'none'`) cho phép chia người dùng thành tối đa 5 đội nhóm độc lập (Team 1 tới Team 5).
+*   **Hỗ trợ phân rã nhiều đội**: Thêm thuộc tính cấu hình `teamId` (mặc định `'none'`) cho phép chia người dùng thành tối đa 10 đội nhóm độc lập (`Team 1` tới `Team 10`).
 *   **So khớp Leader và kích hoạt Boss theo đội**:
     *   Thành viên (Member) chỉ tìm kiếm và đồng bộ di chuyển/mục tiêu theo Leader **có cùng Team ID** (khác `none`).
     *   Hành động thủ công **Kích hoạt săn Boss cả Team** (`force_mvp_hunt`) và đồng bộ chu kỳ chỉ tác động lên các bot cùng đội với bot ra lệnh.
     *   Việc gán vai trò Leader cho một bot chỉ tự động giải phóng vai trò Leader của các bot khác **trong cùng một Team ID**, cho phép chạy nhiều Leader cho các đội khác nhau song song.
 *   **Đồng bộ thiết lập theo đội**: Nút **Đồng bộ cài đặt Team** (`/api/team/sync`) chỉ nhân rộng cấu hình của Leader tới các Member có cùng Team ID (giữ nguyên vai trò Member và Team ID của các tài khoản đó).
-*   **Dropdown UI**: Tích hợp thêm dropdown chọn Đội nhóm bên cạnh dropdown Vai trò nhóm trên Dashboard.
+*   **Dropdown UI & Bộ Lọc Đội Nhóm**:
+    *   Tích hợp dropdown chọn Đội nhóm bên cạnh dropdown Vai trò nhóm trên Dashboard.
+    *   **Thanh Bộ Lọc Team (Team Filter Bar)**: Đặt phía trên danh sách bot hỗ trợ lọc tài khoản theo từng Đội nhóm cụ thể hoặc xem toàn bộ.
+    *   **Tag Đội Nhóm trên Card Header**: Hiển thị Badge định danh trực quan (`🛡️ T1 👑` cho Leader, `🛡️ T1 👥` cho Member) ngay trước tên nhân vật.
+
+### FF. Cờ Trạng Thái `teamSynced` & Độc Lập Cài Đặt Thành Viên (2026-08-15)
+*   **Cờ kiểm soát `teamSynced` (Mặc định `false`)**: Khi người dùng mới chọn Team Role hoặc Team ID, `teamSynced` mặc định là `false`. Thành viên hoạt động 100% độc lập, không bị ép kéo di chuyển hay khóa mục tiêu theo Leader.
+*   **Đồng bộ theo yêu cầu (Explicit Sync)**: Chỉ khi người dùng bấm nút **🔄 Đồng bộ cài đặt Team**, cờ `teamSynced` mới bật `true` và áp dụng thiết lập từ Leader sang Thành viên.
+*   **Tự động quay về Map Farm cá nhân**: Khi đang ở chế độ đồng bộ (`teamSynced === true`), Thành viên chỉ đi theo Leader trong thời gian bật Săn Boss (`bossHuntMode !== 'off'`). Khi tắt Săn Boss, Thành viên sẽ tự động quay trở về bản đồ farm riêng của chính mình (`targetMap`).
+*   **Khắc phục lỗi giật nhảy Map của Thành viên**: Cập nhật đồng bộ khối kiểm tra định tuyến bản đồ thứ hai ở cuối hàm `pollGame()` trong `server.js`, loại bỏ hoàn toàn hiện tượng Thành viên bị giật nhảy qua lại giữa bản đồ cũ và bản đồ mới khi Leader chuyển map.
+
+### GG. Đo Lường & Hiển Thị Ping Mạng (Latency) - Dành Riêng Admin (2026-08-15)
+*   **Đo Độ Trễ RTT Thực Tế**: Tự động đo thời gian phản hồi Round-Trip Time (ms) ở mỗi request game trong hàm `sendRequest()` và làm mịn theo thuật toán Exponential Moving Average (EMA: `0.7 * ping + 0.3 * elapsed`).
+*   **Phân Quyền Bảo Mật**: Chỉ tài khoản Admin (`currentUser.role === 'admin'`) mới nhìn thấy chỉ số Ping mạng bên cạnh trạng thái `Đang Treo`. Người dùng thường được ẩn badge này.
+*   **Phân Loại Màu Sắc Trực Quan**: 
+    *   🟢 **Xanh lá**: Ping tốt (`< 150ms`).
+    *   🟡 **Vàng**: Ping trung bình (`150ms - 400ms`).
+    *   🔴 **Đỏ**: Ping lag/cao (`> 400ms`).
+
+### HH. Tính Năng Săn Boss Bang Hội / Phụ Bản Guild (Guild Dungeon) (2026-08-15)
+*   **Kích Hoạt Thủ Công Linh Hoạt**: Bổ sung 2 nút bấm trong khu vực Săn Boss trên Dashboard:
+    *   **🏰 Cả Team** (`gdun_enter_team`): Trưởng nhóm kéo toàn bộ thành viên nhóm đã đồng bộ (`teamSynced === true`) vào Phụ Bản Guild cùng nhau.
+    *   **👤 Đi 1 Mình** (`gdun_enter_solo`): Chỉ duy nhất bot được chọn vào Phụ Bản Guild, các thành viên khác vẫn ở lại map farm bình thường.
+    *   **🚪 Thoát Phụ Bản** (`gdun_exit`): Nút thoát khẩn cấp bất cứ lúc nào.
+*   **Chủ Động Áp Sát & Tấn Công Boss Guild**: Tích hợp khối nhắm mục tiêu `0.5 Guild Dungeon Targeting`, tự động lấy tọa độ của Boss trong `monsters`/`bosses` để bot chủ động di chuyển áp sát và tung kỹ năng tiêu diệt Boss Guild.
+*   **Tự Động Nhận Diện `monsters: []` Để Thoát Phụ Bản**: Lưu trữ mảng `this.monsters` từ phản hồi game (`d.monsters`). Ngay khi Boss Guild bị hạ gục và mảng quái/Boss trở về rỗng (`monsters: []` & `bosses: []`), sau 2 nhịp poll xác nhận, bot sẽ **lập tức ghi log và tự động phát lệnh `exitGuildDungeon` thoát ra ngoài**.
+*   **Bảo Vệ Bot Khỏi Bị Auto-Warp Giật Ra Khỏi Map**: Khóa cơ chế tự động chuyển bản đồ (`shouldWarpCheck`) ở cả 2 khối định tuyến khi `this.guildDungeonActive === true` hoặc `Number(this.player.gdun_in) === 1`, đảm bảo bot giữ nguyên vị trí trong Phụ Bản (Map 12) mà không bị kéo giật ngược về Map Farm.
+*   **Bảo Toàn Trạng Thái & Tọa Độ**: Bổ sung `'gdun_in'` vào `COLD_FIELDS` trong `updatePlayerState()` để tránh bị các lượt poll thường ghi đè làm mất cờ. Tự động đưa bot về Map Farm sau khi hoàn thành Phụ Bản.
+*   **Hệ Thống Thông Báo Toast Frontend**: Xây dựng `window.showToast(msg, isError)` hiển thị thông báo kết quả nổi góc màn hình mượt mà và tự động xử lý mã lỗi HTTP 401 khi hết hạn phiên đăng nhập.
 
 ---
 
