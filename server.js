@@ -15,8 +15,170 @@ const PORT = process.env.PORT || 3000;
 app.set('trust proxy', 1); // Trust first proxy (Render, Heroku, Nginx, Cloudflare, etc.)
 
 
-// ==================== PROXY POOL ====================
+// ==================== ADAPTIVE TOKEN BUCKET & PROXY POOL ====================
 const PROXIES_FILE = path.join(__dirname, 'proxies.json');
+
+/**
+ * 🪣 AdaptiveTokenBucket (T85)
+ * Thuật toán Token Bucket kết hợp Bộ điều tốc thích ứng AIMD (Additive Increase / Multiplicative Decrease)
+ * và Latency Gradient Tracker per IP/Proxy.
+ */
+class AdaptiveTokenBucket {
+  constructor(options = {}) {
+    this.key = options.key || 'direct';
+    
+    // Dung lượng thùng (Capacity) và Tốc độ nạp (Refill Rate - tokens/s)
+    this.minCapacity = options.minCapacity || 1.5;
+    this.maxCapacity = options.maxCapacity || 4.0;
+    this.capacity = options.initialCapacity || (this.key === 'direct' ? 3.5 : 3.0);
+    
+    this.minRefillRate = options.minRefillRate || 1.0;
+    this.maxRefillRate = options.maxRefillRate || 3.2;
+    this.refillRate = options.initialRefillRate || 2.5; // tokens/giây
+    
+    this.tokens = this.capacity;
+    this.lastRefillAt = Date.now();
+    
+    // Khoảng cách tối thiểu giữa 2 request liên tiếp xuất xưởng
+    this.minSpacingMs = options.minSpacingMs || (this.key === 'direct' ? 300 : 250);
+    this.nextAvailableSlot = 0;
+    this.lastOutboundAt = 0;
+    
+    // AIMD / Adaptive Controller state
+    this.consecutiveSuccesses = 0;
+    this.state = 'HEALTHY'; // 'HEALTHY' | 'CONGESTED' | 'THROTTLED'
+    this.avgRtt = 0;
+    this.softCooldownUntil = 0;
+  }
+
+  /**
+   * Cập nhật số token hiện có theo thời gian trôi qua
+   */
+  _refill() {
+    const now = Date.now();
+    const elapsedSec = (now - this.lastRefillAt) / 1000;
+    if (elapsedSec > 0) {
+      this.tokens = Math.min(this.capacity, this.tokens + elapsedSec * this.refillRate);
+      this.lastRefillAt = now;
+    }
+  }
+
+  /**
+   * Đặt chỗ và tiêu thụ token theo cơ chế Token Bucket + Synchronous Slot Booking
+   * @param {number} cost Số token cần tiêu thụ (mặc định 1)
+   * @param {number} hardMinSpacing Khoảng cách tối thiểu bắt buộc
+   */
+  async acquire(cost = 1, hardMinSpacing = 0) {
+    // 1. Kiểm tra nếu đang trong thời gian Soft Cooldown do vừa gặp 429
+    const now = Date.now();
+    if (this.softCooldownUntil > now) {
+      const wait = this.softCooldownUntil - now;
+      await new Promise(r => setTimeout(r, wait));
+    }
+
+    // 2. Tính toán token & thời gian nạp nếu thiếu
+    this._refill();
+    const effectiveMinSpacing = Math.max(this.minSpacingMs, hardMinSpacing);
+    const currentNow = Date.now();
+
+    let scheduledSlot;
+    if (this.tokens >= cost) {
+      // Đủ token trong thùng -> Tiêu thụ ngay lập tức
+      this.tokens -= cost;
+      scheduledSlot = Math.max(currentNow, this.nextAvailableSlot);
+    } else {
+      // Thiếu token -> Tính thời gian cần chờ để nạp đủ token
+      const missingTokens = cost - this.tokens;
+      const waitMs = Math.ceil((missingTokens / this.refillRate) * 1000);
+      this.tokens = 0; // Tiêu hao hết token hiện có
+      scheduledSlot = Math.max(currentNow + waitMs, this.nextAvailableSlot);
+    }
+
+    // 3. Đặt chỗ đồng bộ tức thì cho request kế tiếp (Chống Async Race Condition)
+    this.nextAvailableSlot = scheduledSlot + effectiveMinSpacing;
+
+    const waitDuration = scheduledSlot - currentNow;
+    if (waitDuration > 0) {
+      await new Promise(r => setTimeout(r, waitDuration));
+    }
+    this.lastOutboundAt = Date.now();
+  }
+
+  /**
+   * Tiếp nhận phản hồi từ request thực tế và tự động điều chỉnh tốc độ (Feedback Loop)
+   */
+  recordFeedback({ ok, status, rtt, isRateLimit, retryAfter }) {
+    const now = Date.now();
+    if (rtt && rtt > 0) {
+      this.avgRtt = this.avgRtt === 0 ? rtt : (0.8 * this.avgRtt + 0.2 * rtt);
+    }
+
+    // A. Xử lý khi gặp Rate Limit (429 / 1015 / Cloudflare Block)
+    if (isRateLimit || status === 429) {
+      this.state = 'THROTTLED';
+      this.consecutiveSuccesses = 0;
+      
+      // Multiplicative Decrease (MD): Giảm 30% tốc độ nạp token và 25% dung lượng thùng
+      this.refillRate = Math.max(this.minRefillRate, Number((this.refillRate * 0.70).toFixed(2)));
+      this.capacity = Math.max(this.minCapacity, Number((this.capacity * 0.75).toFixed(2)));
+      this.minSpacingMs = Math.min(500, this.minSpacingMs + 100);
+      
+      // Xả cạn token trong thùng
+      this.tokens = 0;
+      this.lastRefillAt = now;
+      
+      // Kích hoạt Soft Cooldown (nếu có retry-after thì dùng retry-after, ngược lại 3s)
+      const cooldownSec = (retryAfter && !isNaN(Number(retryAfter))) ? Number(retryAfter) : 3;
+      this.softCooldownUntil = Math.max(this.softCooldownUntil, now + cooldownSec * 1000);
+      return;
+    }
+
+    // B. Xử lý khi Request Timeout hoặc Latency tăng vọt (Dấu hiệu nghẽn mạng)
+    if (!ok && (status === 503 || status === 504 || rtt > 1200)) {
+      this.state = 'CONGESTED';
+      this.consecutiveSuccesses = 0;
+      this.minSpacingMs = Math.min(450, this.minSpacingMs + 25);
+      return;
+    }
+
+    // C. Xử lý khi Request Thành Công (200 OK)
+    if (ok) {
+      this.consecutiveSuccesses++;
+      
+      // Nếu đang trong trạng thái CONGESTED/THROTTLED mà có chuỗi thành công, hồi phục về HEALTHY
+      if (this.consecutiveSuccesses >= 5 && this.state !== 'HEALTHY') {
+        this.state = 'HEALTHY';
+      }
+
+      // Additive Increase (AI): Cứ mỗi 10 request thành công liên tiếp ở trạng thái HEALTHY, tăng tốc nhẹ
+      if (this.state === 'HEALTHY' && this.consecutiveSuccesses % 10 === 0) {
+        if (this.avgRtt < 400) {
+          this.refillRate = Math.min(this.maxRefillRate, Number((this.refillRate + 0.05).toFixed(2)));
+          this.capacity = Math.min(this.maxCapacity, Number((this.capacity + 0.1).toFixed(2)));
+          this.minSpacingMs = Math.max(250, this.minSpacingMs - 10);
+        }
+      }
+    }
+  }
+
+  /**
+   * Lấy thông tin thống kê trạng thái hiện tại
+   */
+  getState() {
+    this._refill();
+    return {
+      key: this.key,
+      tokens: Number(this.tokens.toFixed(2)),
+      capacity: Number(this.capacity.toFixed(2)),
+      refillRate: Number(this.refillRate.toFixed(2)),
+      minSpacingMs: this.minSpacingMs,
+      state: this.state,
+      avgRtt: Math.round(this.avgRtt),
+      isSoftCooldown: Date.now() < this.softCooldownUntil,
+      softCooldownRemainingSec: Math.max(0, Math.round((this.softCooldownUntil - Date.now()) / 1000))
+    };
+  }
+}
 
 class ProxyPool {
   static parseProxyInput(url, type, label) {
@@ -69,6 +231,8 @@ class ProxyPool {
     this._agents = {};      // proxy_id -> ProxyAgent instance
     this._rateLimitCooldowns = {}; // proxyId -> timestamp until which this proxy/direct is rate-limited
     this._lastOutboundAt = {};      // proxyId -> timestamp of last request through this proxy/direct
+    this._nextAvailableSlot = {};   // Backward compatibility map
+    this._tokenBuckets = {};        // proxyId -> AdaptiveTokenBucket instance
     this._directAgent = new Agent({
       connect: {
         timeout: 8000,
@@ -444,11 +608,20 @@ class ProxyPool {
     this._save();
   }
 
+  getTokenBucket(proxyId) {
+    const key = proxyId || 'direct';
+    if (!this._tokenBuckets[key]) {
+      this._tokenBuckets[key] = new AdaptiveTokenBucket({ key });
+    }
+    return this._tokenBuckets[key];
+  }
+
   getStats() {
     const counts = this._getCounts();
     const max = this._settings.maxBotsPerProxy || 10;
     const result = [];
     if (this._settings.useDirectConnection) {
+      const bucketState = this.getTokenBucket('direct').getState();
       result.push({ 
         id: 'direct', 
         label: '🖥️ Kết nối trực tiếp (máy)', 
@@ -458,17 +631,20 @@ class ProxyPool {
         maxBots: max, 
         isDirect: true,
         isRateLimited: this.isRateLimited('direct'),
-        rateLimitWaitSeconds: Math.round(this.getRateLimitWaitTime('direct') / 1000)
+        rateLimitWaitSeconds: Math.round(this.getRateLimitWaitTime('direct') / 1000),
+        tokenBucket: bucketState
       });
     }
     for (const p of this._proxies) {
+      const pBucketState = this.getTokenBucket(p.id).getState();
       result.push({ 
         ...p, 
         botCount: counts[p.id] || 0, 
         maxBots: max, 
         isDirect: false,
         isRateLimited: this.isRateLimited(p.id),
-        rateLimitWaitSeconds: Math.round(this.getRateLimitWaitTime(p.id) / 1000)
+        rateLimitWaitSeconds: Math.round(this.getRateLimitWaitTime(p.id) / 1000),
+        tokenBucket: pBucketState
       });
     }
     return result;
@@ -505,25 +681,23 @@ class ProxyPool {
 
   async waitForOutboundSlot(proxyId, minSpacingMs = 350) {
     const key = proxyId || 'direct';
-    const effectiveSpacing = key === 'direct' ? Math.max(minSpacingMs, 350) : minSpacingMs;
-    if (!this._nextAvailableSlot) this._nextAvailableSlot = {};
-
     // 1. Kiểm tra nếu IP đang trong thời gian hạ nhiệt rate-limit thủ công
     const rateLimitWait = this.getRateLimitWaitTime(key);
     if (rateLimitWait > 0) {
       await new Promise(r => setTimeout(r, rateLimitWait));
     }
 
-    // 2. Synchronous Slot Booking (Đặt chỗ trước tức thì - Chống hoàn toàn Async Race)
-    const now = Date.now();
-    const scheduledSlot = Math.max(now, (this._nextAvailableSlot[key] || 0));
-    this._nextAvailableSlot[key] = scheduledSlot + effectiveSpacing;
-
-    const waitTime = scheduledSlot - now;
-    if (waitTime > 0) {
-      await new Promise(r => setTimeout(r, waitTime));
-    }
+    // 2. Tiêu thụ token qua AdaptiveTokenBucket kết hợp Synchronous Slot Booking
+    const bucket = this.getTokenBucket(key);
+    const effectiveSpacing = key === 'direct' ? Math.max(minSpacingMs, 300) : minSpacingMs;
+    await bucket.acquire(1, effectiveSpacing);
     this._lastOutboundAt[key] = Date.now();
+  }
+
+  recordOutboundResult(proxyId, feedback) {
+    const key = proxyId || 'direct';
+    const bucket = this.getTokenBucket(key);
+    bucket.recordFeedback(feedback);
   }
 
   getSettings() { return { ...this._settings }; }
@@ -2514,32 +2688,64 @@ class BotInstance {
           signal: controller.signal
         });
 
+        const elapsed = Date.now() - reqStartTime;
+        this.ping = Math.round(this.ping ? (0.7 * this.ping + 0.3 * elapsed) : elapsed);
+
         // 🛑 Xử lý mã lỗi HTTP 429: Too Many Requests (Rate Limit từ Cloudflare/Nginx/Game Server)
         if (response.status === 429) {
+          proxyPool.recordOutboundResult(this.proxyId, {
+            ok: false,
+            status: 429,
+            rtt: elapsed,
+            isRateLimit: true,
+            retryAfter: response.headers.get('retry-after')
+          });
           throw new Error('HTTP Error 429: Too Many Requests (Máy chủ giới hạn tần suất — Hãy bấm nút "🛡️ Hạ Nhiệt" nếu cần)');
         }
 
         if (!response.ok) {
+          proxyPool.recordOutboundResult(this.proxyId, {
+            ok: false,
+            status: response.status,
+            rtt: elapsed,
+            isRateLimit: false
+          });
           throw new Error(`HTTP Error ${response.status}`);
         }
 
         const text = await response.text();
-        const elapsed = Date.now() - reqStartTime;
-        this.ping = Math.round(this.ping ? (0.7 * this.ping + 0.3 * elapsed) : elapsed);
 
         try {
           const parsed = JSON.parse(text);
           clearTimeout(timeout);
+          proxyPool.recordOutboundResult(this.proxyId, {
+            ok: true,
+            status: 200,
+            rtt: elapsed,
+            isRateLimit: false
+          });
           return parsed;
         } catch (e) {
           // If it returns HTML or Cloudflare challenge / Error 1015
           if (text.includes('1015') || text.includes('rate limit') || text.includes('cf-challenge') || text.includes('Cloudflare')) {
             const isRateLimit = text.includes('1015') || text.includes('rate limit');
+            proxyPool.recordOutboundResult(this.proxyId, {
+              ok: false,
+              status: isRateLimit ? 429 : 403,
+              rtt: elapsed,
+              isRateLimit: isRateLimit
+            });
             if (isRateLimit) {
               throw new Error('Bị chặn bởi Cloudflare (Rate Limit Error 1015 — Hãy bấm nút "🛡️ Hạ Nhiệt" nếu cần)');
             }
             throw new Error('Bị chặn bởi Cloudflare (JS Challenge / Captcha)');
           }
+          proxyPool.recordOutboundResult(this.proxyId, {
+            ok: false,
+            status: 502,
+            rtt: elapsed,
+            isRateLimit: false
+          });
           throw new Error('Dữ liệu máy chủ trả về không hợp lệ (Không phải JSON)');
         }
       } catch (err) {
@@ -2566,6 +2772,13 @@ class BotInstance {
           formattedErr.message.includes('Rate Limit') || 
           formattedErr.message.includes('1015')
         );
+
+        proxyPool.recordOutboundResult(this.proxyId, {
+          ok: false,
+          status: isRateLimit ? 429 : 500,
+          rtt: Date.now() - reqStartTime,
+          isRateLimit: isRateLimit
+        });
 
         // ⚠️ Khi gặp lỗi 429 / Rate Limit, tuyệt đối KHÔNG retry dồn dập để tránh gia hạn án phạt cấm IP!
         if (!isRateLimit && attempt < maxAttempts) {
@@ -7700,15 +7913,36 @@ async function proxyRequest(req, res, targetUrl, uid = null) {
     const proxyId = uid ? (botInstances[uid]?.proxyId || 'direct') : 'direct';
     const dispatcher = uid ? proxyPool.getDispatcher(uid) : proxyPool.getDefaultDispatcher();
 
-    // Giữ nhịp Outbound Slot (200ms Slot Booking)
+    // Giữ nhịp Outbound Slot qua Adaptive Token Bucket
     await proxyPool.waitForOutboundSlot(proxyId, 200);
 
-    const response = await fetch(targetUrl, {
-      method: req.method,
-      headers: headers,
-      body: body,
-      dispatcher: dispatcher
-    });
+    const reqStartTime = Date.now();
+    let response;
+    try {
+      response = await fetch(targetUrl, {
+        method: req.method,
+        headers: headers,
+        body: body,
+        dispatcher: dispatcher
+      });
+      const elapsed = Date.now() - reqStartTime;
+      proxyPool.recordOutboundResult(proxyId, {
+        ok: response.ok,
+        status: response.status,
+        rtt: elapsed,
+        isRateLimit: response.status === 429,
+        retryAfter: response.headers.get('retry-after')
+      });
+    } catch (fetchErr) {
+      const elapsed = Date.now() - reqStartTime;
+      proxyPool.recordOutboundResult(proxyId, {
+        ok: false,
+        status: 500,
+        rtt: elapsed,
+        isRateLimit: false
+      });
+      throw fetchErr;
+    }
 
     res.status(response.status);
     res.setHeader('content-type', response.headers.get('content-type') || 'application/json');
@@ -8386,5 +8620,6 @@ module.exports = {
   activeCooldownTimers,
   triggerCooldownForBots,
   cancelCooldown,
-  calculateHarmonicPollDelay
+  calculateHarmonicPollDelay,
+  AdaptiveTokenBucket
 };

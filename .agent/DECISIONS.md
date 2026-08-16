@@ -2,6 +2,27 @@
 
 > Captured architectural decisions and trade-offs.
 
+## 2026-08-16 - Triển Khai Thuật Toán Token Bucket Kết Hợp Adaptive Rate Limiter (T85)
+
+- Bối cảnh:
+  - Hệ thống trước đó dùng cơ chế Static Spacing (350ms cứng). Mặc dù giải quyết được vấn đề Async Race, nhưng không tự thích ứng theo độ trễ máy chủ (RTT) và biến động tải mạng.
+  - Khi máy chủ thông thoáng, không thể bùng phát ngắn hạn (Bursting) khi cần thiết; khi máy chủ chịu tải cao, tốc độ cố định vẫn có thể chạm ngưỡng rate-limit.
+- Quyết định:
+  - **Kiến Trúc Token Bucket Per-IP/Proxy (`AdaptiveTokenBucket`)**:
+    - Mỗi Proxy/IP sở hữu 1 Token Bucket độc lập với $C$ (Capacity) và $R$ (Refill Rate tokens/s).
+    - Cho phép bùng phát ngắn hạn $C$ tokens khi tích lũy, sau đó giới hạn mượt mà ở mức trung bình $R\text{ req/s}$.
+  - **Thuật Toán Điều Tốc Thích Ứng AIMD (Adaptive Increase / Multiplicative Decrease)**:
+    - Tiếp nhận phản hồi từ mọi request qua `recordOutboundResult`.
+    - **Additive Increase (AI)**: Khi nhận chuỗi 10 request 200 OK thành công với RTT $< 400\text{ms}$, tăng dần $R \leftarrow R + 0.05$ và $C \leftarrow C + 0.1$.
+    - **Multiplicative Decrease (MD)**: Khi gặp HTTP 429 hoặc Cloudflare 1015, giảm ngay $R \leftarrow R \times 0.70$, $C \leftarrow C \times 0.75$, xả cạn $T=0$, tăng spacing $S_{\text{min}}$, và kích hoạt Soft Cooldown 3s.
+    - **Congestion Mode**: Khi gặp HTTP 503/504 hoặc RTT $> 1200\text{ms}$, tạm ngừng tăng tốc và tăng nhẹ khoảng cách spacing.
+- Kết quả:
+  - Hệ thống tự động học và thích ứng với giới hạn thực tế của Cloudflare / Game Server.
+  - Triệt tiêu hiện tượng sập hàng loạt do HTTP 429 khi mạng lag hoặc máy chủ quá tải.
+  - Toàn bộ test suite `node test.js` vượt qua 100%.
+
+---
+
 ## 2026-08-16 - Tạm Dừng Và Ẩn Các Chức Năng Nâng Stats, Đệ Tử, Khai Thác Mỏ, Đấu Trường (T84)
 
 - Bối cảnh:

@@ -2,6 +2,26 @@
 
 > Changelog of actual changes implemented.
 
+## 2026-08-16 - Triển Khai Thuật Toán Token Bucket Kết Hợp Adaptive Rate Limiter (T85)
+- File đã đổi: [server.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [test.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/test.js)
+- Đã làm:
+  - **Thuật Toán Token Bucket (`AdaptiveTokenBucket`)**:
+    - Thiết lập cơ chế tiêu thụ token và nạp liên tục theo thời gian thực ($R\text{ tokens/s}$).
+    - Cho phép bùng phát lưu lượng an toàn trong phạm vi dung lượng thùng ($C\text{ tokens}$) và tự động điều phối hàng đợi slot khi cạn token.
+  - **Bộ Điều Tốc Thích Ứng AIMD (Adaptive Rate Limiter)**:
+    - Tiếp nhận phản hồi (Feedback Loop) từ `sendRequest()` và `proxyRequest()`.
+    - **Additive Increase (AI)**: Cứ mỗi 10 request thành công liên tiếp (200 OK, RTT $< 400\text{ms}$), tăng $R$ thêm $0.05\text{ tokens/s}$, tăng $C$ thêm $0.1\text{ tokens}$, và giảm nhẹ $S_{\text{min}}$.
+    - **Multiplicative Decrease (MD)**: Khi gặp HTTP 429 hoặc Cloudflare Error 1015, giảm $R$ đi 30%, giảm $C$ đi 25%, xả cạn $T=0$, tăng khoảng cách $S_{\text{min}}$, và kích hoạt Soft Cooldown 3s.
+    - **Congestion Handling**: Khi gặp timeout hoặc HTTP 503/504, chuyển trạng thái `CONGESTED` và điều chỉnh spacing.
+  - **Tích hợp Vào `ProxyPool`**:
+    - Quản lý các bucket tách biệt cho từng proxy và IP direct qua `getTokenBucket(proxyId)`.
+    - Nâng cấp `waitForOutboundSlot()` tiêu thụ token qua `AdaptiveTokenBucket.acquire()`.
+    - Thêm `recordOutboundResult()` và đưa trạng thái `tokenBucket` vào `getStats()`.
+  - **Unit Tests**:
+    - Bổ sung bộ test T85 trong `test.js` kiểm tra kiểm soát bùng phát, MD & xả cạn token khi 429, AI khi 200 OK, và tích hợp ProxyPool. 100% tests pass.
+
+---
+
 ## 2026-08-16 - Tạm Dừng Và Ẩn Các Chức Năng Nâng Stats, Đệ Tử, Khai Thác Mỏ, Đấu Trường (T84)
 - File đã đổi: [server.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [public/app.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/public/app.js), [test.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/test.js)
 - Đã làm:

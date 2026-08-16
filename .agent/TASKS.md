@@ -3,6 +3,19 @@
 > Work Breakdown Structure. Update task states immediately upon changes.
 > Statuses: todo | doing | blocked | review | done
 
+### [x] T85 - Triển Khai Thuật Toán Token Bucket Kết Hợp Adaptive Rate Limiter (AIMD & Feedback Loop)
+- Description: Tích hợp lớp `AdaptiveTokenBucket` per IP/Proxy kết hợp giải thuật điều tốc thích ứng AIMD (Additive Increase on 200 OK / Multiplicative Decrease on 429 & Congestion), theo dõi RTT Ping và tự động điều chỉnh tốc độ nạp token cũng như dung lượng thùng nhằm tối đa hóa throughput và triệt tiêu lỗi HTTP 429.
+- Files related: `server.js`, `test.js`
+- Acceptance criteria:
+  - [x] Backend: Xây dựng lớp `AdaptiveTokenBucket` với các phương thức `acquire(cost)`, `recordFeedback(feedback)`, `getState()`.
+  - [x] Backend: Tích hợp `AdaptiveTokenBucket` vào `ProxyPool` quản lý theo proxy ID / IP direct, nâng cấp `waitForOutboundSlot` và bổ sung `recordOutboundResult`.
+  - [x] Backend: Tích hợp vòng phản hồi (Feedback Loop) trong `sendRequest` và `proxyRequest`.
+  - [x] Unit Test: Viết test suite toàn diện trong `test.js` kiểm tra bùng phát ngắn hạn (Bursting), xả cạn token & MD khi 429, hồi phục AI khi 200 OK, và tích hợp ProxyPool.
+  - [x] Unit Test: Chạy `node test.js` đạt 100% pass.
+- Status: done
+
+---
+
 ### [x] T84 - Tạm Dừng Và Ẩn Các Chức Năng Nâng Stats, Đệ Tử, Khai Thác Mỏ, Đấu Trường
 - Description: Tạm dừng thực thi hoàn toàn các chức năng nâng điểm tiềm năng (Stats), nâng cấp đệ tử (Cat/Drone), khai thác khoáng sản (Mines), và khiêu chiến đấu trường (Arena) trong `executeNextSubAction()`, đồng thời ẩn các toggle điều khiển trên giao diện người dùng theo yêu cầu.
 - Files related: `server.js`, `public/app.js`, `test.js`

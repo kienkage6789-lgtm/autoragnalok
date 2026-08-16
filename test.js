@@ -21,7 +21,8 @@ const {
   activeCooldownTimers,
   triggerCooldownForBots,
   cancelCooldown,
-  calculateHarmonicPollDelay
+  calculateHarmonicPollDelay,
+  AdaptiveTokenBucket
 } = require('./server');
 
 console.log('🧪 Running Unit Tests...');
@@ -1481,7 +1482,8 @@ try {
   const totalSpan = timestamps[4] - timestamps[0];
   assert.ok(totalSpan >= 700, `Total time span for 5 slots must be >= 700ms (got ${totalSpan}ms)`);
 
-  delete proxyPool._nextAvailableSlot[slotTestKey];
+  if (proxyPool._tokenBuckets) delete proxyPool._tokenBuckets[slotTestKey];
+  if (proxyPool._nextAvailableSlot) delete proxyPool._nextAvailableSlot[slotTestKey];
   delete proxyPool._lastOutboundAt[slotTestKey];
 
   console.log('✅ Synchronous Slot Booking Engine Tests Passed successfully!');
@@ -1511,11 +1513,12 @@ try {
   assert.strictEqual(subBot.lastArenaCheckAt, 0);
   assert.strictEqual(subBot.isSubActionRunning, false);
 
-  // Test Direct Connection Outbound Slot Spacing >= 350ms
+  // Test Direct Connection Outbound Slot Spacing >= 300ms
   const directSlotKey = 'direct';
   const directTimestamps = [];
   const directStart = Date.now();
-  delete proxyPool._nextAvailableSlot[directSlotKey];
+  if (proxyPool._tokenBuckets) delete proxyPool._tokenBuckets[directSlotKey];
+  if (proxyPool._nextAvailableSlot) delete proxyPool._nextAvailableSlot[directSlotKey];
 
   const dp1 = proxyPool.waitForOutboundSlot(directSlotKey).then(() => directTimestamps.push(Date.now() - directStart));
   const dp2 = proxyPool.waitForOutboundSlot(directSlotKey).then(() => directTimestamps.push(Date.now() - directStart));
@@ -1526,11 +1529,69 @@ try {
 
   for (let i = 1; i < directTimestamps.length; i++) {
     const gap = directTimestamps[i] - directTimestamps[i - 1];
-    assert.ok(gap >= 320, `Direct slot gap between ${i-1} and ${i} must be >= 320ms for 350ms target (got ${gap}ms)`);
+    assert.ok(gap >= 270, `Direct slot gap between ${i-1} and ${i} must be >= 270ms for 300ms target (got ${gap}ms)`);
   }
 
-  delete proxyPool._nextAvailableSlot[directSlotKey];
+  if (proxyPool._tokenBuckets) delete proxyPool._tokenBuckets[directSlotKey];
+  if (proxyPool._nextAvailableSlot) delete proxyPool._nextAvailableSlot[directSlotKey];
   console.log('✅ Off-Beat Sub-Action Dispatcher & Interval Gating Tests Passed successfully!');
+
+  // ==================== T85 - Token Bucket & Adaptive Rate Limiter Tests ====================
+  console.log('Testing Token Bucket & Adaptive Rate Limiter Engine (T85)...');
+
+  const testBucket = new AdaptiveTokenBucket({
+    key: 'test_tb_1',
+    initialCapacity: 3.0,
+    initialRefillRate: 2.0,
+    minSpacingMs: 100
+  });
+
+  // 1. Kiểm tra khởi tạo
+  assert.strictEqual(testBucket.key, 'test_tb_1');
+  assert.strictEqual(testBucket.capacity, 3.0);
+  assert.strictEqual(testBucket.tokens, 3.0);
+  assert.strictEqual(testBucket.refillRate, 2.0);
+  assert.strictEqual(testBucket.state, 'HEALTHY');
+
+  // 2. Kiểm tra khả năng bùng phát ngắn hạn (Controlled Bursting) khi thùng đầy
+  const tbStart = Date.now();
+  await testBucket.acquire(1, 50);
+  assert.ok(testBucket.tokens <= 2.05 && testBucket.tokens >= 1.95, `Tokens after 1 acquire should be ~2.0 (got ${testBucket.tokens})`);
+  await testBucket.acquire(1, 50);
+  assert.ok(testBucket.tokens <= 1.15 && testBucket.tokens >= 0.95, `Tokens after 2 acquires should be ~1.0 (got ${testBucket.tokens})`);
+  await testBucket.acquire(1, 50);
+  assert.ok(testBucket.tokens <= 0.35, `Tokens after 3 acquires should be <= 0.35 (got ${testBucket.tokens})`);
+
+  // 3. Kiểm tra Multiplicative Decrease (MD) và xả cạn token khi gặp HTTP 429
+  testBucket.recordFeedback({ ok: false, status: 429, rtt: 150, isRateLimit: true });
+  assert.strictEqual(testBucket.state, 'THROTTLED', 'State must be THROTTLED on 429');
+  assert.strictEqual(testBucket.tokens, 0, 'Tokens must be drained to 0 on 429');
+  assert.ok(testBucket.refillRate < 2.0, `Refill rate must decrease after 429 (got ${testBucket.refillRate})`);
+  assert.ok(testBucket.capacity < 3.0, `Capacity must decrease after 429 (got ${testBucket.capacity})`);
+  assert.ok(testBucket.softCooldownUntil > Date.now(), 'Soft cooldown must be active after 429');
+
+  // 4. Kiểm tra Additive Increase (AI) khi nhận phản hồi 200 OK liên tiếp
+  testBucket.softCooldownUntil = 0; // Clear cooldown for testing
+  const rateBeforeAI = testBucket.refillRate;
+  for (let i = 0; i < 10; i++) {
+    testBucket.recordFeedback({ ok: true, status: 200, rtt: 100, isRateLimit: false });
+  }
+  assert.strictEqual(testBucket.state, 'HEALTHY', 'State must recover to HEALTHY');
+  assert.ok(testBucket.refillRate > rateBeforeAI, `Refill rate should increase after 10 successes (before ${rateBeforeAI}, after ${testBucket.refillRate})`);
+
+  // 5. Kiểm tra tích hợp vào ProxyPool
+  const directTB = proxyPool.getTokenBucket('direct');
+  assert.ok(directTB instanceof AdaptiveTokenBucket, 'getTokenBucket must return AdaptiveTokenBucket instance');
+  
+  proxyPool.recordOutboundResult('direct', { ok: true, status: 200, rtt: 150, isRateLimit: false });
+  const poolStats = proxyPool.getStats();
+  const directPoolStat = poolStats.find(s => s.id === 'direct');
+  assert.ok(directPoolStat, 'direct must be in poolStats');
+  assert.ok(directPoolStat.tokenBucket, 'tokenBucket state must be in stats');
+  assert.strictEqual(typeof directPoolStat.tokenBucket.tokens, 'number');
+  assert.strictEqual(typeof directPoolStat.tokenBucket.refillRate, 'number');
+
+  console.log('✅ Token Bucket & Adaptive Rate Limiter Engine Tests Passed successfully!');
 
   console.log('✅ User Polling Interval, Role Propagation and Edit Permissions Tests Passed successfully!');
   console.log('✅ Revamped Auto Market Buy Tests Passed successfully!');
