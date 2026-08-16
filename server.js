@@ -2377,15 +2377,9 @@ class BotInstance {
         if (this.status === 'running') {
           let nextDelay;
           if (this.pollFails > 0) {
-            if (this.lastRateLimitAt && (Date.now() - this.lastRateLimitAt < 120000)) {
-              // 🛑 Giãn cách lũy thừa khi dính Rate Limit / 429: 15s -> 22.5s -> 33.7s -> 50s -> max 60s
-              nextDelay = Math.min(60000, Math.round(15000 * Math.pow(1.5, Math.min(5, this.pollFails) - 1)));
-              this.addLog('WARNING', `⚠️ [Rate-Limit Backoff] Đang tạm dừng ${Math.round(nextDelay / 1000)}s trước khi thử lại để tránh gia hạn án phạt Cloudflare/429...`);
-            } else {
-              // 🌐 Lỗi mạng thông thường: 2s -> 4s -> 8s -> 16s -> 30s
-              const baseDelay = this.userIsAdmin || this.allowEditPollInterval ? (this.settings.pollInterval || 2000) : (this.userPollInterval || 2000);
-              nextDelay = Math.min(30000, Math.max(2000, Math.round(baseDelay * Math.pow(2, Math.min(4, this.pollFails)))));
-            }
+            // Lỗi mạng hoặc kết nối: giãn cách nhẹ nhàng 2s -> 3s -> 4.5s (không ép buộc tự động hạ nhiệt, chỉ hạ nhiệt khi người dùng bấm nút)
+            const baseDelay = this.userIsAdmin || this.allowEditPollInterval ? (this.settings.pollInterval || 2000) : (this.userPollInterval || 2000);
+            nextDelay = Math.min(10000, Math.max(2000, Math.round(baseDelay * Math.pow(1.5, Math.min(3, this.pollFails)))));
           } else {
             // 🌊 Harmonic Sine-Wave Pacing Engine (Bảo toàn 100% tốc train + Phân luồng lệch pha chống 429)
             nextDelay = calculateHarmonicPollDelay(this);
@@ -2468,10 +2462,7 @@ class BotInstance {
 
         // 🛑 Xử lý mã lỗi HTTP 429: Too Many Requests (Rate Limit từ Cloudflare/Nginx/Game Server)
         if (response.status === 429) {
-          const retryAfterSec = Number(response.headers.get('retry-after')) || 15;
-          const cooldownMs = Math.max(15000, retryAfterSec * 1000);
-          proxyPool.setRateLimitCooldown(this.proxyId, cooldownMs);
-          throw new Error(`HTTP Error 429: Too Many Requests (Máy chủ giới hạn tần suất gửi tin, cooldown ${Math.round(cooldownMs/1000)}s)`);
+          throw new Error('HTTP Error 429: Too Many Requests (Máy chủ giới hạn tần suất — Hãy bấm nút "🛡️ Hạ Nhiệt" nếu cần)');
         }
 
         if (!response.ok) {
@@ -2491,8 +2482,7 @@ class BotInstance {
           if (text.includes('1015') || text.includes('rate limit') || text.includes('cf-challenge') || text.includes('Cloudflare')) {
             const isRateLimit = text.includes('1015') || text.includes('rate limit');
             if (isRateLimit) {
-              proxyPool.setRateLimitCooldown(this.proxyId, 20000);
-              throw new Error('Bị chặn bởi Cloudflare (Rate Limit Error 1015)');
+              throw new Error('Bị chặn bởi Cloudflare (Rate Limit Error 1015 — Hãy bấm nút "🛡️ Hạ Nhiệt" nếu cần)');
             }
             throw new Error('Bị chặn bởi Cloudflare (JS Challenge / Captcha)');
           }
@@ -7636,12 +7626,6 @@ async function proxyRequest(req, res, targetUrl, uid = null) {
       body: body,
       dispatcher: dispatcher
     });
-
-    // 🛑 Nếu dính mã 429 từ proxy request, đặt cooldown cho proxy pool ngay
-    if (response.status === 429) {
-      const retryAfter = Number(response.headers.get('retry-after')) || 15;
-      proxyPool.setRateLimitCooldown(proxyId, Math.max(15000, retryAfter * 1000));
-    }
 
     res.status(response.status);
     res.setHeader('content-type', response.headers.get('content-type') || 'application/json');

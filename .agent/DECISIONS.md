@@ -2,6 +2,28 @@
 
 > Captured architectural decisions and trade-offs.
 
+## 2026-08-16 - Chuyển Đổi Hạ Nhiệt Sang Hoàn Toàn Thủ Công Bằng Tay (Manual Cooldown Only) (T80)
+
+- Bối cảnh:
+  - Trước đây, khi bot gặp phản hồi HTTP 429 hoặc Cloudflare 1015, hệ thống tự động gọi `proxyPool.setRateLimitCooldown()` và ép bot vào vòng lặp Exponential Backoff 15s - 60s.
+  - Người dùng muốn tắt tính năng tự động đóng băng này để có toàn quyền kiểm soát hạ nhiệt thủ công bằng tay (thông qua các nút bấm 1-Click trên giao diện) khi thấy cần thiết, giúp bot không bị treo nhịp ngoài ý muốn.
+- Quyết định:
+  - **Tắt Tự Động Hạ Nhiệt Trên Backend**:
+    - Trong `sendRequest()` và `proxyRequest()`: Loại bỏ việc tự động gọi `proxyPool.setRateLimitCooldown()`. Khi gặp 429 / 1015, chỉ ném thông báo lỗi rõ ràng hướng dẫn người dùng bấm nút "🛡️ Hạ Nhiệt" khi cần.
+    - Trong `runPoll()`: Loại bỏ cơ chế ép buộc giãn cách 15s - 60s khi dính lỗi 429, thay vào đó áp dụng nhịp thử lại nhẹ nhàng (2s - 4.5s) để giữ bot luôn linh hoạt.
+  - **Duy Trì Toàn Diện Hệ Thống Hạ Nhiệt Thủ Công 1-Click**:
+    - Giữ nguyên toàn bộ các nút bấm và endpoint hạ nhiệt khẩn cấp:
+      - Nút `🛡️ Hạ Nhiệt IP (120s)` trên Dashboard User Toolbar.
+      - Nút `🛡️ Hạ Nhiệt` trên từng User Accordion ngoài màn hình chính.
+      - Nút `🛡️ Hạ Nhiệt Toàn Bộ Bot (All Users)` trong Admin Modal.
+      - Nút `🛡️ Hạ Nhiệt` từng User trong Admin Users Table.
+      - Nút `🛡️ Hạ Nhiệt` từng Proxy trong Proxy Pool Table.
+- Kết quả:
+  - Chuyển 100% quyền kích hoạt hạ nhiệt về tay người dùng và quản trị viên, tránh việc bot tự động tạm ngưng khi không mong muốn.
+  - Chạy `npm test` thành công 100%.
+
+---
+
 ## 2026-08-16 - Triển Khai Bộ Điều Tốc Phân Luồng Sóng Hình Sin Đa Hệ Số (Harmonic Sine-Wave Pacing Engine) (T79)
 
 - Bối cảnh:

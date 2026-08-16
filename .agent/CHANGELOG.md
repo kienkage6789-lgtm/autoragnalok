@@ -2,6 +2,21 @@
 
 > Changelog of actual changes implemented.
 
+## 2026-08-16 - Chuyển Đổi Hạ Nhiệt Sang Hoàn Toàn Thủ Công Bằng Tay (Manual Cooldown Only) (T80)
+- File đã đổi: [server.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [test.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/test.js)
+- Đã làm:
+  - **Tắt Tự Động Hạ Nhiệt Trên Server**:
+    - Gỡ bỏ lệnh gọi `proxyPool.setRateLimitCooldown()` tự động trong `sendRequest()` và `proxyRequest()` khi gặp lỗi HTTP 429 hoặc Cloudflare Error 1015.
+    - Cập nhật thông báo lỗi thân thiện: `HTTP Error 429: Too Many Requests (Máy chủ giới hạn tần suất — Hãy bấm nút "🛡️ Hạ Nhiệt" nếu cần)`.
+  - **Tối Ưu Hóa Nhịp Thử Lại Trong `runPoll()`**:
+    - Loại bỏ việc ép buộc giãn cách thời gian dài (15s - 60s) tự động khi dính 429; chuyển sang nhịp giãn cách lỗi mạng nhẹ nhàng ($2\text{s} \rightarrow 3\text{s} \rightarrow 4.5\text{s}$) giúp bot không bị treo đứng ngoài ý muốn.
+  - **Toàn Quyền Kiểm Soát Bằng Nút Bấm Thủ Công**:
+    - Giữ nguyên $100\%$ các nút thao tác hạ nhiệt khẩn cấp: Nút Hạ Nhiệt trên Dashboard User, nút Hạ Nhiệt trên Accordion User ngoài màn hình chính, nút Hạ Nhiệt Toàn Bộ trong Admin Panel, và nút Hạ Nhiệt từng Proxy trong Proxy Table.
+  - **Unit Tests**:
+    - Cập nhật bộ kiểm thử trong `test.js` và xác thực toàn bộ hệ thống. Chạy `npm test` thành công 100%.
+
+---
+
 ## 2026-08-16 - Triển Khai Bộ Điều Tốc Phân Luồng Sóng Hình Sin Đa Hệ Số (Harmonic Sine-Wave Pacing Engine) (T79)
 - File đã đổi: [server.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [test.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/test.js)
 - Đã làm:

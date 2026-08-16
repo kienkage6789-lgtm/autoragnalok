@@ -3,6 +3,18 @@
 > Work Breakdown Structure. Update task states immediately upon changes.
 > Statuses: todo | doing | blocked | review | done
 
+### [x] T80 - Chuyển Đổi Hạ Nhiệt Sang Hoàn Toàn Thủ Công (Manual Cooldown Only)
+- Description: Tắt chế độ tự động đóng băng bot / tự động kích hoạt rate-limit cooldown khi gặp 429 để chuyển toàn quyền kiểm soát hạ nhiệt về tay người dùng và quản trị viên (thao tác 1-Click bằng tay).
+- Files related: `server.js`, `test.js`
+- Acceptance criteria:
+  - [x] Backend: Loại bỏ `setRateLimitCooldown` tự động trong `sendRequest()` và `proxyRequest()`, chuyển đổi thông báo hướng dẫn người dùng bấm nút Hạ Nhiệt khi cần.
+  - [x] Backend: Đơn giản hóa cơ chế xử lý lỗi trong `runPoll()` không ép buộc giãn cách 15s-60s tự động khi dính 429.
+  - [x] Backend / UI: Giữ nguyên toàn bộ hệ thống hạ nhiệt thủ công 1-Click (User Dashboard, User Accordion, Admin Panel, Proxy Table).
+  - [x] Unit Test: Cập nhật và chạy `test.js` đạt 100% pass.
+- Status: done
+
+---
+
 ### [x] T79 - Triển Khai Bộ Điều Tốc Phân Luồng Sóng Hình Sin Đa Hệ Số (Harmonic Sine-Wave Pacing Engine)
 - Description: Tích hợp thuật toán điều phối nhịp gửi request theo sóng hình Sin kết hợp góc lệch pha per IP/Proxy, đa hệ số K_boss theo từng loại boss/trạng thái chiến đấu, đảm bảo 100% tốc độ train quái và triệt tiêu va chạm gây lỗi 429.
 - Files related: `server.js`, `test.js`
