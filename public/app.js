@@ -3525,6 +3525,17 @@ document.addEventListener('DOMContentLoaded', () => {
     return parseInt(p.pistol_tier_enabled ?? p.ammo_pistol_tiers ?? 1) || 1;
   }
 
+  function parseJsonSafe(str, defaultVal = {}) {
+    if (!str) return defaultVal;
+    if (typeof str === 'object') return str;
+    try {
+      return JSON.parse(str) || defaultVal;
+    } catch (e) {
+      return defaultVal;
+    }
+  }
+
+
   function _ammoActiveT(p, gun) {
     const mask = _ammoEnabledMask(p, gun);
     const isSniperOrTurret = (gun === 'sniper' || gun === 'turret');
@@ -3918,7 +3929,7 @@ document.addEventListener('DOMContentLoaded', () => {
     } else {
       cardsList.forEach(c => {
         cardsHtml += `
-          <button onclick="triggerAction('${uid}', 'card_socket', null, { weapon: '${weapon}', slot: '${pick.slot}', mid: ${c.cid}, mvp: ${c.isMvp ? 1 : 0}, sidx: ${pick.sidx} }); closeCardPick('${uid}');" style="position:relative; display:flex; flex-direction:column; align-items:center; gap:2px; background:${c.isMvp ? 'rgba(239, 68, 68, 0.2)' : 'rgba(15, 23, 42, 0.8)'}; border:1px solid ${c.isMvp ? '#ef4444' : '#38bdf8'}; border-radius:8px; padding:5px 4px; cursor:pointer; min-width:0;">
+          <button onclick="triggerAction('${uid}', 'card_socket', null, { weapon: '${weapon}', slot: '${pick.slot}', mid: '${c.cid}', mvp: ${c.isMvp ? 1 : 0}, sidx: '${pick.sidx}' }); closeCardPick('${uid}');" style="position:relative; display:flex; flex-direction:column; align-items:center; gap:2px; background:${c.isMvp ? 'rgba(239, 68, 68, 0.2)' : 'rgba(15, 23, 42, 0.8)'}; border:1px solid ${c.isMvp ? '#ef4444' : '#38bdf8'}; border-radius:8px; padding:5px 4px; cursor:pointer; min-width:0;">
             ${c.isMvp ? `<span style="position:absolute; top:1px; left:2px; font-size:0.6rem; font-weight:800; color:#fff; background:#dc2626; padding:0 3px; border-radius:3px;">MVP</span>` : ''}
             <span style="position:absolute; top:1px; right:2px; font-size:0.65rem; font-weight:700; color:#fcd34d;">x${c.count}</span>
             <div style="font-size:1.3rem; margin-top:2px;">${c.emoji}</div>
@@ -4226,10 +4237,33 @@ document.addEventListener('DOMContentLoaded', () => {
       else if (subTab === 'robot') { upgAction = 'robot_body_up'; upgParam = null; }
       else if (subTab === 'house') { upgAction = 'home_up'; upgParam = null; }
 
-      // Ammo Strip for pistol, sniper, and turret (100% In-Game T1..T6 Multi-Tier Toggles)
+      // Ammo Strip for pistol, sniper, turret, and robot (100% In-Game T1..T6 Multi-Tier Toggles)
       let ammoHtml = '';
-      if (subTab === 'pistol' || subTab === 'sniper' || subTab === 'turret') {
+      if (subTab === 'pistol' || subTab === 'sniper' || subTab === 'turret' || subTab === 'robot') {
         ammoHtml = _renderAmmoTierStripHtml(acc.line_uid, subTab, p);
+      }
+
+      let statusHtml = '';
+      if (subTab === 'pistol' || subTab === 'sniper' || subTab === 'turret' || subTab === 'robot') {
+        const useKey = subTab === 'robot' ? 'gun_use_robot_gun' : `gun_use_${subTab}`;
+        const isUsed = p[useKey] !== undefined ? Boolean(parseInt(p[useKey])) : true;
+        const statusLabel = isUsed ? '🟢 Đang hoạt động' : '🔴 Đang tắt';
+        const btnLabel = isUsed ? '🔴 Tắt Kích Hoạt' : '🟢 Kích Hoạt';
+        const gunTypeParam = subTab === 'robot' ? 'robot_gun' : subTab;
+        
+        statusHtml = `
+          <div style="background:rgba(15, 23, 42, 0.75); border:1px solid rgba(255, 255, 255, 0.1); border-radius:10px; padding:10px 12px; margin-top:8px; display:flex; justify-content:space-between; align-items:center;">
+            <div>
+              <div style="font-size:0.75rem; color:#94a3b8;">Trạng thái hoạt động</div>
+              <div style="font-size:0.85rem; font-weight:800; color:${isUsed ? '#22c55e' : '#ef4444'}; margin-top:2px;">
+                ${statusLabel}
+              </div>
+            </div>
+            <button onclick="triggerAction('${acc.line_uid}', 'gun_use', null, { gun_type: '${gunTypeParam}' })" style="font-size:0.75rem; font-weight:700; padding:6px 12px; border:none; border-radius:6px; background:${isUsed ? '#7f1d1d' : '#15803d'}; color:#fff; cursor:pointer;">
+              ${btnLabel}
+            </button>
+          </div>
+        `;
       }
 
       detailEl.innerHTML = `
@@ -4246,6 +4280,8 @@ document.addEventListener('DOMContentLoaded', () => {
             ⬆️ Nâng Cấp
           </button>
         </div>
+
+        ${statusHtml}
 
         ${ammoHtml}
 

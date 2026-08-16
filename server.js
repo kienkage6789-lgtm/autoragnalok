@@ -1482,6 +1482,9 @@ class BotInstance {
       'ammo_sniper_t1','ammo_sniper_t2','ammo_sniper_t3','ammo_sniper_t4','ammo_sniper_t5','ammo_sniper_t6',
       'auto_refill_pistol','auto_refill_sniper',
       'pistol_tier_enabled','sniper_tier_enabled','turret_tier_enabled','robot_tier_enabled',
+      'gun_use_pistol','gun_use_sniper','gun_use_turret','gun_use_robot_gun',
+      'auto_refill_robot_gun','ammo_robot_tiers','robot_ammo_extra',
+      'ammo_robot_t1','ammo_robot_t2','ammo_robot_t3','ammo_robot_t4','ammo_robot_t5','ammo_robot_t6',
       'ammo_pistol_tiers','ammo_sniper_tiers','ammo_turret_tiers','ammo_extra','sniper_ammo_extra',
       'module_inventory','sniper_module_inventory','knife_module_inventory','axe_module_inventory',
       'robot_module_inventory','robot_gun_module_inventory','railgun_module_inventory',
@@ -7249,13 +7252,13 @@ app.post('/api/accounts/:line_uid/action', requireAuth, async (req, res) => {
 
     // Normalize payload & map to 100% In-Game Actions
     if (action === 'gun_use' || action === 'switch_gun') {
-      url = 'https://ragnalok.online/human/xhrpg_canvas.php';
+      url = 'https://ragnalok.online/human/xhrpg_upgrade.php';
       payload.action = 'gun_use';
-      payload.gun_type = (payload.gun_type === 'sniper' || payload.gun_type === 1 || payload.gun_type === '1') ? 1 : 0;
+      payload.gun_type = payload.gun_type;
     } else if (action === 'auto_refill' || action === 'toggle_auto_refill') {
-      url = 'https://ragnalok.online/human/xhrpg_canvas.php';
+      url = 'https://ragnalok.online/human/xhrpg_upgrade.php';
       payload.action = 'auto_refill';
-      payload.gun_type = (payload.gun_type === 'sniper' || payload.gun_type === 1 || payload.gun_type === '1' || param === 'sniper') ? 1 : 0;
+      payload.gun_type = payload.gun_type;
     } else if (action === 'set_ammo_tier_enabled') {
       url = 'https://ragnalok.online/human/xhrpg_upgrade.php';
       payload.action = 'set_ammo_tier_enabled';
