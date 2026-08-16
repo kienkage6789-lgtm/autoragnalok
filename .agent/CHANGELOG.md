@@ -2,6 +2,43 @@
 
 > Changelog of actual changes implemented.
 
+## 2026-08-16 - Tạm Dừng Và Ẩn Các Chức Năng Nâng Stats, Đệ Tử, Khai Thác Mỏ, Đấu Trường (T84)
+- File đã đổi: [server.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [public/app.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/public/app.js), [test.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/test.js)
+- Đã làm:
+  - **Khóa Thực Thi Ở Backend Trong `executeNextSubAction()`**:
+    - Tạm dừng logic gửi request cho:
+      1. Nâng điểm tiềm năng (Auto Stats).
+      2. Nâng cấp Đệ tử Mèo & Drone (Auto Companions).
+      3. Xây dựng, nâng cấp và bật/tắt Mỏ khai thác (Auto Mines).
+      4. Khiếu chiến & Skip Đấu trường Boss (Auto Arena).
+    - Giữ lại hoạt động bình thường cho: Nông trại (Auto Home Farm), Nâng Trang bị/Giáp (Auto Gear), Nâng Kỹ năng (Auto Skills), và Mua Chợ (Auto Market Buy).
+  - **Ẩn Điều Khiển Trên Giao Diện (Frontend)**:
+    - Ẩn toggle `🏟️ Auto Đấu Trường` (`#chk-autoarena-${acc.line_uid}`) trên giao diện cấu hình Bot trong `public/app.js`.
+  - **Unit Tests**:
+    - Chạy `node test.js` đạt 100% pass.
+
+---
+
+## 2026-08-16 - Triển Khai Bộ Điều Phối Hành Động Phụ Xen Kẽ (Off-Beat Sub-Action Dispatcher) & Interval Gating Chống 429 (T83)
+- File đã đổi: [server.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [test.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/test.js)
+- Đã làm:
+  - **Tách Rời Sub-Actions Khỏi Nhịp Farm Chính**:
+    - Rút toàn bộ các logic tự động nâng cấp (Stats, Gear, Skills, Companion, Mines), nông trại (Harvest, Plant, Upgrade) và đấu trường (Arena) ra khỏi `pollGame()`.
+    - Đóng gói thành hàm `executeNextSubAction()` độc lập với cơ chế ưu tiên tuần tự (Priority Fallthrough) và chỉ thực thi tối đa 1 hành động phụ duy nhất mỗi lần gọi.
+  - **Thực Thi Xen Kẽ Ở Nửa Chu Kỳ (Off-Beat Half-Phase Interleaving)**:
+    - Trong vòng lặp `runPoll()`, sau khi hoàn tất nhịp farm chính `xhrpg_game.php`, server tự động lên lịch chạy `executeNextSubAction()` tại điểm giữa của 2 nhịp farm (`halfDelay = Math.max(400, Math.round(nextDelay / 2))`).
+    - Triệt tiêu 100% hiện tượng xung đột/dồn cục 2-3 request cùng lúc của 1 bot.
+  - **Bộ Đệm Thời Gian Tính Năng (Interval Gating)**:
+    - Bổ sung các mốc thời gian kiểm tra giãn cách: Nông trại (`lastFarmCheckAt`: 30s), Mỏ khoáng (`lastMinesCheckAt`: 45s), Đấu trường (`lastArenaCheckAt`: 60s), Đệ tử (`lastCompanionCheckAt`: 20s), Trang bị/Kỹ năng (`lastGearCheckAt`/`lastSkillsCheckAt`: 10s).
+  - **Nâng Cấp Khoảng Cách Outbound An Toàn**:
+    - Cập nhật `ProxyPool.prototype.waitForOutboundSlot` đặt `minSpacingMs = 350ms` mặc định và tối thiểu 350ms cho IP Direct, đảm bảo không bao giờ vượt quá 2.8 req/giây trên cùng 1 IP.
+  - **Cân Bằng Jitter**:
+    - Chuẩn hóa `microJitter` trong `calculateHarmonicPollDelay` về vi nhiễu đối xứng 0-mean, bảo toàn chuẩn xác tốc train trung bình.
+  - **Unit Tests**:
+    - Viết test suite T80/T83 trong `test.js` kiểm thử `executeNextSubAction`, interval gating và độ giãn slot direct $\ge 350\text{ms}$. Chạy `node test.js` đạt 100% pass.
+
+---
+
 ## 2026-08-16 - Tối Ưu Hóa Tái Sử Dụng Kết Nối HTTP/TLS Connection Pooling (Persistent Sockets Keep-Alive 60s - 300s) (T82)
 - File đã đổi: [server.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [test.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/test.js)
 - Đã làm:

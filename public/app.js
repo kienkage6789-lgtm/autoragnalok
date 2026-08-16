@@ -1929,7 +1929,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 </select>
               </div>
               
-              <div class="toggle-control" style="margin-top: 4px;">
+              <!-- [TẠM ẨN] Auto Đấu Trường -->
+              <div class="toggle-control" style="margin-top: 4px; display: none;">
                 <span class="toggle-label">🏟️ Auto Đấu Trường</span>
                 <label class="switch">
                   <input type="checkbox" id="chk-autoarena-${acc.line_uid}" onchange="toggleSetting('${acc.line_uid}', 'autoArena')">

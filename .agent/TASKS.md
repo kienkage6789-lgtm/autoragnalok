@@ -3,6 +3,31 @@
 > Work Breakdown Structure. Update task states immediately upon changes.
 > Statuses: todo | doing | blocked | review | done
 
+### [x] T84 - Tạm Dừng Và Ẩn Các Chức Năng Nâng Stats, Đệ Tử, Khai Thác Mỏ, Đấu Trường
+- Description: Tạm dừng thực thi hoàn toàn các chức năng nâng điểm tiềm năng (Stats), nâng cấp đệ tử (Cat/Drone), khai thác khoáng sản (Mines), và khiêu chiến đấu trường (Arena) trong `executeNextSubAction()`, đồng thời ẩn các toggle điều khiển trên giao diện người dùng theo yêu cầu.
+- Files related: `server.js`, `public/app.js`, `test.js`
+- Acceptance criteria:
+  - [x] Backend: Tạm khóa logic Auto Stats, Auto Companion, Auto Mines, Auto Arena trong `BotInstance.prototype.executeNextSubAction()`.
+  - [x] Frontend: Ẩn toggle Auto Đấu Trường (`chk-autoarena`) trên thẻ cấu hình Bot trong `public/app.js`.
+  - [x] Unit Test: Chạy `node test.js` đạt 100% pass.
+- Status: done
+
+---
+
+### [x] T83 - Triển Khai Bộ Điều Phối Hành Động Phụ Xen Kẽ (Off-Beat Sub-Action Dispatcher) & Interval Gating Chống 429
+- Description: Tách rời toàn bộ các hành động phụ (Stats, Farm, Gear, Skills, Companions, Mines, Arena, Market) khỏi nhịp Farm chính trong `pollGame()`, chuyển sang thực thi xen kẽ tại điểm giữa chu kỳ ($t = \text{interval}/2$), giới hạn tối đa 1 hành động phụ / tick và áp dụng bộ đệm thời gian (Interval Gating) 10s-60s cho các tính năng không chiến đấu.
+- Files related: `server.js`, `test.js`
+- Acceptance criteria:
+  - [x] Backend: Tách logic Auto Stats, Gear, Skills, Companion, Mines, Home Farm, Arena ra khỏi `pollGame()` và đóng gói vào `executeNextSubAction()`.
+  - [x] Backend: Lên lịch chạy `executeNextSubAction()` ở điểm giữa chu kỳ (`halfDelay = Math.max(400, Math.round(nextDelay / 2))`) trong `runPoll()` finally block.
+  - [x] Backend: Thêm các mốc thời gian kiểm tra giãn cách `lastFarmCheckAt` (30s), `lastMinesCheckAt` (45s), `lastArenaCheckAt` (60s), `lastCompanionCheckAt` (20s), `lastGearCheckAt` (10s), `lastSkillsCheckAt` (10s).
+  - [x] Backend: Nâng cấp `ProxyPool.prototype.waitForOutboundSlot` đặt `minSpacingMs = 350ms` mặc định và tối thiểu 350ms cho IP Direct.
+  - [x] Unit Test: Bổ sung bộ test T80/T83 trong `test.js` xác nhận `executeNextSubAction`, các thuộc tính interval gating và độ trễ slot booking direct $\ge 350\text{ms}$.
+  - [x] Unit Test: Chạy `node test.js` đạt 100% pass.
+- Status: done
+
+---
+
 ### [x] T82 - Tối Ưu Hóa Tái Sử Dụng Kết Nối HTTP/TLS Connection Pooling (Persistent Sockets Keep-Alive 60s - 300s)
 - Description: Nâng cấp cấu hình Agent / ProxyAgent trong `undici` bật TCP Keep-Alive với `keepAliveTimeout: 60s` và `keepAliveMaxTimeout: 300s`, triệt tiêu hoàn toàn các đợt TLS Handshake lặp lại để ngăn chặn Cloudflare kích hoạt bộ đếm TLS Flood (Error 1015 / 429).
 - Files related: `server.js`, `test.js`

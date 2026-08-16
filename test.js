@@ -1495,7 +1495,42 @@ try {
   assert.ok(testAgent, 'ProxyAgent must be created');
   try { if (testAgent.destroy) testAgent.destroy(); } catch (e) {}
 
-  console.log('✅ Persistent Connection Pooling Keep-Alive Tests Passed successfully!');
+  // ==================== T80 - Off-Beat Sub-Action Dispatcher & Interval Gating Tests ====================
+  console.log('Testing Off-Beat Sub-Action Dispatcher & Interval Gating (T80)...');
+  const subBot = new BotInstance({
+    line_uid: 'U_TEST_SUB_1',
+    session_token: 'test_token_sub1',
+    name: 'SubActionTester'
+  });
+
+  assert.strictEqual(typeof subBot.executeNextSubAction, 'function', 'executeNextSubAction must be a method on BotInstance');
+  assert.strictEqual(subBot.lastFarmCheckAt, 0);
+  assert.strictEqual(subBot.lastGearCheckAt, 0);
+  assert.strictEqual(subBot.lastSkillsCheckAt, 0);
+  assert.strictEqual(subBot.lastMinesCheckAt, 0);
+  assert.strictEqual(subBot.lastArenaCheckAt, 0);
+  assert.strictEqual(subBot.isSubActionRunning, false);
+
+  // Test Direct Connection Outbound Slot Spacing >= 350ms
+  const directSlotKey = 'direct';
+  const directTimestamps = [];
+  const directStart = Date.now();
+  delete proxyPool._nextAvailableSlot[directSlotKey];
+
+  const dp1 = proxyPool.waitForOutboundSlot(directSlotKey).then(() => directTimestamps.push(Date.now() - directStart));
+  const dp2 = proxyPool.waitForOutboundSlot(directSlotKey).then(() => directTimestamps.push(Date.now() - directStart));
+  const dp3 = proxyPool.waitForOutboundSlot(directSlotKey).then(() => directTimestamps.push(Date.now() - directStart));
+
+  await Promise.all([dp1, dp2, dp3]);
+  directTimestamps.sort((a, b) => a - b);
+
+  for (let i = 1; i < directTimestamps.length; i++) {
+    const gap = directTimestamps[i] - directTimestamps[i - 1];
+    assert.ok(gap >= 320, `Direct slot gap between ${i-1} and ${i} must be >= 320ms for 350ms target (got ${gap}ms)`);
+  }
+
+  delete proxyPool._nextAvailableSlot[directSlotKey];
+  console.log('✅ Off-Beat Sub-Action Dispatcher & Interval Gating Tests Passed successfully!');
 
   console.log('✅ User Polling Interval, Role Propagation and Edit Permissions Tests Passed successfully!');
   console.log('✅ Revamped Auto Market Buy Tests Passed successfully!');

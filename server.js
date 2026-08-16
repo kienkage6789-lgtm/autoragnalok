@@ -503,8 +503,9 @@ class ProxyPool {
     return Math.max(0, until - now);
   }
 
-  async waitForOutboundSlot(proxyId, minSpacingMs = 200) {
+  async waitForOutboundSlot(proxyId, minSpacingMs = 350) {
     const key = proxyId || 'direct';
+    const effectiveSpacing = key === 'direct' ? Math.max(minSpacingMs, 350) : minSpacingMs;
     if (!this._nextAvailableSlot) this._nextAvailableSlot = {};
 
     // 1. Kiểm tra nếu IP đang trong thời gian hạ nhiệt rate-limit thủ công
@@ -516,7 +517,7 @@ class ProxyPool {
     // 2. Synchronous Slot Booking (Đặt chỗ trước tức thì - Chống hoàn toàn Async Race)
     const now = Date.now();
     const scheduledSlot = Math.max(now, (this._nextAvailableSlot[key] || 0));
-    this._nextAvailableSlot[key] = scheduledSlot + minSpacingMs;
+    this._nextAvailableSlot[key] = scheduledSlot + effectiveSpacing;
 
     const waitTime = scheduledSlot - now;
     if (waitTime > 0) {
@@ -1518,11 +1519,9 @@ function calculateHarmonicPollDelay(bot) {
   const omega = (2 * Math.PI) / cyclePeriodSec;
   const sinValue = Math.sin(omega * nowSeconds + phaseOffset);
 
-  // 5. Vi nhiễu bất đối xứng mô phỏng người thật
+  // 5. Vi nhiễu mô phỏng nhịp phản xạ tự nhiên của con người
   const jitterBound = targetBase <= 1200 ? 50 : 80;
-  const isPositiveSkew = Math.random() < 0.65;
-  const jitterMag = Math.floor(Math.random() * jitterBound);
-  const microJitter = isPositiveSkew ? jitterMag : -Math.floor(jitterMag * 0.7);
+  const microJitter = Math.floor((Math.random() * 2 - 1) * jitterBound);
 
   // 6. Tính toán Delay hoàn chỉnh (đảm bảo không vi phạm server throttle guard >= 900ms)
   const harmonicDelta = Math.round((targetBase * kBoss) + (amplitude * sinValue) + microJitter);
@@ -1632,6 +1631,16 @@ class BotInstance {
     this.lastGw = null;
     this.lastCw = null;
     this.others = [];
+    // 🕒 Timestamps & Control Guards for Off-Beat Sub-Action Dispatcher
+    this.lastStatsCheckAt = 0;
+    this.lastFarmCheckAt = 0;
+    this.lastGearCheckAt = 0;
+    this.lastSkillsCheckAt = 0;
+    this.lastCompanionCheckAt = 0;
+    this.lastMinesCheckAt = 0;
+    this.lastArenaCheckAt = 0;
+    this.subActionTimer = null;
+    this.isSubActionRunning = false;
     this.addLog('SYSTEM', `Khởi tạo bot cho tài khoản: ${this.name}`);
   }
 
@@ -2374,7 +2383,12 @@ class BotInstance {
             clearTimeout(this.timer);
             this.timer = null;
           }
+          if (this.subActionTimer) {
+            clearTimeout(this.subActionTimer);
+            this.subActionTimer = null;
+          }
           this.isPolling = false;
+          this.isSubActionRunning = false;
           setTimeout(() => {
             if (this.status === 'paused_error') {
               this.addLog('SYSTEM', '🔄 Hết thời gian chờ 5 phút — Tự động kích hoạt lại bot...');
@@ -2401,15 +2415,31 @@ class BotInstance {
           }
           
           this.timer = setTimeout(runPoll, nextDelay);
+
+          // 🕒 Off-Beat Sub-Action Dispatcher: Bắn xen kẽ tối đa 1 hành động phụ vào điểm giữa 2 nhịp farm
+          if (this.subActionTimer) {
+            clearTimeout(this.subActionTimer);
+            this.subActionTimer = null;
+          }
+          if (this.pollFails === 0 && !this.targetedMvp && !proxyPool.isRateLimited(this.proxyId)) {
+            const halfDelay = Math.max(400, Math.round(nextDelay / 2));
+            this.subActionTimer = setTimeout(() => {
+              if (this.status === 'running' && !this.isPolling) {
+                this.executeNextSubAction().catch(err => {
+                  console.error(`[SubAction Error for ${this.name}]:`, err.message);
+                });
+              }
+            }, halfDelay);
+          }
         }
       }
     };
 
-    // Xếp hàng thứ tự xuất phát khởi động bot theo từng Proxy (200ms mỗi bot)
+    // Xếp hàng thứ tự xuất phát khởi động bot theo từng Proxy (350ms mỗi bot)
     const proxyKey = this.proxyId || 'direct';
     const peerBots = Object.values(botInstances).filter(b => (b.proxyId || 'direct') === proxyKey);
     const botIndex = Math.max(0, peerBots.findIndex(b => b.line_uid === this.line_uid));
-    const startDelay = botIndex * 200 + Math.floor(Math.random() * 50);
+    const startDelay = botIndex * 350 + Math.floor(Math.random() * 80);
     this.timer = setTimeout(runPoll, startDelay);
   }
 
@@ -2418,6 +2448,11 @@ class BotInstance {
       clearTimeout(this.timer);
       this.timer = null;
     }
+    if (this.subActionTimer) {
+      clearTimeout(this.subActionTimer);
+      this.subActionTimer = null;
+    }
+    this.isSubActionRunning = false;
     this.status = status;
     if (status === 'idle') {
       this.addLog('SYSTEM', 'Đã dừng hoạt động bot');
@@ -2443,8 +2478,8 @@ class BotInstance {
       }
       this.lastRequestAt = Date.now();
 
-      // Kiểm tra và giữ nhịp Outbound Rate Limiter tập trung theo Proxy/IP (200ms Slot Booking)
-      await proxyPool.waitForOutboundSlot(this.proxyId, 200);
+      // Kiểm tra và giữ nhịp Outbound Rate Limiter tập trung theo Proxy/IP (350ms Slot Booking)
+      await proxyPool.waitForOutboundSlot(this.proxyId, 350);
 
       const headers = {
         'content-type': 'application/x-www-form-urlencoded; charset=UTF-8',
@@ -3847,239 +3882,6 @@ class BotInstance {
       return;
     }
 
-    // Enable automation routines based on individual user settings
-    const enableUpgrades = !this.isMvpCycling;
-    if (enableUpgrades) {
-      let subActionDone = false;
-
-      // 1. Auto allocation of stats
-      if (!subActionDone && this.settings.autoStats && this.player.stat_pts > 0) {
-      const targetStat = this.settings.statsPriority.find(s => s === 'str' || s === 'agi' || s === 'vit' || s === 'intel' || s === 'dex' || s === 'luk');
-      if (targetStat) {
-        const amount = this.player.stat_pts;
-        this.addLog('SYSTEM', `⚡ [Tự động] Tăng ${amount} điểm vào ${targetStat.toUpperCase()}`);
-        try {
-          const res = await this.sendRequest('https://ragnalok.online/human/xhrpg_upgrade.php', {
-            line_uid: this.line_uid,
-            session_token: this.session_token,
-            action: 'stat_up',
-            param: targetStat,
-            amount: amount
-          });
-          if (res.ok) {
-            this.updatePlayerState(res.player);
-            this.addLog('SUCCESS', `Tăng điểm ${targetStat.toUpperCase()} thành công`);
-            subActionDone = true;
-          } else {
-            this.addLog('WARNING', `Tăng điểm thất bại: ${res.error}`);
-          }
-        } catch (e) {
-          this.addLog('ERROR', `Lỗi tăng điểm: ${e.message}`);
-        }
-      }
-    }
-
-    // 2. Auto upgrading Gear/Armor
-    if (!subActionDone && this.settings.autoGear && (this.player.armor_lv || 0) < 50) {
-      const armLv = this.player.armor_lv || 0;
-      const cost = getArmorUpgradeCost(armLv);
-      if ((this.player.gold || 0) >= cost.gold && (this.player.stone || 0) >= cost.stone) {
-        this.addLog('SYSTEM', `🛡️ [Tự động] Nâng cấp Armor lên Lv.${armLv + 1} (Chi phí: 💰${cost.gold} 🪨${cost.stone})`);
-        try {
-          const res = await this.sendRequest('https://ragnalok.online/human/xhrpg_upgrade.php', {
-            line_uid: this.line_uid,
-            session_token: this.session_token,
-            action: 'upgrade_armor'
-          });
-          if (res.ok) {
-            this.updatePlayerState(res.player);
-            this.addLog('SUCCESS', `Nâng cấp Armor lên Lv.${this.player.armor_lv} thành công`);
-            subActionDone = true;
-          } else {
-            this.addLog('WARNING', `Nâng cấp Armor thất bại: ${res.error}`);
-          }
-        } catch (e) {
-          this.addLog('ERROR', `Lỗi nâng cấp Armor: ${e.message}`);
-        }
-      }
-    }
-
-    // 3. Auto upgrading Skills
-    if (!subActionDone && this.settings.autoSkills && (this.player.skill_pts || 0) > 0) {
-      let skills = {};
-      try {
-        skills = typeof this.player.skills === 'object' ? this.player.skills : JSON.parse(this.player.skills || '{}');
-      } catch (err) {}
-
-      const skillToUpgrade = this.settings.skillsPriority.find(skId => {
-        const curLv = skills[skId] || 0;
-        return curLv < 10 && isSkillUnlocked(skId, this.player.lv || 1, skills);
-      });
-
-      if (skillToUpgrade) {
-        this.addLog('SYSTEM', `✨ [Tự động] Nâng cấp kỹ năng: ${skillToUpgrade}`);
-        try {
-          const res = await this.sendRequest('https://ragnalok.online/human/xhrpg_upgrade.php', {
-            line_uid: this.line_uid,
-            session_token: this.session_token,
-            action: 'skill_up',
-            skill_id: skillToUpgrade
-          });
-          if (res.ok) {
-            this.updatePlayerState(res.player);
-            this.addLog('SUCCESS', `Nâng cấp kỹ năng ${skillToUpgrade} thành công`);
-            subActionDone = true;
-          } else {
-            this.addLog('WARNING', `Nâng cấp kỹ năng thất bại: ${res.error}`);
-          }
-        } catch (e) {
-          this.addLog('ERROR', `Lỗi nâng cấp kỹ năng: ${e.message}`);
-        }
-      }
-    }
-
-    // 4. Auto Companions (Cat & Drone)
-    if (!subActionDone && this.settings.autoCompanion) {
-      // Cat upgrade
-      const catLv = this.player.cat_lv || 0;
-      if (catLv < 30) {
-        const cost = getCatUpgradeCost(catLv);
-        if ((this.player.gold || 0) >= cost.gold && (this.player.stone || 0) >= cost.stone) {
-          this.addLog('SYSTEM', `🐈 [Tự động] Nâng cấp Companion (Cat) lên Lv.${catLv + 1}`);
-          try {
-            const res = await this.sendRequest('https://ragnalok.online/human/xhrpg_upgrade.php', {
-              line_uid: this.line_uid,
-              session_token: this.session_token,
-              action: 'upgrade_cat'
-            });
-            if (res.ok) {
-              this.updatePlayerState(res.player);
-              this.addLog('SUCCESS', `Nâng cấp Cat lên Lv.${this.player.cat_lv} thành công`);
-              subActionDone = true;
-            }
-          } catch (e) {}
-        }
-      }
-
-      // Drone upgrade
-      if (!subActionDone) {
-        const droneLv = this.player.drone_lv || 0;
-        if (droneLv < 30) {
-          const cost = getDroneUpgradeCost(droneLv);
-          if ((this.player.gold || 0) >= cost.gold && (this.player.copper || 0) >= cost.copper) {
-            this.addLog('SYSTEM', `🛸 [Tự động] Nâng cấp Drone lên Lv.${droneLv + 1}`);
-            try {
-              const res = await this.sendRequest('https://ragnalok.online/human/xhrpg_upgrade.php', {
-                line_uid: this.line_uid,
-                session_token: this.session_token,
-                action: 'upgrade_drone'
-              });
-              if (res.ok) {
-                this.updatePlayerState(res.player);
-                this.addLog('SUCCESS', `Nâng cấp Drone lên Lv.${this.player.drone_lv} thành công`);
-                subActionDone = true;
-              }
-            } catch (e) {}
-          }
-        }
-      }
-    }
-
-    // 5. Auto Mines management
-    if (!subActionDone && this.settings.autoMines && (this.player.house_lv || 0) >= 20) {
-      const MINE_UNLOCK = [20, 40, 60, 999, 999, 999];
-      let mlv = [], mor = [], mon = [];
-      try {
-        mlv = Array.isArray(this.player.mine_lv) ? this.player.mine_lv : JSON.parse(this.player.mine_lv || '[]');
-        mor = Array.isArray(this.player.mine_ore) ? this.player.mine_ore : JSON.parse(this.player.mine_ore || '[]');
-        mon = Array.isArray(this.player.mine_on) ? this.player.mine_on : JSON.parse(this.player.mine_on || '[]');
-      } catch (err) {}
-
-      // Check premium miner
-      const hasPremMiner = (parseInt(this.player.premium_miner_expires) || 0) > Math.floor(Date.now() / 1000);
-      if (hasPremMiner) {
-        MINE_UNLOCK[3] = 20; // Unlock 4th slot at house_lv 20 with premium
-      }
-
-      for (let s = 0; s < 6; s++) {
-        const unlock = MINE_UNLOCK[s];
-        if (unlock >= 999 || (this.player.house_lv || 0) < unlock) continue;
-
-        const level = mlv[s] | 0;
-        const ore = mor[s] || '';
-        const on = (mon[s] ?? 1) ? 1 : 0;
-
-        // A. Build Mine
-        if (level < 1) {
-          const cost = getMineUpgradeCost(0);
-          if ((this.player.gold || 0) >= cost.gold && (this.player.wood || 0) >= cost.wood && (this.player.stone || 0) >= cost.stone) {
-            const selectOre = this.settings.defaultOre || 'stone';
-            this.addLog('SYSTEM', `⛏️ [Tự động] Xây dựng mỏ khai thác tại ô ${s + 1} (${selectOre})`);
-            try {
-              const res = await this.sendRequest('https://ragnalok.online/human/xhrpg_upgrade.php', {
-                line_uid: this.line_uid,
-                session_token: this.session_token,
-                action: 'mine_build',
-                slot: s,
-                ore: selectOre
-              });
-              if (res.player) {
-                this.updatePlayerState(res.player);
-                this.addLog('SUCCESS', `Xây dựng mỏ khai thác ô ${s + 1} thành công`);
-                subActionDone = true;
-              }
-            } catch (e) {}
-            break; // Do one mine action per poll
-          }
-        }
-        // B. Upgrade Mine
-        else if (level < 100 && level < (this.player.house_lv || 0)) {
-          const cost = getMineUpgradeCost(level);
-          if ((this.player.gold || 0) >= cost.gold && 
-              (this.player.wood || 0) >= cost.wood && 
-              (this.player.stone || 0) >= cost.stone &&
-              (this.player.iron || 0) >= cost.iron &&
-              (this.player.copper || 0) >= cost.copper) {
-            
-            this.addLog('SYSTEM', `⛏️ [Tự động] Nâng cấp mỏ khai thác ô ${s + 1} lên Lv.${level + 1}`);
-            try {
-              const res = await this.sendRequest('https://ragnalok.online/human/xhrpg_upgrade.php', {
-                line_uid: this.line_uid,
-                session_token: this.session_token,
-                action: 'mine_up',
-                slot: s
-              });
-              if (res.player) {
-                this.updatePlayerState(res.player);
-                this.addLog('SUCCESS', `Nâng cấp mỏ khai thác ô ${s + 1} thành công`);
-                subActionDone = true;
-              }
-            } catch (e) {}
-            break;
-          }
-        }
-        // C. Toggle Mine On if disabled
-        else if (level >= 1 && !on) {
-          this.addLog('SYSTEM', `⛏️ [Tự động] Bật hoạt động mỏ khai thác ô ${s + 1}`);
-          try {
-            const res = await this.sendRequest('https://ragnalok.online/human/xhrpg_upgrade.php', {
-              line_uid: this.line_uid,
-              session_token: this.session_token,
-              action: 'mine_toggle',
-              slot: s
-            });
-            if (res.player) {
-              this.updatePlayerState(res.player);
-              this.addLog('SUCCESS', `Mỏ ô ${s + 1} hoạt động trở lại`);
-              subActionDone = true;
-            }
-          } catch (e) {}
-          break;
-        }
-      }
-    }
-    } // End of temporarily disabled automation
-
     // 6. Phân luồng Định Tuyến Bản Đồ (Map Routing)
     const bypassHomeWarp = this.settings.bypassHomeWarp === true;
 
@@ -4192,192 +3994,454 @@ class BotInstance {
         }
       }
     }
+  }
 
-    // 7. Auto Arena Mode (Chỉ chạy khi không ở Nông trại)
-    if (!isAtHome && !this.isMvpCycling && this.settings.autoArena && this.pollCount % 150 === 0) {
-      try {
-        const info = await this.sendRequest('https://ragnalok.online/human/xhrpg_arena.php', {
-          line_uid: this.line_uid,
-          session_token: this.session_token,
-          action: 'info'
-        });
-        if (info && info.ok && (info.free_runs || 0) > 0 && !info.in_arena) {
-          const wonMonsters = (info.monsters || []).filter(m => m.won);
-          if (wonMonsters.length > 0) {
-            const target = wonMonsters.sort((a, b) => b.lv - a.lv)[0];
-            this.addLog('SYSTEM', `🏟️ [Auto Arena] Thực hiện Skip Boss: ${target.name} (Lv.${target.lv})`);
-            const skipRes = await this.sendRequest('https://ragnalok.online/human/xhrpg_arena.php', {
-              line_uid: this.line_uid,
-              session_token: this.session_token,
-              action: 'skip',
-              mid: target.mid,
-              pay: 'g',
-              count: 1
-            });
-            if (skipRes && skipRes.msg) {
-              this.addLog('SUCCESS', `Skip Đấu trường thành công: ${skipRes.msg}`);
-            }
-          } else {
-            const fightable = (info.monsters || []).filter(m => (this.player.lv || 1) >= m.lv);
-            if (fightable.length > 0) {
-              const target = fightable.sort((a, b) => a.lv - b.lv)[0];
-              this.addLog('SYSTEM', `🏟️ [Auto Arena] Vào khiếu chiến Đấu trường Boss: ${target.name} (Lv.${target.lv})`);
-              const enterRes = await this.sendRequest('https://ragnalok.online/human/xhrpg_arena.php', {
-                line_uid: this.line_uid,
-                session_token: this.session_token,
-                action: 'enter',
-                mid: target.mid,
-                pay: 'g',
-                count: 1
-              });
-              if (enterRes && enterRes.msg) {
-                this.addLog('SUCCESS', `Vào Đấu trường thành công: ${enterRes.msg}`);
-              }
-            }
-          }
-        }
-      } catch (err) {
-        console.error(`Auto Arena error for ${this.name}:`, err);
-      }
-    }
+  /**
+   * 🕒 Off-Beat Sub-Action Dispatcher (T80)
+   * Thực thi xen kẽ tối đa 1 hành động phụ duy nhất tại nửa chu kỳ giữa 2 nhịp farm quái,
+   * áp dụng Rate Gating theo tính năng để triệt tiêu toàn diện lỗi HTTP 429 Too Many Requests.
+   */
+  async executeNextSubAction() {
+    if (this.status !== 'running') return;
+    if (this.isPolling || this.isSubActionRunning) return;
+    if (this.targetedMvp || proxyPool.isRateLimited(this.proxyId)) return;
+    if (!this.player) return;
 
-    // 8. Auto Home (Nông trại: Harvest, Plant, Upgrade)
-    // bypassHomeWarp=true: thực thi ngay tại map hiện tại mà không cần vào Map 5
-    // bypassHomeWarp=false (mặc định): chỉ thực thi khi đang ở Map 5 (isAtHome)
-    if ((isAtHome || bypassHomeWarp) && !this.isMvpCycling && this.player && (this.settings.autoHomeHarvest || this.settings.autoHomePlant || this.settings.autoHomeUpgrade)) {
-      try {
-        const lv = Math.max(1, this.player.home_lv | 0);
-        const HOME_PLOT_LV = [20, 40, 60, 80, 100];
-        const plots = 1 + HOME_PLOT_LV.filter(q => lv >= q).length;
-        const totalHoles = plots * 16;
-        
-        let crops = [];
-        try {
-          const c = this.player.home_crops;
-          crops = Array.isArray(c) ? c : (typeof c === 'string' ? (JSON.parse(c || '[]') || []) : []);
-        } catch (e) {}
+    this.isSubActionRunning = true;
+    try {
+      const now = Date.now();
+      const isAtHome = Number(this.player.map) === 5;
+      const enableUpgrades = !this.isMvpCycling;
 
-        const nowS = Date.now() / 1000;
-        const SEED_GROW_H = [1, 2, 4, 8, 16, 24];
-        const seedGrowS = id => (SEED_GROW_H[((((id - 1) / 4) | 0))] || 1) * 3600;
-
-        // A. Auto Harvest
-        if (!harvestCooldown && this.settings.autoHomeHarvest && crops.length > 0) {
-          const ripeCount = crops.filter(c => {
-            if (c.r === true) return true;
-            const left = seedGrowS(c.s) - (nowS - c.t);
-            return left <= 0;
-          }).length;
-
-          if (ripeCount > 0) {
-            this.addLog('SYSTEM', `🌾 [Auto Home] Thu hoạch ${ripeCount} luống cây đã chín`);
+      // [TẠM DỪNG] 1. Auto Stats (Tạm thời vô hiệu hóa theo yêu cầu người dùng)
+      /*
+      if (enableUpgrades && this.settings.autoStats && (this.player.stat_pts || 0) > 0 && (now - this.lastStatsCheckAt >= 5000)) {
+        this.lastStatsCheckAt = now;
+        const targetStat = (this.settings.statsPriority || []).find(s => s === 'str' || s === 'agi' || s === 'vit' || s === 'intel' || s === 'dex' || s === 'luk');
+        if (targetStat) {
+          const amount = this.player.stat_pts;
+          this.addLog('SYSTEM', `⚡ [Tự động] Tăng ${amount} điểm vào ${targetStat.toUpperCase()}`);
+          try {
             const res = await this.sendRequest('https://ragnalok.online/human/xhrpg_upgrade.php', {
               line_uid: this.line_uid,
               session_token: this.session_token,
-              action: 'home_harvest'
+              action: 'stat_up',
+              param: targetStat,
+              amount: amount
             });
             if (res && res.ok) {
               this.updatePlayerState(res.player);
-              const hv = res.hv || {};
-              this.addLog('SUCCESS', `Thu hoạch thành công: ${hv.n || ripeCount} luống (+${(hv.g || 0).toLocaleString()} Gold)`);
-              this.failedSeeds = {}; // Reset blacklist on successful harvest
-            } else {
-              this.lastHarvestFailedAt = Date.now();
-              const errMsg = res ? (res.error || res.msg || 'Lỗi không xác định') : 'Không phản hồi';
-              this.addLog('ERROR', `Thu hoạch thất bại: ${errMsg}. Tạm dừng thu hoạch 5 phút.`);
+              this.addLog('SUCCESS', `Tăng điểm ${targetStat.toUpperCase()} thành công`);
+              return;
+            } else if (res && res.error) {
+              this.addLog('WARNING', `Tăng điểm thất bại: ${res.error}`);
             }
+          } catch (e) {
+            this.addLog('ERROR', `Lỗi tăng điểm: ${e.message}`);
           }
         }
+      }
+      */
 
-        // B. Auto Plant
-        if (this.settings.autoHomePlant) {
+      // 2. ƯU TIÊN 2: Nông trại (Auto Home Farm: Harvest, Plant, Upgrade) - Check mỗi 30s
+      const bypassHomeWarp = this.settings.bypassHomeWarp === true;
+      if ((isAtHome || bypassHomeWarp) && enableUpgrades && (this.settings.autoHomeHarvest || this.settings.autoHomePlant || this.settings.autoHomeUpgrade) && (now - this.lastFarmCheckAt >= 30000)) {
+        this.lastFarmCheckAt = now;
+        const harvestCooldown = this.lastHarvestFailedAt && (now - this.lastHarvestFailedAt < 300000);
+        const upgradeCooldown = this.lastHomeUpgradeFailedAt && (now - this.lastHomeUpgradeFailedAt < 300000);
+
+        try {
+          const lv = Math.max(1, this.player.home_lv | 0);
+          const HOME_PLOT_LV = [20, 40, 60, 80, 100];
+          const plots = 1 + HOME_PLOT_LV.filter(q => lv >= q).length;
+          const totalHoles = plots * 16;
+          
+          let crops = [];
           try {
             const c = this.player.home_crops;
             crops = Array.isArray(c) ? c : (typeof c === 'string' ? (JSON.parse(c || '[]') || []) : []);
           } catch (e) {}
 
-          const usedHoles = crops.filter(c => c.p < plots).length;
-          if (usedHoles < totalHoles) {
-            let seeds = {};
-            try {
-              const s = this.player.home_seeds;
-              seeds = (s && typeof s === 'object' && !Array.isArray(s)) ? s : (typeof s === 'string' ? (JSON.parse(s || '{}') || {}) : {});
-            } catch (e) {}
+          const nowS = Date.now() / 1000;
+          const SEED_GROW_H = [1, 2, 4, 8, 16, 24];
+          const seedGrowS = id => (SEED_GROW_H[Math.max(0, Math.min(5, (((id - 1) / 4) | 0)))] || 1) * 3600;
 
-            const availSeedIds = Object.keys(seeds).map(Number).filter(id => id >= 1 && id <= 24 && seeds[id] > 0 && !this.failedSeeds[id]);
-            if (availSeedIds.length > 0) {
-              const priority = this.settings.homePlantPriority || 'highest_tier';
-              const seedTier = id => (((id - 1) / 4) | 0) + 1;
-              const seedGold = id => ((id - 1) & 1) === 1;
+          // A. Auto Harvest
+          if (!harvestCooldown && this.settings.autoHomeHarvest && crops.length > 0) {
+            const ripeCount = crops.filter(c => {
+              if (c.r === true) return true;
+              const left = seedGrowS(c.s) - (nowS - c.t);
+              return left <= 0;
+            }).length;
 
-              availSeedIds.sort((a, b) => {
-                if (priority === 'gold_first') {
-                  if (seedGold(a) !== seedGold(b)) return seedGold(b) ? 1 : -1;
-                  return seedTier(b) - seedTier(a);
-                } else if (priority === 'lowest_tier') {
-                  return seedTier(a) - seedTier(b);
+            if (ripeCount > 0) {
+              this.addLog('SYSTEM', `🌾 [Auto Home] Thu hoạch ${ripeCount} luống cây đã chín`);
+              const res = await this.sendRequest('https://ragnalok.online/human/xhrpg_upgrade.php', {
+                line_uid: this.line_uid,
+                session_token: this.session_token,
+                action: 'home_harvest'
+              });
+              if (res && res.ok) {
+                this.updatePlayerState(res.player);
+                const hv = res.hv || {};
+                this.addLog('SUCCESS', `Thu hoạch thành công: ${hv.n || ripeCount} luống (+${(hv.g || 0).toLocaleString()} Gold)`);
+                this.failedSeeds = {};
+                return;
+              } else {
+                this.lastHarvestFailedAt = Date.now();
+                const errMsg = res ? (res.error || res.msg || 'Lỗi không xác định') : 'Không phản hồi';
+                this.addLog('ERROR', `Thu hoạch thất bại: ${errMsg}. Tạm dừng thu hoạch 5 phút.`);
+              }
+            }
+          }
+
+          // B. Auto Plant
+          if (this.settings.autoHomePlant) {
+            const usedHoles = crops.filter(c => c.p < plots).length;
+            if (usedHoles < totalHoles) {
+              let seeds = {};
+              try {
+                const s = this.player.home_seeds;
+                seeds = (s && typeof s === 'object' && !Array.isArray(s)) ? s : (typeof s === 'string' ? (JSON.parse(s || '{}') || {}) : {});
+              } catch (e) {}
+
+              const availSeedIds = Object.keys(seeds).map(Number).filter(id => id >= 1 && id <= 24 && seeds[id] > 0 && !this.failedSeeds[id]);
+              if (availSeedIds.length > 0) {
+                const priority = this.settings.homePlantPriority || 'highest_tier';
+                const seedTier = id => (((id - 1) / 4) | 0) + 1;
+                const seedGold = id => ((id - 1) & 1) === 1;
+
+                availSeedIds.sort((a, b) => {
+                  if (priority === 'gold_first') {
+                    if (seedGold(a) !== seedGold(b)) return seedGold(b) ? 1 : -1;
+                    return seedTier(b) - seedTier(a);
+                  } else if (priority === 'lowest_tier') {
+                    return seedTier(a) - seedTier(b);
+                  } else {
+                    if (seedTier(a) !== seedTier(b)) return seedTier(b) - seedTier(a);
+                    return b - a;
+                  }
+                });
+
+                const targetSeed = availSeedIds[0];
+                this.addLog('SYSTEM', `🌱 [Auto Home] Trồng tự động hạt giống ID #${targetSeed}`);
+                const res = await this.sendRequest('https://ragnalok.online/human/xhrpg_upgrade.php', {
+                  line_uid: this.line_uid,
+                  session_token: this.session_token,
+                  action: 'home_plant',
+                  seed: targetSeed,
+                  all: 1
+                });
+                if (res && res.ok) {
+                  this.updatePlayerState(res.player);
+                  this.addLog('SUCCESS', `Trồng thành công hạt giống ID #${targetSeed}`);
+                  return;
                 } else {
-                  if (seedTier(a) !== seedTier(b)) return seedTier(b) - seedTier(a);
-                  return b - a;
+                  const errMsg = res ? (res.error || res.msg || 'Lỗi không xác định') : 'Không phản hồi';
+                  this.addLog('ERROR', `Gieo hạt giống #${targetSeed} thất bại: ${errMsg}. Đưa hạt giống này vào danh sách đen.`);
+                  this.failedSeeds[targetSeed] = true;
                 }
-              });
-
-              const targetSeed = availSeedIds[0];
-              this.addLog('SYSTEM', `🌱 [Auto Home] Trồng tự động hạt giống ID #${targetSeed}`);
-              const res = await this.sendRequest('https://ragnalok.online/human/xhrpg_upgrade.php', {
-                line_uid: this.line_uid,
-                session_token: this.session_token,
-                action: 'home_plant',
-                seed: targetSeed,
-                all: 1
-              });
-              if (res && res.ok) {
-                this.updatePlayerState(res.player);
-                this.addLog('SUCCESS', `Trồng thành công hạt giống ID #${targetSeed}`);
-              } else {
-                const errMsg = res ? (res.error || res.msg || 'Lỗi không xác định') : 'Không phản hồi';
-                this.addLog('ERROR', `Gieo hạt giống #${targetSeed} thất bại: ${errMsg}. Đưa hạt giống này vào danh sách đen.`);
-                this.failedSeeds[targetSeed] = true;
               }
             }
           }
-        }
 
-        // C. Auto Upgrade Home
-        if (!upgradeCooldown && this.settings.autoHomeUpgrade) {
-          const lv = Math.max(1, this.player.home_lv | 0);
-          if (lv < 100 && lv < ((this.player.lv | 0) + 5)) {
-            const t = lv + 1;
-            const m = _upgCostMult(t);
-            const r = Math.ceil(tierRes(t) * m) * 10;
-            const costGold = Math.ceil(tierGold(t) * m) * 10;
+          // C. Auto Upgrade Home
+          if (!upgradeCooldown && this.settings.autoHomeUpgrade) {
+            const lv = Math.max(1, this.player.home_lv | 0);
+            if (lv < 100 && lv < ((this.player.lv | 0) + 5)) {
+              const t = lv + 1;
+              const m = _upgCostMult(t);
+              const r = Math.ceil(tierRes(t) * m) * 10;
+              const costGold = Math.ceil(tierGold(t) * m) * 10;
 
-            if ((this.player.gold|0) >= costGold && (this.player.wood|0) >= r && (this.player.stone|0) >= r &&
-                (this.player.iron|0) >= r && (this.player.copper|0) >= r && (this.player.herb|0) >= r) {
-              this.addLog('SYSTEM', `⬆️ [Auto Home] Nâng cấp nhà lên Lv.${lv + 1}`);
-              const res = await this.sendRequest('https://ragnalok.online/human/xhrpg_upgrade.php', {
-                line_uid: this.line_uid,
-                session_token: this.session_token,
-                action: 'home_up'
-              });
-              if (res && res.ok) {
-                this.updatePlayerState(res.player);
-                this.addLog('SUCCESS', `Nâng cấp nhà lên Lv.${this.player.home_lv} thành công!`);
-              } else {
-                this.lastHomeUpgradeFailedAt = Date.now();
-                const errMsg = res ? (res.error || res.msg || 'Lỗi không xác định') : 'Không phản hồi';
-                this.addLog('ERROR', `Nâng cấp nhà thất bại: ${errMsg}. Tạm dừng nâng cấp nhà 5 phút.`);
+              if ((this.player.gold|0) >= costGold && (this.player.wood|0) >= r && (this.player.stone|0) >= r &&
+                  (this.player.iron|0) >= r && (this.player.copper|0) >= r && (this.player.herb|0) >= r) {
+                this.addLog('SYSTEM', `⬆️ [Auto Home] Nâng cấp nhà lên Lv.${lv + 1}`);
+                const res = await this.sendRequest('https://ragnalok.online/human/xhrpg_upgrade.php', {
+                  line_uid: this.line_uid,
+                  session_token: this.session_token,
+                  action: 'home_up'
+                });
+                if (res && res.ok) {
+                  this.updatePlayerState(res.player);
+                  this.addLog('SUCCESS', `Nâng cấp nhà lên Lv.${this.player.home_lv} thành công!`);
+                  return;
+                } else {
+                  this.lastHomeUpgradeFailedAt = Date.now();
+                  const errMsg = res ? (res.error || res.msg || 'Lỗi không xác định') : 'Không phản hồi';
+                  this.addLog('ERROR', `Nâng cấp nhà thất bại: ${errMsg}. Tạm dừng nâng cấp nhà 5 phút.`);
+                }
               }
             }
           }
+        } catch (err) {
+          console.error(`Auto Home error for ${this.name}:`, err);
         }
-      } catch (err) {
-        console.error(`Auto Home error for ${this.name}:`, err);
       }
-    }
 
-    // 9. Auto Market Buy
-    await this.scanAndBuyMarket();
+      // 3. ƯU TIÊN 3: Auto Gear/Armor - Check mỗi 10s
+      if (enableUpgrades && this.settings.autoGear && ((this.player.armor_lv || 0) < 50) && (now - this.lastGearCheckAt >= 10000)) {
+        this.lastGearCheckAt = now;
+        const armLv = this.player.armor_lv || 0;
+        const cost = getArmorUpgradeCost(armLv);
+        if ((this.player.gold || 0) >= cost.gold && (this.player.stone || 0) >= cost.stone) {
+          this.addLog('SYSTEM', `🛡️ [Tự động] Nâng cấp Armor lên Lv.${armLv + 1} (Chi phí: 💰${cost.gold} 🪨${cost.stone})`);
+          try {
+            const res = await this.sendRequest('https://ragnalok.online/human/xhrpg_upgrade.php', {
+              line_uid: this.line_uid,
+              session_token: this.session_token,
+              action: 'upgrade_armor'
+            });
+            if (res && res.ok) {
+              this.updatePlayerState(res.player);
+              this.addLog('SUCCESS', `Nâng cấp Armor lên Lv.${this.player.armor_lv} thành công`);
+              return;
+            } else if (res && res.error) {
+              this.addLog('WARNING', `Nâng cấp Armor thất bại: ${res.error}`);
+            }
+          } catch (e) {
+            this.addLog('ERROR', `Lỗi nâng cấp Armor: ${e.message}`);
+          }
+        }
+      }
+
+      // 4. ƯU TIÊN 4: Auto Skills - Check mỗi 10s
+      if (enableUpgrades && this.settings.autoSkills && ((this.player.skill_pts || 0) > 0) && (now - this.lastSkillsCheckAt >= 10000)) {
+        this.lastSkillsCheckAt = now;
+        let skills = {};
+        try {
+          skills = typeof this.player.skills === 'object' ? this.player.skills : JSON.parse(this.player.skills || '{}');
+        } catch (err) {}
+
+        const skillToUpgrade = (this.settings.skillsPriority || []).find(skId => {
+          const curLv = skills[skId] || 0;
+          return curLv < 10 && isSkillUnlocked(skId, this.player.lv || 1, skills);
+        });
+
+        if (skillToUpgrade) {
+          this.addLog('SYSTEM', `✨ [Tự động] Nâng cấp kỹ năng: ${skillToUpgrade}`);
+          try {
+            const res = await this.sendRequest('https://ragnalok.online/human/xhrpg_upgrade.php', {
+              line_uid: this.line_uid,
+              session_token: this.session_token,
+              action: 'skill_up',
+              skill_id: skillToUpgrade
+            });
+            if (res && res.ok) {
+              this.updatePlayerState(res.player);
+              this.addLog('SUCCESS', `Nâng cấp kỹ năng ${skillToUpgrade} thành công`);
+              return;
+            } else if (res && res.error) {
+              this.addLog('WARNING', `Nâng cấp kỹ năng thất bại: ${res.error}`);
+            }
+          } catch (e) {
+            this.addLog('ERROR', `Lỗi nâng cấp kỹ năng: ${e.message}`);
+          }
+        }
+      }
+
+      // [TẠM DỪNG] 5. Auto Companions (Cat & Drone) (Tạm thời vô hiệu hóa theo yêu cầu người dùng)
+      /*
+      if (enableUpgrades && this.settings.autoCompanion && (now - this.lastCompanionCheckAt >= 20000)) {
+        this.lastCompanionCheckAt = now;
+        // Cat upgrade
+        const catLv = this.player.cat_lv || 0;
+        if (catLv < 30) {
+          const cost = getCatUpgradeCost(catLv);
+          if ((this.player.gold || 0) >= cost.gold && (this.player.stone || 0) >= cost.stone) {
+            this.addLog('SYSTEM', `🐈 [Tự động] Nâng cấp Companion (Cat) lên Lv.${catLv + 1}`);
+            try {
+              const res = await this.sendRequest('https://ragnalok.online/human/xhrpg_upgrade.php', {
+                line_uid: this.line_uid,
+                session_token: this.session_token,
+                action: 'upgrade_cat'
+              });
+              if (res && res.ok) {
+                this.updatePlayerState(res.player);
+                this.addLog('SUCCESS', `Nâng cấp Cat lên Lv.${this.player.cat_lv} thành công`);
+                return;
+              }
+            } catch (e) {}
+          }
+        }
+
+        // Drone upgrade
+        const droneLv = this.player.drone_lv || 0;
+        if (droneLv < 30) {
+          const cost = getDroneUpgradeCost(droneLv);
+          if ((this.player.gold || 0) >= cost.gold && (this.player.copper || 0) >= cost.copper) {
+            this.addLog('SYSTEM', `🛸 [Tự động] Nâng cấp Drone lên Lv.${droneLv + 1}`);
+            try {
+              const res = await this.sendRequest('https://ragnalok.online/human/xhrpg_upgrade.php', {
+                line_uid: this.line_uid,
+                session_token: this.session_token,
+                action: 'upgrade_drone'
+              });
+              if (res && res.ok) {
+                this.updatePlayerState(res.player);
+                this.addLog('SUCCESS', `Nâng cấp Drone lên Lv.${this.player.drone_lv} thành công`);
+                return;
+              }
+            } catch (e) {}
+          }
+        }
+      }
+      */
+
+      // [TẠM DỪNG] 6. Auto Mines (Tạm thời vô hiệu hóa theo yêu cầu người dùng)
+      /*
+      if (enableUpgrades && this.settings.autoMines && ((this.player.house_lv || 0) >= 20) && (now - this.lastMinesCheckAt >= 45000)) {
+        this.lastMinesCheckAt = now;
+        const MINE_UNLOCK = [20, 40, 60, 999, 999, 999];
+        let mlv = [], mor = [], mon = [];
+        try {
+          mlv = Array.isArray(this.player.mine_lv) ? this.player.mine_lv : JSON.parse(this.player.mine_lv || '[]');
+          mor = Array.isArray(this.player.mine_ore) ? this.player.mine_ore : JSON.parse(this.player.mine_ore || '[]');
+          mon = Array.isArray(this.player.mine_on) ? this.player.mine_on : JSON.parse(this.player.mine_on || '[]');
+        } catch (err) {}
+
+        const hasPremMiner = (parseInt(this.player.premium_miner_expires) || 0) > Math.floor(Date.now() / 1000);
+        if (hasPremMiner) {
+          MINE_UNLOCK[3] = 20;
+        }
+
+        for (let s = 0; s < 6; s++) {
+          const unlock = MINE_UNLOCK[s];
+          if (unlock >= 999 || (this.player.house_lv || 0) < unlock) continue;
+
+          const level = mlv[s] | 0;
+          const on = (mon[s] ?? 1) ? 1 : 0;
+
+          // A. Build Mine
+          if (level < 1) {
+            const cost = getMineUpgradeCost(0);
+            if ((this.player.gold || 0) >= cost.gold && (this.player.wood || 0) >= cost.wood && (this.player.stone || 0) >= cost.stone) {
+              const selectOre = this.settings.defaultOre || 'stone';
+              this.addLog('SYSTEM', `⛏️ [Tự động] Xây dựng mỏ khai thác tại ô ${s + 1} (${selectOre})`);
+              try {
+                const res = await this.sendRequest('https://ragnalok.online/human/xhrpg_upgrade.php', {
+                  line_uid: this.line_uid,
+                  session_token: this.session_token,
+                  action: 'mine_build',
+                  slot: s,
+                  ore: selectOre
+                });
+                if (res && res.player) {
+                  this.updatePlayerState(res.player);
+                  this.addLog('SUCCESS', `Xây dựng mỏ khai thác ô ${s + 1} thành công`);
+                  return;
+                }
+              } catch (e) {}
+              break;
+            }
+          }
+          // B. Upgrade Mine
+          else if (level < 100 && level < (this.player.house_lv || 0)) {
+            const cost = getMineUpgradeCost(level);
+            if ((this.player.gold || 0) >= cost.gold && 
+                (this.player.wood || 0) >= cost.wood && 
+                (this.player.stone || 0) >= cost.stone &&
+                (this.player.iron || 0) >= cost.iron &&
+                (this.player.copper || 0) >= cost.copper) {
+              
+              this.addLog('SYSTEM', `⛏️ [Tự động] Nâng cấp mỏ khai thác ô ${s + 1} lên Lv.${level + 1}`);
+              try {
+                const res = await this.sendRequest('https://ragnalok.online/human/xhrpg_upgrade.php', {
+                  line_uid: this.line_uid,
+                  session_token: this.session_token,
+                  action: 'mine_up',
+                  slot: s
+                });
+                if (res && res.player) {
+                  this.updatePlayerState(res.player);
+                  this.addLog('SUCCESS', `Nâng cấp mỏ khai thác ô ${s + 1} thành công`);
+                  return;
+                }
+              } catch (e) {}
+              break;
+            }
+          }
+          // C. Toggle Mine On if disabled
+          else if (level >= 1 && !on) {
+            this.addLog('SYSTEM', `⛏️ [Tự động] Bật hoạt động mỏ khai thác ô ${s + 1}`);
+            try {
+              const res = await this.sendRequest('https://ragnalok.online/human/xhrpg_upgrade.php', {
+                line_uid: this.line_uid,
+                session_token: this.session_token,
+                action: 'mine_toggle',
+                slot: s
+              });
+              if (res && res.player) {
+                this.updatePlayerState(res.player);
+                this.addLog('SUCCESS', `Mỏ ô ${s + 1} hoạt động trở lại`);
+                return;
+              }
+            } catch (e) {}
+            break;
+          }
+        }
+      }
+      */
+
+      // [TẠM DỪNG] 7. Auto Arena (Tạm thời vô hiệu hóa theo yêu cầu người dùng)
+      /*
+      if (!isAtHome && !this.isMvpCycling && this.settings.autoArena && (now - this.lastArenaCheckAt >= 60000)) {
+        this.lastArenaCheckAt = now;
+        try {
+          const info = await this.sendRequest('https://ragnalok.online/human/xhrpg_arena.php', {
+            line_uid: this.line_uid,
+            session_token: this.session_token,
+            action: 'info'
+          });
+          if (info && info.ok && (info.free_runs || 0) > 0 && !info.in_arena) {
+            const wonMonsters = (info.monsters || []).filter(m => m.won);
+            if (wonMonsters.length > 0) {
+              const target = wonMonsters.sort((a, b) => b.lv - a.lv)[0];
+              this.addLog('SYSTEM', `🏟️ [Auto Arena] Thực hiện Skip Boss: ${target.name} (Lv.${target.lv})`);
+              const skipRes = await this.sendRequest('https://ragnalok.online/human/xhrpg_arena.php', {
+                line_uid: this.line_uid,
+                session_token: this.session_token,
+                action: 'skip',
+                mid: target.mid,
+                pay: 'g',
+                count: 1
+              });
+              if (skipRes && skipRes.msg) {
+                this.addLog('SUCCESS', `Skip Đấu trường thành công: ${skipRes.msg}`);
+                return;
+              }
+            } else {
+              const fightable = (info.monsters || []).filter(m => (this.player.lv || 1) >= m.lv);
+              if (fightable.length > 0) {
+                const target = fightable.sort((a, b) => a.lv - b.lv)[0];
+                this.addLog('SYSTEM', `🏟️ [Auto Arena] Vào khiếu chiến Đấu trường Boss: ${target.name} (Lv.${target.lv})`);
+                const enterRes = await this.sendRequest('https://ragnalok.online/human/xhrpg_arena.php', {
+                  line_uid: this.line_uid,
+                  session_token: this.session_token,
+                  action: 'enter',
+                  mid: target.mid,
+                  pay: 'g',
+                  count: 1
+                });
+                if (enterRes && enterRes.msg) {
+                  this.addLog('SUCCESS', `Vào Đấu trường thành công: ${enterRes.msg}`);
+                  return;
+                }
+              }
+            }
+          }
+        } catch (err) {
+          console.error(`Auto Arena error for ${this.name}:`, err);
+        }
+      }
+      */
+
+      // 8. ƯU TIÊN 8: Auto Market Buy
+      await this.scanAndBuyMarket();
+
+    } finally {
+      this.isSubActionRunning = false;
+    }
   }
 
   async scanAndBuyMarket() {

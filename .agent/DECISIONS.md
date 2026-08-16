@@ -2,6 +2,50 @@
 
 > Captured architectural decisions and trade-offs.
 
+## 2026-08-16 - Tạm Dừng Và Ẩn Các Chức Năng Nâng Stats, Đệ Tử, Khai Thác Mỏ, Đấu Trường (T84)
+
+- Bối cảnh:
+  - Người dùng yêu cầu tạm dừng thực thi các chức năng: Tự động nâng Stats, Đệ tử (Cat/Drone), Khai thác mỏ (Mines), và Đấu trường (Arena) để giảm thiểu tối đa các luồng request không thiết yếu và ẩn các chức năng này khỏi giao diện người dùng.
+- Quyết định:
+  - **Vô Hiệu Hóa Tại Sub-Action Dispatcher**:
+    - Trong [`BotInstance.prototype.executeNextSubAction()`](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/server.js#L4010), tạm thời khóa khối lệnh xử lý của Auto Stats, Auto Companions, Auto Mines và Auto Arena.
+    - Giữ nguyên các chức năng cốt lõi: Cày quái chính (Combat), Hồi máu khẩn cấp, Nông trại (Auto Home Farm), Nâng cấp trang bị/giáp (Auto Gear), Kỹ năng (Auto Skills), và Mua chợ (Auto Market).
+  - **Ẩn Điều Khiển Giao Diện**:
+    - Thiết lập `display: none;` cho toggle `🏟️ Auto Đấu Trường` trên thẻ cấu hình Bot trong [`public/app.js`](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/public/app.js).
+- Kết quả:
+  - Giảm thiểu triệt để thêm các request phụ, hệ thống chỉ tập trung vào farm quái và nông vụ/chợ.
+  - Toàn bộ test suite `node test.js` vượt qua 100%.
+
+---
+
+## 2026-08-16 - Triển Khai Bộ Điều Phối Hành Động Phụ Xen Kẽ (Off-Beat Sub-Action Dispatcher) & Interval Gating Chống 429 (T83)
+
+- Bối cảnh:
+  - Khi người dùng chạy 4-5 bot trên cùng 1 IP Direct, máy chủ game / Cloudflare trả về `HTTP 429: Too Many Requests`.
+  - Phân tích 4M chỉ ra rằng: trên trình duyệt, mỗi tab chỉ gửi 1 request `xhrpg_game.php` (khoảng 2.5 req/s tổng). Nhưng trên Tool, mỗi bot ngoài nhịp farm còn thực hiện hàng loạt sub-action (nâng Stats, Gear, Skill, Nông trại, Khai mỏ, Đấu trường) ngay trong cùng một tick, gây ra hiện tượng bùng phát lưu lượng (Request Bursting) lên tới 15-25 req/s làm tràn Token Bucket của máy chủ game.
+- Quyết định:
+  - **Tách Rời Hoàn Toàn Sub-Actions Khỏi `pollGame()`**:
+    - Nhịp farm chính trong `pollGame()` chỉ giữ lại `xhrpg_game.php` và các xử lý khẩn cấp (bơm máu khi HP thấp).
+    - Toàn bộ các logic nâng cấp và quản trị được gom vào hàm `executeNextSubAction()`.
+  - **Thực Thi Xen Kẽ Nửa Chu Kỳ (Off-Beat Half-Phase Interleaving)**:
+    - `executeNextSubAction()` được điều phối thực thi ở điểm giữa chu kỳ ($t = \text{interval} / 2$).
+    - Mỗi lần gọi chỉ thực thi **tối đa 1 hành động phụ duy nhất**, sau đó thoát ngay để tránh tạo chùm request.
+  - **Áp Dụng Bộ Đệm Thời Gian (Interval Gating)**:
+    - Nông trại: check mỗi 30s (`lastFarmCheckAt`).
+    - Khai mỏ: check mỗi 45s (`lastMinesCheckAt`).
+    - Đấu trường: check mỗi 60s (`lastArenaCheckAt`).
+    - Đệ tử Mèo/Drone: check mỗi 20s (`lastCompanionCheckAt`).
+    - Trang bị / Kỹ năng: check mỗi 10s (`lastGearCheckAt`/`lastSkillsCheckAt`).
+    - Tiềm năng (Stats): check mỗi 5s (`lastStatsCheckAt`).
+  - **Nâng Khoảng Cách Outbound An Toàn**:
+    - Nâng `minSpacingMs` trong `waitForOutboundSlot` lên `350ms` (tối đa 2.8 req/s/IP) cho kết nối Direct.
+- Kết quả:
+  - Lưu lượng gửi đi từ 4-5 bot trên 1 IP được dàn phẳng đều đặn (mỗi giây chỉ 1-2 request), triệt tiêu hoàn toàn hiện tượng Request Bursting gây lỗi HTTP 429.
+  - Tốc độ farm quái của bot được bảo toàn 100%.
+  - Bộ kiểm thử unit tests `node test.js` đạt 100% pass.
+
+---
+
 ## 2026-08-16 - Tối Ưu Hóa Tái Sử Dụng Kết Nối HTTP/TLS Connection Pooling (Persistent Sockets Keep-Alive 60s - 300s) (T82)
 
 - Bối cảnh:
