@@ -78,6 +78,24 @@
       </div>
     </div>
 
+    <!-- Dashboard Cooldown Banner (Hiển thị khi đang trong thời gian hạ nhiệt IP) -->
+    <div class="dashboard-cooldown-banner" id="dashboard-cooldown-banner" style="display: none; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; background: linear-gradient(135deg, rgba(245, 158, 11, 0.15), rgba(217, 119, 6, 0.25)); border: 1px solid rgba(245, 158, 11, 0.4); padding: 12px 18px; border-radius: 12px; box-shadow: 0 4px 20px rgba(245, 158, 11, 0.15); backdrop-filter: blur(10px);">
+      <div style="display: flex; align-items: center; gap: 10px; font-weight: 600; color: #fef3c7;">
+        <span style="font-size: 1.3rem;">🛡️</span>
+        <div>
+          <div style="font-size: 0.95rem; color: #fde68a;">
+            Đang trong chế độ <strong>Hạ Nhiệt IP (Rate-Limit Cool-down)</strong>: Còn <span id="cooldown-countdown-txt" style="color: #fbbf24; font-size: 1.1rem; font-weight: 800; font-family: monospace;">120s</span>
+          </div>
+          <div style="font-size: 0.8rem; color: #cbd5e1; font-weight: normal; margin-top: 2px;">
+            Toàn bộ bot đang tạm dừng để xóa bộ đếm cấm IP từ Cloudflare. Hệ thống sẽ <strong>tự động chạy lại</strong> khi hết giờ.
+          </div>
+        </div>
+      </div>
+      <button class="btn btn-secondary" onclick="window.cancelCooldown()" style="background: rgba(255, 255, 255, 0.1); border-color: rgba(255, 255, 255, 0.3); color: #fff; padding: 6px 14px; font-size: 0.85rem;">
+        ✕ Hủy & Chạy Ngay
+      </button>
+    </div>
+
     <!-- Dashboard Controls & Team Filter Bar -->
     <div class="dashboard-filter-bar" id="dashboard-filter-bar" style="display: none; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255, 255, 255, 0.08); padding: 10px 16px; border-radius: 12px; backdrop-filter: blur(10px);">
       <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
@@ -99,8 +117,13 @@
           <option value="team_10">🛡️ Team 10</option>
         </select>
       </div>
-      <div id="team-filter-stats" style="font-size: 0.82rem; color: #94a3b8;">
-        Hiển thị: <strong id="filter-count-txt" style="color: #38bdf8;">0</strong> bot
+      <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+        <button class="btn btn-warning btn-cooldown-trigger" onclick="window.triggerMyCooldown(120)" title="Tạm dừng 120s không gửi request để hạ nhiệt IP và xóa án phạt lỗi 429" style="background: rgba(245, 158, 11, 0.2); border: 1px solid rgba(245, 158, 11, 0.4); color: #fbbf24; padding: 6px 12px; font-size: 0.85rem; font-weight: 600; border-radius: 8px; cursor: pointer; transition: all 0.2s; display: inline-flex; align-items: center; gap: 6px;">
+          <span>🛡️</span> Hạ Nhiệt IP (120s)
+        </button>
+        <div id="team-filter-stats" style="font-size: 0.82rem; color: #94a3b8;">
+          Hiển thị: <strong id="filter-count-txt" style="color: #38bdf8;">0</strong> bot
+        </div>
       </div>
     </div>
 
@@ -171,6 +194,21 @@
               <span class="stat-value" id="stat-proxy-val">-- Direct / -- Proxy</span>
               <span class="stat-sub" id="stat-proxy-sub">Bin-packing Pool</span>
             </div>
+          </div>
+        </div>
+
+        <!-- Admin Emergency Support Action Bar -->
+        <div class="admin-emergency-bar" style="margin-bottom: 16px; background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 10px; padding: 10px 16px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+          <div style="font-size: 0.85rem; color: #fde68a;">
+            <strong>🛡️ Hỗ Trợ Xử Lý Lỗi 429 (Emergency Rate-Limit Support):</strong>
+            <div style="font-size: 0.78rem; color: #cbd5e1; margin-top: 2px;">
+              Tạm dừng toàn bộ request của hệ thống hoặc từng user trong 120s để xóa án phạt IP từ Cloudflare.
+            </div>
+          </div>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <button type="button" class="btn btn-warning" onclick="window.adminCooldownAll(120)" style="background: rgba(245, 158, 11, 0.25); border: 1px solid rgba(245, 158, 11, 0.5); color: #fbbf24; padding: 6px 12px; font-size: 0.8rem; font-weight: 700; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 6px;">
+              <span>🛡️</span> Hạ Nhiệt Toàn Bộ Bot (All Users)
+            </button>
           </div>
         </div>
 

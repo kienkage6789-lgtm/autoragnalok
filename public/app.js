@@ -229,6 +229,114 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   };
 
+  window.triggerMyCooldown = async function(seconds = 120) {
+    if (!confirm(`🛡️ Kích hoạt chế độ Hạ Nhiệt IP trong ${seconds}s?\n\nToàn bộ bot của bạn sẽ tạm ngưng gửi request để xóa án phạt 429 từ Cloudflare và tự động chạy lại khi hết ${seconds}s.`)) return;
+    try {
+      const res = await fetch('/api/cooldown/my-bots', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ durationSeconds: seconds })
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        window.showToast(`🛡️ Đã kích hoạt hạ nhiệt ${data.durationSeconds}s cho ${data.botCount} bot!`);
+        fetchAccounts();
+      } else {
+        alert(`🔴 Lỗi kích hoạt hạ nhiệt: ${data.error || 'Thất bại'}`);
+      }
+    } catch (e) {
+      console.error('Error triggering cooldown:', e);
+      alert('Không thể kết nối máy chủ');
+    }
+  };
+
+  window.adminCooldownAll = async function(seconds = 120) {
+    if (!confirm(`🛡️ [ADMIN] Kích hoạt chế độ Hạ Nhiệt IP Toàn Hệ Thống trong ${seconds}s?\n\nToàn bộ bot của TẤT CẢ người dùng sẽ tạm ngưng gửi request để xóa án phạt 429 và tự động chạy lại sau ${seconds}s.`)) return;
+    try {
+      const res = await fetch('/api/admin/cooldown/all', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ durationSeconds: seconds })
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        window.showToast(`🛡️ Đã kích hoạt hạ nhiệt toàn hệ thống (${data.durationSeconds}s) cho ${data.botCount} bot!`);
+        fetchAccounts();
+        if (typeof fetchAdminUsers === 'function') fetchAdminUsers();
+      } else {
+        alert(`🔴 Lỗi kích hoạt hạ nhiệt toàn hệ thống: ${data.error || 'Thất bại'}`);
+      }
+    } catch (e) {
+      console.error('Error triggering admin cooldown all:', e);
+      alert('Không thể kết nối máy chủ');
+    }
+  };
+
+  window.adminCooldownUser = async function(userId, username, seconds = 120) {
+    if (!confirm(`🛡️ [ADMIN] Hỗ trợ Hạ Nhiệt IP cho user "${username}" trong ${seconds}s?\n\nToàn bộ bot của user này sẽ tạm ngưng gửi request để xóa án phạt 429 và tự động chạy lại sau ${seconds}s.`)) return;
+    try {
+      const res = await fetch(`/api/admin/users/${userId}/cooldown`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ durationSeconds: seconds })
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        window.showToast(`🛡️ Đã hạ nhiệt ${data.durationSeconds}s cho ${data.botCount} bot của ${username}!`);
+        fetchAccounts();
+        if (typeof fetchAdminUsers === 'function') fetchAdminUsers();
+      } else {
+        alert(`🔴 Lỗi hạ nhiệt user: ${data.error || 'Thất bại'}`);
+      }
+    } catch (e) {
+      console.error('Error triggering admin cooldown user:', e);
+      alert('Không thể kết nối máy chủ');
+    }
+  };
+
+  window.adminCooldownProxy = async function(proxyId, proxyLabel, seconds = 120) {
+    if (!confirm(`🛡️ [ADMIN] Hạ Nhiệt cho Proxy "${proxyLabel}" trong ${seconds}s?\n\nToàn bộ bot đang sử dụng proxy này sẽ tạm ngưng gửi request để xóa án phạt 429 và tự động chạy lại sau ${seconds}s.`)) return;
+    try {
+      const res = await fetch(`/api/admin/proxies/${proxyId}/cooldown`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ durationSeconds: seconds })
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        window.showToast(`🛡️ Đã hạ nhiệt ${data.durationSeconds}s cho proxy ${proxyLabel} (${data.botCount} bot)!`);
+        fetchAccounts();
+        if (typeof fetchAdminProxies === 'function') fetchAdminProxies();
+      } else {
+        alert(`🔴 Lỗi hạ nhiệt proxy: ${data.error || 'Thất bại'}`);
+      }
+    } catch (e) {
+      console.error('Error triggering proxy cooldown:', e);
+      alert('Không thể kết nối máy chủ');
+    }
+  };
+
+  window.cancelCooldown = async function(userId = null) {
+    try {
+      const res = await fetch('/api/cooldown/cancel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: userId || 'my' })
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        window.showToast('▶️ Đã hủy chế độ hạ nhiệt. Bot đang chạy lại!');
+        fetchAccounts();
+        if (typeof fetchAdminUsers === 'function') fetchAdminUsers();
+      } else {
+        alert(`🔴 Lỗi hủy hạ nhiệt: ${data.error || 'Thất bại'}`);
+      }
+    } catch (e) {
+      console.error('Error canceling cooldown:', e);
+      alert('Không thể kết nối máy chủ');
+    }
+  };
+
   window.stepUserMarketLimit = async function(userId, username, delta) {
     const inp = document.getElementById(`user-market-limit-${userId}`) || document.getElementById(`market-limit-inp-${userId}`);
     let current = inp ? parseInt(inp.value) || 0 : 0;
@@ -694,6 +802,7 @@ document.addEventListener('DOMContentLoaded', () => {
           <td style="padding:8px; text-align:right;">
             ${isAdmin ? `<button class="btn-mini" style="width:auto; padding:3px 6px; background:rgba(16,185,129,0.2); color:#34d399; border-color:rgba(16,185,129,0.3);" onclick="openEditUserModal('${u.id}', '${u.username}')" title="Đổi mật khẩu Admin">✏️ Đổi MK</button>` : `
               <div style="display:flex; justify-content:flex-end; gap:4px; flex-wrap:wrap;">
+                <button class="btn-mini" style="width:auto; padding:3px 6px; background:rgba(245,158,11,0.25); color:#fbbf24; border-color:rgba(245,158,11,0.4);" onclick="adminCooldownUser('${u.id}', '${u.username}')" title="Hạ nhiệt khẩn cấp 120s cho toàn bộ bot của user này">🛡️ Hạ Nhiệt</button>
                 <button class="btn-mini" style="width:auto; padding:3px 6px; background:rgba(234,88,12,0.25); color:#fb923c; border-color:rgba(234,88,12,0.4);" onclick="setTestUserExpiry1Min('${u.id}')" title="Set đúng 1 Phút để TEST">1Phút⚡</button>
                 <button class="btn-mini" style="width:auto; padding:3px 6px; background:rgba(168,85,247,0.2); color:#c084fc; border-color:rgba(168,85,247,0.3);" onclick="extendUserExpiry('${u.id}', 1)" title="Gia hạn thêm 1 Ngày">+1Ngày</button>
                 <button class="btn-mini" style="width:auto; padding:3px 6px; background:rgba(59,130,246,0.2); color:#60a5fa; border-color:rgba(59,130,246,0.3);" onclick="extendUserExpiry('${u.id}', 30)" title="Gia hạn thêm 30 Ngày">+30Ngày</button>
@@ -1106,6 +1215,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
     noAccountsMsg.style.display = 'none';
 
+    // Check and update Cooldown Banner
+    const maxCooldown = Math.max(...accounts.map(a => a.cooldownRemainingSeconds || 0), 0);
+    const cooldownBanner = document.getElementById('dashboard-cooldown-banner');
+    const countdownTxt = document.getElementById('cooldown-countdown-txt');
+    if (cooldownBanner && countdownTxt) {
+      if (maxCooldown > 0) {
+        cooldownBanner.style.display = 'flex';
+        countdownTxt.textContent = `${maxCooldown}s`;
+      } else {
+        cooldownBanner.style.display = 'none';
+      }
+    }
+
     // Auto fetch proxies list if Admin and list empty
     if (currentUser && currentUser.role === 'admin' && adminProxiesList.length === 0) {
       fetchAdminProxies();
@@ -1178,6 +1300,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
               </div>
               <div class="user-group-actions" onclick="event.stopPropagation()">
+                <button type="button" class="btn-mini" onclick="adminCooldownUser('${userId}', '${ownerUsername}', 120)" title="Hạ nhiệt khẩn cấp 120s cho toàn bộ bot của ${ownerUsername}" style="display: inline-flex; align-items: center; gap: 4px; background: rgba(245, 158, 11, 0.2); border: 1px solid rgba(245, 158, 11, 0.4); color: #fbbf24; border-radius: 6px; padding: 4px 10px; font-size: 0.75rem; font-weight: 700; cursor: pointer; transition: all 0.2s; margin-right: 12px;">
+                  <span>🛡️</span> Hạ Nhiệt
+                </button>
                 <div class="user-market-limit-box" style="margin-right: 15px; display: inline-flex; align-items: center; gap: 4px; background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; padding: 3px 8px;">
                   <span style="font-size: 0.72rem; color: #a5b4fc; white-space: nowrap; font-weight: bold;">🏪 Giới hạn Chợ:</span>
                   <button type="button" onclick="stepUserMarketLimit('${userId}', '${ownerUsername}', -1)" title="Giảm 1 bot" style="width: 18px; height: 18px; font-size: 0.75rem; display: inline-flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15); color: #fff; cursor: pointer; border-radius: 3px; padding: 0;">-</button>
@@ -2421,10 +2546,30 @@ document.addEventListener('DOMContentLoaded', () => {
     if (acc.clientActive) {
       card.className = `account-card running client-active`;
       badge.className = 'badge badge-info';
+      badge.style.background = '';
+      badge.style.color = '';
+      badge.style.border = '';
       badge.textContent = 'Chơi Tay';
+    } else if (acc.status === 'cooldown' || (acc.cooldownRemainingSeconds && acc.cooldownRemainingSeconds > 0)) {
+      card.className = `account-card cooldown`;
+      badge.className = 'badge badge-warning';
+      badge.style.background = 'rgba(245, 158, 11, 0.2)';
+      badge.style.color = '#fbbf24';
+      badge.style.border = '1px solid rgba(245, 158, 11, 0.4)';
+      badge.textContent = `⏳ Hạ nhiệt (${acc.cooldownRemainingSeconds || 120}s)`;
+    } else if (acc.isRateLimited && acc.rateLimitWaitSeconds > 0) {
+      card.className = `account-card cooldown`;
+      badge.className = 'badge badge-warning';
+      badge.style.background = 'rgba(245, 158, 11, 0.2)';
+      badge.style.color = '#fbbf24';
+      badge.style.border = '1px solid rgba(245, 158, 11, 0.4)';
+      badge.textContent = `⏳ Hạ nhiệt 429 (${acc.rateLimitWaitSeconds}s)`;
     } else {
       card.className = `account-card ${acc.status}`;
       badge.className = `badge badge-${acc.status}`;
+      badge.style.background = '';
+      badge.style.color = '';
+      badge.style.border = '';
       badge.textContent = acc.status === 'running' ? 'Đang Treo' : acc.status === 'idle' ? 'Tạm Dừng' : 'Lỗi';
     }
 
@@ -5597,9 +5742,11 @@ document.addEventListener('DOMContentLoaded', () => {
               : p.active
                 ? '<span style="color:#34d399; font-size:0.78rem;">🟢 Hoạt động</span>'
                 : '<span style="color:#ef4444; font-size:0.78rem;">🔴 Tắt</span>'}
+            ${p.isRateLimited && p.rateLimitWaitSeconds > 0 ? `<div style="color:#fbbf24; font-size:0.72rem; font-weight:700; margin-top:2px;">⏳ Hạ nhiệt (${p.rateLimitWaitSeconds}s)</div>` : ''}
           </td>
           <td style="padding:7px; text-align:right;">
-            <div style="display:flex; justify-content:flex-end; gap:4px;">
+            <div style="display:flex; justify-content:flex-end; gap:4px; flex-wrap:wrap;">
+              <button class="btn-mini" style="width:auto; padding:2px 8px; background:rgba(245,158,11,0.25); color:#fbbf24; border-color:rgba(245,158,11,0.4);" onclick="adminCooldownProxy('${p.id}', '${p.label}', 120)" title="Hạ nhiệt 120s cho toàn bộ bot dùng proxy này">🛡️ Hạ Nhiệt</button>
               <button class="btn-mini" style="width:auto; padding:2px 8px; background:rgba(99,102,241,0.15); color:#a5b4fc; border-color:rgba(99,102,241,0.3);" onclick="testAdminProxy('${p.id}', this)">⚡ Test</button>
               ${isDirect ? '' : `
                 <button class="btn-mini" style="width:auto; padding:2px 8px; background:${p.active ? 'rgba(239,68,68,0.2)' : 'rgba(16,185,129,0.2)'}; color:${p.active ? '#ef4444' : '#34d399'}; border-color:${p.active ? 'rgba(239,68,68,0.4)' : 'rgba(16,185,129,0.4)'};" onclick="toggleAdminProxy('${p.id}', ${!p.active})">${p.active ? 'Tắt' : 'Bật'}</button>

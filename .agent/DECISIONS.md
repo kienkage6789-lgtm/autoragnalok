@@ -2,6 +2,60 @@
 
 > Captured architectural decisions and trade-offs.
 
+## 2026-08-16 - Tích Hợp Nút Hạ Nhiệt IP Khẩn Cấp (1-Click Emergency Cooldown) Cho User, Admin & Proxy (T78)
+
+- Bối cảnh:
+  - Khi người dùng gặp tình trạng dính án phạt HTTP 429 từ Cloudflare hoặc đổi nhiều bot liên tục trên cùng 1 IP, họ cần một phương thức nhanh gọn để tạm dừng toàn bộ traffic gửi lên game server mà không phải dừng/bật từng bot bằng tay.
+  - Quản trị viên (Admin) cần công cụ hỗ trợ để có thể cứu hộ nhanh toàn bộ hệ thống, giải cứu riêng cho từng người dùng gặp sự cố bị chặn IP ngay trên màn hình quản lý Dashboard bên ngoài (không cần mở modal), và hạ nhiệt riêng cho từng Proxy / Outbound IP trong danh sách Proxy Pool.
+- Quyết định:
+  - **Quản lý Cooldown Tập Trung (`activeCooldownTimers`)**:
+    - Xây dựng bộ theo dõi timer riêng biệt cho `global` (toàn hệ thống), `users` (từng user), và theo từng `proxyId`.
+    - Khi kích hoạt, server tự động chuyển bot sang trạng thái `status = 'cooldown'`, kích hoạt `setRateLimitCooldown` trên Proxy Pool, xóa timer poll để đảm bảo Zero Traffic trong suốt thời gian hạ nhiệt (mặc định 120s).
+    - Tự động lên lịch timer khôi phục (`setTimeout`) để đánh thức và chạy lại (`bot.start()`) toàn bộ các bot đã bị tạm dừng khi hết 120s.
+  - **API Endpoints Đa Cấp Độ**:
+    - `POST /api/cooldown/my-bots`: Dành cho từng User tự giải cứu bot của mình.
+    - `POST /api/admin/cooldown/all`: Dành cho Admin hạ nhiệt toàn bộ hệ thống (All Users / All Bots).
+    - `POST /api/admin/users/:userId/cooldown`: Dành cho Admin hỗ trợ hạ nhiệt riêng cho từng User cụ thể.
+    - `POST /api/admin/proxies/:proxyId/cooldown`: Dành cho Admin hạ nhiệt riêng cho từng Proxy / IP Direct cụ thể và toàn bộ bot đang kết nối qua proxy đó.
+    - `POST /api/cooldown/cancel`: Cho phép hủy hạ nhiệt và khôi phục hoạt động bot ngay lập tức.
+  - **Trải Nghiệm Giao Diện Người Dùng (UI/UX)**:
+    - **Nút Hạ Nhiệt User Bên Ngoài Dashboard**: Đặt nút `🛡️ Hạ Nhiệt` ngay trên thanh tiêu đề accordion của từng User Group trên màn hình chính, Admin chỉ cần 1 click để giải cứu bot của user đó.
+    - **Nút Hạ Nhiệt Trong Bảng Proxy**: Thêm nút `🛡️ Hạ Nhiệt` cho từng dòng Proxy và Direct connection trong Tab Quản Lý Proxy, kèm badge `⏳ Hạ nhiệt (XXs)` trực quan.
+    - **Dashboard Toolbar & Banner**: Nút `🛡️ Hạ Nhiệt IP (120s)` trên thanh công cụ và Banner đếm ngược thời gian thực `#dashboard-cooldown-banner`.
+    - **Thẻ Bot**: Hiển thị badge trạng thái `⏳ Đang hạ nhiệt (XXs)` với màu vàng hổ phách nổi bật.
+- Kết quả:
+  - Thao tác 1-Click giải cứu triệt để sự cố nghẽn IP do 429 từ mọi góc nhìn (User, Admin Dashboard, và Proxy Pool).
+  - Chạy `npm test` thành công 100%.
+
+---
+
+## 2026-08-16 - Cải Tiến Cơ Chế Điều Phối Request & Khắc Phục Triệt Để Lỗi HTTP 429 (T77)
+
+- Bối cảnh:
+  - Bot gặp tình trạng dính lỗi HTTP 429 (Too Many Requests / Cloudflare Error 1015) liên tục.
+  - Phân tích mã nguồn game gốc (`xhrpg_canvas.js`) chỉ ra game server có rate-limit guard 800ms per account, và Cloudflare rate limit per IP. Khi bị phạt rate limit, việc tiếp tục gửi request sẽ khiến Cloudflare gia hạn án phạt cấm IP.
+  - Cơ chế `sendRequest` cũ của bot khi gặp 429 lại tự động retry dồn dập sau 500ms/1000ms, và vòng lặp `runPoll` poll lại ngay sau 1-2 giây, khiến bot bị kẹt vĩnh viễn trong vòng lặp 429.
+  - Các bot dùng chung Direct IP không có hàng đợi outbound rate limiter chung.
+- Quyết định:
+  - **Tập trung Outbound Rate Limiter trong `ProxyPool`**:
+    - Thêm `_rateLimitCooldowns` và `_lastOutboundAt` vào `ProxyPool`.
+    - Phương thức `waitForOutboundSlot(proxyId, minSpacingMs)` đảm bảo khoảng cách tối thiểu giữa 2 request trên cùng một Dispatcher và tự động đợi nếu IP đang trong thời gian hạ nhiệt.
+    - Phương thức `setRateLimitCooldown(proxyId, durationMs)` đặt thời gian phạt tập trung cho toàn bộ các bot dùng chung IP/Proxy đó.
+  - **Chặn vòng lặp Retry trong `sendRequest` khi gặp 429 / CF 1015**:
+    - Khi nhận HTTP 429 hoặc Cloudflare 1015, lập tức kích hoạt `setRateLimitCooldown` (15s - 20s) và ném lỗi `RateLimitError` ra ngoài, **tuyệt đối không retry ngay**.
+  - **Tích hợp Exponential Backoff trong `runPoll`**:
+    - Thêm biến đếm lỗi `this.pollFails`.
+    - Khi dính 429: Áp dụng giãn cách lũy thừa `Math.min(60000, 15000 * 1.5^(pollFails - 1))` (15s → 22.5s → 33.7s → 50s → max 60s) để chờ Cloudflare gỡ án phạt.
+    - Khi gặp lỗi mạng thông thường: Giãn cách `2s → 4s → 8s → 16s → 30s`.
+    - Khi request thành công: Reset `pollFails = 0`.
+  - **Bảo vệ Sub-actions trong `pollGame`**:
+    - Kiểm tra `proxyPool.isRateLimited(this.proxyId)` để tạm dừng các tác vụ phụ (chợ, nông trại, đấu trường, nâng cấp) khi IP đang trong thời gian hạ nhiệt.
+- Kết quả:
+  - Khắc phục triệt để lỗi spam dồn dập vào IP bị cấm, bot tự động phục hồi mượt mà sau khi hết thời gian hạ nhiệt.
+  - Chạy `npm test` thành công 100%.
+
+---
+
 ## 2026-08-13 - Bơm máu PK, MIME SDK, Zone Event & Thống kê K/D Chiến tích (T74)
 
 - Bối cảnh:

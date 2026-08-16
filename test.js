@@ -17,7 +17,10 @@ const {
   getAccountFingerprint,
   naturalCoordNoise,
   logNormalActInterval,
-  checkAndRecoverZombieBots
+  checkAndRecoverZombieBots,
+  activeCooldownTimers,
+  triggerCooldownForBots,
+  cancelCooldown
 } = require('./server');
 
 console.log('🧪 Running Unit Tests...');
@@ -1298,6 +1301,97 @@ try {
   assert.strictEqual(watchdogBot.lastChpassSentAt, 0, 'Initial lastChpassSentAt must be 0');
 
   console.log('✅ Anti-Hang & Zombie Bot Watchdog Engine Tests Passed successfully!');
+
+  // ==================== T77 - Rate Limiter, Cooldown & Exponential Backoff Tests ====================
+  console.log('Testing Rate Limiter, Cooldown & Exponential Backoff Engine...');
+
+  // 1. Test ProxyPool Rate Limit Cooldown methods
+  proxyPool.setRateLimitCooldown('direct', 5000);
+  assert.strictEqual(proxyPool.isRateLimited('direct'), true, 'Proxy direct must be rate limited after cooldown set');
+  assert.ok(proxyPool.getRateLimitWaitTime('direct') > 0, 'Wait time must be positive when rate limited');
+  assert.strictEqual(proxyPool.isRateLimited('non_existent_proxy'), false, 'Non-existent proxy must not be rate limited');
+
+  // 2. Test Rate-Limit Backoff formula (15s -> 22.5s -> 33.75s -> 50.625s -> max 60s)
+  const calcRateLimitDelay = (fails) => Math.min(60000, Math.round(15000 * Math.pow(1.5, Math.min(5, fails) - 1)));
+  assert.strictEqual(calcRateLimitDelay(1), 15000, 'Fail 1 rate limit delay should be 15,000ms');
+  assert.strictEqual(calcRateLimitDelay(2), 22500, 'Fail 2 rate limit delay should be 22,500ms');
+  assert.strictEqual(calcRateLimitDelay(3), 33750, 'Fail 3 rate limit delay should be 33,750ms');
+  assert.strictEqual(calcRateLimitDelay(4), 50625, 'Fail 4 rate limit delay should be 50,625ms');
+  assert.strictEqual(calcRateLimitDelay(5), 60000, 'Fail 5 rate limit delay should be capped at 60,000ms');
+  assert.strictEqual(calcRateLimitDelay(8), 60000, 'Fail 8 rate limit delay should be capped at 60,000ms');
+
+  // 3. Test Network Error Backoff formula (2s -> 4s -> 8s -> 16s -> 30s)
+  const calcNetworkDelay = (baseDelay, fails) => Math.min(30000, Math.max(2000, Math.round(baseDelay * Math.pow(2, Math.min(4, fails)))));
+  assert.strictEqual(calcNetworkDelay(1250, 1), 2500, 'Fail 1 network delay should be 2,500ms');
+  assert.strictEqual(calcNetworkDelay(1250, 2), 5000, 'Fail 2 network delay should be 5,000ms');
+  assert.strictEqual(calcNetworkDelay(1250, 3), 10000, 'Fail 3 network delay should be 10,000ms');
+  assert.strictEqual(calcNetworkDelay(1250, 4), 20000, 'Fail 4 network delay should be 20,000ms');
+  assert.strictEqual(calcNetworkDelay(1250, 5), 20000, 'Fail 5 network delay should be capped at min(30s, 20s)');
+  assert.strictEqual(calcNetworkDelay(2000, 4), 30000, 'Fail 4 with base 2000ms should cap at 30,000ms');
+
+  // 4. Test BotInstance pollFails and lastRateLimitAt fields
+  const testBotRL = new BotInstance({
+    line_uid: 'U_TEST_RL_1',
+    session_token: 'test_token_rl',
+    name: 'RateLimitTester'
+  });
+  assert.strictEqual(testBotRL.pollFails, 0, 'Initial pollFails must be 0');
+  assert.strictEqual(testBotRL.lastRateLimitAt, null, 'Initial lastRateLimitAt must be null');
+
+  // Clean up cooldown
+  proxyPool._rateLimitCooldowns['direct'] = 0;
+  assert.strictEqual(proxyPool.isRateLimited('direct'), false, 'Proxy direct should not be rate limited after reset');
+
+  console.log('✅ Rate Limiter, Cooldown & Exponential Backoff Tests Passed successfully!');
+
+  // ==================== T78 - Emergency Cooldown Engine Tests ====================
+  console.log('Testing Emergency Cooldown Engine (User & Admin)...');
+
+  const coolBot1 = new BotInstance({
+    line_uid: 'U_TEST_COOL_1',
+    session_token: 'test_token_c1',
+    name: 'CoolBot1'
+  });
+  const coolBot2 = new BotInstance({
+    line_uid: 'U_TEST_COOL_2',
+    session_token: 'test_token_c2',
+    name: 'CoolBot2'
+  });
+  botInstances['U_TEST_COOL_1'] = coolBot1;
+  botInstances['U_TEST_COOL_2'] = coolBot2;
+  coolBot1.status = 'running';
+  coolBot2.status = 'running';
+
+  // 1. Test triggerCooldownForBots for user
+  const coolResult = triggerCooldownForBots([coolBot1, coolBot2], 120, 'Unit test cooldown', 'U_TEST_USER_1');
+  assert.strictEqual(coolResult.success, true, 'triggerCooldownForBots must return success true');
+  assert.strictEqual(coolResult.botCount, 2, 'Must put 2 running bots into cooldown');
+  assert.strictEqual(coolBot1.status, 'cooldown', 'Bot 1 status must be cooldown');
+  assert.strictEqual(coolBot2.status, 'cooldown', 'Bot 2 status must be cooldown');
+  assert.ok(activeCooldownTimers.users['U_TEST_USER_1'].until > Date.now(), 'User cooldown timer until must be in the future');
+
+  // 2. Test cancelCooldown
+  cancelCooldown('U_TEST_USER_1', [coolBot1, coolBot2]);
+  assert.strictEqual(coolBot1.status, 'running', 'Bot 1 status must recover to running after cancel');
+  assert.strictEqual(coolBot2.status, 'running', 'Bot 2 status must recover to running after cancel');
+  assert.strictEqual(activeCooldownTimers.users['U_TEST_USER_1'].until, 0, 'User cooldown until must be reset to 0');
+
+  // 3. Test Proxy Cooldown & getStats rateLimit fields
+  proxyPool.setRateLimitCooldown('direct', 10000);
+  const stats = proxyPool.getStats();
+  const directStat = stats.find(s => s.id === 'direct');
+  assert.ok(directStat, 'Direct stats must exist');
+  assert.strictEqual(directStat.isRateLimited, true, 'Direct proxy isRateLimited must be true');
+  assert.ok(directStat.rateLimitWaitSeconds > 0, 'Direct proxy rateLimitWaitSeconds must be positive');
+
+  // Clean up test bots
+  coolBot1.stop();
+  coolBot2.stop();
+  delete botInstances['U_TEST_COOL_1'];
+  delete botInstances['U_TEST_COOL_2'];
+  proxyPool._rateLimitCooldowns['direct'] = 0;
+
+  console.log('✅ Emergency Cooldown Engine Tests Passed successfully!');
 
   console.log('✅ User Polling Interval, Role Propagation and Edit Permissions Tests Passed successfully!');
   console.log('✅ Revamped Auto Market Buy Tests Passed successfully!');

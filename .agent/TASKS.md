@@ -3,6 +3,32 @@
 > Work Breakdown Structure. Update task states immediately upon changes.
 > Statuses: todo | doing | blocked | review | done
 
+### [x] T78 - Tích Hợp Nút Hạ Nhiệt IP Khẩn Cấp (1-Click Emergency Cooldown) Cho User & Admin Support
+- Description: Bổ sung tính năng tạm dừng gửi request (hạ nhiệt IP 120s) có đồng hồ đếm ngược trực tiếp và tự động kích hoạt lại bot. Cho phép người dùng tự hạ nhiệt bot của mình, và cho phép Admin hạ nhiệt toàn hệ thống hoặc hạ nhiệt riêng cho từng User.
+- Files related: `server.js`, `public/index.html`, `public/app.css`, `public/app.js`, `test.js`
+- Acceptance criteria:
+  - [x] Backend: Xây dựng bộ quản lý `activeCooldownTimers` và các endpoint `POST /api/cooldown/my-bots`, `POST /api/admin/cooldown/all`, `POST /api/admin/users/:userId/cooldown`, `POST /api/cooldown/cancel`.
+  - [x] Backend: Cập nhật `GET /api/accounts` và `GET /api/admin/users` trả về `cooldownRemainingSeconds` và trạng thái `bot.status === 'cooldown'`.
+  - [x] Frontend (HTML/CSS): Thêm nút `🛡️ Hạ Nhiệt IP` và banner đếm ngược `#dashboard-cooldown-banner` trên Dashboard, thêm nút `🛡️ Hạ Nhiệt Toàn Bộ` và nút `🛡️ Hạ Nhiệt` từng User trong Admin Modal.
+  - [x] Frontend (JS): Viết các hàm `triggerMyCooldown`, `adminCooldownAll`, `adminCooldownUser`, `cancelCooldown`, đồng bộ đếm ngược countdown và render badge `⏳ Đang hạ nhiệt` trên thẻ Bot.
+  - [x] Unit Test: Bổ sung test cases trong `test.js` kiểm tra toàn bộ luồng cooldown, tính toán thời gian và tự động phục hồi. Chạy `npm test` thành công 100%.
+- Status: done
+
+---
+
+### [x] T77 - Cải Tiến Cơ Chế Điều Phối Request & Khắc Phục Triệt Để Lỗi HTTP 429
+- Description: Tích hợp bộ đệm Outbound Rate Limiter tập trung theo Proxy / Outbound IP, xử lý lỗi HTTP 429 / Cloudflare 1015 thông minh (không retry tức thì làm gia hạn án phạt), và triển khai cơ chế Exponential Backoff chuẩn game gốc trong vòng lặp poll.
+- Files related: `server.js`, `test.js`
+- Acceptance criteria:
+  - [x] Thêm cơ chế Rate Limiter và Cooldown per Dispatcher/Proxy trong `ProxyPool` (`setRateLimitCooldown`, `isRateLimited`, `waitForOutboundSlot`).
+  - [x] Sửa `sendRequest` trong `server.js` để phát hiện HTTP 429 / CF 1015, thiết lập cooldown cho ProxyPool, không retry dồn dập, và ném lỗi rõ ràng.
+  - [x] Nâng cấp vòng lặp `runPoll` trong `server.js` với biến `this.pollFails` và tính toán Exponential Backoff khi dính lỗi rate limit hoặc lỗi mạng.
+  - [x] Tối ưu hóa việc giãn cách các request phụ (Market, Arena, Home, Upgrade) trong chu kỳ poll để tránh burst traffic.
+  - [x] Viết unit tests trong `test.js` xác minh cơ chế 429 handling, Exponential Backoff, và ProxyPool Rate Limiter. Chạy `npm test` thành công 100%.
+- Status: done
+
+---
+
 ### [x] T76 - Tái cấu trúc Tab Tiềm Năng & Kỹ Năng
 - Description: Dựng lại tab tiềm năng kỹ năng thành đúng tab chỉ số và kỹ năng trong game, yêu cầu phải 100% chức năng và nội dung và chức năng giống 90%. yêu cầu việt hóa 100%.
 - Files related: `server.js`, `public/app.js`, `public/app.css`

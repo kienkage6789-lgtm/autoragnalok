@@ -67,6 +67,8 @@ class ProxyPool {
     this._proxies = [];
     this._assignments = {}; // line_uid -> proxy_id | 'direct'
     this._agents = {};      // proxy_id -> ProxyAgent instance
+    this._rateLimitCooldowns = {}; // proxyId -> timestamp until which this proxy/direct is rate-limited
+    this._lastOutboundAt = {};      // proxyId -> timestamp of last request through this proxy/direct
     this._directAgent = new Agent({
       connect: { timeout: 5000 }, // Giảm xuống 5s kết nối
       keepAliveTimeout: 10000,     // Giảm xuống 10s để tránh ECONNRESET do máy chủ đóng trước
@@ -437,10 +439,27 @@ class ProxyPool {
     const max = this._settings.maxBotsPerProxy || 10;
     const result = [];
     if (this._settings.useDirectConnection) {
-      result.push({ id: 'direct', label: '🖥️ Kết nối trực tiếp (máy)', url: 'direct', active: true, botCount: counts['direct'] || 0, maxBots: max, isDirect: true });
+      result.push({ 
+        id: 'direct', 
+        label: '🖥️ Kết nối trực tiếp (máy)', 
+        url: 'direct', 
+        active: true, 
+        botCount: counts['direct'] || 0, 
+        maxBots: max, 
+        isDirect: true,
+        isRateLimited: this.isRateLimited('direct'),
+        rateLimitWaitSeconds: Math.round(this.getRateLimitWaitTime('direct') / 1000)
+      });
     }
     for (const p of this._proxies) {
-      result.push({ ...p, botCount: counts[p.id] || 0, maxBots: max, isDirect: false });
+      result.push({ 
+        ...p, 
+        botCount: counts[p.id] || 0, 
+        maxBots: max, 
+        isDirect: false,
+        isRateLimited: this.isRateLimited(p.id),
+        rateLimitWaitSeconds: Math.round(this.getRateLimitWaitTime(p.id) / 1000)
+      });
     }
     return result;
   }
@@ -451,6 +470,44 @@ class ProxyPool {
     if (slot === 'direct') return { id: 'direct', label: '🖥️ Direct', isDirect: true };
     const p = this._proxies.find(p => p.id === slot);
     return p ? { id: p.id, label: p.label, isDirect: false } : { label: '🖥️ Direct', isDirect: true };
+  }
+
+  setRateLimitCooldown(proxyId, durationMs = 15000) {
+    const key = proxyId || 'direct';
+    const current = this._rateLimitCooldowns[key] || 0;
+    const target = Date.now() + durationMs;
+    this._rateLimitCooldowns[key] = Math.max(current, target);
+    console.log(`[RateLimiter] 🚨 Proxy/IP "${key}" kích hoạt Rate-Limit cooldown ${Math.round(durationMs/1000)}s (hết hạn lúc ${new Date(this._rateLimitCooldowns[key]).toLocaleTimeString()})`);
+  }
+
+  isRateLimited(proxyId) {
+    const key = proxyId || 'direct';
+    const until = this._rateLimitCooldowns[key] || 0;
+    return Date.now() < until;
+  }
+
+  getRateLimitWaitTime(proxyId) {
+    const key = proxyId || 'direct';
+    const until = this._rateLimitCooldowns[key] || 0;
+    const now = Date.now();
+    return Math.max(0, until - now);
+  }
+
+  async waitForOutboundSlot(proxyId, minSpacingMs = 400) {
+    const key = proxyId || 'direct';
+    // 1. Kiểm tra nếu IP đang trong thời gian hạ nhiệt rate-limit
+    const rateLimitWait = this.getRateLimitWaitTime(key);
+    if (rateLimitWait > 0) {
+      await new Promise(r => setTimeout(r, rateLimitWait));
+    }
+    // 2. Đảm bảo khoảng cách tối thiểu giữa 2 request đi qua cùng 1 dispatcher
+    const now = Date.now();
+    const lastAt = this._lastOutboundAt[key] || 0;
+    const gap = now - lastAt;
+    if (gap < minSpacingMs) {
+      await new Promise(r => setTimeout(r, minSpacingMs - gap));
+    }
+    this._lastOutboundAt[key] = Date.now();
   }
 
   getSettings() { return { ...this._settings }; }
@@ -1442,6 +1499,8 @@ class BotInstance {
     this.nextActInterval = logNormalActInterval();
     this.pendingActFlag = false;
     this.consecutiveErrors = 0;
+    this.pollFails = 0;
+    this.lastRateLimitAt = null;
     this.failedSeeds = {}; // Danh sách hạt giống bị lỗi gieo trồng
     this.lastHarvestFailedAt = 0;
     this.lastHomeUpgradeFailedAt = 0;
@@ -2155,18 +2214,27 @@ class BotInstance {
         ]);
         this.consecutiveErrors = 0;
         this.firstErrorAt = null;
+        this.pollFails = 0;
+        this.lastRateLimitAt = null;
         if (this.proxyId) {
           proxyPool.resetErrorCount(this.proxyId);
         }
       } catch (err) {
         console.error(`Poll error for ${this.name}:`, err);
         this.consecutiveErrors = (this.consecutiveErrors || 0) + 1;
+        this.pollFails = Math.min((this.pollFails || 0) + 1, 8);
         if (!this.firstErrorAt) {
           this.firstErrorAt = Date.now();
         }
         const elapsedTime = Date.now() - this.firstErrorAt;
         const formattedErr = err.message || (err.cause ? `${err.cause.code || err.cause.message}` : 'Lỗi kết nối');
         this.error = formattedErr;
+
+        const isRateLimit = formattedErr.includes('429') || formattedErr.includes('Rate Limit') || formattedErr.includes('1015');
+        if (isRateLimit) {
+          this.lastRateLimitAt = Date.now();
+        }
+
         const elapsedSec = Math.round(elapsedTime / 1000);
         this.addLog('ERROR', `${formattedErr} (Lỗi liên tục ${elapsedSec}s/180s)`);
 
@@ -2242,19 +2310,32 @@ class BotInstance {
             baseDelay = Math.min(baseDelay, 1200);
           }
 
-          // Dynamic jitter range: ±100ms for <= 1100ms, ±120ms for <= 1500ms, ±150ms for slower
-          let jitterBound = 150;
-          if (baseDelay <= 1100) {
-            jitterBound = 100;
-          } else if (baseDelay <= 1500) {
-            jitterBound = 120;
+          let nextDelay;
+          if (this.pollFails > 0) {
+            if (this.lastRateLimitAt && (Date.now() - this.lastRateLimitAt < 120000)) {
+              // 🛑 Giãn cách lũy thừa khi dính Rate Limit / 429: 15s -> 22.5s -> 33.7s -> 50s -> max 60s
+              nextDelay = Math.min(60000, Math.round(15000 * Math.pow(1.5, Math.min(5, this.pollFails) - 1)));
+              this.addLog('WARNING', `⚠️ [Rate-Limit Backoff] Đang tạm dừng ${Math.round(nextDelay / 1000)}s trước khi thử lại để tránh gia hạn án phạt Cloudflare/429...`);
+            } else {
+              // 🌐 Lỗi mạng thông thường: 2s -> 4s -> 8s -> 16s -> 30s
+              nextDelay = Math.min(30000, Math.max(2000, Math.round(baseDelay * Math.pow(2, Math.min(4, this.pollFails)))));
+            }
+          } else {
+            // Dynamic jitter range: ±100ms for <= 1100ms, ±120ms for <= 1500ms, ±150ms for slower
+            let jitterBound = 150;
+            if (baseDelay <= 1100) {
+              jitterBound = 100;
+            } else if (baseDelay <= 1500) {
+              jitterBound = 120;
+            }
+            // Asymmetric jitter: 70% positive human/network lag, 30% slight lead
+            const isPositiveSkew = Math.random() < 0.7;
+            const jitterMag = Math.floor(Math.random() * jitterBound);
+            const jitter = isPositiveSkew ? jitterMag : -Math.floor(jitterMag * 0.75);
+            nextDelay = Math.max(500, baseDelay + jitter);
           }
-          // Asymmetric jitter: 70% positive human/network lag, 30% slight lead
-          const isPositiveSkew = Math.random() < 0.7;
-          const jitterMag = Math.floor(Math.random() * jitterBound);
-          const jitter = isPositiveSkew ? jitterMag : -Math.floor(jitterMag * 0.75);
           
-          this.timer = setTimeout(runPoll, Math.max(500, baseDelay + jitter));
+          this.timer = setTimeout(runPoll, nextDelay);
         }
       }
     };
@@ -2293,6 +2374,9 @@ class BotInstance {
       }
       this.lastRequestAt = Date.now();
 
+      // Kiểm tra và giữ nhịp Outbound Rate Limiter tập trung theo Proxy/IP
+      await proxyPool.waitForOutboundSlot(this.proxyId, url.includes('xhrpg_game.php') ? 450 : 350);
+
       const headers = {
         'content-type': 'application/x-www-form-urlencoded; charset=UTF-8',
         'user-agent': (this.fingerprint && this.fingerprint.userAgent) || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
@@ -2326,6 +2410,14 @@ class BotInstance {
           signal: controller.signal
         });
 
+        // 🛑 Xử lý mã lỗi HTTP 429: Too Many Requests (Rate Limit từ Cloudflare/Nginx/Game Server)
+        if (response.status === 429) {
+          const retryAfterSec = Number(response.headers.get('retry-after')) || 15;
+          const cooldownMs = Math.max(15000, retryAfterSec * 1000);
+          proxyPool.setRateLimitCooldown(this.proxyId, cooldownMs);
+          throw new Error(`HTTP Error 429: Too Many Requests (Máy chủ giới hạn tần suất gửi tin, cooldown ${Math.round(cooldownMs/1000)}s)`);
+        }
+
         if (!response.ok) {
           throw new Error(`HTTP Error ${response.status}`);
         }
@@ -2339,9 +2431,14 @@ class BotInstance {
           clearTimeout(timeout);
           return parsed;
         } catch (e) {
-          // If it returns HTML or Cloudflare challenge
-          if (text.includes('cf-challenge') || text.includes('Cloudflare')) {
-            throw new Error('Bị chặn bởi Cloudflare (Rate Limit/JS Challenge)');
+          // If it returns HTML or Cloudflare challenge / Error 1015
+          if (text.includes('1015') || text.includes('rate limit') || text.includes('cf-challenge') || text.includes('Cloudflare')) {
+            const isRateLimit = text.includes('1015') || text.includes('rate limit');
+            if (isRateLimit) {
+              proxyPool.setRateLimitCooldown(this.proxyId, 20000);
+              throw new Error('Bị chặn bởi Cloudflare (Rate Limit Error 1015)');
+            }
+            throw new Error('Bị chặn bởi Cloudflare (JS Challenge / Captcha)');
           }
           throw new Error('Dữ liệu máy chủ trả về không hợp lệ (Không phải JSON)');
         }
@@ -2364,10 +2461,20 @@ class BotInstance {
         
         lastError = formattedErr;
 
-        if (attempt < maxAttempts) {
+        const isRateLimit = formattedErr.message && (
+          formattedErr.message.includes('429') || 
+          formattedErr.message.includes('Rate Limit') || 
+          formattedErr.message.includes('1015')
+        );
+
+        // ⚠️ Khi gặp lỗi 429 / Rate Limit, tuyệt đối KHÔNG retry dồn dập để tránh gia hạn án phạt cấm IP!
+        if (!isRateLimit && attempt < maxAttempts) {
           const waitTime = attempt * 500;
           console.log(`[Request Retry] Bot "${this.name}" gặp lỗi "${formattedErr.message}" khi gọi ${url.substring(url.lastIndexOf('/'))}. Đang thử lại lần ${attempt + 1}/${maxAttempts} sau ${waitTime}ms...`);
           await new Promise(resolve => setTimeout(resolve, waitTime));
+        } else if (isRateLimit) {
+          // Thoát ngay khỏi retry loop để vòng lặp runPoll áp dụng Exponential Backoff
+          break;
         }
       } finally {
         clearTimeout(timeout);
@@ -3670,8 +3777,8 @@ class BotInstance {
       }
     }
 
-    // Pause all automation tasks (upgrades, mines, arena, map warp) while hunting MVP boss
-    if (this.targetedMvp) {
+    // Pause all automation tasks (upgrades, mines, arena, map warp) while hunting MVP boss or if proxy is under rate limit cooldown
+    if (this.targetedMvp || proxyPool.isRateLimited(this.proxyId)) {
       return;
     }
 
@@ -4745,14 +4852,24 @@ app.delete('/api/admin/announcements/:id', requireAdmin, (req, res) => {
 app.get('/api/admin/users', requireAdmin, (req, res) => {
   const users = loadUsers();
   const accounts = loadAccounts();
+  const now = Date.now();
+  const globalCooldown = activeCooldownTimers.global;
+  const globalRemaining = (globalCooldown && globalCooldown.until > now) ? Math.round((globalCooldown.until - now) / 1000) : 0;
 
   const list = users.map(u => {
     const userBots = accounts.filter(acc => acc.userId === u.id);
     let onlineCount = 0;
+    let cooldownCount = 0;
     userBots.forEach(acc => {
       const bot = botInstances[acc.line_uid];
       if (bot && bot.status === 'running') onlineCount++;
+      if (bot && bot.status === 'cooldown') cooldownCount++;
     });
+
+    const userCooldown = activeCooldownTimers.users[u.id];
+    const userRemaining = (userCooldown && userCooldown.until > now) ? Math.round((userCooldown.until - now) / 1000) : 0;
+    const cooldownRemainingSeconds = Math.max(globalRemaining, userRemaining);
+
     return {
       id: u.id,
       username: u.username,
@@ -4764,7 +4881,10 @@ app.get('/api/admin/users', requireAdmin, (req, res) => {
       allowEditPollInterval: u.allowEditPollInterval === true,
       createdAt: u.createdAt,
       botCount: userBots.length,
-      onlineBotCount: onlineCount
+      onlineBotCount: onlineCount,
+      cooldownBotCount: cooldownCount,
+      cooldownRemainingSeconds: cooldownRemainingSeconds,
+      globalCooldownRemainingSeconds: globalRemaining
     };
   });
   res.json(list);
@@ -5534,11 +5654,22 @@ app.get('/api/accounts', requireAuth, (req, res) => {
     res.setHeader('X-User-Max-Accounts', req.user.maxAccounts || 1);
     const users = loadUsers();
     const currentAccounts = loadAccounts();
+    const now = Date.now();
+    const globalCooldown = activeCooldownTimers.global;
+    const userCooldown = activeCooldownTimers.users[req.user.id];
+    const globalRemaining = (globalCooldown && globalCooldown.until > now) ? Math.round((globalCooldown.until - now) / 1000) : 0;
+    const userRemaining = (userCooldown && userCooldown.until > now) ? Math.round((userCooldown.until - now) / 1000) : 0;
+    const defaultCooldownRemaining = Math.max(globalRemaining, userRemaining);
+
     const list = currentAccounts
       .map(acc => botInstances[acc.line_uid])
       .filter(bot => bot && (req.user.role === 'admin' || bot.userId === req.user.id))
       .map(bot => {
         const ownerUser = users.find(u => u.id === bot.userId);
+        const botUserCooldown = activeCooldownTimers.users[bot.userId];
+        const botUserRemaining = (botUserCooldown && botUserCooldown.until > now) ? Math.round((botUserCooldown.until - now) / 1000) : 0;
+        const botCooldownRemaining = Math.max(globalRemaining, botUserRemaining);
+
         return {
           line_uid: bot.line_uid,
           session_token: bot.session_token,
@@ -5554,6 +5685,9 @@ app.get('/api/accounts', requireAuth, (req, res) => {
           status: bot.status,
           ping: bot.ping || 0,
           clientActive: !!(bot.lastClientActive && (Date.now() - bot.lastClientActive < 12000)),
+          isRateLimited: proxyPool.isRateLimited(bot.proxyId),
+          rateLimitWaitSeconds: Math.round(proxyPool.getRateLimitWaitTime(bot.proxyId) / 1000),
+          cooldownRemainingSeconds: botCooldownRemaining,
           error: bot.error,
           lastUpdate: bot.lastUpdate,
           settings: bot.settings,
@@ -6060,6 +6194,158 @@ app.post('/api/accounts/reorder', requireAuth, (req, res) => {
 
   saveAccounts(orderedAccounts);
   res.json({ ok: true, msg: 'Đã lưu thứ tự sắp xếp mới!' });
+});
+
+// ==================== EMERGENCY RATE-LIMIT COOLDOWN MANAGER ====================
+const activeCooldownTimers = {
+  global: { until: 0, timer: null, resumedBotUids: [] },
+  users: {} // userId -> { until: 0, timer: null, resumedBotUids: [] }
+};
+
+function triggerCooldownForBots(botList, durationSeconds = 120, reason = 'Hạ nhiệt IP', trackingKey = 'global') {
+  const durationMs = Math.max(30, Math.min(600, durationSeconds)) * 1000;
+  const until = Date.now() + durationMs;
+  const runningBotUids = [];
+
+  for (const bot of botList) {
+    const wasRunning = (bot.status === 'running' || bot.status === 'cooldown');
+    if (wasRunning) {
+      runningBotUids.push(bot.line_uid);
+      bot.stop('cooldown');
+      bot.status = 'cooldown';
+      bot.pollFails = 0;
+      bot.lastRateLimitAt = Date.now();
+      bot.addLog('SYSTEM', `🛡️ [Hạ Nhiệt IP] ${reason} — Tạm dừng gửi request trong ${Math.round(durationMs/1000)}s để xóa án phạt 429...`);
+      
+      // Đặt cooldown cho proxy / direct
+      proxyPool.setRateLimitCooldown(bot.proxyId || 'direct', durationMs);
+    }
+  }
+
+  // Clear existing timer if any
+  let timerRecord;
+  if (trackingKey === 'global') {
+    if (activeCooldownTimers.global.timer) clearTimeout(activeCooldownTimers.global.timer);
+    timerRecord = activeCooldownTimers.global;
+  } else {
+    if (!activeCooldownTimers.users[trackingKey]) {
+      activeCooldownTimers.users[trackingKey] = { until: 0, timer: null, resumedBotUids: [] };
+    }
+    if (activeCooldownTimers.users[trackingKey].timer) clearTimeout(activeCooldownTimers.users[trackingKey].timer);
+    timerRecord = activeCooldownTimers.users[trackingKey];
+  }
+
+  timerRecord.until = until;
+  const combinedUids = Array.from(new Set([...timerRecord.resumedBotUids, ...runningBotUids]));
+  timerRecord.resumedBotUids = combinedUids;
+
+  timerRecord.timer = setTimeout(() => {
+    console.log(`[Cooldown Manager] ⏳ Hết thời gian hạ nhiệt (${trackingKey}). Tự động kích hoạt lại ${timerRecord.resumedBotUids.length} bot...`);
+    for (const uid of timerRecord.resumedBotUids) {
+      const bot = botInstances[uid];
+      if (bot && bot.status === 'cooldown') {
+        bot.consecutiveErrors = 0;
+        bot.firstErrorAt = null;
+        bot.pollFails = 0;
+        bot.lastRateLimitAt = null;
+        bot.addLog('SYSTEM', '🔄 [Hạ Nhiệt IP] Đã hoàn tất thời gian hạ nhiệt. Tự động kích hoạt lại bot farm...');
+        bot.start();
+      }
+    }
+    timerRecord.until = 0;
+    timerRecord.timer = null;
+    timerRecord.resumedBotUids = [];
+  }, durationMs);
+
+  return { success: true, until, durationSeconds: Math.round(durationMs/1000), botCount: runningBotUids.length };
+}
+
+function cancelCooldown(trackingKey = 'global', userBotList = null) {
+  let timerRecord;
+  if (trackingKey === 'global') {
+    timerRecord = activeCooldownTimers.global;
+  } else {
+    timerRecord = activeCooldownTimers.users[trackingKey] || { until: 0, timer: null, resumedBotUids: [] };
+  }
+
+  if (timerRecord.timer) {
+    clearTimeout(timerRecord.timer);
+    timerRecord.timer = null;
+  }
+  timerRecord.until = 0;
+
+  const targetList = userBotList || timerRecord.resumedBotUids.map(uid => botInstances[uid]).filter(Boolean);
+  for (const bot of targetList) {
+    if (bot.status === 'cooldown') {
+      bot.consecutiveErrors = 0;
+      bot.firstErrorAt = null;
+      bot.pollFails = 0;
+      bot.lastRateLimitAt = null;
+      bot.addLog('SYSTEM', '▶️ [Hạ Nhiệt IP] Đã hủy hạ nhiệt thủ công. Khởi động lại bot ngay lập tức.');
+      bot.start();
+    }
+  }
+  timerRecord.resumedBotUids = [];
+}
+
+// User trigger cooldown for their own bots
+app.post('/api/cooldown/my-bots', requireAuth, (req, res) => {
+  const userId = req.user.id;
+  const durationSeconds = Math.max(30, Math.min(600, parseInt(req.body.durationSeconds) || 120));
+  const userBots = Object.values(botInstances).filter(b => b.userId === userId);
+  const result = triggerCooldownForBots(userBots, durationSeconds, 'Người dùng kích hoạt hạ nhiệt', userId);
+  res.json({ ok: true, ...result });
+});
+
+// Admin trigger cooldown for all bots in the system
+app.post('/api/admin/cooldown/all', requireAuth, requireAdmin, (req, res) => {
+  const durationSeconds = Math.max(30, Math.min(600, parseInt(req.body.durationSeconds) || 120));
+  const allBots = Object.values(botInstances);
+  const result = triggerCooldownForBots(allBots, durationSeconds, 'Admin kích hoạt hạ nhiệt toàn hệ thống', 'global');
+  res.json({ ok: true, ...result });
+});
+
+// Admin trigger cooldown for specific user's bots
+app.post('/api/admin/users/:userId/cooldown', requireAuth, requireAdmin, (req, res) => {
+  const { userId } = req.params;
+  const durationSeconds = Math.max(30, Math.min(600, parseInt(req.body.durationSeconds) || 120));
+  const userBots = Object.values(botInstances).filter(b => b.userId === userId);
+  const users = loadUsers();
+  const targetUser = users.find(u => u.id === userId);
+  const username = targetUser ? targetUser.username : userId;
+  const result = triggerCooldownForBots(userBots, durationSeconds, `Admin hỗ trợ hạ nhiệt cho user ${username}`, userId);
+  res.json({ ok: true, ...result, username });
+});
+
+// Admin trigger cooldown for specific proxy (and all bots assigned to it)
+app.post('/api/admin/proxies/:proxyId/cooldown', requireAuth, requireAdmin, (req, res) => {
+  const { proxyId } = req.params;
+  const durationSeconds = Math.max(30, Math.min(600, parseInt(req.body.durationSeconds) || 120));
+  
+  // Find all bots using this proxy
+  const targetBots = Object.values(botInstances).filter(b => (b.proxyId || 'direct') === proxyId);
+  const proxyLabel = proxyId === 'direct' ? 'Direct Connection' : (proxyPool._proxies.find(p => p.id === proxyId)?.label || proxyId);
+
+  // Set cooldown on proxyPool directly
+  proxyPool.setRateLimitCooldown(proxyId, durationSeconds * 1000);
+
+  const result = triggerCooldownForBots(targetBots, durationSeconds, `Admin hạ nhiệt cho Proxy ${proxyLabel}`, `proxy_${proxyId}`);
+  res.json({ ok: true, ...result, proxyId, proxyLabel });
+});
+
+// Cancel active cooldown
+app.post('/api/cooldown/cancel', requireAuth, (req, res) => {
+  const userId = req.user.id;
+  const isAdmin = req.user.role === 'admin';
+  const targetUser = req.body.userId || userId;
+
+  if (targetUser === 'global' && isAdmin) {
+    cancelCooldown('global', Object.values(botInstances));
+  } else if (isAdmin || targetUser === userId) {
+    const userBots = Object.values(botInstances).filter(b => b.userId === targetUser);
+    cancelCooldown(targetUser, userBots);
+  }
+  res.json({ ok: true, msg: 'Đã hủy chế độ hạ nhiệt và chạy lại bot.' });
 });
 
 // Start bot loop
@@ -7282,7 +7568,11 @@ async function proxyRequest(req, res, targetUrl, uid = null) {
     }
 
     // Use specific bot's dispatcher if uid is provided, to ensure matching outbound IP addresses
+    const proxyId = uid ? (botInstances[uid]?.proxyId || 'direct') : 'direct';
     const dispatcher = uid ? proxyPool.getDispatcher(uid) : proxyPool.getDefaultDispatcher();
+
+    // Giữ nhịp Outbound Slot
+    await proxyPool.waitForOutboundSlot(proxyId, 300);
 
     const response = await fetch(targetUrl, {
       method: req.method,
@@ -7290,6 +7580,12 @@ async function proxyRequest(req, res, targetUrl, uid = null) {
       body: body,
       dispatcher: dispatcher
     });
+
+    // 🛑 Nếu dính mã 429 từ proxy request, đặt cooldown cho proxy pool ngay
+    if (response.status === 429) {
+      const retryAfter = Number(response.headers.get('retry-after')) || 15;
+      proxyPool.setRateLimitCooldown(proxyId, Math.max(15000, retryAfter * 1000));
+    }
 
     res.status(response.status);
     res.setHeader('content-type', response.headers.get('content-type') || 'application/json');
@@ -7963,5 +8259,8 @@ module.exports = {
   logNormalActInterval,
   BROWSER_PROFILES,
   ACCEPT_LANG_POOL,
-  checkAndRecoverZombieBots
+  checkAndRecoverZombieBots,
+  activeCooldownTimers,
+  triggerCooldownForBots,
+  cancelCooldown
 };

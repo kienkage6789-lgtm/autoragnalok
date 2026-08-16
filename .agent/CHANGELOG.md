@@ -2,6 +2,52 @@
 
 > Changelog of actual changes implemented.
 
+## 2026-08-16 - Tích Hợp Nút Hạ Nhiệt IP Khẩn Cấp (1-Click Emergency Cooldown) Cho User, Admin & Proxy (T78)
+- File đã đổi: [server.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [public/index.html](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/public/index.html), [public/app.css](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/public/app.css), [public/app.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/public/app.js), [test.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/test.js)
+- Đã làm:
+  - **Hệ Thống Quản Lý Cooldown Tập Trung (`activeCooldownTimers`)**:
+    - Xây dựng cơ chế theo dõi và tự động lập lịch timer khôi phục cho cả cấp độ User, cấp độ Global (Toàn hệ thống), và cấp độ Proxy/IP.
+    - Cung cấp các hàm helper `triggerCooldownForBots(botList, durationSeconds, reason, trackingKey)` và `cancelCooldown(trackingKey, userBotList)`.
+  - **Bộ API Endpoints Mới**:
+    - `POST /api/cooldown/my-bots`: User kích hoạt hạ nhiệt cho toàn bộ bot của mình trong 120s.
+    - `POST /api/admin/cooldown/all`: Admin kích hoạt hạ nhiệt toàn bộ bot của tất cả user trong hệ thống.
+    - `POST /api/admin/users/:userId/cooldown`: Admin hỗ trợ hạ nhiệt riêng cho từng user cụ thể.
+    - `POST /api/admin/proxies/:proxyId/cooldown`: Admin hạ nhiệt riêng cho từng Proxy hoặc Direct connection.
+    - `POST /api/cooldown/cancel`: Hủy bỏ trạng thái hạ nhiệt và khởi động lại bot ngay lập tức.
+    - Cập nhật `GET /api/accounts` và `GET /api/admin/users` trả về `cooldownRemainingSeconds` và cờ trạng thái `isRateLimited`.
+    - Cập nhật `ProxyPool.prototype.getStats()` và `GET /api/admin/proxies` trả về `isRateLimited` và `rateLimitWaitSeconds` cho từng proxy.
+  - **Giao Diện & Trải Nghiệm Người Dùng (Frontend UI)**:
+    - **Nút Hạ Nhiệt User Bên Ngoài Dashboard**: Đặt nút **`🛡️ Hạ Nhiệt`** ngay trên thanh tiêu đề accordion của từng User Group trên màn hình chính, Admin chỉ cần 1 click để giải cứu bot của user đó.
+    - **Nút Hạ Nhiệt Trong Bảng Proxy**: Thêm nút **`🛡️ Hạ Nhiệt`** cho từng dòng Proxy và Direct connection trong Tab Quản Lý Proxy, kèm badge `⏳ Hạ nhiệt (XXs)` trực quan.
+    - **Dashboard User**: Bổ sung nút **`🛡️ Hạ Nhiệt IP (120s)`** trên thanh filter toolbar và Banner đếm ngược thời gian thực `#dashboard-cooldown-banner` kèm nút `[✕ Hủy & Chạy Ngay]`.
+    - **Bảng Admin Users**: Thêm nút **`🛡️ Hạ Nhiệt`** trong từng dòng User và nút **`🛡️ Hạ Nhiệt Toàn Bộ Bot (All Users)`** trên thanh Action Bar của Modal Admin.
+    - **Thẻ Bot**: Tự động hiển thị Badge màu vàng hổ phách `⏳ Đang hạ nhiệt (XXs)` với hiệu ứng glow vàng cam khi bot đang trong thời gian hạ nhiệt.
+  - **Unit Tests**:
+    - Bổ sung bộ kiểm thử trong `test.js` kiểm tra toàn bộ luồng `triggerCooldownForBots`, chuyển đổi trạng thái `cooldown` ➔ `running` khi `cancelCooldown`, Proxy cooldown và `ProxyPool.getStats()`. Chạy `npm test` thành công 100%.
+
+---
+
+## 2026-08-16 - Cải Tiến Cơ Chế Điều Phối Request & Khắc Phục Triệt Để Lỗi HTTP 429 (T77)
+- File đã đổi: [server.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [test.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/test.js)
+- Đã làm:
+  - **Outbound Rate Limiter & Cooldown Tập Trung Trong `ProxyPool`**:
+    - Thêm `_rateLimitCooldowns` và `_lastOutboundAt` vào `ProxyPool` để quản lý thời gian hạ nhiệt và hàng đợi request theo từng Dispatcher/Proxy.
+    - Cung cấp các phương thức `setRateLimitCooldown(proxyId, durationMs)`, `isRateLimited(proxyId)`, `getRateLimitWaitTime(proxyId)` và `waitForOutboundSlot(proxyId, minSpacingMs)`.
+  - **Nâng Cấp `sendRequest()` Xử Lý 429 / Cloudflare 1015**:
+    - Nhận diện chính xác phản hồi HTTP 429 và trang chặn Cloudflare Error 1015, tự động đọc `Retry-After` và kích hoạt cooldown 15s-20s trên `ProxyPool`.
+    - Loại bỏ việc retry dồn dập tức thì (500ms) khi gặp lỗi 429 / Rate Limit để ngăn chặn việc bị Cloudflare gia hạn án phạt cấm IP.
+  - **Tích Hợp Exponential Backoff Trong Vòng Lặp `runPoll()`**:
+    - Bổ sung biến đếm `this.pollFails` và `this.lastRateLimitAt`.
+    - Khi dính lỗi 429: Áp dụng cơ chế giãn cách lũy thừa thông minh `15s → 22.5s → 33.7s → 50s → max 60s`, ghi log cảnh báo rõ ràng cho người dùng.
+    - Khi gặp lỗi mạng thông thường: Giãn cách theo nhịp `2s → 4s → 8s → 16s → 30s`.
+    - Khi chu kỳ poll thành công: Tự động reset `pollFails = 0` và `lastRateLimitAt = null`.
+  - **Giảm Tải & Tránh Burst Traffic Trong `pollGame()`**:
+    - Thêm điều kiện `proxyPool.isRateLimited(this.proxyId)` để tạm dừng các tác vụ tự động phụ (Nâng cấp, Nông trại, Đấu trường, Chợ) khi IP đang trong thời gian hạ nhiệt.
+  - **Unit Tests**:
+    - Thêm bộ kiểm thử trong `test.js` xác thực công thức tính toán Exponential Backoff cho lỗi 429 và lỗi mạng, cơ chế cooldown của `ProxyPool` và khởi tạo thuộc tính của `BotInstance`. Chạy `npm test` thành công 100%.
+
+---
+
 ## 2026-08-15 - Tái Cấu Trúc Tab STAT & Kỹ Năng (Clone 100% Giao Diện In-Game & Đồng Bộ Dark Theme) (T76)
 - File đã đổi: [public/app.js](file:///c:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/public/app.js), [public/app.css](file:///c:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/public/app.css)
 - Đã làm:
