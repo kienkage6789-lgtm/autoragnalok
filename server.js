@@ -493,19 +493,24 @@ class ProxyPool {
     return Math.max(0, until - now);
   }
 
-  async waitForOutboundSlot(proxyId, minSpacingMs = 400) {
+  async waitForOutboundSlot(proxyId, minSpacingMs = 200) {
     const key = proxyId || 'direct';
-    // 1. Kiểm tra nếu IP đang trong thời gian hạ nhiệt rate-limit
+    if (!this._nextAvailableSlot) this._nextAvailableSlot = {};
+
+    // 1. Kiểm tra nếu IP đang trong thời gian hạ nhiệt rate-limit thủ công
     const rateLimitWait = this.getRateLimitWaitTime(key);
     if (rateLimitWait > 0) {
       await new Promise(r => setTimeout(r, rateLimitWait));
     }
-    // 2. Đảm bảo khoảng cách tối thiểu giữa 2 request đi qua cùng 1 dispatcher
+
+    // 2. Synchronous Slot Booking (Đặt chỗ trước tức thì - Chống hoàn toàn Async Race)
     const now = Date.now();
-    const lastAt = this._lastOutboundAt[key] || 0;
-    const gap = now - lastAt;
-    if (gap < minSpacingMs) {
-      await new Promise(r => setTimeout(r, minSpacingMs - gap));
+    const scheduledSlot = Math.max(now, (this._nextAvailableSlot[key] || 0));
+    this._nextAvailableSlot[key] = scheduledSlot + minSpacingMs;
+
+    const waitTime = scheduledSlot - now;
+    if (waitTime > 0) {
+      await new Promise(r => setTimeout(r, waitTime));
     }
     this._lastOutboundAt[key] = Date.now();
   }
@@ -2424,8 +2429,8 @@ class BotInstance {
       }
       this.lastRequestAt = Date.now();
 
-      // Kiểm tra và giữ nhịp Outbound Rate Limiter tập trung theo Proxy/IP
-      await proxyPool.waitForOutboundSlot(this.proxyId, url.includes('xhrpg_game.php') ? 450 : 350);
+      // Kiểm tra và giữ nhịp Outbound Rate Limiter tập trung theo Proxy/IP (200ms Slot Booking)
+      await proxyPool.waitForOutboundSlot(this.proxyId, 200);
 
       const headers = {
         'content-type': 'application/x-www-form-urlencoded; charset=UTF-8',
@@ -7617,8 +7622,8 @@ async function proxyRequest(req, res, targetUrl, uid = null) {
     const proxyId = uid ? (botInstances[uid]?.proxyId || 'direct') : 'direct';
     const dispatcher = uid ? proxyPool.getDispatcher(uid) : proxyPool.getDefaultDispatcher();
 
-    // Giữ nhịp Outbound Slot
-    await proxyPool.waitForOutboundSlot(proxyId, 300);
+    // Giữ nhịp Outbound Slot (200ms Slot Booking)
+    await proxyPool.waitForOutboundSlot(proxyId, 200);
 
     const response = await fetch(targetUrl, {
       method: req.method,

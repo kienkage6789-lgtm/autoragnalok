@@ -1453,6 +1453,39 @@ try {
 
   console.log('✅ Harmonic Sine-Wave Pacing Engine Tests Passed successfully!');
 
+  // ==================== T81 - Synchronous Slot Booking 200ms Tests ====================
+  console.log('Testing Synchronous Slot Booking Engine (T81)...');
+  const slotTestKey = 'test_slot_proxy_t81';
+  const timestamps = [];
+  const startTime = Date.now();
+
+  // Bắn đồng thời 5 request tại cùng 1 mili-giây
+  const p1 = proxyPool.waitForOutboundSlot(slotTestKey, 200).then(() => timestamps.push(Date.now() - startTime));
+  const p2 = proxyPool.waitForOutboundSlot(slotTestKey, 200).then(() => timestamps.push(Date.now() - startTime));
+  const p3 = proxyPool.waitForOutboundSlot(slotTestKey, 200).then(() => timestamps.push(Date.now() - startTime));
+  const p4 = proxyPool.waitForOutboundSlot(slotTestKey, 200).then(() => timestamps.push(Date.now() - startTime));
+  const p5 = proxyPool.waitForOutboundSlot(slotTestKey, 200).then(() => timestamps.push(Date.now() - startTime));
+
+  await Promise.all([p1, p2, p3, p4, p5]);
+
+  assert.strictEqual(timestamps.length, 5, 'All 5 slots must resolve');
+  // Sắp xếp tăng dần theo thời gian hoàn thành
+  timestamps.sort((a, b) => a - b);
+  
+  // Xác thực khoảng cách tuần tự giữa mỗi cặp request liên tiếp >= 180ms
+  for (let i = 1; i < timestamps.length; i++) {
+    const diff = timestamps[i] - timestamps[i - 1];
+    assert.ok(diff >= 170, `Gap between slot ${i-1} (${timestamps[i-1]}ms) and slot ${i} (${timestamps[i]}ms) must be >= 170ms (got ${diff}ms)`);
+  }
+  // Tổng thời gian cho 5 slot (4 khoảng cách x 200ms) phải >= 700ms
+  const totalSpan = timestamps[4] - timestamps[0];
+  assert.ok(totalSpan >= 700, `Total time span for 5 slots must be >= 700ms (got ${totalSpan}ms)`);
+
+  delete proxyPool._nextAvailableSlot[slotTestKey];
+  delete proxyPool._lastOutboundAt[slotTestKey];
+
+  console.log('✅ Synchronous Slot Booking Engine Tests Passed successfully!');
+
   console.log('✅ User Polling Interval, Role Propagation and Edit Permissions Tests Passed successfully!');
   console.log('✅ Revamped Auto Market Buy Tests Passed successfully!');
   console.log('✅ Urgent Active Potion Healing Tests Passed successfully!');

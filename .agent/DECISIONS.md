@@ -2,6 +2,24 @@
 
 > Captured architectural decisions and trade-offs.
 
+## 2026-08-16 - Nâng Cấp Synchronous Slot Booking Gatekeeper 200ms (Zero Collision & 100% Preserved Polling Rate) (T81)
+
+- Bối cảnh:
+  - Khi kiểm tra thực tế trên server game, phát hiện cơ chế `waitForOutboundSlot` cũ bị lỗi bất đồng bộ (Async Race Condition): do `this._lastOutboundAt` chỉ được cập nhật sau khi kết thúc `await`, nếu nhiều bot cùng gọi hàm tại cùng 1 mili-giây, tất cả đều đọc `lastAt = 0` và cùng đặt `setTimeout` kết thúc tại cùng một thời điểm, dẫn đến việc vẫn bắn đồng thời lên Cloudflare.
+  - Người dùng yêu cầu giảm khoảng cách khe thời gian an toàn về mức **200ms** ($5.0 \text{ req/s}$) để tối đa hóa tốc độ phản xạ và tải được 5-6 bot/IP, đồng thời làm rõ sự tương thích với chức năng Nhịp Polling của bot.
+- Quyết định:
+  - **Khắc Phục Bằng Đặt Chỗ Đồng Bộ Tức Thì (Synchronous Slot Booking)**:
+    - Trong `ProxyPool.prototype.waitForOutboundSlot`: Ngay khi một coroutine bước vào hàm, nó lập tức tính `scheduledSlot = Math.max(now, _nextAvailableSlot)` và **gán ngay đồng bộ `_nextAvailableSlot = scheduledSlot + minSpacingMs` (200ms)** trước khi `await`.
+    - Các request kế tiếp dù vào sau chỉ 0.001ms cũng bắt buộc phải nhận slot tiếp theo ($+200\text{ms}, +400\text{ms}, +600\text{ms}$), đảm bảo $100\%$ tính tuần tự tuyệt đối (Zero Collision).
+  - **Tương Thích Tuyệt Đối Với Chức Năng Nhịp Polling**:
+    - Nhịp Polling (Macro level: $1.0\text{s} - 2.0\text{s}$) quyết định chu kỳ cày quái của từng bot.
+    - Gatekeeper 200ms (Micro level) chỉ đóng vai trò cảnh sát giao thông tại cổng mạng IP: chỉ can thiệp giãn $200\text{ms}$ khi có 2 bot vô tình đến cổng cùng 1 mili-giây, sau đó cả 2 bot tự động chạy lệch pha nhau và duy trì $100\%$ nhịp Polling mà người dùng đã cài đặt.
+- Kết quả:
+  - Triệt tiêu $100\%$ hiện tượng va chạm gói tin tại tầng mạng.
+  - Chạy `npm test` thành công 100%.
+
+---
+
 ## 2026-08-16 - Chuyển Đổi Hạ Nhiệt Sang Hoàn Toàn Thủ Công Bằng Tay (Manual Cooldown Only) (T80)
 
 - Bối cảnh:

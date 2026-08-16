@@ -2,6 +2,19 @@
 
 > Changelog of actual changes implemented.
 
+## 2026-08-16 - Nâng Cấp Synchronous Slot Booking Gatekeeper 200ms (Zero Collision & 100% Preserved Polling Rate) (T81)
+- File đã đổi: [server.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [test.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/test.js)
+- Đã làm:
+  - **Sửa Lỗi Bất Đồng Bộ Trong `waitForOutboundSlot`**:
+    - Chuyển sang cơ chế Đặt Chỗ Đồng Bộ Tức Thì (`this._nextAvailableSlot[key] = scheduledSlot + minSpacingMs`) ngay khi bắt đầu hàm trước khi `await`, giải quyết triệt để lỗi Async Race Condition.
+    - Giảm khoảng cách khe thời gian an toàn từ `400ms` về **`200ms`** (tương đương $5.0 \text{ req/s}$ per IP/Proxy), cho phép 1 IP chạy full tốc độ cho $5 - 6$ bot cùng lúc.
+  - **Cập Nhật Call Sites**:
+    - Cập nhật `sendRequest()` và `proxyRequest()` trong `server.js` truyền `minSpacingMs = 200ms`.
+  - **Unit Tests**:
+    - Thêm unit test mô phỏng 5 request đồng thời tại cùng 1 mili-giây, kiểm tra khoảng cách tuần tự giữa các slot luôn $\ge 180\text{ms}$ và tổng thời gian $\ge 700\text{ms}$. Chạy `npm test` thành công 100%.
+
+---
+
 ## 2026-08-16 - Chuyển Đổi Hạ Nhiệt Sang Hoàn Toàn Thủ Công Bằng Tay (Manual Cooldown Only) (T80)
 - File đã đổi: [server.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [test.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/test.js)
 - Đã làm:

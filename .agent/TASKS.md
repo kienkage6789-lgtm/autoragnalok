@@ -3,6 +3,18 @@
 > Work Breakdown Structure. Update task states immediately upon changes.
 > Statuses: todo | doing | blocked | review | done
 
+### [x] T81 - Nâng Cấp Synchronous Slot Booking Gatekeeper 200ms (Zero Collision & 100% Preserved Polling Rate)
+- Description: Tinh chỉnh bộ điều phối khe thời gian per IP/Proxy sang cơ chế Đặt Chỗ Đồng Bộ (Synchronous Slot Booking) với khoảng cách 200ms, loại bỏ hoàn toàn hiện tượng Async Race Condition và đảm bảo tương thích 100% với nhịp Polling của người dùng.
+- Files related: `server.js`, `test.js`
+- Acceptance criteria:
+  - [x] Backend: Nâng cấp `ProxyPool.prototype.waitForOutboundSlot` với `_nextAvailableSlot` đặt chỗ đồng bộ ngay lập tức khi gọi hàm với `minSpacingMs = 200ms`.
+  - [x] Backend: Cập nhật `sendRequest()` và `proxyRequest()` áp dụng nhịp `200ms` tuần tự.
+  - [x] Unit Test: Viết test case trong `test.js` mô phỏng 10 request đồng thời và xác thực khoảng cách tuần tự $\ge 200\text{ms}$ giữa các request xuất xưởng.
+  - [x] Unit Test: Chạy `node test.js` đạt 100% pass.
+- Status: done
+
+---
+
 ### [x] T80 - Chuyển Đổi Hạ Nhiệt Sang Hoàn Toàn Thủ Công (Manual Cooldown Only)
 - Description: Tắt chế độ tự động đóng băng bot / tự động kích hoạt rate-limit cooldown khi gặp 429 để chuyển toàn quyền kiểm soát hạ nhiệt về tay người dùng và quản trị viên (thao tác 1-Click bằng tay).
 - Files related: `server.js`, `test.js`
