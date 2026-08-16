@@ -70,11 +70,16 @@ class ProxyPool {
     this._rateLimitCooldowns = {}; // proxyId -> timestamp until which this proxy/direct is rate-limited
     this._lastOutboundAt = {};      // proxyId -> timestamp of last request through this proxy/direct
     this._directAgent = new Agent({
-      connect: { timeout: 5000 }, // Giảm xuống 5s kết nối
-      keepAliveTimeout: 10000,     // Giảm xuống 10s để tránh ECONNRESET do máy chủ đóng trước
-      keepAliveMaxTimeout: 30000,
+      connect: {
+        timeout: 8000,
+        keepAlive: true,
+        keepAliveInitialDelay: 5000
+      },
+      keepAliveTimeout: 60000,     // 60s: Socket luôn duy trì sẵn sàng tái sử dụng cho các nhịp poll
+      keepAliveMaxTimeout: 300000, // 5 phút: Giữ phiên persistent lâu dài như trình duyệt Chrome thật
       pipelining: 1,
-      connections: 100,            // Tăng số lượng kết nối tối đa giảm nghẽn
+      connections: 50,             // Tối đa 50 persistent connections
+      maxRedirections: 5
     });
     this._load();
 
@@ -114,11 +119,16 @@ class ProxyPool {
   _createAgent(url) {
     return new ProxyAgent({
       uri: url,
-      connect: { timeout: 5000 },  // Giảm timeout kết nối
-      keepAliveTimeout: 10000,     // Giảm keepAliveTimeout tránh ECONNRESET
-      keepAliveMaxTimeout: 30000,
+      connect: {
+        timeout: 8000,
+        keepAlive: true,
+        keepAliveInitialDelay: 5000
+      },
+      keepAliveTimeout: 60000,     // 60s: Tái sử dụng socket liên tục trên Proxy
+      keepAliveMaxTimeout: 300000, // 5 phút
       pipelining: 1,
-      connections: 100,            // Tăng kết nối tối đa lên 100
+      connections: 50,
+      maxRedirections: 5
     });
   }
 
@@ -2395,8 +2405,12 @@ class BotInstance {
       }
     };
 
-    // Stagger startup based on harmonic phase offset
-    this.timer = setTimeout(runPoll, Math.floor(Math.random() * 600));
+    // Xếp hàng thứ tự xuất phát khởi động bot theo từng Proxy (200ms mỗi bot)
+    const proxyKey = this.proxyId || 'direct';
+    const peerBots = Object.values(botInstances).filter(b => (b.proxyId || 'direct') === proxyKey);
+    const botIndex = Math.max(0, peerBots.findIndex(b => b.line_uid === this.line_uid));
+    const startDelay = botIndex * 200 + Math.floor(Math.random() * 50);
+    this.timer = setTimeout(runPoll, startDelay);
   }
 
   stop(status = 'idle') {

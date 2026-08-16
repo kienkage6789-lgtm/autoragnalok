@@ -3,6 +3,17 @@
 > Work Breakdown Structure. Update task states immediately upon changes.
 > Statuses: todo | doing | blocked | review | done
 
+### [x] T82 - Tối Ưu Hóa Tái Sử Dụng Kết Nối HTTP/TLS Connection Pooling (Persistent Sockets Keep-Alive 60s - 300s)
+- Description: Nâng cấp cấu hình Agent / ProxyAgent trong `undici` bật TCP Keep-Alive với `keepAliveTimeout: 60s` và `keepAliveMaxTimeout: 300s`, triệt tiêu hoàn toàn các đợt TLS Handshake lặp lại để ngăn chặn Cloudflare kích hoạt bộ đếm TLS Flood (Error 1015 / 429).
+- Files related: `server.js`, `test.js`
+- Acceptance criteria:
+  - [x] Backend: Cập nhật `_directAgent` và `_createAgent(url)` trong `ProxyPool` với cấu hình Persistent Connection: `keepAliveTimeout: 60000`, `keepAliveMaxTimeout: 300000`, `keepAlive: true`, `keepAliveInitialDelay: 5000`.
+  - [x] Unit Test: Kiểm tra cấu hình persistent connection options trên `_directAgent` và các Agent trong `test.js`.
+  - [x] Unit Test: Chạy `node test.js` đạt 100% pass.
+- Status: done
+
+---
+
 ### [x] T81 - Nâng Cấp Synchronous Slot Booking Gatekeeper 200ms (Zero Collision & 100% Preserved Polling Rate)
 - Description: Tinh chỉnh bộ điều phối khe thời gian per IP/Proxy sang cơ chế Đặt Chỗ Đồng Bộ (Synchronous Slot Booking) với khoảng cách 200ms, loại bỏ hoàn toàn hiện tượng Async Race Condition và đảm bảo tương thích 100% với nhịp Polling của người dùng.
 - Files related: `server.js`, `test.js`

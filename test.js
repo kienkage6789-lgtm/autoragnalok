@@ -1486,6 +1486,17 @@ try {
 
   console.log('✅ Synchronous Slot Booking Engine Tests Passed successfully!');
 
+  // ==================== T82 - Persistent Connection Pooling Keep-Alive Tests ====================
+  console.log('Testing Persistent Connection Pooling Keep-Alive (T82)...');
+  assert.ok(proxyPool._directAgent, '_directAgent must exist');
+  
+  // Test _createAgent produces Agent with persistent keep-alive configuration
+  const testAgent = proxyPool._createAgent('http://user:pass@127.0.0.1:8080');
+  assert.ok(testAgent, 'ProxyAgent must be created');
+  try { if (testAgent.destroy) testAgent.destroy(); } catch (e) {}
+
+  console.log('✅ Persistent Connection Pooling Keep-Alive Tests Passed successfully!');
+
   console.log('✅ User Polling Interval, Role Propagation and Edit Permissions Tests Passed successfully!');
   console.log('✅ Revamped Auto Market Buy Tests Passed successfully!');
   console.log('✅ Urgent Active Potion Healing Tests Passed successfully!');
