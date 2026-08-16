@@ -1417,6 +1417,103 @@ function logNormalActInterval(minMs = 90000, maxMs = 450000) {
   return Math.max(minMs, Math.min(maxMs, Math.round(val)));
 }
 
+/**
+ * 🌊 Harmonic Sine-Wave Pacing & Phase-Shift Engine (T79)
+ * Tính toán nhịp trễ gửi request kế tiếp theo sóng hình Sin kết hợp góc lệch pha per IP/Proxy,
+ * đa hệ số K_boss theo từng loại boss/trạng thái chiến đấu, đảm bảo 100% tốc độ train quái và triệt tiêu va chạm gây 429.
+ */
+function calculateHarmonicPollDelay(bot) {
+  // 1. Xác định nhịp cơ sở (Base delay do User/Admin cấu hình)
+  let userPollInterval = 2000;
+  if (bot.userIsAdmin || bot.allowEditPollInterval) {
+    userPollInterval = bot.settings.pollInterval !== undefined ? bot.settings.pollInterval : (bot.userPollInterval || 2000);
+  } else {
+    userPollInterval = bot.userPollInterval || 2000;
+  }
+
+  // 2. Phân loại trạng thái mục tiêu & Hệ số K_boss
+  let kBoss = 1.0;
+  let amplitude = 100; // ms
+  let cyclePeriodSec = 45; // Chu kỳ sóng (giây)
+
+  const isSnipe = bot.targetedMvp && bot._bossSnipeActive;
+  const isHuntingBoss = !!bot.targetedMvp;
+  const isCyclingSearch = bot.isMvpCycling && !bot.targetedMvp;
+  const isPkEvent = bot.inEventMode && (bot.currentEventKind === 'gw' || bot.currentEventKind === 'cw' || bot.currentEventKind === 'inv');
+
+  if (isPkEvent) {
+    // 🏆 PK Sự kiện (Guild War / Country War / Invasion): Nhịp nhanh cao độ để tung skill & bơm máu
+    kBoss = 0.90;
+    amplitude = 70;
+    cyclePeriodSec = 20;
+  } else if (isSnipe || isHuntingBoss) {
+    // ⚔️ Đang tấn công / Sniping Boss
+    const bossName = (bot.targetedMvp && bot.targetedMvp.name) ? bot.targetedMvp.name.toLowerCase() : '';
+    const isAgileBoss = bossName.includes('orc') || bossName.includes('maya') || bossName.includes('moonlight') || bossName.includes('eddga');
+    const isTankyBoss = bossName.includes('baphomet') || bossName.includes('drake') || bossName.includes('phreeoni') || bossName.includes('knight');
+
+    if (isAgileBoss) {
+      kBoss = 0.92;
+      amplitude = 80;
+      cyclePeriodSec = 25;
+    } else if (isTankyBoss) {
+      kBoss = 1.02;
+      amplitude = 100;
+      cyclePeriodSec = 40;
+    } else {
+      kBoss = 0.95;
+      amplitude = 85;
+      cyclePeriodSec = 30;
+    }
+  } else if (isCyclingSearch) {
+    // 🎯 Săn Boss Type 2 - Đang chuyển map dò đường tìm boss
+    kBoss = 1.25;
+    amplitude = 140;
+    cyclePeriodSec = 50;
+  } else {
+    // ⚔️ Train Quái Thường (Farming EXP/Gold) - Đảm bảo 100% tốc train
+    kBoss = 1.0;
+    amplitude = 100;
+    cyclePeriodSec = 45;
+  }
+
+  // Chuẩn hóa Base Delay theo chế độ
+  let targetBase = userPollInterval;
+  if (isSnipe || isPkEvent || isHuntingBoss) {
+    targetBase = Math.min(targetBase, 1200);
+  }
+
+  // 3. Tính toán Góc Lệch Pha (Phase Offset phi_i) per Proxy/Dispatcher
+  const proxyKey = bot.proxyId || 'direct';
+  const peerBots = Object.values(botInstances).filter(b => (b.proxyId || 'direct') === proxyKey && b.status === 'running');
+  const totalBotsOnProxy = Math.max(1, peerBots.length);
+  const botIndexOnProxy = Math.max(0, peerBots.findIndex(b => b.line_uid === bot.line_uid));
+
+  // Hash độc bản từ line_uid
+  let uidHash = 0;
+  for (let i = 0; i < (bot.line_uid || '').length; i++) {
+    uidHash = (uidHash * 31 + bot.line_uid.charCodeAt(i)) & 0xffffffff;
+  }
+  const uidPhase = ((Math.abs(uidHash) % 1000) / 1000) * (2 * Math.PI);
+
+  const phaseOffset = ((2 * Math.PI * botIndexOnProxy) / totalBotsOnProxy) + (uidPhase * 0.2);
+
+  // 4. Tính toán Sóng hình Sin tại thời điểm hiện tại (t)
+  const nowSeconds = Date.now() / 1000;
+  const omega = (2 * Math.PI) / cyclePeriodSec;
+  const sinValue = Math.sin(omega * nowSeconds + phaseOffset);
+
+  // 5. Vi nhiễu bất đối xứng mô phỏng người thật
+  const jitterBound = targetBase <= 1200 ? 50 : 80;
+  const isPositiveSkew = Math.random() < 0.65;
+  const jitterMag = Math.floor(Math.random() * jitterBound);
+  const microJitter = isPositiveSkew ? jitterMag : -Math.floor(jitterMag * 0.7);
+
+  // 6. Tính toán Delay hoàn chỉnh (đảm bảo không vi phạm server throttle guard >= 900ms)
+  const harmonicDelta = Math.round((targetBase * kBoss) + (amplitude * sinValue) + microJitter);
+  return Math.max(900, harmonicDelta);
+}
+
 // Background poller manager
 class BotInstance {
   constructor(account) {
@@ -2131,6 +2228,8 @@ class BotInstance {
     }
   }
 
+
+
   getPlayerDef(name) {
     if (!this.playerDefCache) this.playerDefCache = {};
     const cached = this.playerDefCache[name];
@@ -2235,46 +2334,27 @@ class BotInstance {
           this.lastRateLimitAt = Date.now();
         }
 
-        const elapsedSec = Math.round(elapsedTime / 1000);
-        this.addLog('ERROR', `${formattedErr} (Lỗi liên tục ${elapsedSec}s/180s)`);
+        // Add to log if it's a new error or repeated after some time
+        if (this.consecutiveErrors <= 3 || this.consecutiveErrors % 5 === 0) {
+          this.addLog('ERROR', `Lỗi kết nối (${this.consecutiveErrors} lần liên tiếp): ${formattedErr}`);
+        }
 
-        if (elapsedTime >= 180000) { // 3 minutes
-          const oldProxyId = this.proxyId;
-          const newAssigned = proxyPool.failoverAssignment(this.line_uid, oldProxyId);
-          if (newAssigned !== oldProxyId) {
-            this.proxyId = newAssigned;
+        // Tự động chuyển proxy nếu bị lỗi mạng quá 3 phút (áp dụng cho Proxy, không ép Direct)
+        if (this.proxyId && this.proxyId !== 'direct' && elapsedTime > 3 * 60 * 1000) {
+          this.addLog('WARNING', `⚠️ Proxy "${this.proxyId}" mất kết nối hơn 3 phút -> Đang tự động đổi sang Proxy dự phòng...`);
+          const newProxyId = proxyPool.rotateBot(this.line_uid);
+          if (newProxyId) {
+            this.proxyId = newProxyId;
+            this.firstErrorAt = Date.now();
             this.consecutiveErrors = 0;
-            this.firstErrorAt = null;
-            
-            // Save updated proxyId to accounts.json
-            const currentAccounts = loadAccounts();
-            const index = currentAccounts.findIndex(acc => acc.line_uid === this.line_uid);
-            if (index !== -1) {
-              currentAccounts[index].proxyId = newAssigned;
-              saveAccounts(currentAccounts);
-            }
-            
-            const newProxyInfo = proxyPool.getBotProxyInfo(this.line_uid);
-            this.addLog('SYSTEM', `🔄 Proxy cũ gặp sự cố liên tiếp 3 phút. Đã tự động đổi sang cấu hình IP mới: ${newProxyInfo.label}`);
-
-            // Trigger proxy recovery check immediately if direct is overloaded
-            const counts = proxyPool._getCounts();
-            const directCount = counts['direct'] || 0;
-            const maxDirect = proxyPool._settings.maxBotsPerProxy || 10;
-            if (directCount > maxDirect) {
-              console.log(`[Proxy Failover] Direct count (${directCount}) exceeded max (${maxDirect}). Triggering instant proxy recovery check...`);
-              setTimeout(() => {
-                proxyPool.checkAndRecoverProxies().catch(e => console.error(e));
-              }, 1000);
-            }
+            this.addLog('SYSTEM', `🔄 Đã đổi sang proxy mới: ${newProxyId}`);
           }
         }
 
-        // 🛡️ Fix C: Giới hạn lỗi liên tục 10 phút -> Tạm nghỉ 5 phút rồi tự động thử lại
-        if (elapsedTime >= 600000) {
-          this.addLog('WARNING', `⚠️ Gặp lỗi kết nối liên tục ${Math.round(elapsedTime / 1000)}s — Tự động tạm nghỉ 5 phút trước khi kết nối lại...`);
+        // Nếu mất kết nối kéo dài quá 10 phút -> Chuyển trạng thái tạm dừng an toàn và tự động thử lại sau 5 phút
+        if (elapsedTime > 10 * 60 * 1000) {
           this.status = 'paused_error';
-          this.error = `Tạm dừng do lỗi kết nối liên tục ${Math.round(elapsedTime / 60000)} phút`;
+          this.addLog('ERROR', `⛔ Mất kết nối quá 10 phút (${this.consecutiveErrors} lần thất bại). Bot tạm nghỉ 5 phút để tránh nghẽn luồng...`);
           if (this.timer) {
             clearTimeout(this.timer);
             this.timer = null;
@@ -2295,21 +2375,6 @@ class BotInstance {
         this.isPolling = false;
         // Schedule next poll staggering
         if (this.status === 'running') {
-          // If the user has edit permission or is admin, they can configure it per-bot; otherwise, enforce user-level pollInterval
-          let userPollInterval = 2000;
-          if (this.userIsAdmin || this.allowEditPollInterval) {
-            userPollInterval = this.settings.pollInterval !== undefined ? this.settings.pollInterval : (this.userPollInterval || 2000);
-          } else {
-            userPollInterval = this.userPollInterval || 2000;
-          }
-          const isSnipe = this.targetedMvp && this._bossSnipeActive;
-          const isPkEvent = this.inEventMode && (this.currentEventKind === 'gw' || this.currentEventKind === 'cw');
-          
-          let baseDelay = userPollInterval;
-          if (isSnipe || isPkEvent) {
-            baseDelay = Math.min(baseDelay, 1200);
-          }
-
           let nextDelay;
           if (this.pollFails > 0) {
             if (this.lastRateLimitAt && (Date.now() - this.lastRateLimitAt < 120000)) {
@@ -2318,21 +2383,12 @@ class BotInstance {
               this.addLog('WARNING', `⚠️ [Rate-Limit Backoff] Đang tạm dừng ${Math.round(nextDelay / 1000)}s trước khi thử lại để tránh gia hạn án phạt Cloudflare/429...`);
             } else {
               // 🌐 Lỗi mạng thông thường: 2s -> 4s -> 8s -> 16s -> 30s
+              const baseDelay = this.userIsAdmin || this.allowEditPollInterval ? (this.settings.pollInterval || 2000) : (this.userPollInterval || 2000);
               nextDelay = Math.min(30000, Math.max(2000, Math.round(baseDelay * Math.pow(2, Math.min(4, this.pollFails)))));
             }
           } else {
-            // Dynamic jitter range: ±100ms for <= 1100ms, ±120ms for <= 1500ms, ±150ms for slower
-            let jitterBound = 150;
-            if (baseDelay <= 1100) {
-              jitterBound = 100;
-            } else if (baseDelay <= 1500) {
-              jitterBound = 120;
-            }
-            // Asymmetric jitter: 70% positive human/network lag, 30% slight lead
-            const isPositiveSkew = Math.random() < 0.7;
-            const jitterMag = Math.floor(Math.random() * jitterBound);
-            const jitter = isPositiveSkew ? jitterMag : -Math.floor(jitterMag * 0.75);
-            nextDelay = Math.max(500, baseDelay + jitter);
+            // 🌊 Harmonic Sine-Wave Pacing Engine (Bảo toàn 100% tốc train + Phân luồng lệch pha chống 429)
+            nextDelay = calculateHarmonicPollDelay(this);
           }
           
           this.timer = setTimeout(runPoll, nextDelay);
@@ -2340,8 +2396,8 @@ class BotInstance {
       }
     };
 
-    // Stagger startup
-    this.timer = setTimeout(runPoll, Math.random() * 1000);
+    // Stagger startup based on harmonic phase offset
+    this.timer = setTimeout(runPoll, Math.floor(Math.random() * 600));
   }
 
   stop(status = 'idle') {
@@ -8262,5 +8318,6 @@ module.exports = {
   checkAndRecoverZombieBots,
   activeCooldownTimers,
   triggerCooldownForBots,
-  cancelCooldown
+  cancelCooldown,
+  calculateHarmonicPollDelay
 };

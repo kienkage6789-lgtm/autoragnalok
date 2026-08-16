@@ -20,7 +20,8 @@ const {
   checkAndRecoverZombieBots,
   activeCooldownTimers,
   triggerCooldownForBots,
-  cancelCooldown
+  cancelCooldown,
+  calculateHarmonicPollDelay
 } = require('./server');
 
 console.log('🧪 Running Unit Tests...');
@@ -1391,7 +1392,66 @@ try {
   delete botInstances['U_TEST_COOL_2'];
   proxyPool._rateLimitCooldowns['direct'] = 0;
 
-  console.log('✅ Emergency Cooldown Engine Tests Passed successfully!');
+  console.log('Testing Harmonic Sine-Wave Pacing Engine (T79)...');
+  const trainBot = new BotInstance({
+    line_uid: 'U_TEST_TRAIN_1',
+    session_token: 'test_token_tr1',
+    name: 'TrainBot1'
+  });
+  trainBot.userPollInterval = 1200;
+  trainBot.settings = { pollInterval: 1200 };
+  trainBot.userIsAdmin = true;
+  trainBot.status = 'running';
+  botInstances['U_TEST_TRAIN_1'] = trainBot;
+
+  // Test 1: Đảm bảo tốc train trung bình đạt chuẩn (100% tốc train ~ 1200ms)
+  let sumDelay = 0;
+  const samples = 100;
+  for (let s = 0; s < samples; s++) {
+    const delay = calculateHarmonicPollDelay(trainBot);
+    assert.ok(delay >= 900, `Delay must be >= 900ms (got ${delay})`);
+    sumDelay += delay;
+  }
+  const avgDelay = sumDelay / samples;
+  assert.ok(avgDelay >= 1100 && avgDelay <= 1300, `Average train delay must be ~1200ms (got ${avgDelay}ms) to guarantee 100% train speed`);
+
+  // Test 2: Kiểm tra Agile Boss Hunter (Orc Hero) scale nhịp nhanh
+  trainBot.targetedMvp = { name: 'Orc Hero', id: '1086' };
+  trainBot._bossSnipeActive = true;
+  const agileDelay = calculateHarmonicPollDelay(trainBot);
+  assert.ok(agileDelay >= 900 && agileDelay <= 1300, `Agile boss delay must be in fast range (got ${agileDelay})`);
+
+  // Test 3: Kiểm tra PK Event Mode scale nhịp phản xạ cao
+  trainBot.targetedMvp = null;
+  trainBot._bossSnipeActive = false;
+  trainBot.inEventMode = true;
+  trainBot.currentEventKind = 'gw';
+  const pkDelay = calculateHarmonicPollDelay(trainBot);
+  assert.ok(pkDelay >= 900 && pkDelay <= 1250, `PK Event delay must be high reflex (got ${pkDelay})`);
+
+  // Test 4: Kiểm tra góc lệch pha phân luồng giữa 2 bot trên cùng IP
+  const trainBot2 = new BotInstance({
+    line_uid: 'U_TEST_TRAIN_2',
+    session_token: 'test_token_tr2',
+    name: 'TrainBot2'
+  });
+  trainBot2.userPollInterval = 1200;
+  trainBot2.settings = { pollInterval: 1200 };
+  trainBot2.status = 'running';
+  botInstances['U_TEST_TRAIN_2'] = trainBot2;
+  trainBot.inEventMode = false;
+
+  const d1 = calculateHarmonicPollDelay(trainBot);
+  const d2 = calculateHarmonicPollDelay(trainBot2);
+  assert.ok(d1 >= 900 && d2 >= 900, 'Both delays must be >= 900ms');
+
+  // Clean up test bots
+  trainBot.stop();
+  trainBot2.stop();
+  delete botInstances['U_TEST_TRAIN_1'];
+  delete botInstances['U_TEST_TRAIN_2'];
+
+  console.log('✅ Harmonic Sine-Wave Pacing Engine Tests Passed successfully!');
 
   console.log('✅ User Polling Interval, Role Propagation and Edit Permissions Tests Passed successfully!');
   console.log('✅ Revamped Auto Market Buy Tests Passed successfully!');

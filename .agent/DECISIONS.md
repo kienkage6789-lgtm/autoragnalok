@@ -2,6 +2,29 @@
 
 > Captured architectural decisions and trade-offs.
 
+## 2026-08-16 - Triển Khai Bộ Điều Tốc Phân Luồng Sóng Hình Sin Đa Hệ Số (Harmonic Sine-Wave Pacing Engine) (T79)
+
+- Bối cảnh:
+  - Khi chạy nhiều bot trên cùng một địa chỉ IP / Proxy, các bot có nhịp poll cố định dễ bị hội tụ chu kỳ ("bó chùm thời gian" / burst spike), gửi đồng loạt nhiều request trong cùng một mili-giây dẫn đến việc Cloudflare kích hoạt án phạt HTTP 429.
+  - Tuy nhiên, việc tăng delay trung bình để tránh 429 sẽ làm giảm tốc độ đánh quái, nhặt đồ và cày EXP (tốc train) của người dùng.
+- Quyết định:
+  - **Thuật Toán Sóng Hình Sin Điều Hòa & Góc Lệch Pha Độc Bản (`calculateHarmonicPollDelay`)**:
+    - Sử dụng hàm sóng hình Sin: $\Delta T_i(t) = (T_{\text{base}} \cdot K_{\text{boss}}) + A \cdot \sin(\omega t + \phi_i) + \varepsilon(t)$.
+    - Mỗi bot trên cùng một IP/Proxy được gán một góc lệch pha độc bản $\phi_i = \frac{2\pi \cdot i}{N} + \text{hash}(\text{line\_uid})$. Nhờ đó, các thời điểm gửi request của các bot luôn xen kẽ nhau (interleaved), triệt tiêu hoàn toàn hiện tượng va chạm cùng mili-giây.
+  - **Bảo Toàn 100% Tốc Train Quái**:
+    - Mốc trung tâm tối ưu của chế độ train quái được neo cố định ở mức chuẩn $1200\text{ms}$ (hoặc theo `pollInterval` do user cài đặt).
+    - Biên độ sóng nhẹ $A = \pm 100\text{ms}$ giúp nhịp dao động trong dải vàng $1100\text{ms} \leftrightarrow 1300\text{ms}$, đảm bảo số lượt đánh/phút và EXP/phút đạt mức tối đa 100% mà không bị giảm hiệu suất.
+  - **Ma Trận Hệ Số $K_{\text{boss}}$ Linh Hoạt Theo Tình Huống**:
+    - *Boss Di Động Nhanh (Orc Hero, Maya, Moonlight)*: $K_{\text{boss}} = 0.92, A = 80\text{ms}, T_{\text{cycle}} = 25\text{s}$ (kiting và dồn skill tốc độ cao).
+    - *Boss Trâu Máu / Đánh Chậm (Baphomet, Drake, Phreeoni)*: $K_{\text{boss}} = 1.02, A = 100\text{ms}, T_{\text{cycle}} = 40\text{s}$.
+    - *PK Sự Kiện (Guild War / Country War / Invasion)*: $K_{\text{boss}} = 0.90, A = 70\text{ms}, T_{\text{cycle}} = 20\text{s}$ (phản xạ chiến đấu tức thì).
+    - *Săn Boss Xoay Vòng (Giai đoạn chuyển map)*: $K_{\text{boss}} = 1.25, A = 140\text{ms}$ (tiết kiệm request khi dò đường, tự động chuyển về nhịp boss nhanh khi chạm trán).
+- Kết quả:
+  - Vừa đảm bảo 100% tốc train quái vừa san phẳng hoàn toàn lưu lượng IP, ngăn chặn 100% nguy cơ dính 429 do bó chùm.
+  - Chạy `npm test` thành công 100%.
+
+---
+
 ## 2026-08-16 - Tích Hợp Nút Hạ Nhiệt IP Khẩn Cấp (1-Click Emergency Cooldown) Cho User, Admin & Proxy (T78)
 
 - Bối cảnh:

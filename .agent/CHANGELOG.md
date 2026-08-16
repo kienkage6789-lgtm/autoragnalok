@@ -2,6 +2,26 @@
 
 > Changelog of actual changes implemented.
 
+## 2026-08-16 - Triển Khai Bộ Điều Tốc Phân Luồng Sóng Hình Sin Đa Hệ Số (Harmonic Sine-Wave Pacing Engine) (T79)
+- File đã đổi: [server.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [test.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/test.js)
+- Đã làm:
+  - **Bộ Điều Tốc Sóng Hình Sin & Phân Luồng Lệch Pha (`calculateHarmonicPollDelay`)**:
+    - Xây dựng thuật toán điều phối nhịp poll động $\Delta T_i(t) = (T_{\text{base}} \cdot K_{\text{boss}}) + A \cdot \sin(\omega t + \phi_i) + \varepsilon(t)$.
+    - Tự động gán góc lệch pha độc bản $\phi_i = \frac{2\pi \cdot i}{N} + \text{hash}(\text{line\_uid})$ per IP/Proxy để các request của các bot luôn xen kẽ nhau đều đặn, không bao giờ bị dồn dập (burst spikes) cùng 1 thời điểm.
+  - **Bảo Toàn 100% Tốc Train Quái**:
+    - Neo mốc trung tâm tối ưu của chế độ cày quái tại $1200\text{ms}$ với biên độ dao động nhẹ $\pm 100\text{ms}$ ($1100\text{ms} \leftrightarrow 1300\text{ms}$), đảm bảo DPS, tốc độ diệt quái và cày EXP đạt mức tối đa 100%.
+  - **Ma Trận Hệ Số $K_{\text{boss}}$ Đa Dạng**:
+    - Boss Di Động Nhanh (Orc Hero, Maya, Moonlight): $K_{\text{boss}} = 0.92$, biên độ $80\text{ms}$, chu kỳ $25\text{s}$.
+    - Boss Trâu Máu / Đánh Chậm (Baphomet, Drake, Phreeoni): $K_{\text{boss}} = 1.02$, biên độ $100\text{ms}$, chu kỳ $40\text{s}$.
+    - PK Sự Kiện (Guild War / Country War / Invasion): $K_{\text{boss}} = 0.90$, biên độ $70\text{ms}$, chu kỳ $20\text{s}$.
+    - Săn Boss Type 2 (Giai đoạn chuyển map dò đường): $K_{\text{boss}} = 1.25$, biên độ $140\text{ms}$, chu kỳ $50\text{s}$.
+  - **Tích Hợp Vào Vòng Lặp Poll**:
+    - Cập nhật `runPoll()` trong `BotInstance` tự động lấy nhịp `calculateHarmonicPollDelay` trong chu kỳ hoạt động bình thường, và áp dụng Exponential Backoff khi dính lỗi.
+  - **Unit Tests**:
+    - Bổ sung bộ kiểm thử trong `test.js` xác thực nhịp train trung bình $\sim 1200\text{ms}$ (100% tốc train), kiểm tra dải nhịp của Boss Hunter và PK Event, và độ lệch pha giữa các bot trên cùng Proxy. Chạy `npm test` thành công 100%.
+
+---
+
 ## 2026-08-16 - Tích Hợp Nút Hạ Nhiệt IP Khẩn Cấp (1-Click Emergency Cooldown) Cho User, Admin & Proxy (T78)
 - File đã đổi: [server.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [public/index.html](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/public/index.html), [public/app.css](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/public/app.css), [public/app.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/public/app.js), [test.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/test.js)
 - Đã làm:

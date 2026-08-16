@@ -3,6 +3,17 @@
 > Work Breakdown Structure. Update task states immediately upon changes.
 > Statuses: todo | doing | blocked | review | done
 
+### [x] T79 - Triển Khai Bộ Điều Tốc Phân Luồng Sóng Hình Sin Đa Hệ Số (Harmonic Sine-Wave Pacing Engine)
+- Description: Tích hợp thuật toán điều phối nhịp gửi request theo sóng hình Sin kết hợp góc lệch pha per IP/Proxy, đa hệ số K_boss theo từng loại boss/trạng thái chiến đấu, đảm bảo 100% tốc độ train quái và triệt tiêu va chạm gây lỗi 429.
+- Files related: `server.js`, `test.js`
+- Acceptance criteria:
+  - [x] Backend: Xây dựng hàm `calculateHarmonicPollDelay(bot)` tính toán nhịp trễ dao động hình Sin với góc lệch pha $\phi_i = \frac{2\pi \cdot i}{N}$ per Proxy/Dispatcher, hệ số $K_{\text{boss}}$ theo loại boss/trạng thái chiến đấu, và vi nhiễu $\varepsilon(t)$.
+  - [x] Backend: Tích hợp hàm vào vòng lặp `runPoll()` của `BotInstance` trong `server.js` đảm bảo tốc train duy trì quanh mốc $1100\text{ms} - 1300\text{ms}$ khi cày quái.
+  - [x] Unit Test: Viết test cases trong `test.js` kiểm tra độ phân kỳ lệch pha giữa các bot cùng IP, kiểm tra nhịp trung bình bảo toàn tốc train $100\%$, và hệ số $K_{\text{boss}}$ cho Boss và PK Event. Chạy `npm test` thành công 100%.
+- Status: done
+
+---
+
 ### [x] T78 - Tích Hợp Nút Hạ Nhiệt IP Khẩn Cấp (1-Click Emergency Cooldown) Cho User & Admin Support
 - Description: Bổ sung tính năng tạm dừng gửi request (hạ nhiệt IP 120s) có đồng hồ đếm ngược trực tiếp và tự động kích hoạt lại bot. Cho phép người dùng tự hạ nhiệt bot của mình, và cho phép Admin hạ nhiệt toàn hệ thống hoặc hạ nhiệt riêng cho từng User.
 - Files related: `server.js`, `public/index.html`, `public/app.css`, `public/app.js`, `test.js`
