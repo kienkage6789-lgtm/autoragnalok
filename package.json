@@ -4,7 +4,7 @@
   "description": "Multi-account headless manager for Ragnalok Online",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
+    "start": "node --optimize-for-size --max-old-space-size=300 server.js",
     "test": "node test.js"
   },
   "dependencies": {

@@ -3,6 +3,31 @@
 > Work Breakdown Structure. Update task states immediately upon changes.
 > Statuses: todo | doing | blocked | review | done
 
+### [x] T78 - Sao Chép 100% Giao Diện Tab Vũ Khí In-Game Vào Bảng Điều Khiển (Dark Mode)
+- Description: Đưa nguyên bản 100% cấu trúc HTML/CSS và tương tác từ file game gốc `xhrpg_canvas.js` (`renderGuns`, `_renderModulePanel`, `_modSocketStrip`, `_cardPickerHtml`) vào Tab Vũ Khí trên Dashboard với giao diện Space-Dark Glassmorphism: Switcher chuyển đổi vũ khí (Dao găm / Dao dài), 8 phân loại vũ khí & trang bị, hệ thống khe Module kèm màu phẩm cấp, Cường hóa Kim Cương (+0..+15), Khảm/Gỡ Thẻ bài trực tiếp trong từng ô slot, Quản lý đạn T1–T6 kèm nút BẬT/TẮT từng Tier cho cả Dao Găm, Dao Dài và Pháo Tháp (Turret), và Kho 30 ô Module (lưới 5 cột).
+- Files related: `server.js`, `public/app.js`, `public/app.css`, `public/index.html`, `test.js`
+- Acceptance criteria:
+  - [x] Backend (`server.js`): Mở rộng `COLD_FIELDS` lưu giữ các trường module, vũ khí, đạn dược, và các bitmask bật tắt tier (`pistol_tier_enabled`, `sniper_tier_enabled`, `turret_tier_enabled`); hỗ trợ đầy đủ các action in-game (`card_socket`, `card_unsocket`, `module_enhance`, `module_equip`, `module_unequip`, `module_discard_multi`, `gun_use`, `auto_refill`, `set_ammo_tier_enabled`) kèm cập nhật state tức thì.
+  - [x] Frontend (`public/app.js`): Tái hiện 100% layout in-game: `_renderInGameModulePanel`, dải khảm thẻ trực tiếp `_renderModSocketStripHtml`, bộ chọn thẻ trực tiếp `_renderCardPickerHtml`, thanh quản lý đạn 6 Tier đa tầng `_renderAmmoTierStripHtml` có nút BẬT/TẮT và điều kiện mở khóa Phi Thuyền cho Dao Găm, Dao Dài và Pháo Tháp, và kho 30 ô module lưới 5 cột.
+  - [x] Frontend (`public/app.css`): Đồng bộ toàn bộ palette màu Space-Dark Glassmorphism sang trọng, viền phát sáng theo 7 phẩm cấp độ hiếm.
+  - [x] Unit Test (`test.js`): Bổ sung test case kiểm tra công thức nâng cấp, tính toán option module, khảm/gỡ thẻ bài và duy trì `COLD_FIELDS`. Chạy test 100% Passed.
+- Status: done
+
+---
+
+### [x] T77 - Tối Ưu Tốc Độ Polling Cực Đại (500ms / 600ms) Cho Thiết Lập 1 Proxy / 1 Tài Khoản
+- Description: Loại bỏ throttler kìm hãm tốc độ (900ms -> 350ms), hạ trần delay khi Săn Boss MVP và PK Event (1200ms -> 500ms), mở rộng tùy chọn nhịp 600ms và 500ms trên UI & API, tối ưu dải Jitter và sàn thời gian cứng cho hệ thống chạy 1 Proxy/Acc.
+- Files related: `server.js`, `public/app.js`, `test.js`
+- Acceptance criteria:
+  - [x] Backend: Giảm `minInterval` trong `sendRequest` từ 900ms xuống 350ms (game) và 150ms (actions).
+  - [x] Backend: Hạ trần delay Snipe Boss và PK Event từ 1200ms xuống 500ms.
+  - [x] Backend: Thu hẹp dải jitter xuống ±30ms cho nhịp <= 600ms và hạ sàn cứng xuống 380ms.
+  - [x] Frontend: Thêm các tùy chọn `600ms` và `500ms` trên dropdown Admin User Modal và Cài đặt Bot Card.
+  - [x] Unit Test: Viết test case và chạy `npm test` thành công 100%.
+- Status: done
+
+---
+
 ### [x] T76 - Tái cấu trúc Tab Tiềm Năng & Kỹ Năng
 - Description: Dựng lại tab tiềm năng kỹ năng thành đúng tab chỉ số và kỹ năng trong game, yêu cầu phải 100% chức năng và nội dung và chức năng giống 90%. yêu cầu việt hóa 100%.
 - Files related: `server.js`, `public/app.js`, `public/app.css`

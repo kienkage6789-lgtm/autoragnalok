@@ -2,6 +2,28 @@
 
 > Changelog of actual changes implemented.
 
+## 2026-08-16 - Sao Chép 100% Giao Diện Tab Vũ Khí In-Game Vào Bảng Điều Khiển (Dark Mode) (T78)
+- File đã đổi: [server.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [public/app.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/public/app.js), [public/app.css](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/public/app.css), [public/index.html](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/public/index.html), [test.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/test.js).
+- Đã làm:
+  - **Sao Chép 100% Cấu Trúc HTML/CSS Từ Game Client (`xhrpg_canvas.js`)**:
+    - **Thanh Header Vũ Khí & Nút Chuyển Đổi**: Thống kê ATK, Tầm ném (+ thưởng DEX), Sức chứa đạn, nút `🔄 Đổi sang Dao Găm / Dao Dài` (`action: 'gun_use'`).
+    - **Thanh Đạn 6 Tier**: 6 ô đạn T1–T6 kèm icon phẩm chất (`🔵`, `🟢`, `🟣`, `🟡`, `🔴`, `⭐`), số lượng tồn, hệ số DMG, và tùy chọn `Tự nạp đạn (Auto Refill)` (`action: 'auto_refill'`).
+    - **Khung Module Đang Trang Bị (`_renderInGameModulePanel`)**: Tái hiện toàn bộ bố cục thẻ slot, nút `Tháo` (`action: 'module_unequip'`), nút `+Cường Hóa` (`action: 'module_enhance'`) hiển thị tỷ lệ thành công `%` và chi phí Kim cương + Vàng.
+    - **Dải Khảm Thẻ Trực Tiếp (`_renderModSocketStripHtml`) & Bộ Chọn Thẻ (`_renderCardPickerHtml`)**: Khảm và gỡ thẻ trực tiếp ngay bên trong thẻ Module không cần chuyển trang. Nút `↩️ Gỡ Thẻ` hoàn thẻ về kho (`action: 'card_unsocket'`).
+    - **Kho Module 30 Ô (Lưới 5 Cột)**: Hiển thị module theo thứ tự ưu tiên Slot -> Rarity -> Plus, hiển thị badge `🎴X` thẻ cắm bên trong, 1-click lắp trang bị (`action: 'module_equip'`), chế độ Quản lý `🗑️ Quản lý` và phá hủy hàng loạt (`action: 'module_discard_multi'`).
+  - **Đồng Bộ Space-Dark Glassmorphism**: Toàn bộ các thẻ, ô cắm và bảng chọn đều được tinh chỉnh sang giao diện nền tối sang trọng, viền phát sáng theo 7 phẩm cấp độ hiếm.
+  - **Backend API & Optimistic State Update**: Forward đầy đủ tất cả các action in-game (`gun_use`, `auto_refill`, `set_ammo_tier_enabled`, `card_socket`, `card_unsocket`, `module_equip`, `module_unequip`, `module_enhance`, `module_discard_multi`) tới endpoint PHP của game, cập nhật tức thì state người chơi.
+  - **Unit Tests**: Chạy `node test.js` vượt qua 100% các bài kiểm tra logic và bảo toàn `COLD_FIELDS`.
+
+## 2026-08-16 - Tối Ưu Tốc Độ Polling Cực Đại (500ms / 600ms) Cho Thiết Lập 1 Proxy / Acc
+- File đã đổi: [server.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [public/app.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/public/app.js), [test.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/test.js).
+- Đã làm:
+  - **Mở khóa Throttler Request**: Giảm `minInterval` của `xhrpg_game.php` từ 900ms xuống 350ms, các action API (`xhrpg_upgrade.php`, `xhrpg_warp.php`...) từ 600ms xuống 150ms để loại bỏ hoàn toàn độ trễ nhân tạo.
+  - **Bổ sung tùy chọn nhịp Siêu Tốc 600ms & Cực Đại 500ms**: Cập nhật dropdown Quản lý User (Admin Modal) và dropdown Cài đặt từng Bot Card.
+  - **Nâng cấp tốc độ Săn Boss & PK Chiến**: Giảm mức trần delay khi nhắm Boss Snipe hoặc trong sự kiện PK (GW/CW) từ 1200ms xuống 500ms.
+  - **Tối ưu dải Jitter & Hạ sàn cứng**: Thu hẹp dải jitter xuống ±30ms ở nhịp <= 600ms và hạ sàn cứng từ 500ms xuống 380ms.
+  - **Bổ sung Unit Tests**: Viết thêm các test case kiểm thử phân giải nhịp 500ms/600ms và trần Boss/PK 500ms. Toàn bộ test suite chạy thành công 100%.
+
 ## 2026-08-15 - Tái Cấu Trúc Tab STAT & Kỹ Năng (Clone 100% Giao Diện In-Game & Đồng Bộ Dark Theme) (T76)
 - File đã đổi: [public/app.js](file:///c:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/public/app.js), [public/app.css](file:///c:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/public/app.css)
 - Đã làm:

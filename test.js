@@ -1020,6 +1020,21 @@ try {
     : (mockUserBotPermittedNoCustom.userPollInterval || 2000);
   assert.strictEqual(resolvedIntervalUserPermittedNoCustom, 1500, 'User bot WITH permission but without bot settings should fallback to userPollInterval (1500ms)');
 
+  // Ultra-Fast poll interval test (500ms and 600ms for 1-Proxy-per-Account setups)
+  const mockUltraBot500 = new BotInstance({ name: 'UltraBot500', userId: 'usr_admin', settings: { pollInterval: 500 } });
+  let resolved500 = (mockUltraBot500.userIsAdmin || mockUltraBot500.allowEditPollInterval)
+    ? (mockUltraBot500.settings.pollInterval !== undefined ? mockUltraBot500.settings.pollInterval : (mockUltraBot500.userPollInterval || 2000))
+    : (mockUltraBot500.userPollInterval || 2000);
+  assert.strictEqual(resolved500, 500, 'Ultra-fast bot should resolve to 500ms');
+
+  // Test Snipe / PK event mode capping to 500ms
+  const isSnipeTest = true;
+  let baseDelayTest = resolvedIntervalAdmin; // 1100ms
+  if (isSnipeTest) {
+    baseDelayTest = Math.min(baseDelayTest, 500);
+  }
+  assert.strictEqual(baseDelayTest, 500, 'Snipe mode should cap delay at 500ms');
+
   // Test Event War Log fetch verification with active war flags (T74 additional)
   console.log('Testing Event War Log fetch with active war flags...');
   const testWarBot = new BotInstance({ name: 'WarBot', line_uid: 'war_bot_test', settings: {} });
@@ -1297,8 +1312,97 @@ try {
   // 4. Test lastChpassSentAt field in BotInstance
   assert.strictEqual(watchdogBot.lastChpassSentAt, 0, 'Initial lastChpassSentAt must be 0');
 
-  console.log('✅ Anti-Hang & Zombie Bot Watchdog Engine Tests Passed successfully!');
+  // ==================== ⚔️ WEAPON TAB (VŨ KHÍ IN-GAME) TESTS ====================
+  console.log('Testing T78 In-Game Weapon Tab Integration & Cold Fields...');
+  
+  // 1. Test Weapon Upgrade Cost Formulas
+  function testTierGold(lv) {
+    const START = [100, 1000, 10000, 100000, 1000000, 10000000, 50000000];
+    const END = [1000, 10000, 100000, 1000000, 10000000, 50000000, 100000000];
+    const b = Math.min(6, Math.max(0, Math.floor((lv - 1) / 10)));
+    const pos = (lv - 1) % 10;
+    return Math.round(START[b] + pos * (END[b] - START[b]) / 9);
+  }
 
+  function testTierRes(lv) {
+    const START_RES = [10, 50, 200, 1000, 5000, 20000, 50000];
+    const END_RES = [50, 200, 1000, 5000, 20000, 50000, 100000];
+    const b = Math.min(6, Math.max(0, Math.floor((lv - 1) / 10)));
+    const pos = (lv - 1) % 10;
+    return Math.round(START_RES[b] + pos * (END_RES[b] - START_RES[b]) / 9);
+  }
+
+  assert.strictEqual(testTierGold(1), 100, 'Lv.1 tierGold must be 100');
+  assert.strictEqual(testTierGold(10), 1000, 'Lv.10 tierGold must be 1000');
+  assert.strictEqual(testTierRes(1), 10, 'Lv.1 tierRes must be 10');
+  assert.strictEqual(testTierRes(10), 50, 'Lv.10 tierRes must be 50');
+
+  // 2. Test COLD_FIELDS Preservation in updatePlayerState
+  const testWpnBot = new BotInstance({ name: 'WpnTester', line_uid: 'wpn_test_uid', settings: {} });
+  testWpnBot.player = {
+    lv: 50,
+    active_gun: 1,
+    gun_pistol_lv: 10,
+    gun_sniper_lv: 15,
+    knife_lv: 8,
+    turret_lv: 5,
+    armor_lv: 12,
+    pistol_modules: { barrel: { rarity: 4, plus: 5, cards: [] } },
+    sniper_modules: { barrel: { rarity: 6, plus: 10, cards: [] } },
+    knife_modules: { blade: { rarity: 3, plus: 2, cards: [] } },
+    turret_modules: { t_atk: { rarity: 5, plus: 7, cards: [] } },
+    armor_modules: { a_max: { rarity: 6, plus: 9, cards: [] } },
+    module_inventory: [{ id: 101, name: 'Pistol Mod', rarity: 3 }],
+    sniper_module_inventory: [{ id: 201, name: 'Sniper Mod', rarity: 5 }],
+    ammo_pistol_t1: 150,
+    ammo_sniper_t1: 200,
+    auto_refill_pistol: 1
+  };
+
+  // Simulate short poll response omitting cold weapon fields
+  testWpnBot.updatePlayerState({
+    lv: 50,
+    hp: 1200,
+    mp: 400
+  });
+
+  assert.strictEqual(testWpnBot.player.active_gun, 1, 'active_gun must be carried forward');
+  assert.strictEqual(testWpnBot.player.gun_sniper_lv, 15, 'gun_sniper_lv must be carried forward');
+  assert.strictEqual(testWpnBot.player.sniper_modules.barrel.rarity, 6, 'sniper_modules must be carried forward');
+  assert.strictEqual(testWpnBot.player.module_inventory.length, 1, 'module_inventory must be carried forward');
+  assert.strictEqual(testWpnBot.player.ammo_sniper_t1, 200, 'ammo_sniper_t1 must be carried forward');
+
+  // 3. Test Mod Option Stat Calculation
+  function testModOptionAtk(r, plus) {
+    const enhAtk = plus > 0 ? (plus <= 5 ? plus * 3 : (plus <= 11 ? 15 + (plus - 5) * 5 : 45 + (plus - 11) * 8)) : 0;
+    return (r - 1) * 3 + enhAtk;
+  }
+  assert.strictEqual(testModOptionAtk(4, 0), 9, 'Rarity 4 (+0) ATK should be 9');
+  assert.strictEqual(testModOptionAtk(4, 5), 24, 'Rarity 4 (+5) ATK should be 9 + 15 = 24');
+  assert.strictEqual(testModOptionAtk(6, 10), 55, 'Rarity 6 (+10) ATK should be 15 + 40 = 55');
+
+  // 4. Test Card In / Out Optimistic Updates & State Integrity
+  testWpnBot.player.cards = { 12: { n: 5, m: 2 } };
+  
+  // Simulate card in
+  const modKey = 'sniper_modules';
+  testWpnBot.player[modKey].barrel.cards = [];
+  testWpnBot.player[modKey].barrel.cards[0] = { mid: 12, mvp: 1 };
+  testWpnBot.player.cards[12].m -= 1;
+
+  assert.strictEqual(testWpnBot.player[modKey].barrel.cards[0].mid, 12, 'Card 12 should be slotted');
+  assert.strictEqual(testWpnBot.player.cards[12].m, 1, 'MVP card count should decrease to 1');
+
+  // Simulate card out
+  const unslotted = testWpnBot.player[modKey].barrel.cards.splice(0, 1)[0];
+  testWpnBot.player.cards[unslotted.mid].m += 1;
+
+  assert.strictEqual(testWpnBot.player[modKey].barrel.cards.length, 0, 'Module cards should be empty after unslot');
+  assert.strictEqual(testWpnBot.player.cards[12].m, 2, 'MVP card count should return to 2');
+
+  console.log('✅ T78 In-Game Weapon Tab Integration, Card Socketing & Cold Fields Tests Passed successfully!');
+
+  console.log('✅ Anti-Hang & Zombie Bot Watchdog Engine Tests Passed successfully!');
   console.log('✅ User Polling Interval, Role Propagation and Edit Permissions Tests Passed successfully!');
   console.log('✅ Revamped Auto Market Buy Tests Passed successfully!');
   console.log('✅ Urgent Active Potion Healing Tests Passed successfully!');

@@ -3223,3 +3223,568 @@ input:checked + .slider:before {
   font-size: 11px;
   outline: none;
 }
+
+/* ==================== ⚔️ WEAPON TAB (VŨ KHÍ IN-GAME) STYLES ==================== */
+.weapon-hero-card {
+  background: linear-gradient(135deg, rgba(30, 27, 75, 0.6) 0%, rgba(15, 23, 42, 0.75) 100%);
+  border: 1px solid rgba(167, 139, 250, 0.25);
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+}
+
+.weapon-hero-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.weapon-active-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+  border: 1px solid rgba(52, 211, 153, 0.3);
+  padding: 3px 8px;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.btn-switch-weapon {
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  color: #ffffff;
+  border: none;
+  border-radius: 8px;
+  padding: 5px 12px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.4);
+  transition: all 0.2s ease;
+}
+
+.btn-switch-weapon:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.6);
+}
+
+.weapon-stats-strip {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.weapon-stat-box {
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  padding: 6px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.weapon-stat-lbl {
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.weapon-stat-val {
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: #f8fafc;
+}
+
+.weapon-help-box {
+  font-size: 0.72rem;
+  color: #cbd5e1;
+  line-height: 1.4;
+  background: rgba(0, 0, 0, 0.25);
+  border-left: 3px solid #a78bfa;
+  padding: 6px 10px;
+  border-radius: 0 6px 6px 0;
+  margin-top: 6px;
+}
+
+/* Weapon Subtabs Navigation */
+.weapon-nav-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  padding-bottom: 6px;
+  overflow-x: auto;
+}
+
+.weapon-nav-btn {
+  background: rgba(15, 23, 42, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+  font-weight: 600;
+  padding: 5px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+}
+
+.weapon-nav-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #f8fafc;
+}
+
+.weapon-nav-btn.active {
+  background: rgba(124, 58, 237, 0.25);
+  border-color: rgba(167, 139, 250, 0.5);
+  color: #c4b5fd;
+  box-shadow: 0 0 10px rgba(124, 58, 237, 0.2);
+}
+
+/* Weapon Upgrade Header Block */
+.weapon-level-card {
+  background: rgba(15, 23, 42, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.weapon-level-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.weapon-level-title {
+  font-size: 0.88rem;
+  font-weight: 800;
+  color: #f8fafc;
+}
+
+.weapon-level-desc {
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+}
+
+.btn-weapon-up {
+  background: linear-gradient(135deg, #10b981, #059669);
+  color: #ffffff;
+  border: none;
+  border-radius: 8px;
+  padding: 6px 14px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.35);
+  transition: all 0.15s ease;
+}
+
+.btn-weapon-up:hover:not(:disabled) {
+  transform: translateY(-1px);
+  background: linear-gradient(135deg, #34d399, #10b981);
+}
+
+.btn-weapon-up:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Module Slots Grid */
+.module-slots-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.module-slot-card {
+  background: rgba(15, 23, 42, 0.6);
+  border: 1.5px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 6px;
+  min-height: 110px;
+  transition: all 0.2s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.module-slot-card:hover {
+  border-color: rgba(167, 139, 250, 0.4);
+}
+
+.module-slot-card.empty {
+  border: 1.5px dashed rgba(255, 255, 255, 0.15);
+  background: rgba(0, 0, 0, 0.2);
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.module-slot-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+}
+
+.module-slot-title {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #f8fafc;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.module-plus-badge {
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.15);
+  border: 1px solid rgba(251, 191, 36, 0.3);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+.module-opt-text {
+  font-size: 0.72rem;
+  color: #38bdf8;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.module-cards-socket-row {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  margin-top: 2px;
+}
+
+.module-socket-dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.6rem;
+}
+
+.module-socket-dot.filled {
+  border-color: #f43f5e;
+  background: rgba(244, 63, 94, 0.2);
+}
+
+.module-slot-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.btn-mod-action {
+  flex: 1;
+  padding: 3px 6px;
+  border-radius: 5px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+  color: #cbd5e1;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  text-align: center;
+}
+
+.btn-mod-action:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.15);
+  color: #ffffff;
+}
+
+.btn-mod-enhance {
+  background: rgba(234, 179, 8, 0.15);
+  border-color: rgba(234, 179, 8, 0.35);
+  color: #fde047;
+}
+
+.btn-mod-enhance:hover:not(:disabled) {
+  background: rgba(234, 179, 8, 0.3);
+  color: #ffffff;
+}
+
+.btn-mod-socket {
+  background: rgba(225, 29, 72, 0.15);
+  border-color: rgba(244, 63, 94, 0.35);
+  color: #fda4af;
+}
+
+.btn-mod-socket:hover:not(:disabled) {
+  background: rgba(225, 29, 72, 0.3);
+  color: #ffffff;
+}
+
+/* Ammo Management Box */
+.ammo-box {
+  background: rgba(15, 23, 42, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+}
+
+.ammo-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.ammo-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+  gap: 6px;
+}
+
+.ammo-tier-card {
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  padding: 5px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: center;
+}
+
+.ammo-tier-lbl {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: #a5b4fc;
+}
+
+.ammo-tier-val {
+  font-size: 0.82rem;
+  font-weight: 800;
+  color: #f8fafc;
+}
+
+/* Module Inventory Section */
+.module-inv-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.module-inv-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 8px;
+  max-height: 380px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.module-inv-card {
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 6px;
+  box-sizing: border-box;
+  transition: all 0.15s ease;
+}
+
+.module-inv-card:hover {
+  transform: translateY(-1px);
+  border-color: rgba(167, 139, 250, 0.35);
+}
+
+/* Rarity Colors */
+.rarity-1 { border-color: #9ca3af !important; }
+.rarity-2 { border-color: #22c55e !important; box-shadow: inset 0 0 6px rgba(34, 197, 94, 0.1); }
+.rarity-3 { border-color: #3b82f6 !important; box-shadow: inset 0 0 6px rgba(59, 130, 246, 0.15); }
+.rarity-4 { border-color: #a855f7 !important; box-shadow: inset 0 0 8px rgba(168, 85, 247, 0.2); }
+.rarity-5 { border-color: #ec4899 !important; box-shadow: inset 0 0 8px rgba(236, 72, 153, 0.2); }
+.rarity-6 { border-color: #f59e0b !important; box-shadow: inset 0 0 10px rgba(245, 158, 11, 0.25); }
+.rarity-7 { border-color: #ef4444 !important; box-shadow: inset 0 0 12px rgba(239, 68, 68, 0.3); }
+
+/* Slotted Cards List on Module */
+.slotted-cards-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 6px 0;
+}
+
+.slotted-card-pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 0.72rem;
+  transition: all 0.15s ease;
+}
+
+.slotted-card-pill:hover {
+  background: rgba(0, 0, 0, 0.6);
+  border-color: rgba(167, 139, 250, 0.4);
+}
+
+.slotted-card-pill.mvp {
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.2), rgba(245, 158, 11, 0.15));
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.15);
+}
+
+.slotted-card-icon {
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.slotted-card-info {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.slotted-card-name {
+  font-weight: 700;
+  color: #f8fafc;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.slotted-card-name small {
+  color: #94a3b8;
+  font-size: 0.65rem;
+  font-weight: normal;
+}
+
+.slotted-card-bonus {
+  font-size: 0.68rem;
+  color: #38bdf8;
+  font-weight: 600;
+}
+
+.slotted-card-empty-btn {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px dashed rgba(255, 255, 255, 0.18);
+  border-radius: 6px;
+  padding: 4px 8px;
+  color: #94a3b8;
+  font-size: 0.7rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  transition: all 0.15s ease;
+}
+
+.slotted-card-empty-btn:hover {
+  background: rgba(99, 102, 241, 0.15);
+  border-color: #818cf8;
+  color: #c7d2fe;
+}
+
+/* Sockets Modal Styles */
+.socket-holes-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.socket-hole-card {
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.socket-hole-card.active-target {
+  border-color: #8b5cf6;
+  background: rgba(139, 92, 246, 0.12);
+  box-shadow: 0 0 10px rgba(139, 92, 246, 0.25);
+}
+
+.socket-picker-card {
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.socket-picker-card:hover {
+  border-color: #8b5cf6;
+  background: rgba(30, 41, 59, 0.8);
+  transform: translateY(-2px);
+}
+
+.socket-picker-card.mvp {
+  border-color: rgba(245, 158, 11, 0.4);
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.15), rgba(245, 158, 11, 0.1));
+}
+
+@media (max-width: 640px) {
+  .weapon-stats-strip {
+    grid-template-columns: 1fr;
+  }
+  .module-slots-grid {
+    grid-template-columns: 1fr;
+  }
+  .module-inv-grid {
+    grid-template-columns: 1fr;
+  }
+  .socket-holes-grid {
+    grid-template-columns: 1fr;
+  }
+}
+

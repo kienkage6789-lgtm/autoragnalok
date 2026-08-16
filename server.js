@@ -68,11 +68,11 @@ class ProxyPool {
     this._assignments = {}; // line_uid -> proxy_id | 'direct'
     this._agents = {};      // proxy_id -> ProxyAgent instance
     this._directAgent = new Agent({
-      connect: { timeout: 5000 }, // Giảm xuống 5s kết nối
-      keepAliveTimeout: 10000,     // Giảm xuống 10s để tránh ECONNRESET do máy chủ đóng trước
+      connect: { timeout: 5000 },
+      keepAliveTimeout: 10000,
       keepAliveMaxTimeout: 30000,
       pipelining: 1,
-      connections: 100,            // Tăng số lượng kết nối tối đa giảm nghẽn
+      connections: 4,              // Giảm từ 100 xuống 4 để tiết kiệm RAM tối đa
     });
     this._load();
 
@@ -112,11 +112,11 @@ class ProxyPool {
   _createAgent(url) {
     return new ProxyAgent({
       uri: url,
-      connect: { timeout: 5000 },  // Giảm timeout kết nối
-      keepAliveTimeout: 10000,     // Giảm keepAliveTimeout tránh ECONNRESET
+      connect: { timeout: 5000 },
+      keepAliveTimeout: 10000,
       keepAliveMaxTimeout: 30000,
       pipelining: 1,
-      connections: 100,            // Tăng kết nối tối đa lên 100
+      connections: 2,              // Mỗi proxy phục vụ 1 bot, đặt 2 kết nối để tối ưu triệt để bộ nhớ RAM
     });
   }
 
@@ -1475,6 +1475,14 @@ class BotInstance {
       return;
     }
     const COLD_FIELDS = [
+      'pistol_modules','sniper_modules','knife_modules','axe_modules','armor_modules','turret_modules',
+      'robot_modules','robot_gun_modules','railgun_modules','house_modules',
+      'active_gun','gun_pistol_lv','gun_sniper_lv','knife_lv','turret_lv','armor_lv',
+      'ammo_pistol_t1','ammo_pistol_t2','ammo_pistol_t3','ammo_pistol_t4','ammo_pistol_t5','ammo_pistol_t6',
+      'ammo_sniper_t1','ammo_sniper_t2','ammo_sniper_t3','ammo_sniper_t4','ammo_sniper_t5','ammo_sniper_t6',
+      'auto_refill_pistol','auto_refill_sniper',
+      'pistol_tier_enabled','sniper_tier_enabled','turret_tier_enabled','robot_tier_enabled',
+      'ammo_pistol_tiers','ammo_sniper_tiers','ammo_turret_tiers','ammo_extra','sniper_ammo_extra',
       'module_inventory','sniper_module_inventory','knife_module_inventory','axe_module_inventory',
       'robot_module_inventory','robot_gun_module_inventory','railgun_module_inventory',
       'armor_module_inventory','house_module_inventory','turret_module_inventory',
@@ -1622,7 +1630,7 @@ class BotInstance {
       type: type.toLowerCase(),
       msg: translateThaiText(msg)
     });
-    if (this.logs.length > 200) {
+    if (this.logs.length > 50) {
       this.logs.shift();
     }
   }
@@ -1633,7 +1641,7 @@ class BotInstance {
       time: timestamp,
       msg: translateThaiText(msg)
     });
-    if (this.lootLogs.length > 200) {
+    if (this.lootLogs.length > 50) {
       this.lootLogs.shift();
     }
   }
@@ -1646,7 +1654,7 @@ class BotInstance {
       event: eventType, // 'cycle_start' | 'boss_found' | 'boss_killed' | 'map_clear' | 'map_timeout' | 'cycle_done' | 'warp'
       ...data
     });
-    if (this.mvpHuntLog.length > 100) {
+    if (this.mvpHuntLog.length > 30) {
       this.mvpHuntLog.shift();
     }
   }
@@ -2239,22 +2247,24 @@ class BotInstance {
           
           let baseDelay = userPollInterval;
           if (isSnipe || isPkEvent) {
-            baseDelay = Math.min(baseDelay, 1200);
+            baseDelay = Math.min(baseDelay, 500);
           }
 
-          // Dynamic jitter range: ±100ms for <= 1100ms, ±120ms for <= 1500ms, ±150ms for slower
-          let jitterBound = 150;
-          if (baseDelay <= 1100) {
-            jitterBound = 100;
+          // Dynamic jitter range: ±30ms for <= 600ms, ±60ms for <= 1100ms, ±100ms for <= 1500ms, ±140ms for slower
+          let jitterBound = 140;
+          if (baseDelay <= 600) {
+            jitterBound = 30;
+          } else if (baseDelay <= 1100) {
+            jitterBound = 60;
           } else if (baseDelay <= 1500) {
-            jitterBound = 120;
+            jitterBound = 100;
           }
           // Asymmetric jitter: 70% positive human/network lag, 30% slight lead
           const isPositiveSkew = Math.random() < 0.7;
           const jitterMag = Math.floor(Math.random() * jitterBound);
           const jitter = isPositiveSkew ? jitterMag : -Math.floor(jitterMag * 0.75);
           
-          this.timer = setTimeout(runPoll, Math.max(500, baseDelay + jitter));
+          this.timer = setTimeout(runPoll, Math.max(380, baseDelay + jitter));
         }
       }
     };
@@ -2284,8 +2294,8 @@ class BotInstance {
     let lastError = null;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      // Throttle requests: Đảm bảo khoảng cách tối thiểu giữa các request của bot để tránh lỗi "too_fast"
-      const minInterval = url.includes('xhrpg_game.php') ? 900 : 600;
+      // Throttle requests: Đảm bảo khoảng cách tối thiểu giữa các request của cùng 1 bot để tránh lỗi "too_fast" (350ms cho game, 150ms cho action)
+      const minInterval = url.includes('xhrpg_game.php') ? 350 : 150;
       const now = Date.now();
       const timeSinceLast = now - (this.lastRequestAt || 0);
       if (timeSinceLast < minInterval) {
@@ -3541,10 +3551,11 @@ class BotInstance {
         diffHerb = Math.max(0, (this.player.herb | 0) - (prevP.herb | 0));
       }
 
-      // Save history
+      // Save history & prune actively to maintain minimal memory
       if (pollKills > 0 || pollGold > 0 || pollExp > 0 || diffWood > 0 || diffStone > 0 || diffIron > 0 || diffCopper > 0 || diffHerb > 0) {
+        const nowMs = Date.now();
         this.combatStatsHistory.push({
-          time: Date.now(),
+          time: nowMs,
           kills: pollKills,
           gold: pollGold,
           exp: pollExp,
@@ -3554,16 +3565,26 @@ class BotInstance {
           copper: diffCopper,
           herb: diffHerb
         });
+        const cutoff = nowMs - 300000;
+        while (this.combatStatsHistory.length > 0 && this.combatStatsHistory[0].time < cutoff) {
+          this.combatStatsHistory.shift();
+        }
+        if (this.combatStatsHistory.length > 100) {
+          this.combatStatsHistory.shift();
+        }
       }
 
-      const filtered = d.events.filter(e =>
-        e.type !== 'beam' && e.type !== 'explosion' && e.type !== 'orion' && e.type !== 'cannon' &&
-        e.type !== 'lockon' && e.type !== 'tri_knife' && e.type !== 'shock_ring' && e.type !== 'sword_skill' &&
-        e.type !== 'arrow' && e.type !== 'mon_atk' &&
-        !(e.type === 'hit' && !(e.icon && e.icon.startsWith('✨')))
-      );
-      
-      filtered.forEach(e => {
+      // Zero-allocation loop for event parsing
+      const events = d.events || [];
+      for (let i = 0; i < events.length; i++) {
+        const e = events[i];
+        if (e.type === 'beam' || e.type === 'explosion' || e.type === 'orion' || e.type === 'cannon' ||
+            e.type === 'lockon' || e.type === 'tri_knife' || e.type === 'shock_ring' || e.type === 'sword_skill' ||
+            e.type === 'arrow' || e.type === 'mon_atk' ||
+            (e.type === 'hit' && !(e.icon && e.icon.startsWith('✨')))) {
+          continue;
+        }
+
         if (e.msg) {
           // Clean HTML tags from messages
           const cleanMsg = e.msg.replace(/<[^>]*>/g, '');
@@ -3580,7 +3601,7 @@ class BotInstance {
             this.addLootLog(cleanMsg);
           }
         }
-      });
+      }
     }
 
     // Execute automation
@@ -4873,7 +4894,7 @@ app.put('/api/admin/users/:userId', requireAdmin, (req, res) => {
 
   if (pollInterval !== undefined) {
     const parsed = parseInt(pollInterval);
-    if (!isNaN(parsed) && parsed >= 500) {
+    if (!isNaN(parsed) && parsed >= 380) {
       users[index].pollInterval = parsed;
     }
   }
@@ -7226,6 +7247,56 @@ app.post('/api/accounts/:line_uid/action', requireAuth, async (req, res) => {
       }
     }
 
+    // Normalize payload & map to 100% In-Game Actions
+    if (action === 'gun_use' || action === 'switch_gun') {
+      url = 'https://ragnalok.online/human/xhrpg_canvas.php';
+      payload.action = 'gun_use';
+      payload.gun_type = (payload.gun_type === 'sniper' || payload.gun_type === 1 || payload.gun_type === '1') ? 1 : 0;
+    } else if (action === 'auto_refill' || action === 'toggle_auto_refill') {
+      url = 'https://ragnalok.online/human/xhrpg_canvas.php';
+      payload.action = 'auto_refill';
+      payload.gun_type = (payload.gun_type === 'sniper' || payload.gun_type === 1 || payload.gun_type === '1' || param === 'sniper') ? 1 : 0;
+    } else if (action === 'set_ammo_tier_enabled') {
+      url = 'https://ragnalok.online/human/xhrpg_upgrade.php';
+      payload.action = 'set_ammo_tier_enabled';
+      payload.gun = (payload.gun === 'sniper' || payload.gun === 'turret' || payload.gun === 'robot') ? payload.gun : 'pistol';
+      payload.tier = Number(payload.tier || 1);
+      payload.on = payload.on ? 1 : 0;
+    } else if (action === 'module_discard_multi') {
+      payload.action = 'module_discard_multi';
+      payload.weapon = (payload.weapon === 'sniper'||payload.weapon === 'knife'||payload.weapon === 'axe'||payload.weapon === 'robot'||payload.weapon === 'robot_gun'||payload.weapon === 'railgun'||payload.weapon === 'armor'||payload.weapon === 'house'||payload.weapon === 'turret') ? payload.weapon : 'pistol';
+      let selArr = payload.indices || payload.sel || [];
+      if (typeof selArr === 'string') {
+        try { selArr = JSON.parse(selArr); } catch(e) { selArr = []; }
+      }
+      payload.sel = selArr;
+    } else if (action === 'card_socket' || action === 'module_card_in') {
+      payload.action = 'card_socket';
+      payload.weapon = (payload.weapon === 'sniper'||payload.weapon === 'knife'||payload.weapon === 'axe'||payload.weapon === 'robot'||payload.weapon === 'robot_gun'||payload.weapon === 'railgun'||payload.weapon === 'armor'||payload.weapon === 'house'||payload.weapon === 'turret') ? payload.weapon : 'pistol';
+      payload.slot = payload.slot;
+      payload.mid = Number(payload.mid || payload.card_id || payload.cardId);
+      payload.mvp = (payload.mvp !== undefined ? payload.mvp : (payload.is_mvp ? 1 : 0)) ? 1 : 0;
+    } else if (action === 'card_unsocket' || action === 'module_card_out') {
+      payload.action = 'card_unsocket';
+      payload.weapon = (payload.weapon === 'sniper'||payload.weapon === 'knife'||payload.weapon === 'axe'||payload.weapon === 'robot'||payload.weapon === 'robot_gun'||payload.weapon === 'railgun'||payload.weapon === 'armor'||payload.weapon === 'house'||payload.weapon === 'turret') ? payload.weapon : 'pistol';
+      payload.slot = payload.slot;
+      payload.sidx = Number(payload.sidx !== undefined ? payload.sidx : (payload.socket_idx !== undefined ? payload.socket_idx : (payload.socket || 0)));
+      payload.pay = payload.pay || payload.pay_type || 'gold';
+    } else if (action === 'module_enhance' || action === 'module_plus') {
+      payload.action = 'module_enhance';
+      payload.weapon = (payload.weapon === 'sniper'||payload.weapon === 'knife'||payload.weapon === 'axe'||payload.weapon === 'robot'||payload.weapon === 'robot_gun'||payload.weapon === 'railgun'||payload.weapon === 'armor'||payload.weapon === 'house'||payload.weapon === 'turret') ? payload.weapon : 'pistol';
+      payload.slot = payload.slot;
+    } else if (action === 'module_equip') {
+      payload.action = 'module_equip';
+      payload.weapon = (payload.weapon === 'sniper'||payload.weapon === 'knife'||payload.weapon === 'axe'||payload.weapon === 'robot'||payload.weapon === 'robot_gun'||payload.weapon === 'railgun'||payload.weapon === 'armor'||payload.weapon === 'house'||payload.weapon === 'turret') ? payload.weapon : 'pistol';
+      payload.slot = payload.slot;
+      payload.idx = payload.idx !== undefined ? Number(payload.idx) : Number(payload.mod_id || 0);
+    } else if (action === 'module_unequip') {
+      payload.action = 'module_unequip';
+      payload.weapon = (payload.weapon === 'sniper'||payload.weapon === 'knife'||payload.weapon === 'axe'||payload.weapon === 'robot'||payload.weapon === 'robot_gun'||payload.weapon === 'railgun'||payload.weapon === 'armor'||payload.weapon === 'house'||payload.weapon === 'turret') ? payload.weapon : 'pistol';
+      payload.slot = payload.slot;
+    }
+
     const response = await bot.sendRequest(url, payload);
     
     // Fix: Đối với gwar_join và cwar_join, server game không trả về đối tượng player, mà chỉ trả về {ok: true, map: 4, x, y}
@@ -7250,6 +7321,95 @@ app.post('/api/accounts/:line_uid/action', requireAuth, async (req, res) => {
           saveAccounts(currentAccounts);
         }
       }
+    } else if (response && (response.ok || !response.error) && bot.player) {
+      // Optimistic state updates for module & card actions when server returns ok without full player
+      const p = bot.player;
+      const modKeyMap = {
+        pistol: 'pistol_modules', sniper: 'sniper_modules', knife: 'knife_modules',
+        axe: 'axe_modules', turret: 'turret_modules', armor: 'armor_modules',
+        robot: 'robot_modules', house: 'house_modules'
+      };
+
+      if (action === 'card_socket' || action === 'module_card_in') {
+        const cardId = Number(payload.mid || payload.card_id);
+        const socketIdx = parseInt(payload.sidx !== undefined ? payload.sidx : (payload.socket_idx || 0)) || 0;
+        const isMvp = Boolean(payload.mvp || payload.is_mvp);
+        const wpnModKey = modKeyMap[payload.weapon];
+
+        if (wpnModKey && p[wpnModKey] && payload.slot) {
+          let mods = typeof p[wpnModKey] === 'string' ? JSON.parse(p[wpnModKey] || '{}') : p[wpnModKey];
+          if (mods && mods[payload.slot]) {
+            if (!Array.isArray(mods[payload.slot].cards)) mods[payload.slot].cards = [];
+            mods[payload.slot].cards[socketIdx] = { mid: cardId, id: cardId, mvp: isMvp ? 1 : 0 };
+            p[wpnModKey] = mods;
+          }
+        }
+        // Deduct from card inventory
+        if (p.cards) {
+          let cardsObj = typeof p.cards === 'string' ? JSON.parse(p.cards || '{}') : p.cards;
+          if (cardsObj && cardsObj[cardId]) {
+            if (isMvp) cardsObj[cardId].m = Math.max(0, (cardsObj[cardId].m | 0) - 1);
+            else cardsObj[cardId].n = Math.max(0, (cardsObj[cardId].n | 0) - 1);
+            p.cards = cardsObj;
+          }
+        }
+        bot.addLog('ACTION', `🎴 Đã khảm thẻ [${cardId}] vào Lỗ #${socketIdx + 1}`);
+      } else if (action === 'card_unsocket' || action === 'module_card_out') {
+        const socketIdx = parseInt(payload.sidx !== undefined ? payload.sidx : (payload.socket_idx || 0)) || 0;
+        const wpnModKey = modKeyMap[payload.weapon];
+        let unslotted = null;
+
+        if (wpnModKey && p[wpnModKey] && payload.slot) {
+          let mods = typeof p[wpnModKey] === 'string' ? JSON.parse(p[wpnModKey] || '{}') : p[wpnModKey];
+          if (mods && mods[payload.slot] && Array.isArray(mods[payload.slot].cards)) {
+            unslotted = mods[payload.slot].cards[socketIdx];
+            mods[payload.slot].cards.splice(socketIdx, 1);
+            p[wpnModKey] = mods;
+          }
+        }
+
+        if (unslotted) {
+          const uMid = unslotted.mid || unslotted.id || unslotted;
+          let cardsObj = typeof p.cards === 'string' ? JSON.parse(p.cards || '{}') : p.cards || {};
+          if (!cardsObj[uMid]) cardsObj[uMid] = { n: 0, m: 0 };
+          if (unslotted.mvp) cardsObj[uMid].m = (cardsObj[uMid].m | 0) + 1;
+          else cardsObj[uMid].n = (cardsObj[uMid].n | 0) + 1;
+          p.cards = cardsObj;
+        }
+        bot.addLog('ACTION', `↩️ Đã gỡ thẻ khỏi Lỗ #${socketIdx + 1} hoàn trả về kho`);
+      } else if (action === 'gun_use' || action === 'switch_gun') {
+        p.active_gun = payload.gun_type;
+        bot.addLog('ACTION', `🔄 Đã chuyển sang vũ khí ${payload.gun_type === 1 ? 'Dao Dài (Sniper)' : 'Dao Găm (Pistol)'}`);
+      } else if (action === 'auto_refill' || action === 'toggle_auto_refill') {
+        if (payload.gun_type === 1) {
+          p.auto_refill_sniper = !p.auto_refill_sniper;
+        } else {
+          p.auto_refill_pistol = !p.auto_refill_pistol;
+        }
+        bot.addLog('ACTION', `🎒 Đã chuyển trạng thái Tự nạp đạn`);
+      } else if (action === 'set_ammo_tier_enabled') {
+        const t = Number(payload.tier || 1);
+        const on = Boolean(payload.on);
+        const g = payload.gun;
+        if (g === 'turret') {
+          let mask = (p.turret_tier_enabled != null && p.turret_tier_enabled !== '') ? (parseInt(p.turret_tier_enabled) || 0) : ((parseInt(p.sniper_tier_enabled) || 1) | 1);
+          if (on) mask |= (1 << (t - 1)); else mask &= ~(1 << (t - 1));
+          p.turret_tier_enabled = mask;
+          bot.addLog('ACTION', `🗼 Đã ${on ? 'bật' : 'tắt'} Đạn Pháo Tier ${t}`);
+        } else if (g === 'sniper') {
+          let mask = parseInt(p.sniper_tier_enabled ?? p.ammo_sniper_tiers ?? 1) || 1;
+          if (on) mask |= (1 << (t - 1)); else mask &= ~(1 << (t - 1));
+          p.sniper_tier_enabled = mask;
+          p.ammo_sniper_tiers = mask;
+          bot.addLog('ACTION', `🎯 Đã ${on ? 'bật' : 'tắt'} Đạn Dao Dài Tier ${t}`);
+        } else {
+          let mask = parseInt(p.pistol_tier_enabled ?? p.ammo_pistol_tiers ?? 1) || 1;
+          if (on) mask |= (1 << (t - 1)); else mask &= ~(1 << (t - 1));
+          p.pistol_tier_enabled = mask;
+          p.ammo_pistol_tiers = mask;
+          bot.addLog('ACTION', `🔪 Đã ${on ? 'bật' : 'tắt'} Đạn Dao Găm Tier ${t}`);
+        }
+      }
     }
     
     if (response.msg) {
@@ -7258,7 +7418,7 @@ app.post('/api/accounts/:line_uid/action', requireAuth, async (req, res) => {
       bot.addLog('ERROR', `Thao tác thất bại: ${response.error}`);
     }
 
-    res.json(response);
+    res.json(response || { ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -699,9 +699,54 @@
           <span class="spinner" id="mkt-sell-spinner"></span> 🏷️ Đăng Bán Ngay
         </button>
       </div>
+  <!-- Modal Khảm / Gỡ Thẻ Bài vào Module -->
+  <div class="modal-backdrop" id="module-socket-modal" style="display:none;">
+    <div class="modal-card" style="max-width: 580px; max-height:92vh; display:flex; flex-direction:column;">
+      <div class="modal-header">
+        <div class="modal-title" style="display:flex; align-items:center; gap:8px;">
+          <span style="font-size:1.3rem;">🎴</span>
+          <span id="socket-modal-title">Khảm / Gỡ Thẻ Bài Vào Module</span>
+        </div>
+        <button class="modal-close" onclick="closeModuleSocketModal()">&times;</button>
+      </div>
+      <div class="modal-body" style="overflow-y:auto; flex:1; padding:12px 14px;">
+        <!-- Module Header & Option Info -->
+        <div id="socket-modal-target-info" style="background:rgba(15,23,42,0.6); border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:10px 12px; margin-bottom:12px;">
+          <!-- Populated dynamically -->
+        </div>
+
+        <!-- Sockets Holes in this Module -->
+        <div style="font-size:0.8rem; font-weight:700; color:#c4b5fd; margin-bottom:6px;">
+          ⚙️ Các Lỗ Khảm Của Module (Chạm lỗ để chọn hoặc gỡ thẻ)
+        </div>
+        <div id="socket-modal-holes-list" class="socket-holes-grid">
+          <!-- Populated dynamically -->
+        </div>
+
+        <!-- Card Collection Picker Header & Filter -->
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:10px; margin-bottom:6px; flex-wrap:wrap; gap:6px;">
+          <span style="font-size:0.8rem; font-weight:700; color:#a5b4fc;">
+            🎴 Chọn Thẻ Bài Từ Kho (Bộ Sưu Tập)
+          </span>
+          <div style="display:flex; gap:4px;" id="socket-card-type-filters">
+            <button type="button" class="weapon-nav-btn active" style="font-size:0.7rem; padding:2px 8px;" id="btn-filter-card-all" onclick="filterSocketCards('all')">Tất Cả</button>
+            <button type="button" class="weapon-nav-btn" style="font-size:0.7rem; padding:2px 8px; color:#fb7185;" id="btn-filter-card-mvp" onclick="filterSocketCards('mvp')">⭐ MVP</button>
+            <button type="button" class="weapon-nav-btn" style="font-size:0.7rem; padding:2px 8px; color:#93c5fd;" id="btn-filter-card-normal" onclick="filterSocketCards('normal')">🎴 Thường</button>
+          </div>
+        </div>
+
+        <!-- Card Grid -->
+        <div id="socket-cards-picker-grid" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:6px; max-height:240px; overflow-y:auto;">
+          <!-- List of cards -->
+        </div>
+      </div>
+      <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center;">
+        <button type="button" class="btn btn-secondary" onclick="closeModuleSocketModal()">Đóng</button>
+        <span style="font-size:0.72rem; color:#94a3b8;" id="socket-modal-footer-hint">💡 Chọn một thẻ ở trên để khảm vào lỗ đang chọn.</span>
+      </div>
     </div>
   </div>
 
-  <script src="/app.js"></script>
+  <script src="/app.js?v=20260816i"></script>
 </body>
 </html>

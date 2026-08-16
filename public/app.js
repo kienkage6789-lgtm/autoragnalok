@@ -268,6 +268,11 @@ document.addEventListener('DOMContentLoaded', () => {
     return val.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
   }
 
+  function formatNumber(val) {
+    return formatNumberWithDots(val);
+  }
+  window.formatNumber = formatNumberWithDots;
+
   function formatShortGold(val) {
     if (!val) return '0 Gold';
     if (val >= 1000000) {
@@ -277,6 +282,76 @@ document.addEventListener('DOMContentLoaded', () => {
       return (val / 1000).toFixed(1).replace(/\.?0+$/, '') + 'K Gold';
     }
     return val + ' Gold';
+  }
+
+  const MONSTER_DICT = {
+    1:  { n: 'Sứa Đỏ',             e: '🔴', lv: 1,  cs: 'str' },
+    2:  { n: 'Sâu Lá',              e: '🐛', lv: 2,  cs: 'agi' },
+    3:  { n: 'Thỏ Trắng',          e: '🐰', lv: 3,  cs: 'vit' },
+    4:  { n: 'Chim Khai Phá',       e: '🐥', lv: 5,  cs: 'dex' },
+    5:  { n: 'Chuồn Chuồn',          e: '🦟', lv: 7,  cs: 'intel' },
+    6:  { n: 'Mộc Yêu',             e: '🪵', lv: 9,  cs: 'luk' },
+    7:  { n: 'Nấm Độc',             e: '🍄', lv: 12, cs: 'vit' },
+    8:  { n: 'Sói Xám',             e: '🐺', lv: 15, cs: 'dex' },
+    9:  { n: 'Cốt Binh',             e: '💀', lv: 18, cs: 'str' },
+    10: { n: 'Thây Ma',             e: '🧟', lv: 22, cs: 'vit' },
+    11: { n: 'Xác Ướp',             e: '🩹', lv: 26, cs: 'vit' },
+    12: { n: 'Rắn Độc',             e: '🐍', lv: 30, cs: 'agi' },
+    13: { n: 'Người Đá',            e: '🗿', lv: 35, cs: 'str' },
+    14: { n: 'Băng Khổng Lồ',        e: '🧊', lv: 40, cs: 'vit' },
+    15: { n: 'Quỷ Tuyết',            e: '❄️', lv: 45, cs: 'str' },
+    16: { n: 'Bò Thần',              e: '🐂', lv: 50, cs: 'str' },
+    17: { n: 'Pháp Sư',             e: '📿', lv: 55, cs: 'intel' },
+    18: { n: 'Thuyền Trưởng',       e: '🏴‍☠️', lv: 60, cs: 'dex' },
+    19: { n: 'Quỷ Lửa',             e: '🔥', lv: 65, cs: 'str' },
+    20: { n: 'Chúa Lửa',             e: '🌋', lv: 70, cs: 'str' },
+    21: { n: 'Bọ Hoàng Kim',        e: '🐞', lv: 75, cs: 'vit' },
+    22: { n: 'Nữ Hoàng Maya',        e: '👑', lv: 80, cs: 'intel' },
+    23: { n: 'Vua Bọ',              e: '☥',  lv: 85, cs: 'intel' },
+    24: { n: 'Chúa Tể Baphomet',    e: '🐐', lv: 90, cs: 'str' },
+    25: { n: 'Chúa Tể Bóng Tối',    e: '🧙‍♂️', lv: 95, cs: 'intel' },
+    26: { n: 'Nữ Thần Valkyrie',    e: '⚔️', lv: 100, cs: 'str' }
+  };
+
+  function getCardDetails(mid, c = {}, monMasters = {}) {
+    const numericMid = Math.abs(parseInt(mid) || 1);
+    const defMon = MONSTER_DICT[numericMid] || {};
+    const mm = (monMasters && monMasters[numericMid]) || {};
+    const monName = mm.n || mm.name || defMon.n || c.name || `Quái #${mid}`;
+    const monLv = parseInt(mm.lv) || defMon.lv || c.lv || Math.max(1, numericMid * 2);
+    const monEmoji = mm.e || defMon.e || c.emoji || '👾';
+    const isMvp = Boolean((c.m | 0) > 0 || c.mvp);
+
+    const STAT_LABELS = { str: 'STR', agi: 'AGI', vit: 'VIT', dex: 'DEX', intel: 'INT', luk: 'LUK' };
+    const STAT_KEYS = ['str', 'agi', 'vit', 'dex', 'intel', 'luk'];
+    const statType = (mm.cs || defMon.cs || STAT_KEYS[(numericMid - 1) % 6]).toLowerCase();
+    const statLabel = STAT_LABELS[statType] || statType.toUpperCase();
+    const statVal = Math.ceil(monLv / 10) * (isMvp ? 3 : 1);
+
+    let cbBonus = '';
+    if (c.mb && c.mb.t && c.mb.a) {
+      cbBonus = `${c.mb.t.toUpperCase()} +${c.mb.a}`;
+    } else {
+      const cbTypes = ['str','agi','vit','dex','intel','luk','atk','armor','hp','mp','hp_regen','mp_regen'];
+      const cbType = cbTypes[numericMid % 12];
+      let cbVal = 0;
+      if (cbType === 'hp' || cbType === 'mp') cbVal = Math.round(monLv * 30 / 4);
+      else if (cbType === 'armor') cbVal = Math.ceil(monLv / 10) * 30;
+      else if (cbType === 'hp_regen' || cbType === 'mp_regen') cbVal = Math.max(1, Math.floor(monLv / 10)) * 3;
+      else cbVal = Math.ceil(monLv / 10) * 3;
+      cbBonus = `${cbType.toUpperCase()} +${cbVal}`;
+    }
+
+    return {
+      mid: numericMid,
+      name: monName,
+      lv: monLv,
+      emoji: monEmoji,
+      isMvp,
+      statLabel,
+      statVal,
+      cbBonus
+    };
   }
 
   window.formatMarketPriceInput = function(input, uid) {
@@ -682,6 +757,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 <option value="1100" ${u.pollInterval === 1100 ? 'selected' : ''}>1100ms</option>
                 <option value="1000" ${u.pollInterval === 1000 ? 'selected' : ''}>1000ms</option>
                 <option value="800" ${u.pollInterval === 800 ? 'selected' : ''}>800ms</option>
+                <option value="600" ${u.pollInterval === 600 ? 'selected' : ''}>600ms</option>
+                <option value="500" ${u.pollInterval === 500 ? 'selected' : ''}>500ms</option>
               </select>
             `}
           </td>
@@ -1419,8 +1496,10 @@ document.addEventListener('DOMContentLoaded', () => {
             <option value="1500">1500ms</option>
             <option value="1300">1300ms</option>
             <option value="1100">1100ms (Khuyên dùng)</option>
-            <option value="1000">1000ms (Rất nhanh)</option>
-            <option value="800">800ms (Siêu nhanh)</option>
+            <option value="1000">1000ms (Nhanh)</option>
+            <option value="800">800ms (Rất nhanh)</option>
+            <option value="600">600ms (Siêu nhanh - 1 Proxy)</option>
+            <option value="500">500ms (Tối đa tốc độ - 1 Proxy)</option>
           </select>
         </div>
         ${(currentUser && currentUser.role === 'admin') ? `
@@ -1442,6 +1521,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       <div class="card-tabs-nav">
         <button class="tab-link" id="tab-btn-core-${acc.line_uid}" onclick="switchTab('${acc.line_uid}', 'core')">Cơ Bản</button>
+        <button class="tab-link" id="tab-btn-weapon-${acc.line_uid}" onclick="switchTab('${acc.line_uid}', 'weapon')">⚔️ Vũ Khí</button>
         <button class="tab-link" id="tab-btn-home-${acc.line_uid}" onclick="switchTab('${acc.line_uid}', 'home')">🏡 Nông Trại</button>
         <button class="tab-link" id="tab-btn-mvp-${acc.line_uid}" onclick="switchTab('${acc.line_uid}', 'mvp')">Săn Boss</button>
         <button class="tab-link" id="tab-btn-event-${acc.line_uid}" onclick="switchTab('${acc.line_uid}', 'event')">🏆 Event</button>
@@ -1451,6 +1531,32 @@ document.addEventListener('DOMContentLoaded', () => {
       </div>
 
       <div class="card-tab-content">
+        <!-- Weapon Tab Pane (100% In-Game Presentation) -->
+        <div class="tab-pane" id="pane-weapon-${acc.line_uid}">
+          <!-- Hero Section: Active Weapon Switcher & Main Combat Stats -->
+          <div class="weapon-hero-card" id="weapon-hero-${acc.line_uid}">
+            <!-- Populated dynamically by renderWeaponTab(acc) -->
+          </div>
+
+          <!-- Sub-tabs Navigation for all Weapons + Module Inventory -->
+          <div class="weapon-nav-tabs" id="weapon-subnav-${acc.line_uid}">
+            <button class="weapon-nav-btn active" id="wpn-btn-pistol-${acc.line_uid}" onclick="switchWeaponSubTab('${acc.line_uid}', 'pistol')">🔪 Dao Găm</button>
+            <button class="weapon-nav-btn" id="wpn-btn-sniper-${acc.line_uid}" onclick="switchWeaponSubTab('${acc.line_uid}', 'sniper')">🎯 Dao Dài</button>
+            <button class="weapon-nav-btn" id="wpn-btn-knife-${acc.line_uid}" onclick="switchWeaponSubTab('${acc.line_uid}', 'knife')">🗡️ Kiếm</button>
+            <button class="weapon-nav-btn" id="wpn-btn-axe-${acc.line_uid}" onclick="switchWeaponSubTab('${acc.line_uid}', 'axe')">🪓 Rìu</button>
+            <button class="weapon-nav-btn" id="wpn-btn-turret-${acc.line_uid}" onclick="switchWeaponSubTab('${acc.line_uid}', 'turret')">🗼 Pháo Tháp</button>
+            <button class="weapon-nav-btn" id="wpn-btn-armor-${acc.line_uid}" onclick="switchWeaponSubTab('${acc.line_uid}', 'armor')">🛡️ Khiên Giáp</button>
+            <button class="weapon-nav-btn" id="wpn-btn-robot-${acc.line_uid}" onclick="switchWeaponSubTab('${acc.line_uid}', 'robot')">🔋 Titan</button>
+            <button class="weapon-nav-btn" id="wpn-btn-house-${acc.line_uid}" onclick="switchWeaponSubTab('${acc.line_uid}', 'house')">🛸 Phi Thuyền</button>
+            <button class="weapon-nav-btn" id="wpn-btn-inv-${acc.line_uid}" onclick="switchWeaponSubTab('${acc.line_uid}', 'inv')">📦 Kho Module (30)</button>
+          </div>
+
+          <!-- Sub-panes for each Weapon / Armor -->
+          <div id="wpn-pane-detail-${acc.line_uid}">
+            <!-- Populated dynamically by renderWeaponTab(acc) -->
+          </div>
+        </div>
+
         <!-- Event Tab Pane -->
         <div class="tab-pane" id="pane-event-${acc.line_uid}">
           <!-- Navigation Tiểu tab -->
@@ -2885,6 +2991,7 @@ document.addEventListener('DOMContentLoaded', () => {
     renderEggBook(acc);
     renderPetSection(acc);
     updateHomeTabUI(acc);
+    renderWeaponTab(acc);
 
     // Handle Trade Invites
     window._currentTradeTid = window._currentTradeTid || {};
@@ -3386,6 +3493,766 @@ document.addEventListener('DOMContentLoaded', () => {
     if (paneCards) paneCards.style.display = subTabId === 'cards' ? 'block' : 'none';
     if (paneEggs) paneEggs.style.display = subTabId === 'eggs' ? 'block' : 'none';
   };
+
+  // ==================== ⚔️ WEAPON TAB (100% IN-GAME DARK MODE) SYSTEM ====================
+  const activeWeaponSubTabs = {};
+  const activeWeaponInvFilters = {};
+  const activeCardPicks = {}; // { [uid]: { weapon, slot, sidx } }
+  const activeModManages = {}; // { [uid]: { [weapon]: boolean } }
+  const activeModSelections = {}; // { [uid]: { [weapon]: Set<number> } }
+
+  const MODULE_RARITY = [
+    { id: 1, n: 'Thường', c: '#9ca3af', bg: 'rgba(156, 163, 175, 0.12)' },
+    { id: 2, n: 'Cao cấp', c: '#22c55e', bg: 'rgba(34, 197, 94, 0.15)' },
+    { id: 3, n: 'Hiếm', c: '#3b82f6', bg: 'rgba(59, 130, 246, 0.18)' },
+    { id: 4, n: 'Sử thi', c: '#a855f7', bg: 'rgba(168, 85, 247, 0.2)' },
+    { id: 5, n: 'Sử thi+', c: '#ec4899', bg: 'rgba(236, 72, 153, 0.22)' },
+    { id: 6, n: 'Huyền thoại', c: '#f59e0b', bg: 'rgba(245, 158, 11, 0.25)' },
+    { id: 7, n: 'Thần thoại', c: '#ef4444', bg: 'rgba(239, 68, 68, 0.28)' }
+  ];
+
+  const AMMO_TIER_ICONS = ['⚪', '🟢', '🔵', '🟣', '🟡', '🔴'];
+  const AMMO_TIER_DMG = [1.0, 1.2, 1.4, 1.6, 1.8, 2.0];
+  const AMMO_TIER_UNLOCK_LV = [1, 10, 25, 50, 80, 100];
+
+  function _ammoEnabledMask(p, gun) {
+    if (gun === 'turret') {
+      return (p.turret_tier_enabled != null && p.turret_tier_enabled !== '')
+        ? (parseInt(p.turret_tier_enabled) || 0)
+        : ((parseInt(p.sniper_tier_enabled) || 1) | 1);
+    }
+    if (gun === 'sniper') return parseInt(p.sniper_tier_enabled ?? p.ammo_sniper_tiers ?? 1) || 1;
+    return parseInt(p.pistol_tier_enabled ?? p.ammo_pistol_tiers ?? 1) || 1;
+  }
+
+  function _ammoActiveT(p, gun) {
+    const mask = _ammoEnabledMask(p, gun);
+    const isSniperOrTurret = (gun === 'sniper' || gun === 'turret');
+    for (let t = 6; t >= 2; t--) {
+      if (!(mask & (1 << (t - 1)))) continue;
+      const extraVal = isSniperOrTurret
+        ? (p.sniper_ammo_extra ? p.sniper_ammo_extra[t - 2] : (parseInt(p[`ammo_sniper_t${t}`]) || 0))
+        : (p.ammo_extra ? p.ammo_extra[t - 2] : (parseInt(p[`ammo_pistol_t${t}`]) || 0));
+      if (extraVal > 0) return { tier: t, dmg: AMMO_TIER_DMG[t - 1] };
+    }
+    const t1Val = isSniperOrTurret ? (p.ammo_sniper || p.ammo_sniper_t1 || 0) : (p.ammo_pistol || p.ammo_pistol_t1 || 0);
+    if ((mask & 1) && t1Val > 0) return { tier: 1, dmg: 1.0 };
+    return { tier: 0, dmg: 1.0 };
+  }
+
+  function _renderAmmoTierStripHtml(uid, gun, p) {
+    const mask = _ammoEnabledMask(p, gun);
+    const activeT = _ammoActiveT(p, gun);
+    const hLv = parseInt(p.home_lv || p.house_lv || 1);
+    const isTurret = gun === 'turret';
+    const isSniper = gun === 'sniper';
+    const autoRefill = isSniper ? p.auto_refill_sniper : p.auto_refill_pistol;
+
+    let tierBoxes = '';
+    for (let t = 1; t <= 6; t++) {
+      const unlock = AMMO_TIER_UNLOCK_LV[t - 1];
+      const locked = hLv < unlock;
+      const enabled = !locked && Boolean(mask & (1 << (t - 1)));
+      const isActive = !locked && enabled && activeT.tier === t;
+      const mult = AMMO_TIER_DMG[t - 1];
+      
+      let stock = 0;
+      if (isTurret || isSniper) {
+        if (t === 1) stock = parseInt(p.ammo_sniper ?? p.ammo_sniper_t1 ?? 0) || 0;
+        else stock = (p.sniper_ammo_extra ? p.sniper_ammo_extra[t - 2] : (parseInt(p[`ammo_sniper_t${t}`]) || 0)) || 0;
+      } else {
+        if (t === 1) stock = parseInt(p.ammo_pistol ?? p.ammo_pistol_t1 ?? 0) || 0;
+        else stock = (p.ammo_extra ? p.ammo_extra[t - 2] : (parseInt(p[`ammo_pistol_t${t}`]) || 0)) || 0;
+      }
+
+      const nextOn = enabled ? 0 : 1;
+      const onclick = locked ? '' : `triggerAction('${uid}', 'set_ammo_tier_enabled', null, { gun: '${gun}', tier: ${t}, on: ${nextOn} })`;
+
+      const bottomBtn = locked
+        ? `<div style="font-size:0.58rem; font-weight:700; color:#fbbf24; background:rgba(245, 158, 11, 0.2); border-radius:3px; padding:2px 0; line-height:1.1; width:100%; box-sizing:border-box; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="Yêu cầu Phi Thuyền Lv.${unlock}">Lv.${unlock}</div>`
+        : `<button onclick="event.stopPropagation(); ${onclick}" style="font-size:0.62rem; padding:2px 0; width:100%; border-radius:3px; border:none; font-weight:700; background:${enabled ? '#16a34a' : '#475569'}; color:#fff; cursor:pointer;">${enabled ? 'BẬT' : 'TẮT'}</button>`;
+
+      tierBoxes += `
+        <div onclick="${onclick}" style="background:${locked ? 'rgba(15, 23, 42, 0.4)' : (enabled ? 'rgba(34, 197, 94, 0.12)' : 'rgba(15, 23, 42, 0.75)')}; border:${isActive ? '2px solid #f59e0b' : (enabled ? '1.5px solid #22c55e' : '1px solid rgba(255, 255, 255, 0.1)')}; border-radius:6px; padding:4px 2px; text-align:center; cursor:${locked ? 'default' : 'pointer'}; opacity:${locked ? 0.6 : 1}; display:flex; flex-direction:column; justify-content:space-between; gap:2px; min-width:0; box-sizing:border-box; width:100%; overflow:hidden;">
+          <div style="font-size:0.68rem; color:${enabled ? '#86efac' : '#94a3b8'}; white-space:nowrap; font-weight:700; overflow:hidden; text-overflow:ellipsis; display:flex; align-items:center; justify-content:center; gap:2px;">
+            <span>${AMMO_TIER_ICONS[t - 1]}T${t}</span> <span style="font-size:0.58rem; color:#fcd34d;">×${mult.toFixed(1)}</span>
+          </div>
+          <div style="font-size:0.8rem; font-weight:700; color:${locked ? '#64748b' : (stock > 0 ? '#f8fafc' : '#ef4444')}; margin:1px 0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+            ${locked ? '🔒' : stock}
+          </div>
+          ${bottomBtn}
+        </div>
+      `;
+    }
+
+    const titleText = isTurret
+      ? '🗼 Cấu Hình Đạn Pháo Tháp (Bắn đạn Dao Dài)'
+      : `🎒 Quản Lý Đạn (${isSniper ? 'Dao Dài' : 'Dao Găm'})`;
+
+    const activeInfo = isTurret
+      ? '💣 Pháo tháp ưu tiên bắn đạn Tier cao nhất có sẵn trong kho (DMG lên tới ×2.0).'
+      : (activeT.tier > 0 ? `🗡️ Đạn đang dùng: <b>${AMMO_TIER_ICONS[activeT.tier - 1]} Tier ${activeT.tier}</b> — Sát thương <b>DMG ×${activeT.dmg.toFixed(1)}</b>` : '⚠️ Hết đạn hoặc chưa bật Tier đạn nào!');
+
+    const refillCheckbox = isTurret ? '' : `
+      <label style="font-size:0.72rem; color:#cbd5e1; display:flex; align-items:center; gap:4px; cursor:pointer; white-space:nowrap;">
+        <input type="checkbox" ${autoRefill ? 'checked' : ''} onchange="triggerAction('${uid}', 'auto_refill', null, { gun_type: '${gun}' })"> Tự nạp đạn (Auto Refill)
+      </label>
+    `;
+
+    return `
+      <div style="background:rgba(15, 23, 42, 0.85); border:1px solid rgba(255, 255, 255, 0.1); border-radius:10px; padding:8px 10px; margin-top:8px; width:100%; box-sizing:border-box; overflow:hidden;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; flex-wrap:wrap; gap:4px;">
+          <span style="font-size:0.78rem; font-weight:800; color:#a5b4fc;">${titleText}</span>
+          ${refillCheckbox}
+        </div>
+        <div style="display:grid; grid-template-columns:repeat(6, minmax(0, 1fr)); gap:4px; width:100%; box-sizing:border-box;">
+          ${tierBoxes}
+        </div>
+        <div style="font-size:0.68rem; color:#94a3b8; margin-top:6px; padding-top:4px; border-top:1px dashed rgba(255, 255, 255, 0.08); overflow:hidden; text-overflow:ellipsis;">
+          ${activeInfo}
+        </div>
+      </div>
+    `;
+  }
+
+  function _rarBg(r) {
+    return r >= 7 ? 'background:linear-gradient(90deg,#f87171,#fbbf24,#34d399,#60a5fa,#a78bfa)' : `background:${(MODULE_RARITY[r-1]||MODULE_RARITY[0]).c}`;
+  }
+
+  function _modEnhCost(to) {
+    return { blue: to, red: to >= 6 ? to - 5 : 0, green: to >= 12 ? to - 11 : 0, gold: Math.max(1, to) * 1000 };
+  }
+
+  function _modRate(to) {
+    return to <= 5 ? 100 : (to === 6 ? 90 : (to <= 11 ? (150 - to * 10) : 30));
+  }
+
+  function calcTierGold(lv) {
+    const START = [100, 1000, 10000, 100000, 1000000, 10000000, 50000000];
+    const END = [1000, 10000, 100000, 1000000, 10000000, 50000000, 100000000];
+    const b = Math.min(6, Math.max(0, Math.floor((lv - 1) / 10)));
+    const pos = (lv - 1) % 10;
+    return Math.round(START[b] + pos * (END[b] - START[b]) / 9);
+  }
+
+  function calcTierRes(lv) {
+    const START_RES = [10, 50, 200, 1000, 5000, 20000, 50000];
+    const END_RES = [50, 200, 1000, 5000, 20000, 50000, 100000];
+    const b = Math.min(6, Math.max(0, Math.floor((lv - 1) / 10)));
+    const pos = (lv - 1) % 10;
+    return Math.round(START_RES[b] + pos * (END_RES[b] - START_RES[b]) / 9);
+  }
+
+  function _upgCostMult(lv) {
+    return lv >= 20 ? (1.0 + 0.25 * (Math.floor(lv / 10) - 1)) : 1.0;
+  }
+
+  function _pmodsObj(player, weapon) {
+    const f = (weapon || 'pistol') + '_modules';
+    const v = player && player[f];
+    if (v && typeof v === 'object' && !Array.isArray(v)) return v;
+    if (typeof v === 'string') {
+      try {
+        const o = JSON.parse(v);
+        return (o && typeof o === 'object' && !Array.isArray(o)) ? o : {};
+      } catch (e) {}
+    }
+    return {};
+  }
+
+  function _modSlotsFor(w) {
+    if (w === 'robot') return [
+      { key: 'core_back', name: 'Lõi Lưng (Back)', icon: '🔋', stat: '⚡ Năng lượng + 🔋 Recover' },
+      { key: 'core_brain', name: 'Lõi Não (Brain)', icon: '🧠', stat: '⚡ Năng lượng + 🔋 Recover' },
+      { key: 'core_center', name: 'Lõi Trung Tâm', icon: '🔩', stat: '⚡ Năng lượng + 🔋 Recover' }
+    ];
+    if (w === 'house') return [
+      { key: 'h_roof', name: 'Module Mái', icon: '🏠', stat: '⚡ Năng lượng Phi Thuyền' },
+      { key: 'h_wall', name: 'Module Tường', icon: '🧱', stat: '⚡ Năng lượng Phi Thuyền' },
+      { key: 'h_floor', name: 'Module Sàn', icon: '▦', stat: '⚡ Năng lượng Phi Thuyền' }
+    ];
+    if (w === 'armor') return [
+      { key: 'a_max', name: 'Lõi Giáp MAX', icon: '🛡️', stat: '+Giáp tối đa' },
+      { key: 'a_regen', name: 'Lõi Hồi Giáp', icon: '♻️', stat: '+Hồi giáp/s' },
+      { key: 'a_return', name: 'Lõi Phản Sát Thương', icon: '⚡', stat: 'Phản dame % + ATK' }
+    ];
+    if (w === 'turret') return [
+      { key: 't_atk', name: 'Lõi Tấn Công', icon: '🎯', stat: '+ATK (Tổng Module)' },
+      { key: 't_range', name: 'Lõi Tầm Bắn', icon: '🔭', stat: '+Tầm 1m/Lv · +ATK' },
+      { key: 't_dur', name: 'Lõi Bền Bỉ', icon: '⏳', stat: '+Thời gian 0.5s/Lv · +ATK' }
+    ];
+    if (w === 'knife') return [
+      { key: 'barrel', name: 'Lưỡi Kiếm', icon: '🔪', stat: 'Tầm chém + ATK' },
+      { key: 'sight', name: 'Chuôi Kiếm', icon: '🤺', stat: 'Tầm với + ATK' },
+      { key: 'mag', name: 'Lưỡi Phụ', icon: '⚔️', stat: 'ATK' }
+    ];
+    if (w === 'axe') return [
+      { key: 'barrel', name: 'Lưỡi Rìu', icon: '🪓', stat: 'Tầm chém + ATK' },
+      { key: 'sight', name: 'Cán Rìu', icon: '🪵', stat: 'Tầm với + ATK' },
+      { key: 'mag', name: 'Lưỡi Phụ', icon: '⚔️', stat: 'ATK' }
+    ];
+    return [
+      { key: 'barrel', name: w === 'sniper' ? 'Lưỡi Dao Dài' : 'Lưỡi Dao Găm', icon: '📏', stat: 'ATK' },
+      { key: 'sight', name: w === 'sniper' ? 'Ống Ngắm Tầm Xa' : 'Ống Ngắm', icon: '🎯', stat: 'Tầm ném + ATK' },
+      { key: 'mag', name: w === 'sniper' ? 'Băng Đạn Lớn' : 'Băng Đạn', icon: '⚔️', stat: 'ATK' }
+    ];
+  }
+
+  function formatModOptionText(slotId, m) {
+    if (!m) return '';
+    const r = parseInt(m.rarity) || 1;
+    const plus = parseInt(m.plus) || 0;
+    const enhAtk = plus > 0 ? (plus <= 5 ? plus * (plus + 1) : (plus <= 10 ? 30 + 10 * (plus - 5) : 80 + 20 * (plus - 10))) : 0;
+    const atkVal = (r - 1) * 3 + enhAtk;
+    
+    if (slotId === 'barrel' || slotId === 'mag') return `⚔️ ATK +${atkVal}`;
+    if (slotId === 'sight') return `🔭 Tầm +${(r * 0.3).toFixed(1)}m · ⚔️ ATK +${atkVal}`;
+    if (slotId === 't_atk') return `⚔️ ATK +${atkVal}`;
+    if (slotId === 't_range') return `🔭 Tầm +${r}m · ⚔️ ATK +${atkVal}`;
+    if (slotId === 't_dur') return `⏳ Thời gian +${(r * 0.5).toFixed(1)}s · ⚔️ ATK +${atkVal}`;
+    if (slotId === 'a_max') return `🛡️ Giáp tối đa +${r * 3 + plus * 2} · 🔰 DEF +${plus * 3}`;
+    if (slotId === 'a_regen') return `♻️ Hồi giáp +${plus + Math.floor((r - 1) / 2)}/s · 🔰 DEF +${plus * 3}`;
+    if (slotId === 'a_return') return `⚡ Phản dame +${Math.min(50, r * 2 + plus)}% · 🔰 DEF +${plus * 3}`;
+    if (slotId === 'core_back' || slotId === 'core_brain' || slotId === 'core_center') return `⚡ Năng lượng +${plus + 1} · 🔋 Recover +${plus + 1}`;
+    if (slotId === 'h_roof' || slotId === 'h_wall' || slotId === 'floor' || slotId === 'h_floor') return `⚡ Năng lượng +${plus + 1}`;
+    return `⚔️ ATK +${atkVal}`;
+  }
+
+  function _modEffectShort(w, m) {
+    return formatModOptionText(m.slot, m);
+  }
+
+  const _MOD_INV_FIELD = {
+    pistol: 'module_inventory', sniper: 'sniper_module_inventory', knife: 'knife_module_inventory',
+    axe: 'axe_module_inventory', turret: 'turret_module_inventory', armor: 'armor_module_inventory',
+    robot: 'robot_module_inventory', house: 'house_module_inventory'
+  };
+
+  const _MOD_WEAPON_LABEL = {
+    pistol: 'Module Dao Găm', sniper: 'Module Dao Dài', knife: 'Module Kiếm',
+    axe: 'Module Rìu', turret: 'Module Pháo Tháp', armor: 'Module Khiên Giáp',
+    robot: 'Module Titan Robot', house: 'Module Phi Thuyền Orion'
+  };
+
+  window.switchWeaponSubTab = function(uid, subTabId) {
+    activeWeaponSubTabs[uid] = subTabId;
+    const subnav = document.getElementById(`weapon-subnav-${uid}`);
+    if (subnav) {
+      const btns = subnav.querySelectorAll('.weapon-nav-btn');
+      btns.forEach(b => {
+        b.classList.toggle('active', b.id === `wpn-btn-${subTabId}-${uid}`);
+      });
+    }
+    if (window.lastFetchedAccounts) {
+      const acc = window.lastFetchedAccounts.find(a => a.line_uid === uid);
+      if (acc) renderWeaponTab(acc);
+    }
+  };
+
+  window.switchWeaponInvFilter = function(uid, filterCat) {
+    activeWeaponInvFilters[uid] = filterCat;
+    if (window.lastFetchedAccounts) {
+      const acc = window.lastFetchedAccounts.find(a => a.line_uid === uid);
+      if (acc) renderWeaponTab(acc);
+    }
+  };
+
+  window.openCardPick = function(uid, weapon, slot, sidx = 0) {
+    activeCardPicks[uid] = { weapon, slot, sidx, filter: 'all' };
+    if (window.lastFetchedAccounts) {
+      const acc = window.lastFetchedAccounts.find(a => a.line_uid === uid);
+      if (acc) renderWeaponTab(acc);
+    }
+  };
+
+  window.closeCardPick = function(uid) {
+    delete activeCardPicks[uid];
+    if (window.lastFetchedAccounts) {
+      const acc = window.lastFetchedAccounts.find(a => a.line_uid === uid);
+      if (acc) renderWeaponTab(acc);
+    }
+  };
+
+  window.filterCardPick = function(uid, filterType) {
+    if (activeCardPicks[uid]) {
+      activeCardPicks[uid].filter = filterType;
+      if (window.lastFetchedAccounts) {
+        const acc = window.lastFetchedAccounts.find(a => a.line_uid === uid);
+        if (acc) renderWeaponTab(acc);
+      }
+    }
+  };
+
+  window.toggleModManage = function(uid, weapon) {
+    if (!activeModManages[uid]) activeModManages[uid] = {};
+    activeModManages[uid][weapon] = !activeModManages[uid][weapon];
+    if (!activeModSelections[uid]) activeModSelections[uid] = {};
+    if (!activeModSelections[uid][weapon]) activeModSelections[uid][weapon] = new Set();
+    else activeModSelections[uid][weapon].clear();
+    if (window.lastFetchedAccounts) {
+      const acc = window.lastFetchedAccounts.find(a => a.line_uid === uid);
+      if (acc) renderWeaponTab(acc);
+    }
+  };
+
+  window.toggleModSelect = function(uid, weapon, idx) {
+    if (!activeModSelections[uid]) activeModSelections[uid] = {};
+    if (!activeModSelections[uid][weapon]) activeModSelections[uid][weapon] = new Set();
+    const sel = activeModSelections[uid][weapon];
+    if (sel.has(idx)) sel.delete(idx);
+    else sel.add(idx);
+    if (window.lastFetchedAccounts) {
+      const acc = window.lastFetchedAccounts.find(a => a.line_uid === uid);
+      if (acc) renderWeaponTab(acc);
+    }
+  };
+
+  window.selectAllMod = function(uid, weapon, totalLen) {
+    if (!activeModSelections[uid]) activeModSelections[uid] = {};
+    if (!activeModSelections[uid][weapon]) activeModSelections[uid][weapon] = new Set();
+    const sel = activeModSelections[uid][weapon];
+    if (sel.size >= totalLen) sel.clear();
+    else {
+      for (let i = 0; i < totalLen; i++) sel.add(i);
+    }
+    if (window.lastFetchedAccounts) {
+      const acc = window.lastFetchedAccounts.find(a => a.line_uid === uid);
+      if (acc) renderWeaponTab(acc);
+    }
+  };
+
+  window.discardSelectedMods = function(uid, weapon) {
+    const sel = activeModSelections[uid] && activeModSelections[uid][weapon];
+    if (!sel || !sel.size) return;
+    const indices = Array.from(sel);
+    if (!confirm(`Xác nhận phá hủy ${indices.length} module đã chọn?\n(Thu hồi 100% Kim cương cường hóa và Thẻ bài về kho)`)) return;
+    triggerAction(uid, 'module_discard_multi', null, { weapon, indices: JSON.stringify(indices) });
+    sel.clear();
+  };
+
+  // 100% In-Game Module Socket Strip Renderer (Dark Mode)
+  function _renderModSocketStripHtml(uid, weapon, slotKey, m, monMasters) {
+    const n = Math.max(1, parseInt(m.sockets) || (m.cards ? m.cards.length : 1));
+    const cards = Array.isArray(m.cards) ? m.cards : [];
+    const filled = cards.filter(Boolean).length;
+
+    let tiles = '';
+    for (let i = 0; i < n; i++) {
+      const c = cards[i];
+      if (c) {
+        const mid = c.mid || c.id || c;
+        const cInfo = getCardDetails(mid, typeof c === 'object' ? c : {}, monMasters);
+        const mvp = cInfo.isMvp;
+        tiles += `
+          <div style="position:relative; box-sizing:border-box; min-width:0; background:${mvp ? 'rgba(239, 68, 68, 0.15)' : 'rgba(15, 23, 42, 0.6)'}; border:1px solid ${mvp ? '#ef4444' : '#475569'}; border-radius:8px; padding:4px 6px; display:flex; flex-direction:column; gap:2px;">
+            <div style="display:flex; align-items:center; justify-content:space-between;">
+              <span style="font-size:0.95rem;">${cInfo.emoji}</span>
+              <span style="font-size:0.65rem; font-weight:700; color:${mvp ? '#fb7185' : '#38bdf8'};">${mvp ? '⭐ MVP' : 'Thường'}</span>
+            </div>
+            <div style="font-size:0.72rem; font-weight:700; color:#f8fafc; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+              ${cInfo.name} <small style="color:#94a3b8;">Lv.${cInfo.lv}</small>
+            </div>
+            <div style="font-size:0.68rem; color:#38bdf8; font-weight:600;">+${cInfo.statVal} ${cInfo.statLabel}</div>
+            ${mvp ? `<div style="font-size:0.62rem; color:#fbbf24;">⚔️ ${cInfo.cbBonus}</div>` : ''}
+            <button onclick="triggerAction('${uid}', 'card_unsocket', null, { weapon: '${weapon}', slot: '${slotKey}', sidx: ${i}, pay: 'gold' })" title="Gỡ thẻ về kho (3,000 G x Bậc)" style="margin-top:2px; font-size:0.65rem; padding:2px 4px; border:none; border-radius:4px; background:#7f1d1d; color:#fecaca; cursor:pointer; font-weight:600;">
+              ↩️ Gỡ Thẻ
+            </button>
+          </div>
+        `;
+      } else {
+        const isPicking = activeCardPicks[uid] && activeCardPicks[uid].weapon === weapon && activeCardPicks[uid].slot === slotKey && activeCardPicks[uid].sidx === i;
+        tiles += `
+          <div style="box-sizing:border-box; min-width:0; background:rgba(255, 255, 255, 0.02); border:1px dashed ${isPicking ? '#a855f7' : 'rgba(255, 255, 255, 0.15)'}; border-radius:8px; padding:6px 4px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px;">
+            <span style="font-size:0.68rem; color:#94a3b8;">— Lỗ #${i+1} Trống —</span>
+            <button onclick="openCardPick('${uid}', '${weapon}', '${slotKey}', ${i})" style="font-size:0.68rem; padding:2px 6px; border:1px solid #8b5cf6; border-radius:4px; background:${isPicking ? '#8b5cf6' : 'rgba(139, 92, 246, 0.2)'}; color:#fff; cursor:pointer; font-weight:600;">
+              ${isPicking ? '👉 Đang Chọn' : '🎴 Khảm Thẻ'}
+            </button>
+          </div>
+        `;
+      }
+    }
+
+    return `
+      <div style="padding:4px 8px 8px 8px; border-top:1px dashed rgba(255, 255, 255, 0.1); margin-top:4px;">
+        <div style="font-size:0.72rem; color:#fcd34d; font-weight:700; margin-bottom:4px;">
+          🎴 Ô Khảm Thẻ (${filled}/${n})
+        </div>
+        <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(105px, 1fr)); gap:6px;">
+          ${tiles}
+        </div>
+      </div>
+    `;
+  }
+
+  // 100% In-Game Inline Card Picker Renderer (Dark Mode)
+  function _renderCardPickerHtml(uid, weapon, p, monMasters) {
+    const pick = activeCardPicks[uid];
+    if (!pick || pick.weapon !== weapon || !pick.slot) return '';
+
+    const ownedCards = parseJsonSafe(p.cards, {});
+    const cardFilter = pick.filter || 'all';
+
+    let cardsList = [];
+    Object.keys(ownedCards).forEach(cid => {
+      const c = ownedCards[cid];
+      if (c && typeof c === 'object') {
+        const countNormal = parseInt(c.n) || 0;
+        const countMvp = parseInt(c.m) || 0;
+        if (countNormal > 0 || countMvp > 0) {
+          const cInfo = getCardDetails(cid, c, monMasters);
+          if (countNormal > 0 && (cardFilter === 'all' || cardFilter === 'normal')) {
+            cardsList.push({ ...cInfo, cid, isMvp: false, count: countNormal });
+          }
+          if (countMvp > 0 && (cardFilter === 'all' || cardFilter === 'mvp')) {
+            cardsList.push({ ...cInfo, cid, isMvp: true, statVal: Math.ceil(cInfo.lv / 10) * 3, count: countMvp });
+          }
+        }
+      }
+    });
+
+    cardsList.sort((a, b) => (a.lv - b.lv) || (a.cid - b.cid));
+
+    let cardsHtml = '';
+    if (cardsList.length === 0) {
+      cardsHtml = `<div style="grid-column:1/-1; font-size:0.75rem; color:#94a3b8; text-align:center; padding:12px 0;">— Không có thẻ bài phù hợp trong kho —</div>`;
+    } else {
+      cardsList.forEach(c => {
+        cardsHtml += `
+          <button onclick="triggerAction('${uid}', 'card_socket', null, { weapon: '${weapon}', slot: '${pick.slot}', mid: ${c.cid}, mvp: ${c.isMvp ? 1 : 0}, sidx: ${pick.sidx} }); closeCardPick('${uid}');" style="position:relative; display:flex; flex-direction:column; align-items:center; gap:2px; background:${c.isMvp ? 'rgba(239, 68, 68, 0.2)' : 'rgba(15, 23, 42, 0.8)'}; border:1px solid ${c.isMvp ? '#ef4444' : '#38bdf8'}; border-radius:8px; padding:5px 4px; cursor:pointer; min-width:0;">
+            ${c.isMvp ? `<span style="position:absolute; top:1px; left:2px; font-size:0.6rem; font-weight:800; color:#fff; background:#dc2626; padding:0 3px; border-radius:3px;">MVP</span>` : ''}
+            <span style="position:absolute; top:1px; right:2px; font-size:0.65rem; font-weight:700; color:#fcd34d;">x${c.count}</span>
+            <div style="font-size:1.3rem; margin-top:2px;">${c.emoji}</div>
+            <div style="font-size:0.68rem; font-weight:700; color:#f8fafc; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; width:100%; text-align:center;">${c.name}</div>
+            <div style="font-size:0.65rem; color:#38bdf8; font-weight:700;">+${c.statVal} ${c.statLabel}</div>
+            ${c.isMvp ? `<div style="font-size:0.6rem; color:#fbbf24; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; width:100%; text-align:center;">⚔️ ${c.cbBonus}</div>` : ''}
+          </button>
+        `;
+      });
+    }
+
+    return `
+      <div style="margin-top:10px; background:rgba(30, 41, 59, 0.9); border:1px solid #a855f7; border-radius:10px; padding:10px; box-shadow:0 8px 25px rgba(0,0,0,0.5);">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+          <span style="font-size:0.78rem; font-weight:800; color:#d8b4fe;">
+            🎴 Chọn Thẻ Khảm vào Lỗ #${pick.sidx + 1} (${pick.slot.toUpperCase()}) <small style="color:#a855f7;">(Khảm vĩnh viễn)</small>
+          </span>
+          <button onclick="closeCardPick('${uid}')" style="font-size:0.7rem; padding:2px 8px; border:1px solid #475569; border-radius:5px; background:rgba(15, 23, 42, 0.8); color:#cbd5e1; cursor:pointer;">✕ Đóng</button>
+        </div>
+        <div style="display:flex; gap:4px; margin-bottom:8px;">
+          <button class="weapon-nav-btn ${cardFilter === 'all' ? 'active' : ''}" style="font-size:0.68rem; padding:2px 6px;" onclick="filterCardPick('${uid}', 'all')">Tất Cả</button>
+          <button class="weapon-nav-btn ${cardFilter === 'mvp' ? 'active' : ''}" style="font-size:0.68rem; padding:2px 6px;" onclick="filterCardPick('${uid}', 'mvp')">⭐ MVP</button>
+          <button class="weapon-nav-btn ${cardFilter === 'normal' ? 'active' : ''}" style="font-size:0.68rem; padding:2px 6px;" onclick="filterCardPick('${uid}', 'normal')">🎴 Thường</button>
+        </div>
+        <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(72px, 1fr)); gap:5px; max-height:220px; overflow-y:auto; padding-right:2px;">
+          ${cardsHtml}
+        </div>
+      </div>
+    `;
+  }
+
+  // 100% In-Game Module Panel Renderer (Dark Mode)
+  function _renderInGameModulePanel(uid, weapon, p, monMasters) {
+    const invField = _MOD_INV_FIELD[weapon] || 'module_inventory';
+    const manage = Boolean(activeModManages[uid] && activeModManages[uid][weapon]);
+    const sel = (activeModSelections[uid] && activeModSelections[uid][weapon]) || new Set();
+    const mods = _pmodsObj(p, weapon);
+    const inv = Array.isArray(p[invField]) ? p[invField] : (parseJsonSafe(p[invField], []));
+    const db = p.diamond_blue || 0, dr = p.diamond_red || 0, dg = p.diamond_green || 0;
+    const slotDefs = _modSlotsFor(weapon);
+    const eqCount = slotDefs.filter(s => mods[s.key]).length;
+
+    // 1. Equipped Slot Rows
+    const slotRows = slotDefs.map(s => {
+      const m = mods[s.key];
+      if (!m) {
+        return `
+          <div style="background:rgba(15, 23, 42, 0.6); border:1px dashed rgba(255, 255, 255, 0.15); border-radius:8px; padding:8px 10px; display:flex; align-items:center; gap:8px;">
+            <span style="font-size:1.1rem; width:24px; text-align:center; opacity:0.6;">${s.icon}</span>
+            <div style="flex:1; min-width:0;">
+              <div style="font-size:0.75rem; font-weight:700; color:#94a3b8;">${s.name}</div>
+              <div style="font-size:0.68rem; color:#64748b;">— Trống — (Chạm module bên dưới để lắp)</div>
+            </div>
+          </div>
+        `;
+      }
+
+      const rar = MODULE_RARITY[Math.max(0, Math.min(6, (m.rarity || 1) - 1))];
+      const statTxt = formatModOptionText(s.key, m);
+      const isMax = (m.plus || 0) >= 15;
+      const to = (m.plus || 0) + 1;
+      const cost = _modEnhCost(to);
+      const rate = _modRate(to);
+      const costTxt = isMax ? '' : `🔷${cost.blue}${cost.red ? ` 🔴${cost.red}` : ''}${cost.green ? ` 🟢${cost.green}` : ''} 💰${formatNumber(cost.gold)}`;
+
+      return `
+        <div style="background:rgba(15, 23, 42, 0.75); border:1px solid ${rar.c}; border-left:4px solid ${rar.c}; border-radius:0 8px 8px 0; margin-bottom:4px;">
+          <div style="display:flex; align-items:center; gap:8px; padding:6px 8px;">
+            <span style="font-size:1.2rem; width:24px; flex:none; text-align:center;">${s.icon}</span>
+            <div style="flex:1; min-width:0;">
+              <div style="font-size:0.78rem; font-weight:700; color:#f8fafc;">
+                ${s.name} <span style="font-size:0.65rem; color:#fff; ${_rarBg(m.rarity)}; border-radius:4px; padding:1px 5px;">${rar.n}</span> <b style="color:#c084fc;">+${m.plus || 0}</b>
+              </div>
+              <div style="font-size:0.72rem; color:#4ade80; font-weight:600;">${statTxt}</div>
+            </div>
+            <button onclick="triggerAction('${uid}', 'module_unequip', null, { weapon: '${weapon}', slot: '${s.key}' })" style="font-size:0.68rem; padding:3px 8px; border:1px solid #475569; border-radius:5px; background:rgba(30, 41, 59, 0.8); color:#cbd5e1; cursor:pointer; font-weight:600;">
+              Tháo
+            </button>
+            ${isMax ? '<button disabled style="flex:none; width:90px; font-size:0.68rem; padding:4px; border:none; border-radius:5px; background:#475569; color:#fff;">MAX</button>'
+              : `<button onclick="triggerAction('${uid}', 'module_enhance', null, { weapon: '${weapon}', slot: '${s.key}' })" style="flex:none; width:95px; box-sizing:border-box; font-size:0.68rem; padding:4px; border:none; border-radius:6px; background:#7c3aed; color:#fff; cursor:pointer; text-align:center; line-height:1.2; white-space:nowrap; font-weight:700;">
+                  <b>+${to}</b> (${rate}%)<br><span style="font-size:0.6rem; font-weight:normal; opacity:0.9;">${costTxt}</span>
+                </button>`}
+          </div>
+          ${_renderModSocketStripHtml(uid, weapon, s.key, m, monMasters)}
+        </div>
+      `;
+    }).join('');
+
+    // 2. Module Inventory Grid (5-column in-game grid)
+    const _slotOrd = {};
+    slotDefs.forEach((s, idx) => { _slotOrd[s.key] = idx; });
+
+    let invHtml = '';
+    if (inv.length) {
+      invHtml = inv.map((it, i) => ({ it, i }))
+        .sort((a, b) => ((_slotOrd[a.it.slot] ?? 99) - (_slotOrd[b.it.slot] ?? 99)) || (b.it.rarity - a.it.rarity) || ((b.it.plus || 0) - (a.it.plus || 0)))
+        .map(({ it, i }) => {
+          const rar = MODULE_RARITY[Math.max(0, Math.min(6, (it.rarity || 1) - 1))];
+          const slotTxt = _modEffectShort(weapon, it);
+          const seld = manage && sel.has(i);
+          const bdr = seld ? 'border:2px solid #ef4444' : `border:1px solid rgba(255, 255, 255, 0.1); border-left:3px solid ${rar.c}`;
+          const check = seld ? '<span style="position:absolute; top:-4px; right:-4px; width:14px; height:14px; border-radius:50%; background:#ef4444; color:#fff; font-size:9px; display:flex; align-items:center; justify-content:center; z-index:1;">✓</span>' : '';
+          const cardCount = Array.isArray(it.cards) ? it.cards.length : 0;
+
+          return `
+            <button onclick="${manage ? `toggleModSelect('${uid}', '${weapon}', ${i})` : `triggerAction('${uid}', 'module_equip', null, { weapon: '${weapon}', slot: '${it.slot}', idx: ${i} })`}" style="position:relative; width:100%; box-sizing:border-box; min-height:64px; display:flex; flex-direction:column; align-items:stretch; gap:2px; text-align:left; background:${seld ? 'rgba(239, 68, 68, 0.2)' : 'rgba(15, 23, 42, 0.7)'}; ${bdr}; border-radius:${seld ? '6px' : '0 6px 6px 0'}; padding:5px; cursor:pointer;">
+              ${check}
+              <div style="display:flex; align-items:center; width:100%;">
+                <span style="font-size:0.75rem;">${it.slot || '⚙️'}</span>
+                <span style="margin-left:auto; font-size:0.68rem; font-weight:700; color:${it.plus > 0 ? '#c084fc' : '#94a3b8'};">+${it.plus || 0}</span>
+              </div>
+              <span style="font-size:0.62rem; color:#fff; ${_rarBg(it.rarity)}; border-radius:3px; padding:0 3px; line-height:1.4; display:block; width:100%; text-align:center;">${rar.n}</span>
+              <span style="font-size:0.65rem; font-weight:600; color:#4ade80; line-height:1.2; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${slotTxt}</span>
+              ${cardCount > 0 ? `<span style="position:absolute; bottom:2px; right:2px; font-size:0.6rem; font-weight:800; color:#fff; background:#7c3aed; border-radius:4px; padding:0 3px;">🎴${cardCount}</span>` : ''}
+            </button>
+          `;
+        }).join('');
+    } else {
+      invHtml = `<span style="font-size:0.75rem; color:#94a3b8; grid-column:1/-1; text-align:center; padding:10px 0;">— Kho trống —</span>`;
+    }
+
+    return `
+      <div style="background:rgba(15, 23, 42, 0.85); padding:10px; border-radius:10px; border:1px solid rgba(255, 255, 255, 0.08); margin-top:8px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+          <span style="font-size:0.8rem; color:#fcd34d; font-weight:700;">
+            🔧 ${_MOD_WEAPON_LABEL[weapon] || 'Module'} <span style="color:#94a3b8; font-weight:normal;">(${eqCount}/${slotDefs.length})</span>
+          </span>
+          <span style="font-size:0.72rem; color:#cbd5e1; display:inline-flex; align-items:center; gap:4px;">
+            🔷${db} 🔴${dr} 🟢${dg} 💰${formatNumber(p.gold || 0)}
+          </span>
+        </div>
+
+        <div style="display:flex; flex-direction:column; gap:6px;">
+          ${slotRows}
+        </div>
+
+        ${_renderCardPickerHtml(uid, weapon, p, monMasters)}
+
+        <div style="margin-top:10px; padding-top:8px; border-top:1px solid rgba(255, 255, 255, 0.08);">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+            ${manage
+              ? `<span style="font-size:0.72rem; color:#ef4444; font-weight:700;">Đã chọn ${sel.size} món</span>
+                 <div style="display:flex; gap:4px;">
+                   <button onclick="selectAllMod('${uid}', '${weapon}', ${inv.length})" style="font-size:0.68rem; padding:2px 6px; border:1px solid #7c3aed; border-radius:4px; background:rgba(124,58,237,0.3); color:#fff; cursor:pointer;">${sel.size >= inv.length ? '☐ Bỏ chọn' : '☑ Tất cả'}</button>
+                   <button onclick="toggleModManage('${uid}', '${weapon}')" style="font-size:0.68rem; padding:2px 6px; border:1px solid #64748b; border-radius:4px; background:rgba(30,41,59,0.8); color:#cbd5e1; cursor:pointer;">Hủy</button>
+                   <button onclick="discardSelectedMods('${uid}', '${weapon}')" ${sel.size ? '' : 'disabled'} style="font-size:0.68rem; padding:2px 6px; border:none; border-radius:4px; background:${sel.size ? '#dc2626' : '#475569'}; color:#fff; cursor:pointer; font-weight:700;">🗑️ Phá hủy (${sel.size})</button>
+                 </div>`
+              : `<span style="font-size:0.72rem; color:#94a3b8;">Kho Module ${inv.length}/30 (Chạm để lắp)</span>
+                 <button onclick="toggleModManage('${uid}', '${weapon}')" style="font-size:0.68rem; padding:2px 8px; border:none; border-radius:4px; background:rgba(239, 68, 68, 0.2); color:#f87171; cursor:pointer; font-weight:600;">🗑️ Quản lý</button>`}
+          </div>
+          <div style="display:grid; grid-template-columns:repeat(5, minmax(0, 1fr)); gap:4px;">
+            ${invHtml}
+          </div>
+          ${manage ? `<div style="font-size:0.65rem; color:#4ade80; background:rgba(34, 197, 94, 0.1); border:1px solid rgba(34, 197, 94, 0.2); border-radius:6px; padding:4px 6px; margin-top:6px; line-height:1.4;">♻️ Phá hủy sẽ hoàn <b>100% Thẻ bài khảm + Kim cương</b> về kho.</div>` : ''}
+        </div>
+      </div>
+    `;
+  }
+
+  function renderWeaponTab(acc) {
+    const heroEl = document.getElementById(`weapon-hero-${acc.line_uid}`);
+    const detailEl = document.getElementById(`wpn-pane-detail-${acc.line_uid}`);
+    if (!heroEl || !detailEl) return;
+
+    const p = acc.player || {};
+    const isSniper = Number(p.active_gun) === 1;
+    const currentActiveWeapon = isSniper ? 'Dao Dài (Sniper)' : 'Dao Găm (Pistol)';
+    const currentActiveIco = isSniper ? '🎯' : '🔪';
+    const activeAtk = isSniper ? (p.atk_sniper || 120) : (p.atk_pistol || 20);
+    const dexVal = p.dex_eff || p.dex || 5;
+    const dexBonusRange = Math.floor(dexVal / 24);
+    const baseRange = isSniper ? 55 : 35;
+    const totalRange = baseRange + dexBonusRange;
+    const ammoCapacity = 50 + (p.lv || 1) * 5;
+
+    // 1. Render Hero Section
+    heroEl.innerHTML = `
+      <div class="weapon-hero-header">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span style="font-size:1.4rem;">${currentActiveIco}</span>
+          <div>
+            <div style="font-size:0.95rem; font-weight:800; color:#f8fafc;">${currentActiveWeapon}</div>
+            <span class="weapon-active-badge">✨ Đang trang bị</span>
+          </div>
+        </div>
+        <button class="btn-switch-weapon" onclick="triggerAction('${acc.line_uid}', 'gun_use', null, { gun_type: '${isSniper ? 'pistol' : 'sniper'}' })">
+          🔄 Đổi sang ${isSniper ? 'Dao Găm' : 'Dao Dài'}
+        </button>
+      </div>
+      <div class="weapon-stats-strip">
+        <div class="weapon-stat-box">
+          <span class="weapon-stat-lbl">⚔️ Sát Thương (ATK)</span>
+          <span class="weapon-stat-val" style="color:#f43f5e;">${activeAtk}</span>
+        </div>
+        <div class="weapon-stat-box">
+          <span class="weapon-stat-lbl">🎯 Tầm Ném (+DEX)</span>
+          <span class="weapon-stat-val" style="color:#38bdf8;">${totalRange}m <small style="font-size:0.68rem; color:#94a3b8; font-weight:normal;">(+${dexBonusRange}m)</small></span>
+        </div>
+        <div class="weapon-stat-box">
+          <span class="weapon-stat-lbl">🎒 Sức Chứa Đạn</span>
+          <span class="weapon-stat-val" style="color:#10b981;">${ammoCapacity} <small style="font-size:0.68rem; color:#94a3b8; font-weight:normal;">viên T1</small></span>
+        </div>
+      </div>
+    `;
+
+    // 2. Render Active Subtab Content
+    const subTab = activeWeaponSubTabs[acc.line_uid] || (isSniper ? 'sniper' : 'pistol');
+    
+    // Update button states in subnav
+    const subnav = document.getElementById(`weapon-subnav-${acc.line_uid}`);
+    if (subnav) {
+      const btns = subnav.querySelectorAll('.weapon-nav-btn');
+      btns.forEach(b => {
+        b.classList.toggle('active', b.id === `wpn-btn-${subTab}-${acc.line_uid}`);
+      });
+    }
+
+    if (subTab === 'inv') {
+      // ── SUBTAB: KHO MODULE TOÀN BỘ ──
+      const filterCat = activeWeaponInvFilters[acc.line_uid] || 'all';
+      const invSources = [
+        { cat: 'pistol', label: 'Dao Găm', ico: '🔪', list: parseJsonSafe(p.module_inventory, []) },
+        { cat: 'sniper', label: 'Dao Dài', ico: '🎯', list: parseJsonSafe(p.sniper_module_inventory, []) },
+        { cat: 'knife', label: 'Kiếm', ico: '🗡️', list: parseJsonSafe(p.knife_module_inventory, []) },
+        { cat: 'axe', label: 'Rìu', ico: '🪓', list: parseJsonSafe(p.axe_module_inventory, []) },
+        { cat: 'turret', label: 'Pháo Tháp', ico: '🗼', list: parseJsonSafe(p.turret_module_inventory, []) },
+        { cat: 'armor', label: 'Khiên Giáp', ico: '🛡️', list: parseJsonSafe(p.armor_module_inventory, []) },
+        { cat: 'robot', label: 'Titan', ico: '🔋', list: parseJsonSafe(p.robot_module_inventory, []) },
+        { cat: 'house', label: 'Phi Thuyền', ico: '🛸', list: parseJsonSafe(p.house_module_inventory, []) }
+      ];
+
+      let allModules = [];
+      invSources.forEach(src => {
+        const rawList = Array.isArray(src.list) ? src.list : (typeof src.list === 'object' ? Object.values(src.list) : []);
+        rawList.forEach((m, idx) => {
+          if (m && typeof m === 'object') {
+            allModules.push({ ...m, _cat: src.cat, _catLabel: src.label, _catIco: src.ico, _idx: idx });
+          }
+        });
+      });
+
+      const filteredModules = filterCat === 'all' ? allModules : allModules.filter(m => m._cat === filterCat);
+
+      let filterBtnsHtml = `
+        <button class="weapon-nav-btn ${filterCat === 'all' ? 'active' : ''}" style="font-size:0.7rem; padding:3px 8px;" onclick="switchWeaponInvFilter('${acc.line_uid}', 'all')">Tất Cả (${allModules.length})</button>
+      `;
+      invSources.forEach(src => {
+        const cnt = allModules.filter(m => m._cat === src.cat).length;
+        filterBtnsHtml += `
+          <button class="weapon-nav-btn ${filterCat === src.cat ? 'active' : ''}" style="font-size:0.7rem; padding:3px 8px;" onclick="switchWeaponInvFilter('${acc.line_uid}', '${src.cat}')">${src.ico} ${src.label} (${cnt})</button>
+        `;
+      });
+
+      let invCardsHtml = '';
+      if (filteredModules.length === 0) {
+        invCardsHtml = `<div style="grid-column:1/-1; text-align:center; padding:25px 0; color:#94a3b8; font-size:0.82rem;">📦 Kho Module đang trống.</div>`;
+      } else {
+        filteredModules.forEach(m => {
+          const rar = MODULE_RARITY[Math.max(0, Math.min(6, (m.rarity || 1) - 1))];
+          const slotTxt = _modEffectShort(m._cat, m);
+          const cardCount = Array.isArray(m.cards) ? m.cards.length : 0;
+
+          invCardsHtml += `
+            <button onclick="triggerAction('${acc.line_uid}', 'module_equip', null, { weapon: '${m._cat}', slot: '${m.slot}', idx: ${m._idx} })" style="position:relative; width:100%; box-sizing:border-box; min-height:64px; display:flex; flex-direction:column; align-items:stretch; gap:2px; text-align:left; background:rgba(15, 23, 42, 0.7); border:1px solid rgba(255, 255, 255, 0.1); border-left:3px solid ${rar.c}; border-radius:0 6px 6px 0; padding:5px; cursor:pointer;">
+              <div style="display:flex; align-items:center; width:100%;">
+                <span style="font-size:0.75rem;">${m._catIco} ${m.slot || '⚙️'}</span>
+                <span style="margin-left:auto; font-size:0.68rem; font-weight:700; color:${m.plus > 0 ? '#c084fc' : '#94a3b8'};">+${m.plus || 0}</span>
+              </div>
+              <span style="font-size:0.62rem; color:#fff; ${_rarBg(m.rarity)}; border-radius:3px; padding:0 3px; line-height:1.4; display:block; width:100%; text-align:center;">${rar.n}</span>
+              <span style="font-size:0.65rem; font-weight:600; color:#4ade80; line-height:1.2; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${slotTxt}</span>
+              ${cardCount > 0 ? `<span style="position:absolute; bottom:2px; right:2px; font-size:0.6rem; font-weight:800; color:#fff; background:#7c3aed; border-radius:4px; padding:0 3px;">🎴${cardCount}</span>` : ''}
+            </button>
+          `;
+        });
+      }
+
+      detailEl.innerHTML = `
+        <div class="module-inv-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+          <span style="font-size:0.88rem; font-weight:800; color:#c4b5fd;">📦 Kho Module Nhân Vật (${allModules.length}/30)</span>
+          <span style="font-size:0.72rem; color:#fbbf24;">💎 Kim Cương: <b>${p.diamond || 0}</b></span>
+        </div>
+        <div style="display:flex; gap:4px; margin-bottom:10px; overflow-x:auto;">
+          ${filterBtnsHtml}
+        </div>
+        <div style="display:grid; grid-template-columns:repeat(5, minmax(0, 1fr)); gap:4px;">
+          ${invCardsHtml}
+        </div>
+      `;
+    } else {
+      // ── SUBTAB: 1 TRONG 8 VŨ KHÍ / TRANG BỊ ──
+      const lvKeyMap = {
+        pistol: 'gun_pistol_lv', sniper: 'gun_sniper_lv', knife: 'knife_lv',
+        axe: 'axe_lv', turret: 'turret_lv', armor: 'armor_lv',
+        robot: 'robot_lv', house: 'home_lv'
+      };
+      const curLv = parseInt(p[lvKeyMap[subTab]]) || (subTab === 'armor' ? 0 : 1);
+      const nextLv = curLv + 1;
+      const upgGold = Math.ceil(calcTierGold(nextLv) * _upgCostMult(nextLv));
+      const upgRes = Math.ceil(calcTierRes(nextLv) * _upgCostMult(nextLv));
+      const canUp = (parseInt(p.gold) || 0) >= upgGold;
+
+      let upgAction = 'gun_up';
+      let upgParam = subTab;
+      if (subTab === 'armor') { upgAction = 'upgrade_armor'; upgParam = null; }
+      else if (subTab === 'robot') { upgAction = 'robot_body_up'; upgParam = null; }
+      else if (subTab === 'house') { upgAction = 'home_up'; upgParam = null; }
+
+      // Ammo Strip for pistol, sniper, and turret (100% In-Game T1..T6 Multi-Tier Toggles)
+      let ammoHtml = '';
+      if (subTab === 'pistol' || subTab === 'sniper' || subTab === 'turret') {
+        ammoHtml = _renderAmmoTierStripHtml(acc.line_uid, subTab, p);
+      }
+
+      detailEl.innerHTML = `
+        <div style="background:rgba(15, 23, 42, 0.75); border:1px solid rgba(255, 255, 255, 0.1); border-radius:10px; padding:10px 12px; display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <div style="font-size:0.9rem; font-weight:800; color:#f8fafc;">
+              ${_MOD_WEAPON_LABEL[subTab] || 'Vũ Khí'} <span style="font-size:0.75rem; background:#3b82f6; color:#fff; padding:1px 6px; border-radius:4px;">Lv.${curLv}</span>
+            </div>
+            <div style="font-size:0.72rem; color:#94a3b8; margin-top:2px;">
+              Lên Lv.${nextLv}: 💰<b>${formatNumber(upgGold)}</b> G · 🪨/🔩<b>${formatNumber(upgRes)}</b>
+            </div>
+          </div>
+          <button ${canUp ? '' : 'disabled'} onclick="triggerAction('${acc.line_uid}', '${upgAction}', '${upgParam}')" style="font-size:0.75rem; font-weight:700; padding:6px 12px; border:none; border-radius:6px; background:${canUp ? '#10b981' : '#475569'}; color:#fff; cursor:pointer;">
+            ⬆️ Nâng Cấp
+          </button>
+        </div>
+
+        ${ammoHtml}
+
+        ${_renderInGameModulePanel(acc.line_uid, subTab, p, acc.mon_masters)}
+      `;
+    }
+  }
 
   const activeMarketSubTabs = {};
 
@@ -3989,35 +4856,6 @@ document.addEventListener('DOMContentLoaded', () => {
       if (spinner) spinner.style.display = 'none';
       if (confirmBtn) confirmBtn.disabled = false;
     }
-  };
-
-  const MONSTER_DICT = {
-    1:  { n: 'Sứa Đỏ',             e: '🔴', lv: 1,  cs: 'str' },
-    2:  { n: 'Sâu Lá',              e: '🐛', lv: 2,  cs: 'agi' },
-    3:  { n: 'Thỏ Trắng',          e: '🐰', lv: 3,  cs: 'vit' },
-    4:  { n: 'Chim Khai Phá',       e: '🐥', lv: 5,  cs: 'dex' },
-    5:  { n: 'Chuồn Chuồn',          e: '🦟', lv: 7,  cs: 'intel' },
-    6:  { n: 'Mộc Yêu',             e: '🪵', lv: 9,  cs: 'luk' },
-    7:  { n: 'Nấm Độc',             e: '🍄', lv: 12, cs: 'vit' },
-    8:  { n: 'Sói Xám',             e: '🐺', lv: 15, cs: 'dex' },
-    9:  { n: 'Cốt Binh',             e: '💀', lv: 18, cs: 'str' },
-    10: { n: 'Thây Ma',             e: '🧟', lv: 22, cs: 'vit' },
-    11: { n: 'Xác Ướp',             e: '🩹', lv: 26, cs: 'vit' },
-    12: { n: 'Rắn Độc',             e: '🐍', lv: 30, cs: 'agi' },
-    13: { n: 'Người Đá',            e: '🗿', lv: 35, cs: 'str' },
-    14: { n: 'Băng Khổng Lồ',        e: '🧊', lv: 40, cs: 'vit' },
-    15: { n: 'Quỷ Tuyết',            e: '❄️', lv: 45, cs: 'str' },
-    16: { n: 'Bò Thần',              e: '🐂', lv: 50, cs: 'str' },
-    17: { n: 'Pháp Sư',             e: '📿', lv: 55, cs: 'intel' },
-    18: { n: 'Thuyền Trưởng',       e: '🏴‍☠️', lv: 60, cs: 'dex' },
-    19: { n: 'Quỷ Lửa',             e: '🔥', lv: 65, cs: 'str' },
-    20: { n: 'Chúa Lửa',             e: '🌋', lv: 70, cs: 'str' },
-    21: { n: 'Bọ Hoàng Kim',        e: '🐞', lv: 75, cs: 'vit' },
-    22: { n: 'Nữ Hoàng Maya',        e: '👑', lv: 80, cs: 'intel' },
-    23: { n: 'Vua Bọ',              e: '☥',  lv: 85, cs: 'intel' },
-    24: { n: 'Chúa Tể Baphomet',    e: '🐐', lv: 90, cs: 'str' },
-    25: { n: 'Chúa Tể Bóng Tối',    e: '🧙‍♂️', lv: 95, cs: 'intel' },
-    26: { n: 'Nữ Thần Valkyrie',    e: '⚔️', lv: 100, cs: 'str' }
   };
 
   // Render Cards Inventory & Exchange Panel (Compact 50% Height Layout)
@@ -5332,13 +6170,25 @@ document.addEventListener('DOMContentLoaded', () => {
         body: JSON.stringify(payload)
       });
       const data = await response.json();
-      if (data.error) {
-        alert(`Thao tác thất bại: ${data.error}`);
+      if (data.error || data.ok === false) {
+        if (typeof showToast === 'function') {
+          showToast(`❌ Thao tác thất bại: ${data.error || data.msg || 'Lỗi không xác định'}`, 'error');
+        } else {
+          alert(`Thao tác thất bại: ${data.error || data.msg || 'Lỗi không xác định'}`);
+        }
       } else {
-        fetchAccounts();
+        if (typeof showToast === 'function') {
+          showToast(`✅ ${data.msg || 'Thao tác thành công!'}`, 'success');
+        }
+        await fetchAccounts();
       }
     } catch (err) {
       console.error('Error triggering action:', err);
+      if (typeof showToast === 'function') {
+        showToast(`❌ Lỗi kết nối: ${err.message}`, 'error');
+      } else {
+        alert(`Lỗi kết nối: ${err.message}`);
+      }
     }
   };
 

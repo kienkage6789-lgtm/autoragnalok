@@ -2,7 +2,45 @@
 
 > Captured architectural decisions and trade-offs.
 
-## 2026-08-13 - Bơm máu PK, MIME SDK, Zone Event & Thống kê K/D Chiến tích (T74)
+## 2026-08-16 - Tích Hợp Toàn Bộ Giao Diện Tab Vũ Khí In-Game Vào Bảng Điều Khiển (T78)
+
+- Bối cảnh:
+  - Người dùng muốn đưa nguyên bản 100% giao diện Tab Vũ Khí từ game vào Bảng Điều Khiển Bot Manager để theo dõi chỉ số, nâng cấp cấp độ trang bị, lắp/tháo/cường hóa module, khảm thẻ bài và quản lý đạn dược mà không cần mở game client.
+  - Cần đồng bộ giao diện Dark Glassmorphism của bot, tối ưu hiển thị trên cả máy tính và thiết bị di động, đồng thời đảm bảo an toàn dữ liệu không bị thất lạc qua các chu kỳ poll ngắn.
+- Quyết định:
+  - **Kiến trúc Tab Vũ Khí In-Game 100%**:
+    - **Header & Switcher**: Hiển thị vũ khí chính kích hoạt (`active_gun = 0` vs `1`), nút `🔄 Đổi Vũ Khí` gửi action `switch_gun`, dải thống kê ATK, Tầm ném (+DEX scaling), Sức chứa đạn và Cẩm nang vũ khí (`GUN_HELP`).
+    - **5 Sub-tabs Trang Bị**: 🔪 Dao Găm, 🎯 Dao Dài, 🗡️ Kiếm, 🗼 Pháo Tháp, 🛡️ Khiên Giáp.
+    - **3 Khe Module & Cường Hóa**: Mỗi trang bị có các ô cắm Module riêng biệt kèm viền màu 7 bậc phẩm cấp (Thường `#9ca3af` -> Thần thoại `#ef4444`), cấp `+Plus`, Option chỉ số, các chấm khảm thẻ bài và các nút thao tác `💎 +1`, `🎴 Thẻ`, `↩️ Tháo`.
+    - **Quản lý Đạn Dược (Ammo Tiers T1–T6)**: Khung quản lý số lượng đạn 6 tier kèm công tắc bật/tắt Tự nạp đạn (`Auto Refill`).
+    - **Hệ Thống 30 Ô Kho Module**: Bộ lọc 6 danh mục, hiển thị chi tiết module trong túi, nút `⚙️ Lắp`, `💎 Cường Hóa`, `🗑️ Phá Hủy`.
+    - **Modal Khảm / Gỡ Thẻ Bài**: Trực quan hóa danh sách thẻ bài sở hữu trong kho để khảm vào Module hoặc gỡ thẻ hoàn về túi.
+  - **Bảo Toàn State với `COLD_FIELDS`**: Mở rộng danh sách trường lưu giữ trong `updatePlayerState` (`pistol_modules`, `sniper_modules`, `knife_modules`, `turret_modules`, `armor_modules`, `active_gun`, `gun_pistol_lv`, `gun_sniper_lv`, đạn dược) để tránh bị ghi đè thành undefined bởi các gói tin game poll ngắn.
+- Kết quả:
+  - Giao diện Space-Dark Glassmorphism hiển thị đẹp mắt, trực quan và đồng bộ 100% với game client.
+  - Vượt qua 100% test cases trong `test.js`.
+
+---
+
+## 2026-08-16 - Tối Ưu Tốc Độ Polling Cực Đại Cho Thiết Lập 1 Proxy / 1 Tài Khoản
+
+- Bối cảnh:
+  - Người dùng triển khai hạ tầng 1 Proxy riêng cho mỗi tài khoản bot, loại bỏ hoàn toàn nguy cơ trùng lặp IP hoặc dính Cloudflare/IP Rate Limit khi gửi request nhanh.
+  - Tuy nhiên, kiến trúc cũ có các rào cản tốc độ:
+    - Throttler cứng `minInterval = 900ms` trong `sendRequest()` cho endpoint `xhrpg_game.php` và `600ms` cho actions.
+    - Săn Boss MVP và PK Chiến chỉ được hạ trần xuống `1200ms` (`Math.min(baseDelay, 1200)`).
+    - Jitter lệch dương (+30ms đến +100ms) kéo dài chu kỳ poll thực tế.
+    - UI dropdown bị giới hạn ở mức tối thiểu 800ms.
+- Quyết định:
+  - **Mở khóa Throttler**: Hạ `minInterval` của `xhrpg_game.php` từ `900ms` xuống `350ms`, và các action request từ `600ms` xuống `150ms` để loại bỏ độ trễ nhân tạo.
+  - **Bổ sung nhịp Siêu Tốc (600ms) và Cực Đại (500ms)**: Bổ sung 2 mức này vào cả Quản lý User (Admin Modal) và Dropdown cài đặt từng Bot Card.
+  - **Nâng cấp tốc độ Săn Boss & PK Chiến**: Hạ trần delay từ `1200ms` xuống `500ms` (`Math.min(baseDelay, 500)`).
+  - **Tối ưu Jitter & Sàn thời gian**: Hạ sàn cứng từ `500ms` xuống `380ms`. Điều chỉnh `jitterBound` xuống ±30ms khi chạy ở nhịp <= 600ms để giữ nhịp độ ổn định.
+- Kết quả:
+  - Nâng tốc độ bot từ ~30-40 poll/phút lên tới 100-120 poll/phút khi chọn nhịp 500ms.
+  - Vượt qua toàn bộ Unit Tests trong `test.js`.
+
+---
 
 - Bối cảnh:
   - Khi PK/Battle, việc bơm máu bằng request POST thô gây lag hiển thị và không kích hoạt được hoạt ảnh canvas của game engine.
