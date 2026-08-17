@@ -1402,6 +1402,47 @@ try {
 
   console.log('✅ T78 In-Game Weapon Tab Integration, Card Socketing & Cold Fields Tests Passed successfully!');
 
+  // 5. Test Offline Mechanics (processOfflineReward, syncOfflineZones, sendCheckinGuardWithRetry)
+  console.log('Testing Offline Mechanics...');
+  const offlineBot = new BotInstance({ name: 'OfflineTester', line_uid: 'off_test_uid', settings: {} });
+  
+  // Test processOfflineReward
+  offlineBot.processOfflineReward({
+    kills: 120,
+    exp: 45000,
+    gold: 15000,
+    items: [{ n: 'Thẻ Gà Con', q: 1 }]
+  });
+  
+  assert.strictEqual(offlineBot.offlineRewardsHistory.length, 1, 'offlineRewardsHistory must have 1 record');
+  assert.strictEqual(offlineBot.offlineRewardsHistory[0].kills, 120, 'Kills in reward record must be 120');
+  assert.strictEqual(offlineBot.offlineRewardsHistory[0].exp, 45000, 'EXP in reward record must be 45000');
+  assert.strictEqual(offlineBot.offlineRewardsHistory[0].items.length, 1, 'Items count in reward record must be 1');
+
+  // Test syncOfflineZones method signature & returns
+  let syncCalled = false;
+  offlineBot.sendRequest = async (url, payload) => {
+    if (url.includes('xhrpg_offline.php') && payload.action === 'save_zone') {
+      syncCalled = true;
+      assert.strictEqual(payload.map, 3, 'Map parameter must match 3');
+      assert.strictEqual(payload.zones, '[0,1]', 'Zones parameter must match JSON string [0,1]');
+      return { ok: true };
+    }
+    if (url.includes('xhrpg_offline.php') && payload.action === 'idlestat') {
+      return { ok: true };
+    }
+    return { ok: false };
+  };
+
+  const syncResult = await offlineBot.syncOfflineZones(3, [0, 1]);
+  assert.strictEqual(syncResult, true, 'syncOfflineZones should return true on success');
+  assert.strictEqual(syncCalled, true, 'sendRequest should be called with save_zone action');
+
+  const checkinResult = await offlineBot.sendCheckinGuardWithRetry(2);
+  assert.strictEqual(checkinResult, true, 'sendCheckinGuardWithRetry should return true on success');
+
+  console.log('✅ Offline Mechanics Tests Passed successfully!');
+
   console.log('✅ Anti-Hang & Zombie Bot Watchdog Engine Tests Passed successfully!');
   console.log('✅ User Polling Interval, Role Propagation and Edit Permissions Tests Passed successfully!');
   console.log('✅ Revamped Auto Market Buy Tests Passed successfully!');

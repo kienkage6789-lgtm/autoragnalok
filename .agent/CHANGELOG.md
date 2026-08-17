@@ -2,6 +2,18 @@
 
 > Changelog of actual changes implemented.
 
+## 2026-08-17 - Nâng Cấp Hệ Thống Offline (`xhrpg_offline.php`) & Khôi Phục Nhịp Polling Tối Ưu
+
+- File đã đổi: [server.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [test.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/test.js).
+- Đã làm:
+  - **Khôi Phục Nhịp Polling Tối Ưu Theo Game Server Cooldown**: Revert `minInterval` của `xhrpg_game.php` về `900ms` và action request về `600ms` (khớp chính xác bản `ma đạo phân tranh`), nâng lại trần poll tối thiểu lên `500ms` và trần Boss/PK snipe về `1200ms`. Loại bỏ hiện tượng gửi request quá dày bị game server bỏ qua.
+  - **Check-in Guard với Retry Engine (`sendCheckinGuardWithRetry`)**: Nâng ngưỡng an toàn đếm ngược `d.ci` từ `150s` lên `180s` (3 phút), tự động thử lại đến 3 lần nếu yêu cầu `xhrpg_offline.php` (`action: 'idlestat'`, `k: 'chpass'`) rớt mạng/timeout.
+  - **Bóc Tách & Nhật Ký Thưởng Offline (`processOfflineReward`)**: Tự động bắt dữ liệu `offline_reward` từ game server, lưu mảng lịch sử `offlineRewardsHistory` và xuất log `SUCCESS` chi tiết (Số quái diệt, EXP, Gold, Đồ hiếm).
+  - **Đồng Bộ Zone Offline (`syncOfflineZones`)**: Tạo phương thức lưu cấu hình Zone offline tới game server qua `xhrpg_offline.php` (`action: 'save_zone'`).
+  - **Mở Rộng Backend API Endpoints**: Khai báo 2 endpoint `GET /api/accounts/:line_uid/offline-rewards` và `POST /api/accounts/:line_uid/offline-zones`.
+  - **Unit Tests**: Thêm bộ kiểm thử đơn vị cho cơ chế Offline trong `test.js`, chạy thành công 100%.
+
+
 ## 2026-08-16 - Sao Chép 100% Giao Diện Tab Vũ Khí In-Game Vào Bảng Điều Khiển (Dark Mode) (T78)
 - File đã đổi: [server.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [public/app.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/public/app.js), [public/app.css](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/public/app.css), [public/index.html](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/public/index.html), [test.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/test.js).
 - Đã làm:

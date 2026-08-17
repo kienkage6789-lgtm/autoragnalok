@@ -1446,6 +1446,7 @@ class BotInstance {
     this.lastHarvestFailedAt = 0;
     this.lastHomeUpgradeFailedAt = 0;
     this.marketBuyHistory = account.marketBuyHistory || [];
+    this.offlineRewardsHistory = account.offlineRewardsHistory || [];
     this.eventWarHistory = [];
     this.inEventMode = false;
     this.currentEventKind = null;
@@ -1525,6 +1526,9 @@ class BotInstance {
       autoZone: false,
       lock_zone_center: false,
       targetZone: 0,
+      autoSyncOfflineZone: false,
+      offlineTargetMap: 1,
+      offlineTargetZones: [],
       bossHuntMode: 'off', // 'off' | 'type1' | 'type2'
       currentMvpMapIndex: 0,
       mvpPriorityMode: 'distance',
@@ -2391,6 +2395,74 @@ class BotInstance {
     throw lastError;
   }
 
+  async syncOfflineZones(mapId, zoneIndices) {
+    try {
+      const res = await this.sendRequest('https://ragnalok.online/human/xhrpg_offline.php', {
+        line_uid: this.line_uid,
+        session_token: this.session_token,
+        action: 'save_zone',
+        map: mapId,
+        zones: JSON.stringify(zoneIndices || []),
+        lang: 'vi'
+      });
+      if (res && res.ok) {
+        this.addLog('SYSTEM', `🌙 [Offline Zone] Đã đồng bộ Zone offline thành công (Bản đồ ${mapId})`);
+        return true;
+      }
+      return false;
+    } catch (e) {
+      console.error(`[Offline Zone Error] Failed to sync zones for ${this.name}:`, e.message);
+      return false;
+    }
+  }
+
+  processOfflineReward(offlineReward) {
+    if (!offlineReward) return;
+    const kills = offlineReward.kills || 0;
+    const exp = offlineReward.exp || 0;
+    const gold = offlineReward.gold || 0;
+    const items = offlineReward.items || [];
+    if (kills === 0 && exp === 0 && gold === 0 && (!items || items.length === 0)) return;
+
+    const record = {
+      receivedAt: new Date().toISOString(),
+      kills,
+      exp,
+      gold,
+      items
+    };
+    if (!this.offlineRewardsHistory) this.offlineRewardsHistory = [];
+    this.offlineRewardsHistory.unshift(record);
+    if (this.offlineRewardsHistory.length > 30) this.offlineRewardsHistory.pop();
+
+    this.addLog('SUCCESS', `🌙 [Thưởng Offline] Nhận ${kills} quái diệt, ⚡+${exp} EXP, 💰+${gold} Gold${items && items.length > 0 ? `, 🎁 ${items.length} món đồ hiếm` : ''}!`);
+  }
+
+  async sendCheckinGuardWithRetry(maxAttempts = 3) {
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const res = await this.sendRequest('https://ragnalok.online/human/xhrpg_offline.php', {
+          line_uid: this.line_uid,
+          session_token: this.session_token,
+          action: 'idlestat',
+          k: 'chpass',
+          lang: 'vi'
+        });
+        if (res && res.ok) {
+          this.addLog('SYSTEM', '🖐️ [Check-in Guard] Đã tự động gửi xác nhận điểm danh tương tác (chpass ok)');
+          return true;
+        }
+      } catch (err) {
+        if (attempt === maxAttempts) {
+          this.addLog('WARNING', `⚠️ [Check-in Guard] Gửi chpass thất bại sau ${maxAttempts} lần: ${err.message}`);
+        } else {
+          await new Promise(r => setTimeout(r, 1000 * attempt));
+        }
+      }
+    }
+    return false;
+  }
+
   getCurrentMvpCycleMap() {
     if (!this.settings.mvpTargetMaps) return 1;
     const maps = this.settings.mvpTargetMaps.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
@@ -3190,26 +3262,19 @@ class BotInstance {
       return;
     }
 
-    // 🖐️ Auto Check-in Guard: Tự động gia hạn điểm danh server khi d.ci sắp cạn
+    // 🖐️ Auto Check-in Guard: Tự động gia hạn điểm danh server khi d.ci sắp cạn (<= 180s)
     if (typeof d.ci === 'number') {
       const now = Date.now();
-      // Nếu server báo ci còn dưới 150 giây (2.5 phút) và chưa gửi chpass trong 60 giây qua
-      if (d.ci <= 150 && (now - (this.lastChpassSentAt || 0) > 60000)) {
+      // Nếu server báo ci còn dưới 180 giây (3 phút) và chưa gửi chpass trong 45 giây qua
+      if (d.ci <= 180 && (now - (this.lastChpassSentAt || 0) > 45000)) {
         this.lastChpassSentAt = now;
-        this.sendRequest('https://ragnalok.online/human/xhrpg_offline.php', {
-          line_uid: this.line_uid,
-          session_token: this.session_token,
-          action: 'idlestat',
-          k: 'chpass',
-          lang: 'vi'
-        }).then(res => {
-          if (res && res.ok) {
-            this.addLog('SYSTEM', '🖐️ [Check-in Guard] Đã tự động gửi xác nhận điểm danh tương tác (chpass ok)');
-          }
-        }).catch(err => {
-          console.error(`[Check-in Guard] Failed to send chpass for ${this.name}:`, err.message);
-        });
+        this.sendCheckinGuardWithRetry();
       }
+    }
+
+    // Capture & log offline rewards if returned
+    if (d.offline_reward) {
+      this.processOfflineReward(d.offline_reward);
     }
 
     // Capture Trade Invites
@@ -6115,6 +6180,40 @@ app.get('/api/accounts/:line_uid/logs', requireAuth, (req, res) => {
     lootLogs: bot.lootLogs || [],
     mvpHuntLog: bot.mvpHuntLog || []
   });
+});
+
+// Get offline rewards history
+app.get('/api/accounts/:line_uid/offline-rewards', requireAuth, (req, res) => {
+  const { line_uid } = req.params;
+  const bot = botInstances[line_uid];
+  if (!checkAccountOwnership(req, res, bot)) return;
+  res.json({ ok: true, rewards: bot.offlineRewardsHistory || [] });
+});
+
+// Update offline farming zones
+app.post('/api/accounts/:line_uid/offline-zones', requireAuth, async (req, res) => {
+  const { line_uid } = req.params;
+  const { map, zones } = req.body;
+  const bot = botInstances[line_uid];
+  if (!checkAccountOwnership(req, res, bot)) return;
+
+  const targetMap = parseInt(map) || 1;
+  const targetZones = Array.isArray(zones) ? zones.map(Number) : [];
+
+  const success = await bot.syncOfflineZones(targetMap, targetZones);
+  if (success) {
+    bot.settings.offlineTargetMap = targetMap;
+    bot.settings.offlineTargetZones = targetZones;
+    const currentAccounts = loadAccounts();
+    const idx = currentAccounts.findIndex(acc => acc.line_uid === line_uid);
+    if (idx !== -1) {
+      currentAccounts[idx].settings = bot.settings;
+      saveAccounts(currentAccounts);
+    }
+    res.json({ ok: true, message: 'Đã lưu cấu hình Zone offline thành công', map: targetMap, zones: targetZones });
+  } else {
+    res.status(400).json({ ok: false, error: 'Đồng bộ Zone offline với game server thất bại' });
+  }
 });
 
 // Get official drop logs from game server on-demand
