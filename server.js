@@ -2250,7 +2250,7 @@ class BotInstance {
           
           let baseDelay = userPollInterval;
           if (isSnipe || isPkEvent) {
-            baseDelay = Math.min(baseDelay, 500);
+            baseDelay = Math.min(baseDelay, 1200);
           }
 
           // Dynamic jitter range: ±30ms for <= 600ms, ±60ms for <= 1100ms, ±100ms for <= 1500ms, ±140ms for slower
@@ -2267,7 +2267,7 @@ class BotInstance {
           const jitterMag = Math.floor(Math.random() * jitterBound);
           const jitter = isPositiveSkew ? jitterMag : -Math.floor(jitterMag * 0.75);
           
-          this.timer = setTimeout(runPoll, Math.max(380, baseDelay + jitter));
+          this.timer = setTimeout(runPoll, Math.max(500, baseDelay + jitter));
         }
       }
     };
@@ -2297,8 +2297,9 @@ class BotInstance {
     let lastError = null;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      // Throttle requests: Đảm bảo khoảng cách tối thiểu giữa các request của cùng 1 bot để tránh lỗi "too_fast" (350ms cho game, 150ms cho action)
-      const minInterval = url.includes('xhrpg_game.php') ? 350 : 150;
+      // Throttle requests: Đảm bảo khoảng cách tối thiểu giữa các request của cùng 1 bot để tránh lỗi "too_fast"
+      // 900ms cho xhrpg_game.php (khớp server-side cooldown ~900ms), 600ms cho action requests
+      const minInterval = url.includes('xhrpg_game.php') ? 900 : 600;
       const now = Date.now();
       const timeSinceLast = now - (this.lastRequestAt || 0);
       if (timeSinceLast < minInterval) {
