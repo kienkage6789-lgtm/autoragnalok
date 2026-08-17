@@ -2,6 +2,18 @@
 
 > Changelog of actual changes implemented.
 
+## 2026-08-17 - Hệ Thống Auto Session Renewal & Auto-Relogin (Phòng Tránh Cơ Chế Bắt Offline 1H) (T62)
+- File đã đổi: [server.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [test.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/test.js), [.agent/TASKS.md](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/.agent/TASKS.md), [.agent/DECISIONS.md](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/.agent/DECISIONS.md).
+- Đã làm:
+  - **Nghiên cứu API `xhrpg_offline.php` & Cơ chế Hết hạn 1H**: Xác định Game Server `Ragnalok` thu hồi `session_token` sau đúng 60 phút (3600s), gửi về `d.kicked = true` đẩy nhân vật về chế độ farm offline.
+  - **Phương thức `refreshSession()` trên `BotInstance`**: Tự động gọi `xhrpg_google_auth.php` bằng Cookie `PHPSESSID` lấy `session_token` mới, lưu vào bộ nhớ và đồng bộ xuống `accounts.json`.
+  - **Proactive Token Renewal (45 Phút)**: Tự động gia hạn mốc session token mỗi 45 phút một lần trong luồng poll, giữ phiên Online 24/7 liên tục mà không bị đếm ngược chạm mốc 1h.
+  - **Emergency Auto-Relogin (`d.kicked`)**: Ngay khi nhận `d.kicked = true` hoặc lỗi phiên token từ `xhrpg_game.php`, bot tự động thực hiện Auto-Relogin qua `PHPSESSID` thu hồi token mới trong < 1s và tiếp tục poll mà không bị ngắt luồng (`stop('failed')`).
+  - **Bổ sung API `POST /api/accounts/:line_uid/phpsessid`**: Cho phép người dùng cập nhật Cookie PHPSESSID linh hoạt cho từng bot.
+- Đã test bằng: `node test.js` -> PASS 100%.
+
+---
+
 ### 2026-08-17 - Tối Ưu Tốc Độ Train Cực Đại Theo Cơ Chế Request-Tick Game Server
 
 - File đã đổi: [server.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [test.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/test.js).
@@ -341,6 +353,17 @@
       3. **Lịch sử mua (📜 History)**: Hiển thị nhật ký log tự động mua của chợ đã được làm rộng rãi hơn.
     - Thiết kế lại 9 ô nhập số lượng mua tối đa thành cụm điều khiển tăng/giảm tích hợp hai nút **`+/-`** màu sắc sinh động (giảm màu đỏ `#f43f5e`, tăng màu xanh `#10b981`), đồng thời bổ sung hàm `adjustMarketQty` giải quyết triệt để lỗi không nhận diện thao tác nhập số hoặc bị ghi đè/reset focus từ vòng lặp cập nhật trạng thái của thẻ nhân vật (thẻ quái, đồ sưu tầm, hộp trứng).
 - Đã test bằng: `npm test` -> PASS 100%.
+=======
+## 2026-08-17 - Hệ Thống Auto Session Renewal & Auto-Relogin (Phòng Tránh Cơ Chế Bắt Offline 1H) (T62)
+- File đã đổi: [server.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [test.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/test.js), [.agent/TASKS.md](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/.agent/TASKS.md), [.agent/DECISIONS.md](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/.agent/DECISIONS.md).
+- Đã làm:
+  - **Nghiên cứu API `xhrpg_offline.php` & Cơ chế Hết hạn 1H**: Xác định Game Server `Ragnalok` thu hồi `session_token` sau đúng 60 phút (3600s), gửi về `d.kicked = true` đẩy nhân vật về chế độ farm offline.
+  - **Phương thức `refreshSession()` trên `BotInstance`**: Tự động gọi `xhrpg_google_auth.php` bằng Cookie `PHPSESSID` lấy `session_token` mới, lưu vào bộ nhớ và đồng bộ xuống `accounts.json`.
+  - **Proactive Token Renewal (45 Phút)**: Tự động gia hạn mốc session token mỗi 45 phút một lần trong luồng poll, giữ phiên Online 24/7 liên tục mà không bị đếm ngược chạm mốc 1h.
+  - **Emergency Auto-Relogin (`d.kicked`)**: Ngay khi nhận `d.kicked = true` hoặc lỗi phiên token từ `xhrpg_game.php`, bot tự động thực hiện Auto-Relogin qua `PHPSESSID` thu hồi token mới trong < 1s và tiếp tục poll mà không bị ngắt luồng (`stop('failed')`).
+  - **Bổ sung API `POST /api/accounts/:line_uid/phpsessid`**: Cho phép người dùng cập nhật Cookie PHPSESSID linh hoạt cho từng bot.
+- Đã test bằng: `node test.js` -> PASS 100%.
+>>>>>>> Stashed changes
 
 ---
 

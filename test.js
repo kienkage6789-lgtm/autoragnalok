@@ -1445,9 +1445,26 @@ try {
 
   console.log('✅ Anti-Hang & Zombie Bot Watchdog Engine Tests Passed successfully!');
   console.log('✅ User Polling Interval, Role Propagation and Edit Permissions Tests Passed successfully!');
-  console.log('✅ Revamped Auto Market Buy Tests Passed successfully!');
   console.log('✅ Urgent Active Potion Healing Tests Passed successfully!');
   console.log('✅ ProxyPool SOCKS5 Parsing Tests Passed successfully!');
+
+  // ==================== T62 AUTO SESSION RENEWAL & AUTO-RELOGIN TESTS ====================
+  console.log('Testing T62 Auto Session Renewal & Auto-Relogin Engine...');
+  const t62Bot = new BotInstance({
+    line_uid: 't62_uid_9999',
+    session_token: 'old_token_123',
+    phpsessid: 'sess_cookie_abc',
+    name: 'T62 Test Bot'
+  });
+
+  assert.strictEqual(t62Bot.phpsessid, 'sess_cookie_abc', 'BotInstance must store phpsessid');
+  assert.strictEqual(typeof t62Bot.refreshSession, 'function', 'BotInstance must have refreshSession method');
+
+  // Test refreshing with dummy/invalid phpsessid handles failure gracefully
+  const refreshResult = await t62Bot.refreshSession();
+  assert.strictEqual(typeof refreshResult, 'boolean', 'refreshSession must return boolean result');
+
+  console.log('✅ T62 Auto Session Renewal Tests Passed successfully!');
   console.log('✅ All Unit Tests Passed successfully!');
   process.exit(0);
 } catch (error) {

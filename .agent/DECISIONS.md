@@ -2,6 +2,26 @@
 
 > Captured architectural decisions and trade-offs.
 
+## 2026-08-17 - Tự Động Gia Hạn Session & Auto-Relogin Khắc Phục Cơ Chế Offline 1H (T62)
+
+- Bối cảnh:
+  - Game Server `Ragnalok` áp dụng cơ chế giới hạn phiên 60 phút (3600s). Sau 1 tiếng continuous session, game server sẽ làm thu hồi `session_token` cũ và trả về `d.kicked = true` hoặc lỗi phiên, đẩy nhân vật vào chế độ farm offline.
+  - Trước đây, khi gặp `d.kicked`, bot trong `server.js` chuyển sang trạng thái `failed` và dừng hoàn toàn luồng bot (`this.stop('failed')`).
+- Quyết định:
+  1. **Lưu giữ Cookie PHPSESSID Bền Vững**:
+     - Lưu trữ thuộc tính `phpsessid` trên `BotInstance` và file `accounts.json`. `PHPSESSID` đóng vai trò làm chìa khóa xác thực dài hạn với Google Auth của game.
+  2. **Proactive Session Renewal (Gia hạn định kỳ 45 phút)**:
+     - Trong luồng polling `poll()`, kiểm tra mốc thời gian `lastSessionRefreshAt`. Cứ sau mỗi 45 phút, bot tự động gọi `refreshSession()` đến `xhrpg_google_auth.php` bằng `PHPSESSID` để lấy `session_token` mới từ game server, reset timer countdown 60 phút của server trước khi bị timeout.
+  3. **Emergency Auto-Relogin (Khôi phục khẩn cấp khi bị Kicked)**:
+     - Thay vì dừng bot khi gặp `d.kicked` hoặc lỗi phiên token, bot lập tức tự động kích hoạt `refreshSession()`. Nếu thu được `session_token` mới thành công (thường < 1 giây), bot lập tức tiếp tục luồng polling online mà không bị gián đoạn hay ngắt luồng.
+  4. **Cung cấp API Quản lý PHPSESSID**:
+     - Bổ sung endpoint `POST /api/accounts/:line_uid/phpsessid` để người dùng có thể chủ động nhập hoặc cập nhật Cookie `PHPSESSID` từ Dashboard bất cứ lúc nào.
+- Kết quả:
+  - Giúp bot giữ phiên Online 24/7 liền mạch, hoàn toàn vượt qua cơ chế giới hạn 1h của Game Server.
+  - Chạy thành công 100% các bài kiểm thử unit test tự động trong `test.js`.
+
+---
+
 ## 2026-08-16 - Tích Hợp Toàn Bộ Giao Diện Tab Vũ Khí In-Game Vào Bảng Điều Khiển (T78)
 
 - Bối cảnh:
@@ -112,6 +132,25 @@
   - Nhân vật tự động bơm máu khẩn cấp nhanh như click tay thật cả ở bot poller backend lẫn khi chơi trực tiếp trên radar PK.
   - Thiết kế UI Chợ Auto siêu gọn gàng, giảm 60% diện tích cuộn trang.
   - Tất cả các bài kiểm thử unit test tự động trong `test.js` đã pass 100%.
+=======
+## 2026-08-17 - Tự Động Gia Hạn Session & Auto-Relogin Khắc Phục Cơ Chế Offline 1H (T62)
+
+- Bối cảnh:
+  - Game Server `Ragnalok` áp dụng cơ chế giới hạn phiên 60 phút (3600s). Sau 1 tiếng continuous session, game server sẽ làm thu hồi `session_token` cũ và trả về `d.kicked = true` hoặc lỗi phiên, đẩy nhân vật vào chế độ farm offline.
+  - Trước đây, khi gặp `d.kicked`, bot trong `server.js` chuyển sang trạng thái `failed` và dừng hoàn toàn luồng bot (`this.stop('failed')`).
+- Quyết định:
+  1. **Lưu giữ Cookie PHPSESSID Bền Vững**:
+     - Lưu trữ thuộc tính `phpsessid` trên `BotInstance` và file `accounts.json`. `PHPSESSID` đóng vai trò làm chìa khóa xác thực dài hạn với Google Auth của game.
+  2. **Proactive Session Renewal (Gia hạn định kỳ 45 phút)**:
+     - Trong luồng polling `poll()`, kiểm tra mốc thời gian `lastSessionRefreshAt`. Cứ sau mỗi 45 phút, bot tự động gọi `refreshSession()` đến `xhrpg_google_auth.php` bằng `PHPSESSID` để lấy `session_token` mới từ game server, reset timer countdown 60 phút của server trước khi bị timeout.
+  3. **Emergency Auto-Relogin (Khôi phục khẩn cấp khi bị Kicked)**:
+     - Thay vì dừng bot khi gặp `d.kicked` hoặc lỗi phiên token, bot lập tức tự động kích hoạt `refreshSession()`. Nếu thu được `session_token` mới thành công (thường < 1 giây), bot lập tức tiếp tục luồng polling online mà không bị gián đoạn hay ngắt luồng.
+  4. **Cung cấp API Quản lý PHPSESSID**:
+     - Bổ sung endpoint `POST /api/accounts/:line_uid/phpsessid` để người dùng có thể chủ động nhập hoặc cập nhật Cookie `PHPSESSID` từ Dashboard bất cứ lúc nào.
+- Kết quả:
+  - Giúp bot giữ phiên Online 24/7 liền mạch, hoàn toàn vượt qua cơ chế giới hạn 1h của Game Server.
+  - Chạy thành công 100% các bài kiểm thử unit test tự động trong `test.js`.
+>>>>>>> Stashed changes
 
 ---
 

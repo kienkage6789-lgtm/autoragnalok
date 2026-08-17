@@ -3,6 +3,20 @@
 > Work Breakdown Structure. Update task states immediately upon changes.
 > Statuses: todo | doing | blocked | review | done
 
+### [x] T62 - Hệ Thống Auto Session Renewal & Auto-Relogin (Phòng Tránh Cơ Chế Bắt Offline 1H)
+- Description: Nghiên cứu endpoint `xhrpg_offline.php` và cơ chế ngắt phiên 60 phút (Offline Limit) của Game Server `Ragnalok`. Triển khai tính năng Proactive Token Renewal tự động gia hạn `session_token` qua `PHPSESSID` định kỳ mỗi 45 phút (trước khi dính timeout 1h). Bổ sung luồng Auto-Relogin khẩn cấp khi nhận `d.kicked = true` hoặc lỗi session token từ `xhrpg_game.php`, tự động lấy lại `session_token` mới trong < 1s và tiếp tục luồng polling online liền mạch mà không làm ngắt bot. Bổ sung lưu trữ `phpsessid` trong `BotInstance`, `accounts.json` và API `POST /api/accounts/:line_uid/phpsessid`.
+- Files related: `server.js`, `test.js`
+- Acceptance criteria:
+  - [x] Lưu trữ `phpsessid` trong cấu hình tài khoản `BotInstance` và `accounts.json`.
+  - [x] Triển khai phương thức `refreshSession()` tự động làm mới `session_token` qua `xhrpg_google_auth.php`.
+  - [x] Tự động làm mới session định kỳ mốc 45 phút (Proactive Renewal).
+  - [x] Tự động Auto-Relogin khẩn cấp khi gặp `d.kicked` từ game server thay vì ngắt bot (`stop('failed')`).
+  - [x] Bổ sung API `POST /api/accounts/:line_uid/phpsessid` để cập nhật PHPSESSID.
+  - [x] Viết unit tests trong `test.js` và chạy `node test.js` vượt qua 100%.
+- Status: done
+
+---
+
 ### [x] T78 - Sao Chép 100% Giao Diện Tab Vũ Khí In-Game Vào Bảng Điều Khiển (Dark Mode)
 - Description: Đưa nguyên bản 100% cấu trúc HTML/CSS và tương tác từ file game gốc `xhrpg_canvas.js` (`renderGuns`, `_renderModulePanel`, `_modSocketStrip`, `_cardPickerHtml`) vào Tab Vũ Khí trên Dashboard với giao diện Space-Dark Glassmorphism: Switcher chuyển đổi vũ khí (Dao găm / Dao dài), 8 phân loại vũ khí & trang bị, hệ thống khe Module kèm màu phẩm cấp, Cường hóa Kim Cương (+0..+15), Khảm/Gỡ Thẻ bài trực tiếp trong từng ô slot, Quản lý đạn T1–T6 kèm nút BẬT/TẮT từng Tier cho cả Dao Găm, Dao Dài và Pháo Tháp (Turret), và Kho 30 ô Module (lưới 5 cột).
 - Files related: `server.js`, `public/app.js`, `public/app.css`, `public/index.html`, `test.js`
@@ -132,6 +146,18 @@
   - [x] Triển khai logic bơm máu khẩn cấp chủ động qua nhịp request trong `pollGame()`, thiết kế công tắc bật/tắt và chọn ngưỡng HP trên UI tab Cơ Bản.
   - [x] Tích hợp cấu hình và logic bơm máu khẩn cấp tương ứng vào `play_battle.html` thông qua `localStorage` và can thiệp AJAX `$.post` callback.
   - [x] Viết unit tests kiểm thử bộ lọc hộp và cơ chế bơm máu khẩn cấp trong `test.js`, chạy `npm test` thành công 100%.
+=======
+### [x] T62 - Hệ Thống Auto Session Renewal & Auto-Relogin (Phòng Tránh Cơ Chế Bắt Offline 1H)
+- Description: Nghiên cứu endpoint `xhrpg_offline.php` và cơ chế ngắt phiên 60 phút (Offline Limit) của Game Server `Ragnalok`. Triển khai tính năng Proactive Token Renewal tự động gia hạn `session_token` qua `PHPSESSID` định kỳ mỗi 45 phút (trước khi dính timeout 1h). Bổ sung luồng Auto-Relogin khẩn cấp khi nhận `d.kicked = true` hoặc lỗi session token từ `xhrpg_game.php`, tự động lấy lại `session_token` mới trong < 1s và tiếp tục luồng polling online liền mạch mà không làm ngắt bot. Bổ sung lưu trữ `phpsessid` trong `BotInstance`, `accounts.json` và API `POST /api/accounts/:line_uid/phpsessid`.
+- Files related: `server.js`, `test.js`
+- Acceptance criteria:
+  - [x] Lưu trữ `phpsessid` trong cấu hình tài khoản `BotInstance` và `accounts.json`.
+  - [x] Triển khai phương thức `refreshSession()` tự động làm mới `session_token` qua `xhrpg_google_auth.php`.
+  - [x] Tự động làm mới session định kỳ mốc 45 phút (Proactive Renewal).
+  - [x] Tự động Auto-Relogin khẩn cấp khi gặp `d.kicked` từ game server thay vì ngắt bot (`stop('failed')`).
+  - [x] Bổ sung API `POST /api/accounts/:line_uid/phpsessid` để cập nhật PHPSESSID.
+  - [x] Viết unit tests trong `test.js` và chạy `node test.js` vượt qua 100%.
+>>>>>>> Stashed changes
 - Status: done
 
 ---

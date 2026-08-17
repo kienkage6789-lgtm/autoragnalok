@@ -1365,6 +1365,7 @@ class BotInstance {
   constructor(account) {
     this.line_uid = account.line_uid;
     this.session_token = account.session_token;
+    this.phpsessid = account.phpsessid || null;
     this.name = account.name;
     this.userId = account.userId || 'usr_admin';
     this.fingerprint = getAccountFingerprint(this.line_uid);
@@ -1441,6 +1442,7 @@ class BotInstance {
     this.lastActSentAt = 0;
     this.nextActInterval = logNormalActInterval();
     this.pendingActFlag = false;
+    this.lastSessionRefreshAt = Date.now(); // 🕒 Mốc làm mới session token gần nhất
     this.consecutiveErrors = 0;
     this.failedSeeds = {}; // Danh sách hạt giống bị lỗi gieo trồng
     this.lastHarvestFailedAt = 0;
@@ -1462,7 +1464,54 @@ class BotInstance {
     this.lastGw = null;
     this.lastCw = null;
     this.others = [];
-    this.addLog('SYSTEM', `Khởi tạo bot cho tài khoản: ${this.name}`);
+    this.addLog('SYSTEM', `Khởi tạo bot cho tài khoản: ${this.name}${this.phpsessid ? ' (🔑 Có Auto-Relogin PHPSESSID)' : ''}`);
+  }
+
+  // 🔑 T62 Auto Session Renewal & Auto-Relogin Engine
+  async refreshSession() {
+    if (!this.phpsessid) {
+      this.addLog('WARN', '🔑 Chưa cấu hình PHPSESSID nên không thể tự động gia hạn Session Token');
+      return false;
+    }
+    try {
+      this.addLog('SYSTEM', '🔄 Đang làm mới Session Token qua PHPSESSID từ game server...');
+      const fetchOptions = {
+        headers: {
+          'cookie': `PHPSESSID=${this.phpsessid}`,
+          'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
+      };
+      if (typeof proxyPool !== 'undefined' && proxyPool.getDispatcherForBot) {
+        const disp = proxyPool.getDispatcherForBot(this.line_uid);
+        if (disp) fetchOptions.dispatcher = disp;
+      }
+      const response = await fetch('https://ragnalok.online/human/xhrpg_google_auth.php', fetchOptions);
+      const text = await response.text();
+      let data;
+      try { data = JSON.parse(text); } catch (e) {}
+      if (data && data.ok && data.session_token) {
+        this.session_token = String(data.session_token);
+        this.lastSessionRefreshAt = Date.now();
+        this.addLog('SYSTEM', `✅ Làm mới Session Token thành công! Token mới: ${this.session_token.slice(0, 8)}...`);
+
+        // Cập nhật lại file accounts.json
+        const currentAccounts = loadAccounts();
+        const index = currentAccounts.findIndex(acc => acc.line_uid === this.line_uid);
+        if (index !== -1) {
+          currentAccounts[index].session_token = this.session_token;
+          currentAccounts[index].phpsessid = this.phpsessid;
+          saveAccounts(currentAccounts);
+        }
+        return true;
+      } else {
+        const errMsg = (data && (data.msg || data.error)) || 'PHPSESSID không hợp lệ hoặc đã hết hạn trên game';
+        this.addLog('ERROR', `❌ Làm mới Session Token thất bại: ${errMsg}`);
+        return false;
+      }
+    } catch (err) {
+      this.addLog('ERROR', `❌ Lỗi kết nối khi làm mới Session Token: ${err.message}`);
+      return false;
+    }
   }
 
   triggerActFlag() {
@@ -3214,6 +3263,12 @@ class BotInstance {
       }
     }
 
+    // 🕒 T62 Proactive Token Renewal: Tự động gia hạn session token mỗi 45 phút để tránh mốc 1h của Game Server
+    if (this.phpsessid && (Date.now() - this.lastSessionRefreshAt > 45 * 60 * 1000)) {
+      this.addLog('SYSTEM', '🕒 Đạt mốc 45 phút -> Tự động gia hạn Session Token để duy trì phiên Online 24/7');
+      await this.refreshSession();
+    }
+
     const payload = {
       line_uid: this.line_uid,
       session_token: this.session_token,
@@ -3234,9 +3289,18 @@ class BotInstance {
     const d = await this.sendRequest('https://ragnalok.online/human/xhrpg_game.php', payload);
 
     if (d.kicked) {
+      if (this.phpsessid) {
+        this.addLog('SYSTEM', '⚠️ Game Server báo Kicked/Session Expired (Dính mốc 1h) -> Kích hoạt Auto-Relogin khẩn cấp...');
+        const ok = await this.refreshSession();
+        if (ok) {
+          this.addLog('SYSTEM', '🚀 Auto-Relogin bằng PHPSESSID thành công! Đang tiếp tục luồng Polling Online...');
+          this.consecutiveErrors = 0;
+          return;
+        }
+      }
       this.status = 'failed';
-      this.error = 'Tài khoản bị kick hoặc đăng nhập từ thiết bị khác';
-      this.addLog('ERROR', 'Tài khoản bị đăng xuất (đăng nhập từ nơi khác)');
+      this.error = 'Tài khoản bị kick hoặc hết hạn phiên (Chưa cấu hình PHPSESSID hợp lệ)';
+      this.addLog('ERROR', 'Tài khoản bị đăng xuất (đăng nhập từ nơi khác hoặc hết hạn phiên)');
       this.stop('failed');
       return;
     }
@@ -3255,6 +3319,11 @@ class BotInstance {
 
     if (!d.ok) {
       this.error = d.error || 'Yêu cầu game trả về thất bại';
+      if (this.phpsessid && (String(this.error).toLowerCase().includes('token') || String(this.error).toLowerCase().includes('session') || String(this.error).toLowerCase().includes('kick'))) {
+        this.addLog('SYSTEM', `⚠️ Phát hiện lỗi phiên (${this.error}) -> Đang thử Auto-Relogin qua PHPSESSID...`);
+        const ok = await this.refreshSession();
+        if (ok) return;
+      }
       this.addLog('ERROR', `Lỗi: ${this.error}`);
       return;
     }
@@ -5454,11 +5523,14 @@ app.all('/api/add-by-phpsessid', requireAuth, async (req, res) => {
       const bot = botInstances[line_uid];
       if (bot.userId === req.user.id || req.user.role === 'admin') {
         bot.session_token = session_token;
+        bot.phpsessid = phpsessid;
+        bot.lastSessionRefreshAt = Date.now();
         if (customName || data.player.name) bot.name = customName || data.player.name;
         const currentAccounts = loadAccounts();
         const index = currentAccounts.findIndex(acc => acc.line_uid === line_uid);
         if (index !== -1) {
           currentAccounts[index].session_token = session_token;
+          currentAccounts[index].phpsessid = phpsessid;
           if (customName || data.player.name) currentAccounts[index].name = customName || data.player.name;
           saveAccounts(currentAccounts);
         }
@@ -5467,7 +5539,7 @@ app.all('/api/add-by-phpsessid', requireAuth, async (req, res) => {
             <div style="background:#0f172a; color:#fff; height:100vh; display:flex; flex-direction:column; align-items:center; justify-content:center; font-family:sans-serif; text-align:center; padding:20px;">
               <div style="font-size:60px; margin-bottom:10px;">🎉</div>
               <h2 style="color:#34d399; margin-bottom:10px;">CẬP NHẬT TOKEN THÀNH CÔNG!</h2>
-              <p style="color:#94a3b8; font-size:16px;">Tài khoản <strong>${bot.name}</strong> đã được cập nhật Token mới.</p>
+              <p style="color:#94a3b8; font-size:16px;">Tài khoản <strong>${bot.name}</strong> đã được cập nhật Token & PHPSESSID mới.</p>
               <p style="color:#a78bfa; font-size:14px; margin-top:15px;">⏳ Đang quay về Bảng điều khiển...</p>
               <script>setTimeout(() => location.href='/', 1500);</script>
             </div>
@@ -5496,6 +5568,7 @@ app.all('/api/add-by-phpsessid', requireAuth, async (req, res) => {
       name: accountName,
       line_uid,
       session_token,
+      phpsessid,
       userId: req.user.id
     };
 
@@ -5639,6 +5712,7 @@ app.get('/api/accounts', requireAuth, (req, res) => {
           ownerAllowEditPollInterval: ownerUser ? (ownerUser.allowEditPollInterval === true) : false,
           status: bot.status,
           ping: bot.ping || 0,
+          hasPhpsessid: !!bot.phpsessid,
           clientActive: !!(bot.lastClientActive && (Date.now() - bot.lastClientActive < 12000)),
           error: bot.error,
           lastUpdate: bot.lastUpdate,
@@ -5853,6 +5927,40 @@ app.get('/api/accounts', requireAuth, (req, res) => {
     console.error('Error in GET /api/accounts:', err);
     res.status(500).json({ error: 'Lỗi máy chủ khi lấy danh sách tài khoản: ' + err.message });
   }
+});
+
+// Update or set PHPSESSID for Auto-Relogin (Protected)
+app.post('/api/accounts/:line_uid/phpsessid', requireAuth, async (req, res) => {
+  const uid = req.params.line_uid;
+  let phpsessid = req.body.phpsessid || req.body.cookie;
+  if (!phpsessid) return res.status(400).json({ error: 'Thiếu PHPSESSID cookie' });
+
+  const match = String(phpsessid).match(/PHPSESSID=([^;\s]+)/i);
+  if (match) phpsessid = match[1];
+  phpsessid = String(phpsessid).trim();
+
+  const bot = botInstances[uid];
+  if (!bot) return res.status(404).json({ error: 'Không tìm thấy tài khoản bot này' });
+  if (bot.userId !== req.user.id && req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Bạn không có quyền sửa đổi tài khoản này' });
+  }
+
+  bot.phpsessid = phpsessid;
+  const currentAccounts = loadAccounts();
+  const idx = currentAccounts.findIndex(acc => acc.line_uid === uid);
+  if (idx !== -1) {
+    currentAccounts[idx].phpsessid = phpsessid;
+    saveAccounts(currentAccounts);
+  }
+
+  // Thử refresh token ngay lập tức
+  const refreshed = await bot.refreshSession();
+  return res.json({
+    success: true,
+    message: refreshed ? '✅ Cập nhật PHPSESSID & Làm mới Token thành công!' : '⚠️ Đã lưu PHPSESSID nhưng chưa thể làm mới token (vui lòng kiểm tra cookie)',
+    refreshed,
+    phpsessid
+  });
 });
 
 // Add account (Protected + Quota check)
