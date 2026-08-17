@@ -2257,14 +2257,12 @@ class BotInstance {
             baseDelay = Math.min(baseDelay, 1200);
           }
 
-          // Dynamic jitter range: ±30ms for <= 600ms, ±60ms for <= 1100ms, ±100ms for <= 1500ms, ±140ms for slower
-          let jitterBound = 140;
-          if (baseDelay <= 600) {
-            jitterBound = 30;
-          } else if (baseDelay <= 1100) {
-            jitterBound = 60;
-          } else if (baseDelay <= 1500) {
+          // Dynamic jitter range: ±100ms for <= 1100ms, ±120ms for <= 1500ms, ±150ms for slower
+          let jitterBound = 150;
+          if (baseDelay <= 1100) {
             jitterBound = 100;
+          } else if (baseDelay <= 1500) {
+            jitterBound = 120;
           }
           // Asymmetric jitter: 70% positive human/network lag, 30% slight lead
           const isPositiveSkew = Math.random() < 0.7;
@@ -2824,9 +2822,8 @@ class BotInstance {
       }
     }
 
-    // Request full payload every 5 polls if boss hunt is active OR every 10 polls if idle
-    // OR on every poll while actively hunting a boss or when bosses list is null.
-    const isFull = ((this.pollCount % (this.settings.bossHuntMode !== 'off' ? 5 : 10) === 0) || this.targetedMvp || this.bosses === null || this.guildDungeonActive || (this.player && Number(this.player.gdun_in) === 1)) ? 1 : 0;
+    // Request full payload every 2 polls or when monsters/bosses empty for fast spawn detection
+    const isFull = ((this.pollCount % 2 === 0) || this.targetedMvp || this.bosses === null || !this.monsters || this.monsters.length === 0 || this.guildDungeonActive || (this.player && Number(this.player.gdun_in) === 1)) ? 1 : 0;
 
     // 😴 Anti-idle: Tính act flag mô phỏng hành vi người dùng thật
     // - Poll đầu tiên = act=1 (giống user vừa load trang/F5)
@@ -3221,13 +3218,13 @@ class BotInstance {
       line_uid: this.line_uid,
       session_token: this.session_token,
       manual_dir: '',
-      act: actValue,  // 😴 Log-normal Jitter tự nhiên (~2-6 phút) hoặc Event-driven
+      act: 1,  // ⚡ Ép 100% act=1 cho mọi poll request để tối đa hóa tốc độ diệt quái (Request-Tick)
       full: isFull,
       bot: this.settings.bot ? 1 : 0,
       lock_pos: lockPos,
       explore_radius: exploreRadius,
-      explore_cx: lockPos ? exploreCx : naturalCoordNoise(exploreCx, 18),
-      explore_cy: lockPos ? exploreCy : naturalCoordNoise(exploreCy, 18),
+      explore_cx: (lockPos || traveling === 0) ? exploreCx : naturalCoordNoise(exploreCx, 18),
+      explore_cy: (lockPos || traveling === 0) ? exploreCy : naturalCoordNoise(exploreCy, 18),
       traveling: traveling,
       auto_potion_threshold: this.settings.auto_potion_threshold,
       have_static: (this.spots && this.mon_masters) ? 1 : 0,
@@ -3494,18 +3491,17 @@ class BotInstance {
 
       if (shouldActiveHeal) {
         this.addLog('HEAL', `💊 [Urgent Potion] ${healReason} -> Bơm máu khẩn cấp!`);
-        try {
-          const res = await this.sendRequest('https://ragnalok.online/human/xhrpg_upgrade.php', {
-            line_uid: this.line_uid,
-            session_token: this.session_token,
-            action: 'use_potion_manual'
-          });
+        this.sendRequest('https://ragnalok.online/human/xhrpg_upgrade.php', {
+          line_uid: this.line_uid,
+          session_token: this.session_token,
+          action: 'use_potion_manual'
+        }).then(res => {
           if (res && res.ok && res.player) {
             this.updatePlayerState(res.player);
           }
-        } catch (e) {
+        }).catch(e => {
           console.error(`[Urgent Potion Error] Failed to use potion:`, e.message);
-        }
+        });
       }
     }
 
@@ -3673,8 +3669,8 @@ class BotInstance {
       }
     }
 
-    // Execute automation
-    await this.runAutomation();
+    // Execute automation asynchronously without blocking main poll tick
+    this.runAutomation().catch(err => console.error('Automation error:', err));
   }
 
   async runAutomation() {

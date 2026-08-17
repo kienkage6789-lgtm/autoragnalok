@@ -2,6 +2,29 @@
 
 > Changelog of actual changes implemented.
 
+### 2026-08-17 - Tối Ưu Tốc Độ Train Cực Đại Theo Cơ Chế Request-Tick Game Server
+
+- File đã đổi: [server.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [test.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/test.js).
+- Đã làm:
+  - **Ép Cờ `act: 1` Cho 100% Request Poll Game**: Chuyển `act: actValue` thành `act: 1` cho mọi poll request gửi tới `xhrpg_game.php`. Đảm bảo mỗi nhịp poll đều là 1 tick tính toán sát thương & hạ quái thực sự của server.
+  - **Bất Đồng Bộ Hóa Request Phụ (Non-blocking Sub-actions)**: Chuyển `runAutomation()` và `use_potion_manual` sang chế độ bất đồng bộ không chặn (Non-blocking), giúp nhịp poll `xhrpg_game.php` không bị nghẽn 600ms bởi các request phụ.
+  - **Khóa Tọa Độ Chuẩn Khi Đứng Yên (Zero-Jitter Lock)**: Loại bỏ nhiễu ngẫu nhiên khi `lockPos === 1` hoặc `traveling === 0`, giúp nhân vật giữ nguyên hướng tấn công tối đa DPS.
+  - **Tăng Tần Suất Payload `full: 1`**: Đổi tần suất từ 5-10 poll thành 2 poll/lần hoặc khi danh sách quái trống để nhận diện quái spawn lại cực nhanh.
+  - **Unit Tests**: Chạy `npm test` vượt qua 100% các bài kiểm thử tự động.
+
+
+### 2026-08-17 - Khôi Phục 100% Cơ Chế & Nhịp Polling Bản "Ma Đạo Phân Tranh"
+
+- File đã đổi: [server.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [test.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/test.js).
+- Đã làm:
+  - **Thay Thế Toàn Bộ Cấu Hình Nhịp Poll Thành Bản "Ma Đạo Phân Tranh" (Commit `60e6071`)**:
+    - `minInterval` game poll: **900ms** (khớp với server-side cooldown ~900ms).
+    - `minInterval` action request: **600ms**.
+    - Sàn poll tối thiểu (`Math.max` floor): **500ms**.
+    - Trần Boss Snipe / PK War: **1200ms**.
+    - Biên độ Jitter động (`jitterBound`): `±100ms` với nhịp ≤ 1100ms, `±120ms` với nhịp ≤ 1500ms, và `±150ms` với nhịp lớn hơn.
+  - **Unit Tests**: Đã chạy bộ test tự động `npm test` thành công 100%.
+
 ## 2026-08-17 - Nâng Cấp Hệ Thống Offline (`xhrpg_offline.php`) & Khôi Phục Nhịp Polling Tối Ưu
 
 - File đã đổi: [server.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [test.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/test.js).
