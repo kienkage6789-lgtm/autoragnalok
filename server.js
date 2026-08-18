@@ -2664,7 +2664,7 @@ class BotInstance {
     }
 
     // 5. Quản lý danh sách Boss khi đã đến đúng map mục tiêu
-    const aliveTargetBosses = this.bosses ? this.bosses.filter(b => (b.hp || 0) > 0) : [];
+    const aliveTargetBosses = this.bosses ? this.bosses.filter(b => (b.hp === undefined || (b.hp || 0) > 0)) : [];
     
     // Cập nhật bộ đếm xác nhận map sạch boss
     if (this.bosses === null) {
@@ -2755,10 +2755,19 @@ class BotInstance {
         : null;
 
       if (isMem && ldr && ldr.status === 'running' && ldr.player && this.settings.teamSynced === true) {
+        const isDifferentGuild = (() => {
+          if (!this.player || !ldr.player) return false;
+          if (this.player.gd && ldr.player.gd && this.player.gd !== ldr.player.gd) return true;
+          if (this.player.guild_id && ldr.player.guild_id && this.player.guild_id !== ldr.player.guild_id) return true;
+          if (this.player.guild_name && ldr.player.guild_name && this.player.guild_name !== ldr.player.guild_name) return true;
+          if (this.player.g_name && ldr.player.g_name && this.player.g_name !== ldr.player.g_name) return true;
+          return false;
+        })();
+
         if (ldr.guildDungeonActive && ldr.guildDungeonIsTeam && !this.guildDungeonActive && Number(this.player.gdun_in) !== 1) {
           this.addLog('SYSTEM', `🏰 [Team Member] Đồng bộ vào Phụ Bản Guild theo Trưởng nhóm (${ldr.name})...`);
           await this.enterGuildDungeon(true);
-        } else if (!ldr.guildDungeonActive && (this.guildDungeonActive || Number(this.player.gdun_in) === 1)) {
+        } else if (!ldr.guildDungeonActive && !isDifferentGuild && (this.guildDungeonActive || Number(this.player.gdun_in) === 1)) {
           this.addLog('SYSTEM', `↩️ [Team Member] Đồng bộ thoát Phụ Bản Guild theo Trưởng nhóm (${ldr.name})...`);
           await this.exitGuildDungeon();
         }
@@ -2773,7 +2782,11 @@ class BotInstance {
         const timeInDungeon = this.gdunEnteredAt ? (now - this.gdunEnteredAt) : 0;
         const timeSinceKill = this.gdunLastKillAt ? (now - this.gdunLastKillAt) : 0;
 
-        const shouldExitByKill = (this.gdunLastKillAt > 0 && timeSinceKill >= 5000); // 5s sau kill Boss Guild
+        const aliveMonsters = (this.monsters || []).filter(m => (m.hp === undefined || (m.hp || 0) > 0));
+        const aliveBosses = (this.bosses || []).filter(b => (b.hp === undefined || (b.hp || 0) > 0));
+        const hasTargets = (this.monsters !== null && this.bosses !== null) && (aliveMonsters.length > 0 || aliveBosses.length > 0);
+
+        const shouldExitByKill = (this.gdunLastKillAt > 0 && timeSinceKill >= 5000 && !hasTargets); // 5s sau kill Boss Guild và không còn mục tiêu
         const shouldExitByTimer = (timeInDungeon >= 10 * 60 * 1000);                 // 10 phút tối đa
 
         if (shouldExitByKill) {
@@ -3027,7 +3040,7 @@ class BotInstance {
     const isHuntingEnabled = this.settings.bossHuntMode !== 'off';
     
     if (isHuntingEnabled && isCorrectMvpMap && this.bosses && this.bosses.length > 0) {
-      const aliveBosses = this.bosses.filter(b => (b.hp || 0) > 0);
+      const aliveBosses = this.bosses.filter(b => (b.hp === undefined || (b.hp || 0) > 0));
 
       if (aliveBosses.length > 0) {
         let targetPool = aliveBosses;
@@ -3401,16 +3414,16 @@ class BotInstance {
 
     // 🏰 Tự động thoát Phụ Bản Guild khi sạch Quái & Boss (monsters: [] và bosses: [])
     if (this.guildDungeonActive && !this._exitingGuildDungeon) {
-      if (this.monsters !== null || this.bosses !== null) {
+      if (this.monsters !== null && this.bosses !== null) {
         const aliveMonsters = (this.monsters || []).filter(m => (m.hp === undefined || (m.hp || 0) > 0));
         const aliveBosses = (this.bosses || []).filter(b => (b.hp === undefined || (b.hp || 0) > 0));
         const hasTargets = (aliveMonsters.length > 0 || aliveBosses.length > 0);
 
         if (!hasTargets) {
           this.gdunEmptyPolls = (this.gdunEmptyPolls || 0) + 1;
-          if (this.gdunEmptyPolls >= 2) {
+          if (this.gdunEmptyPolls >= 5) {
             this._exitingGuildDungeon = true;
-            this.addLog('SUCCESS', `🎉 [Guild Dungeon] Đã sạch Boss/Quái trong Phụ Bản (monsters: [])! Tự động thoát Phụ Bản ra ngoài.`);
+            this.addLog('SUCCESS', `🎉 [Guild Dungeon] Đã sạch Boss/Quái trong Phụ Bản! Tự động thoát Phụ Bản ra ngoài.`);
             await this.exitGuildDungeon();
           }
         } else {
@@ -3502,7 +3515,7 @@ class BotInstance {
 
     if (this.bosses) {
       const nowTs = Date.now();
-      const aliveBosses = this.bosses.filter(b => (b.hp || 0) > 0);
+      const aliveBosses = this.bosses.filter(b => (b.hp === undefined || (b.hp || 0) > 0));
       
       // Track newly appeared bosses
       aliveBosses.forEach(b => {
@@ -5905,9 +5918,9 @@ app.get('/api/accounts', requireAuth, (req, res) => {
           })(),
           isMvpCycling: bot.isMvpCycling || false,
           currentMvpBossInfo: bot.currentMvpBossInfo || null,
-          aliveBossCount: bot.bosses ? bot.bosses.filter(b => (b.hp || 0) > 0).length : 0,
+          aliveBossCount: bot.bosses ? bot.bosses.filter(b => (b.hp === undefined || (b.hp || 0) > 0)).length : 0,
           bossHuntActive: bot.settings.bossHuntMode !== 'off',
-          aliveBosses: (bot.bosses || []).filter(b => (b.hp || 0) > 0).map(b => ({
+          aliveBosses: (bot.bosses || []).filter(b => (b.hp === undefined || (b.hp || 0) > 0)).map(b => ({
             id: b.id,
             name: b.name || 'Boss',
             emoji: b.emoji || '👾',
@@ -7371,7 +7384,7 @@ app.post('/api/accounts/:line_uid/action', requireAuth, async (req, res) => {
       bot.addLog('SYSTEM', '🎯 [Manual Target] Đã hủy chỉ định boss thủ công. Quay lại chế độ tự động.');
       return res.json({ ok: true, msg: 'Đã hủy chỉ định boss. Bot sẽ tự chọn mục tiêu.' });
     }
-    const aliveBoss = bot.bosses ? bot.bosses.find(b => b.id === bossId && (b.hp || 0) > 0) : null;
+    const aliveBoss = bot.bosses ? bot.bosses.find(b => b.id === bossId && (b.hp === undefined || (b.hp || 0) > 0)) : null;
     if (!aliveBoss) {
       return res.status(400).json({ error: 'Boss không tồn tại hoặc đã chết.' });
     }
@@ -7393,7 +7406,20 @@ app.post('/api/accounts/:line_uid/action', requireAuth, async (req, res) => {
 
     if (action === 'gdun_enter_team') {
       const ok = await bot.enterGuildDungeon(true);
-      return res.json({ ok, msg: ok ? '🏰 Đã kích hoạt Săn Boss Guild (Cả Team)' : 'Không thể vào Phụ Bản Guild' });
+      const myTeamId = bot.settings.teamId || 'none';
+      if (myTeamId !== 'none') {
+        const members = Object.values(botInstances).filter(b => 
+          b.userId === bot.userId && 
+          b.settings.teamRole === 'member' && 
+          (b.settings.teamId || 'none') === myTeamId &&
+          b.settings.teamSynced === true &&
+          b.status === 'running'
+        );
+        for (const mem of members) {
+          mem.enterGuildDungeon(true).catch(() => {});
+        }
+      }
+      return res.json({ ok, msg: ok ? '🏰 Đã kích hoạt Săn Boss Guild (Cả Team)' : 'Không thể vào Phụ Bản Guild (Nhưng đã gửi lệnh cho thành viên)' });
     }
     if (action === 'gdun_enter_solo' || action === 'gdun_enter') {
       const ok = await bot.enterGuildDungeon(false);

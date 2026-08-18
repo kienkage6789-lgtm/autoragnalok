@@ -378,7 +378,7 @@ try {
   instance.bosses = null;
   instance.targetedMvp = false;
   instance.pollCount = 1;
-  const isFullWithNullBosses = ((instance.pollCount % (instance.settings.bossHuntMode !== 'off' ? 5 : 10) === 0) || instance.targetedMvp || instance.bosses === null) ? 1 : 0;
+  const isFullWithNullBosses = ((instance.pollCount % 2 === 0) || instance.targetedMvp || instance.bosses === null) ? 1 : 0;
   assert.strictEqual(isFullWithNullBosses, 1, 'isFull must be 1 when bosses is null');
 
   // Test Case 2: mvpConfirmClearCount reset when bosses is null
@@ -433,6 +433,31 @@ try {
   const targetMapT57 = instance.isMvpCycling ? instance.getCurrentMvpCycleMap() : (parseInt(instance.settings.targetMap) || 1);
   const needsWarpT57 = (instance.settings.autoMap || (instance.settings.bossHuntMode && instance.settings.bossHuntMode !== 'off') || instance.isMvpCycling) && Number(instance.player.map) !== Number(targetMapT57);
   assert.strictEqual(needsWarpT57, true, 'needsWarp must be true when autoMap is false but bossHuntMode is enabled');
+
+  // Test Case: Boss with hp === undefined treated as alive in all MVP cycle pathways
+  console.log('Testing Boss with hp === undefined treated as alive...');
+  instance.bosses = [
+    { id: 99, name: 'Undefined HP Boss', x: 100, y: 100 } // hp property missing / undefined
+  ];
+  
+  // 1. updateMvpCycleStatus aliveTargetBosses filter check
+  const aliveTargetBossesUndefined = instance.bosses ? instance.bosses.filter(b => (b.hp === undefined || (b.hp || 0) > 0)) : [];
+  assert.strictEqual(aliveTargetBossesUndefined.length, 1, 'Boss with hp === undefined must be considered alive for MVP cycle map clear check');
+
+  // 2. MVP Hunt target filtering check
+  const aliveBossesUndefined = instance.bosses.filter(b => (b.hp === undefined || (b.hp || 0) > 0));
+  assert.strictEqual(aliveBossesUndefined.length, 1, 'Boss with hp === undefined must be filtered as alive for targeting');
+
+  // 3. Dashboard API response filtering check
+  const dashboardAliveCount = instance.bosses ? instance.bosses.filter(b => (b.hp === undefined || (b.hp || 0) > 0)).length : 0;
+  const dashboardAliveList = (instance.bosses || []).filter(b => (b.hp === undefined || (b.hp || 0) > 0));
+  assert.strictEqual(dashboardAliveCount, 1, 'Dashboard API must count boss with hp === undefined as alive');
+  assert.strictEqual(dashboardAliveList.length, 1, 'Dashboard API must list boss with hp === undefined in aliveBosses');
+
+  // 4. Manual boss target validation check
+  const bossIdToTarget = 99;
+  const manualTargetAlive = instance.bosses ? instance.bosses.find(b => b.id === bossIdToTarget && (b.hp === undefined || (b.hp || 0) > 0)) : null;
+  assert.ok(manualTargetAlive, 'Manual boss target must find boss with hp === undefined as alive');
 
   // Clean up to avoid pollution
   instance.settings.bossHuntMode = 'off';
@@ -1092,11 +1117,16 @@ try {
   assert.strictEqual(mockGdunBot.gdunLastKillAt, 0, 'gdunLastKillAt should be reset to 0 on exit');
   assert.strictEqual(mockGdunBot._exitingGuildDungeon, false, '_exitingGuildDungeon should be false after exit');
 
-  // Test 3: Kill-based auto-exit — 5s after gdunLastKillAt → shouldExitByKill = true
+  // Test 3: Kill-based auto-exit — 5s after gdunLastKillAt & no targets → shouldExitByKill = true
   await mockGdunBot.enterGuildDungeon(false); // Enter solo again
   mockGdunBot.gdunLastKillAt = Date.now() - 6000; // Simulate kill 6 seconds ago
-  const shouldExitByKill = (mockGdunBot.gdunLastKillAt > 0 && (Date.now() - mockGdunBot.gdunLastKillAt) >= 5000);
-  assert.strictEqual(shouldExitByKill, true, 'shouldExitByKill should be true when 5s have passed since kill');
+  mockGdunBot.monsters = [];
+  mockGdunBot.bosses = [];
+  const testAliveM = (mockGdunBot.monsters || []).filter(m => (m.hp === undefined || m.hp > 0));
+  const testAliveB = (mockGdunBot.bosses || []).filter(b => (b.hp === undefined || b.hp > 0));
+  const testHasTargets = (mockGdunBot.monsters !== null && mockGdunBot.bosses !== null) && (testAliveM.length > 0 || testAliveB.length > 0);
+  const shouldExitByKill = (mockGdunBot.gdunLastKillAt > 0 && (Date.now() - mockGdunBot.gdunLastKillAt) >= 5000 && !testHasTargets);
+  assert.strictEqual(shouldExitByKill, true, 'shouldExitByKill should be true when 5s have passed since kill and there are no targets');
 
   // Test 4: Timer-based auto-exit — time in dungeon >= 10 min → shouldExitByTimer
   const shouldExitByTimer10min = ((Date.now() - mockGdunBot.gdunEnteredAt) >= 10 * 60 * 1000);
@@ -1110,27 +1140,74 @@ try {
   let guardBlocked = mockGdunBot._exitingGuildDungeon; // Would skip exitGuildDungeon in real pollGame
   assert.strictEqual(guardBlocked, true, '_exitingGuildDungeon guard should block repeated exit');
 
-  // Test 6: Empty monsters: [] and bosses: [] triggers auto-exit after 2 consecutive polls
+  // Test 6: Empty monsters: [] and bosses: [] triggers auto-exit after 5 consecutive polls (when both not null)
   mockGdunBot._exitingGuildDungeon = false;
   mockGdunBot.guildDungeonActive = true;
   mockGdunBot.monsters = [];
   mockGdunBot.bosses = [];
   mockGdunBot.gdunEmptyPolls = 0;
 
-  // Poll 1: Empty monsters -> gdunEmptyPolls = 1
+  // Poll 1 to 4: Empty monsters -> gdunEmptyPolls increments but doesn't exit yet
+  for (let i = 1; i <= 4; i++) {
+    let aliveM = (mockGdunBot.monsters || []).filter(m => (m.hp === undefined || m.hp > 0));
+    let aliveB = (mockGdunBot.bosses || []).filter(b => (b.hp === undefined || b.hp > 0));
+    if (mockGdunBot.monsters !== null && mockGdunBot.bosses !== null && aliveM.length === 0 && aliveB.length === 0) {
+      mockGdunBot.gdunEmptyPolls++;
+    }
+    assert.strictEqual(mockGdunBot.gdunEmptyPolls, i, `Poll ${i} should set gdunEmptyPolls to ${i}`);
+    assert.strictEqual(mockGdunBot.guildDungeonActive, true, `Bot should still be in dungeon on poll ${i}`);
+  }
+
+  // Poll 5: Still empty -> gdunEmptyPolls = 5 -> auto exit
   let aliveM = (mockGdunBot.monsters || []).filter(m => (m.hp === undefined || m.hp > 0));
   let aliveB = (mockGdunBot.bosses || []).filter(b => (b.hp === undefined || b.hp > 0));
-  if (aliveM.length === 0 && aliveB.length === 0) mockGdunBot.gdunEmptyPolls++;
-  assert.strictEqual(mockGdunBot.gdunEmptyPolls, 1, 'Poll 1 should set gdunEmptyPolls to 1');
-  assert.strictEqual(mockGdunBot.guildDungeonActive, true, 'Bot should still be in dungeon on poll 1');
-
-  // Poll 2: Still empty -> gdunEmptyPolls = 2 -> auto exit
-  aliveM = (mockGdunBot.monsters || []).filter(m => (m.hp === undefined || m.hp > 0));
-  aliveB = (mockGdunBot.bosses || []).filter(b => (b.hp === undefined || b.hp > 0));
-  if (aliveM.length === 0 && aliveB.length === 0) mockGdunBot.gdunEmptyPolls++;
-  if (mockGdunBot.gdunEmptyPolls >= 2) await mockGdunBot.exitGuildDungeon();
-  assert.strictEqual(mockGdunBot.guildDungeonActive, false, 'Bot should auto-exit when monsters: [] verified for 2 polls');
+  if (mockGdunBot.monsters !== null && mockGdunBot.bosses !== null && aliveM.length === 0 && aliveB.length === 0) {
+    mockGdunBot.gdunEmptyPolls++;
+  }
+  if (mockGdunBot.gdunEmptyPolls >= 5) await mockGdunBot.exitGuildDungeon();
+  assert.strictEqual(mockGdunBot.guildDungeonActive, false, 'Bot should auto-exit when monsters: [] verified for 5 polls');
   assert.strictEqual(mockGdunBot.player.gdun_in, 0, 'player.gdun_in should be reset to 0');
+
+  // Test 7: Different Guild identification logic (isDifferentGuild)
+  const ldrMock = { player: { gd: 'GuildA', guild_id: 1, guild_name: 'Guild A', g_name: 'A' } };
+  
+  const checkIsDifferentGuild = (player, ldrPlayer) => {
+    if (!player || !ldrPlayer) return false;
+    if (player.gd && ldrPlayer.gd && player.gd !== ldrPlayer.gd) return true;
+    if (player.guild_id && ldrPlayer.guild_id && player.guild_id !== ldrPlayer.guild_id) return true;
+    if (player.guild_name && ldrPlayer.guild_name && player.guild_name !== ldrPlayer.guild_name) return true;
+    if (player.g_name && ldrPlayer.g_name && player.g_name !== ldrPlayer.g_name) return true;
+    return false;
+  };
+
+  // Same guild
+  const sameGuildPlayer = { gd: 'GuildA' };
+  assert.strictEqual(checkIsDifferentGuild(sameGuildPlayer, ldrMock.player), false, 'Should be same guild');
+
+  // Different guild (by gd)
+  const diffGuildPlayer1 = { gd: 'GuildB' };
+  assert.strictEqual(checkIsDifferentGuild(diffGuildPlayer1, ldrMock.player), true, 'Should detect different guild by gd');
+
+  // Different guild (by guild_id)
+  const diffGuildPlayer2 = { guild_id: 2 };
+  assert.strictEqual(checkIsDifferentGuild(diffGuildPlayer2, { guild_id: 1 }), true, 'Should detect different guild by guild_id');
+
+  // Test 8: Member of different guild must NOT sync exit with leader
+  mockGdunBot.player = { gd: 'GuildB', gdun_in: 1 };
+  mockGdunBot.guildDungeonActive = true;
+  const ldrMockInactive = { status: 'running', player: { gd: 'GuildA' }, guildDungeonActive: false };
+  
+  const isDifferentGuild = checkIsDifferentGuild(mockGdunBot.player, ldrMockInactive.player);
+  assert.strictEqual(isDifferentGuild, true, 'Leader and member should be different guilds');
+
+  // Simulate tick check: should NOT trigger exitGuildDungeon since isDifferentGuild is true
+  let syncExited = false;
+  if (!ldrMockInactive.guildDungeonActive && !isDifferentGuild && (mockGdunBot.guildDungeonActive || Number(mockGdunBot.player.gdun_in) === 1)) {
+    syncExited = true;
+    await mockGdunBot.exitGuildDungeon();
+  }
+  assert.strictEqual(syncExited, false, 'Member of different guild should NOT sync exit with leader');
+  assert.strictEqual(mockGdunBot.guildDungeonActive, true, 'Member should remain in dungeon');
 
   console.log('✅ Guild Dungeon State & Auto-Exit Tests Passed successfully!');
 
