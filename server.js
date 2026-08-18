@@ -1551,6 +1551,13 @@ class BotInstance {
       }
     }
     this.player = newPlayer;
+
+    // Automatically sync guildDungeonActive with gdun_in status
+    if (this.player && Number(this.player.gdun_in) === 1) {
+      this.guildDungeonActive = true;
+    } else {
+      this.guildDungeonActive = false;
+    }
   }
 
   getDefaultSettings() {
@@ -2572,6 +2579,11 @@ class BotInstance {
 
   async updateMvpCycleStatus() {
     if (!this.player) return;
+
+    // Pause MVP cycle while inside Guild Dungeon to prevent warp-out or map skipping conflicts
+    if (this.guildDungeonActive || Number(this.player.gdun_in) === 1) {
+      return;
+    }
     
     const maps = (this.settings.mvpTargetMaps || '')
       .split(',')
@@ -2678,7 +2690,8 @@ class BotInstance {
 
     const timeSpentMs = Date.now() - (this.mvpCycleStats ? (this.mvpCycleStats.mapStartTs || Date.now()) : Date.now());
     const isMapTimeout = (timeSpentMs >= 300000); // 5 phút (5 * 60 * 1000)
-    const isDoneWithCurrentMap = (this.mvpConfirmClearCount >= 3) || isMapTimeout; // Xác minh 3 nhịp poll (~6s) hoặc quá thời gian chờ 5p
+    // Confirm map is clear only after staying for at least 6.0 seconds (timeSpentMs >= 6000) and confirming 3 times, or if map timed out
+    const isDoneWithCurrentMap = (this.mvpConfirmClearCount >= 3 && timeSpentMs >= 6000) || isMapTimeout;
     
     if (isDoneWithCurrentMap) {
       const killedCount = this.mvpCycleStats ? (this.mvpCycleStats.bossKilledInMap || 0) : 0;
@@ -2773,27 +2786,13 @@ class BotInstance {
         }
       }
 
-      // Tự động thoát Phụ Bản Guild - 2 điều kiện:
-      // 1. Kill-based: 5 giây sau khi hạ gục Boss Guild (phát hiện qua d.events is_mvp kill)
-      // 2. Timer-based: 10 phút tối đa kể từ khi vào (fallback an toàn)
-      // NOTE: Boss Guild KHÔNG xuất hiện trong this.bosses (poll từ xhrpg_main.php)
+      // Safety Timer-based Fallback: Thoát Phụ Bản Guild nếu ở quá 10 phút
       if (this.guildDungeonActive && !this._exitingGuildDungeon) {
         const now = Date.now();
         const timeInDungeon = this.gdunEnteredAt ? (now - this.gdunEnteredAt) : 0;
-        const timeSinceKill = this.gdunLastKillAt ? (now - this.gdunLastKillAt) : 0;
-
-        const aliveMonsters = (this.monsters || []).filter(m => (m.hp === undefined || (m.hp || 0) > 0));
-        const aliveBosses = (this.bosses || []).filter(b => (b.hp === undefined || (b.hp || 0) > 0));
-        const hasTargets = (this.monsters !== null && this.bosses !== null) && (aliveMonsters.length > 0 || aliveBosses.length > 0);
-
-        const shouldExitByKill = (this.gdunLastKillAt > 0 && timeSinceKill >= 5000 && !hasTargets); // 5s sau kill Boss Guild và không còn mục tiêu
         const shouldExitByTimer = (timeInDungeon >= 10 * 60 * 1000);                 // 10 phút tối đa
 
-        if (shouldExitByKill) {
-          this._exitingGuildDungeon = true;
-          this.addLog('SUCCESS', `🎉 [Guild Dungeon] Đã sạch Boss Guild! Tự động thoát Phụ Bản ra ngoài.`);
-          await this.exitGuildDungeon();
-        } else if (shouldExitByTimer) {
+        if (shouldExitByTimer) {
           this._exitingGuildDungeon = true;
           this.addLog('WARNING', `⏳ [Guild Dungeon] Đã ở trong Phụ Bản quá 10 phút. Tự động thoát ra ngoài.`);
           await this.exitGuildDungeon();
@@ -2887,7 +2886,9 @@ class BotInstance {
     }
 
     // Request full payload every 2 polls or when monsters/bosses empty for fast spawn detection
-    const isFull = ((this.pollCount % 2 === 0) || this.targetedMvp || this.bosses === null || !this.monsters || this.monsters.length === 0 || this.guildDungeonActive || (this.player && Number(this.player.gdun_in) === 1)) ? 1 : 0;
+    // Enforce isFull = 1 during MVP Cycle on the correct target map to ensure the latest boss list is retrieved
+    const isCorrectMvpMap = !this.isMvpCycling || (this.player && Number(this.player.map) === Number(this.getCurrentMvpCycleMap()));
+    const isFull = ((this.pollCount % 2 === 0) || this.targetedMvp || this.bosses === null || !this.monsters || this.monsters.length === 0 || this.guildDungeonActive || (this.player && Number(this.player.gdun_in) === 1) || (this.isMvpCycling && isCorrectMvpMap)) ? 1 : 0;
 
     // 😴 Anti-idle: Tính act flag mô phỏng hành vi người dùng thật
     // - Poll đầu tiên = act=1 (giống user vừa load trang/F5)
@@ -3036,7 +3037,7 @@ class BotInstance {
     }
 
     // 1. Auto MVP Hunting (Priority 1)
-    const isCorrectMvpMap = !this.isMvpCycling || (this.player && Number(this.player.map) === Number(this.getCurrentMvpCycleMap()));
+    // isCorrectMvpMap is already defined above for isFull calculation
     const isHuntingEnabled = this.settings.bossHuntMode !== 'off';
     
     if (isHuntingEnabled && isCorrectMvpMap && this.bosses && this.bosses.length > 0) {
@@ -3421,7 +3422,7 @@ class BotInstance {
 
         if (!hasTargets) {
           this.gdunEmptyPolls = (this.gdunEmptyPolls || 0) + 1;
-          if (this.gdunEmptyPolls >= 5) {
+          if (this.gdunEmptyPolls >= 10) {
             this._exitingGuildDungeon = true;
             this.addLog('SUCCESS', `🎉 [Guild Dungeon] Đã sạch Boss/Quái trong Phụ Bản! Tự động thoát Phụ Bản ra ngoài.`);
             await this.exitGuildDungeon();
@@ -3662,10 +3663,9 @@ class BotInstance {
           pollKills++;
           if (e.is_mvp) {
             this.weKilledCurrentMvp = true;
-            // 🏰 Nếu đang ở trong Phụ Bản Guild và kill được MVP (Boss Guild) → ghi nhận thời gian
+            // 🏰 Nếu đang ở trong Phụ Bản Guild và kill được MVP (Boss Guild) → ghi nhận và thông báo tiếp tục dò quái
             if (this.guildDungeonActive) {
-              this.gdunLastKillAt = Date.now();
-              this.addLog('SUCCESS', `🎉 [Guild Dungeon] Đã hạ gục Boss Guild! Đợi ${5}s rồi tự động thoát Phụ Bản...`);
+              this.addLog('SUCCESS', `⚔️ [Guild Dungeon] Đã hạ gục Boss Guild! Đang tiếp tục kiểm tra Phụ Bản xem còn Boss tiếp theo không...`);
             }
           }
         }

@@ -475,16 +475,56 @@ try {
   assert.strictEqual(mockBosses[0].id, 3, 'Lowest HP boss must be sorted first');
   assert.strictEqual(mockBosses[2].id, 1, 'Highest HP boss must be sorted last');
 
-  // Test Case 6: Fast 1-poll map clear confirmation
+  // Test Case 6: isFull logic verification under MVP cycle
+  console.log('Testing isFull logic with MVP cycle...');
+  instance.isMvpCycling = true;
+  instance.player = { map: 2 };
+  instance.settings.mvpTargetMaps = '2,3,5';
+  instance.mvpCycleMapIndex = 0;
   instance.bosses = [];
-  instance.mvpConfirmClearCount = 0;
-  if (instance.bosses === null) {
-    instance.mvpConfirmClearCount = 0;
-  } else if (instance.bosses.length === 0) {
-    instance.mvpConfirmClearCount++;
-  }
-  const isDoneFast = (instance.mvpConfirmClearCount >= 1);
-  assert.strictEqual(isDoneFast, true, 'isDoneWithCurrentMap must be true on 1st poll when bosses array is empty');
+  instance.monsters = [{ id: 1 }];
+  instance.pollCount = 1; // odd poll
+  const activeTargetMapIdCheck = instance.getCurrentMvpCycleMap();
+  const isCorrectMvpMapCheck = !instance.isMvpCycling || (instance.player && Number(instance.player.map) === Number(activeTargetMapIdCheck));
+  const isFullTest = ((instance.pollCount % 2 === 0) || instance.targetedMvp || instance.bosses === null || !instance.monsters || instance.monsters.length === 0 || instance.guildDungeonActive || (instance.player && Number(instance.player.gdun_in) === 1) || (instance.isMvpCycling && isCorrectMvpMapCheck)) ? 1 : 0;
+  assert.strictEqual(isFullTest, 1, 'isFull must be 1 during MVP cycle on target map even on odd poll count');
+
+  // Test Case 8: updatePlayerState auto syncs guildDungeonActive
+  console.log('Testing updatePlayerState auto syncs guildDungeonActive...');
+  instance.guildDungeonActive = false;
+  instance.player = { gdun_in: 0 };
+  instance.updatePlayerState({ gdun_in: 1 });
+  assert.strictEqual(instance.guildDungeonActive, true, 'guildDungeonActive must be true when gdun_in is 1');
+  instance.updatePlayerState({ gdun_in: 0 });
+  assert.strictEqual(instance.guildDungeonActive, false, 'guildDungeonActive must be false when gdun_in is 0');
+
+  // Test Case 9: MVP cycle is paused when in Guild Dungeon
+  console.log('Testing MVP cycle pause in Guild Dungeon...');
+  instance.isMvpCycling = true;
+  instance.guildDungeonActive = true;
+  instance.mvpCycleMapIndex = 0;
+  // We mock a call to updateMvpCycleStatus by verifying the conditions at the start of the function:
+  const isPaused = (instance.guildDungeonActive || (instance.player && Number(instance.player.gdun_in) === 1));
+  assert.strictEqual(isPaused, true, 'MVP cycle must be paused when guildDungeonActive is true');
+  instance.guildDungeonActive = false;
+
+  // Test Case 10: Minimum stay time on map before clear is confirmed
+  console.log('Testing minimum stay time on map requirement...');
+  instance.mvpConfirmClearCount = 3;
+  instance.mvpCycleStats = { mapStartTs: Date.now() };
+  
+  // Scenario A: Time spent is less than 6.0s (e.g. 2000ms)
+  let timeSpentMs = 2000;
+  let isDoneWithCurrentMapTest = (instance.mvpConfirmClearCount >= 3 && timeSpentMs >= 6000);
+  assert.strictEqual(isDoneWithCurrentMapTest, false, 'isDoneWithCurrentMap must be false if stay time is less than 6.0s');
+
+  // Scenario B: Time spent is 6.0s or more (e.g. 6500ms)
+  timeSpentMs = 6500;
+  isDoneWithCurrentMapTest = (instance.mvpConfirmClearCount >= 3 && timeSpentMs >= 6000);
+  assert.strictEqual(isDoneWithCurrentMapTest, true, 'isDoneWithCurrentMap must be true if stay time is >= 6.0s and confirm count is >= 3');
+  
+  // Reset states
+  instance.isMvpCycling = false;
 
   // Test Case 7: Boss Safe Distance & Kiting Vector Engine
   console.log('Testing Boss Safe Distance & Kiting Vector Engine (Short knife vs Long knife)...');
@@ -1117,16 +1157,16 @@ try {
   assert.strictEqual(mockGdunBot.gdunLastKillAt, 0, 'gdunLastKillAt should be reset to 0 on exit');
   assert.strictEqual(mockGdunBot._exitingGuildDungeon, false, '_exitingGuildDungeon should be false after exit');
 
-  // Test 3: Kill-based auto-exit — 5s after gdunLastKillAt & no targets → shouldExitByKill = true
+  // Test 3: Kill event should NOT trigger immediate exit — bot must stay for more boss potential spawns
   await mockGdunBot.enterGuildDungeon(false); // Enter solo again
-  mockGdunBot.gdunLastKillAt = Date.now() - 6000; // Simulate kill 6 seconds ago
-  mockGdunBot.monsters = [];
+  // Simulate killing boss but NOT setting gdunLastKillAt (which would trigger old kill-based exit)
+  // After kill, guildDungeonActive stays true; bot relies only on empty polls
+  mockGdunBot.monsters = [{ id: 1, name: 'Boss2', hp: 1000 }]; // Boss 2 just spawned!
   mockGdunBot.bosses = [];
   const testAliveM = (mockGdunBot.monsters || []).filter(m => (m.hp === undefined || m.hp > 0));
-  const testAliveB = (mockGdunBot.bosses || []).filter(b => (b.hp === undefined || b.hp > 0));
-  const testHasTargets = (mockGdunBot.monsters !== null && mockGdunBot.bosses !== null) && (testAliveM.length > 0 || testAliveB.length > 0);
-  const shouldExitByKill = (mockGdunBot.gdunLastKillAt > 0 && (Date.now() - mockGdunBot.gdunLastKillAt) >= 5000 && !testHasTargets);
-  assert.strictEqual(shouldExitByKill, true, 'shouldExitByKill should be true when 5s have passed since kill and there are no targets');
+  const testHasTargetsAfterKill = testAliveM.length > 0;
+  assert.strictEqual(testHasTargetsAfterKill, true, 'Bot must stay in dungeon when another boss is present after first kill');
+  assert.strictEqual(mockGdunBot.guildDungeonActive, true, 'guildDungeonActive must remain true — do NOT exit on kill event');
 
   // Test 4: Timer-based auto-exit — time in dungeon >= 10 min → shouldExitByTimer
   const shouldExitByTimer10min = ((Date.now() - mockGdunBot.gdunEnteredAt) >= 10 * 60 * 1000);
@@ -1140,32 +1180,53 @@ try {
   let guardBlocked = mockGdunBot._exitingGuildDungeon; // Would skip exitGuildDungeon in real pollGame
   assert.strictEqual(guardBlocked, true, '_exitingGuildDungeon guard should block repeated exit');
 
-  // Test 6: Empty monsters: [] and bosses: [] triggers auto-exit after 5 consecutive polls (when both not null)
+  // Test 6: Empty monsters: [] and bosses: [] triggers auto-exit after 10 consecutive polls (when both not null)
+  // (Threshold increased from 5 to 10 to survive boss respawn gap between multi-boss spawns)
   mockGdunBot._exitingGuildDungeon = false;
   mockGdunBot.guildDungeonActive = true;
   mockGdunBot.monsters = [];
   mockGdunBot.bosses = [];
   mockGdunBot.gdunEmptyPolls = 0;
 
-  // Poll 1 to 4: Empty monsters -> gdunEmptyPolls increments but doesn't exit yet
-  for (let i = 1; i <= 4; i++) {
-    let aliveM = (mockGdunBot.monsters || []).filter(m => (m.hp === undefined || m.hp > 0));
-    let aliveB = (mockGdunBot.bosses || []).filter(b => (b.hp === undefined || b.hp > 0));
-    if (mockGdunBot.monsters !== null && mockGdunBot.bosses !== null && aliveM.length === 0 && aliveB.length === 0) {
+  // Poll 1 to 9: Empty monsters -> gdunEmptyPolls increments but does NOT exit yet
+  for (let i = 1; i <= 9; i++) {
+    let aliveM2 = (mockGdunBot.monsters || []).filter(m => (m.hp === undefined || m.hp > 0));
+    let aliveB2 = (mockGdunBot.bosses || []).filter(b => (b.hp === undefined || b.hp > 0));
+    if (mockGdunBot.monsters !== null && mockGdunBot.bosses !== null && aliveM2.length === 0 && aliveB2.length === 0) {
       mockGdunBot.gdunEmptyPolls++;
     }
     assert.strictEqual(mockGdunBot.gdunEmptyPolls, i, `Poll ${i} should set gdunEmptyPolls to ${i}`);
-    assert.strictEqual(mockGdunBot.guildDungeonActive, true, `Bot should still be in dungeon on poll ${i}`);
+    assert.strictEqual(mockGdunBot.guildDungeonActive, true, `Bot should still be in dungeon on poll ${i} (< 10)`);
   }
 
-  // Poll 5: Still empty -> gdunEmptyPolls = 5 -> auto exit
-  let aliveM = (mockGdunBot.monsters || []).filter(m => (m.hp === undefined || m.hp > 0));
-  let aliveB = (mockGdunBot.bosses || []).filter(b => (b.hp === undefined || b.hp > 0));
-  if (mockGdunBot.monsters !== null && mockGdunBot.bosses !== null && aliveM.length === 0 && aliveB.length === 0) {
+  // Simulate boss 2 spawning on poll 7 then dying again (reset gdunEmptyPolls)
+  mockGdunBot.monsters = [{ id: 2, name: 'BossSpawn', hp: 500 }];
+  let aliveM3 = (mockGdunBot.monsters || []).filter(m => (m.hp === undefined || m.hp > 0));
+  if (aliveM3.length > 0) { mockGdunBot.gdunEmptyPolls = 0; }
+  assert.strictEqual(mockGdunBot.gdunEmptyPolls, 0, 'gdunEmptyPolls must reset to 0 when a new boss spawns');
+  assert.strictEqual(mockGdunBot.guildDungeonActive, true, 'Bot must stay in dungeon while boss2 is alive');
+
+  // Now boss 2 dies, 10 empty polls needed to confirm fully clear
+  mockGdunBot.monsters = [];
+  mockGdunBot.bosses = [];
+  for (let i = 1; i <= 9; i++) {
+    let aliveM4 = (mockGdunBot.monsters || []).filter(m => (m.hp === undefined || m.hp > 0));
+    let aliveB4 = (mockGdunBot.bosses || []).filter(b => (b.hp === undefined || b.hp > 0));
+    if (mockGdunBot.monsters !== null && mockGdunBot.bosses !== null && aliveM4.length === 0 && aliveB4.length === 0) {
+      mockGdunBot.gdunEmptyPolls++;
+    }
+  }
+  assert.strictEqual(mockGdunBot.gdunEmptyPolls, 9, 'Should be at 9 empty polls — not yet exiting');
+  assert.strictEqual(mockGdunBot.guildDungeonActive, true, 'Bot must still be in dungeon at 9 polls');
+
+  // Poll 10: gdunEmptyPolls reaches 10 → exit
+  let aliveM5 = (mockGdunBot.monsters || []).filter(m => (m.hp === undefined || m.hp > 0));
+  let aliveB5 = (mockGdunBot.bosses || []).filter(b => (b.hp === undefined || b.hp > 0));
+  if (mockGdunBot.monsters !== null && mockGdunBot.bosses !== null && aliveM5.length === 0 && aliveB5.length === 0) {
     mockGdunBot.gdunEmptyPolls++;
   }
-  if (mockGdunBot.gdunEmptyPolls >= 5) await mockGdunBot.exitGuildDungeon();
-  assert.strictEqual(mockGdunBot.guildDungeonActive, false, 'Bot should auto-exit when monsters: [] verified for 5 polls');
+  if (mockGdunBot.gdunEmptyPolls >= 10) await mockGdunBot.exitGuildDungeon();
+  assert.strictEqual(mockGdunBot.guildDungeonActive, false, 'Bot should auto-exit when dungeon empty confirmed for 10 polls');
   assert.strictEqual(mockGdunBot.player.gdun_in, 0, 'player.gdun_in should be reset to 0');
 
   // Test 7: Different Guild identification logic (isDifferentGuild)

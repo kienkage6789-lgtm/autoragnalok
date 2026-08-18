@@ -2,6 +2,22 @@
 
 > Changelog of actual changes implemented.
 
+## 2026-08-18 - Khắc Phục Lỗi Săn Boss MVP & Phụ Bản Bang (Guild Dungeon)
+
+- File đã đổi: [server.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [test.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/test.js), [.agent/4M.md](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/.agent/4M.md).
+- Đã làm:
+  - **Đồng bộ tự động trạng thái Guild Dungeon**: Tự động đặt `this.guildDungeonActive = true` khi phát hiện `gdun_in === 1` từ phản hồi server trong `updatePlayerState()`.
+  - **Force isFull = 1 khi săn MVP**: Ép gửi cờ `full: 1` lên server ở mọi nhịp poll khi nhân vật đang trong chu kỳ săn Boss MVP (`this.isMvpCycling === true`) và đứng đúng bản đồ MVP mục tiêu. Loại bỏ lỗi dùng cache trống `bosses = []` ở các nhịp poll lẻ.
+  - **Tự động tạm dừng chu kỳ MVP khi đi Boss Bang**: Tạm khóa và thoát sớm xử lý `updateMvpCycleStatus()` khi nhân vật ở trong Phụ Bản Guild (`this.guildDungeonActive` hoặc `gdun_in === 1`), tránh xung đột nhảy map hay tự động warp về map farm gốc.
+  - **Ràng buộc thời gian lưu lại map MVP tối thiểu 6 giây**: Thay đổi điều kiện `isDoneWithCurrentMap` thành `this.mvpConfirmClearCount >= 3 && timeSpentMs >= 6000`, bảo đảm bot ở lại trên bản đồ ít nhất 6.0 giây để game server kịp tải và đồng bộ danh sách Boss sau khi warp, ngăn ngừa skip map MVP sớm khi poll ở nhịp nhanh (500ms - 600ms).
+  - **Sửa lỗi thoát Phụ Bản Bang sớm (chỉ ăn 1 Boss rồi thoát)**:
+    - Loại bỏ hoàn toàn luồng `shouldExitByKill` (luồng thoát nhanh 5 giây sau khi giết MVP) vốn gây ra việc thoát nhầm khi game server chưa kịp spawn Boss tiếp theo.
+    - Tăng số nhịp poll trống tối thiểu để thoát tự động từ `5` lên `10` nhịp poll liên tiếp (khoảng 15-20 giây).
+    - Bảo đảm bot kiên nhẫn đợi ở lại bản đồ đủ lâu cho đến khi sạch hoàn toàn Boss/Quái hoặc quá thời hạn 10 phút.
+  - **Bổ sung & Cập nhật Unit Tests**: Viết thêm và cập nhật các test cases kiểm thử logic MVP, đồng bộ trạng thái `gdun_in`, tạm dừng MVP trong Phụ bản, thời gian chờ 6s và cơ chế đếm poll trống thoát Guild Dungeon an toàn mới. Chạy test suite vượt qua 100%.
+
+---
+
 ## 2026-08-17 - Hệ Thống Auto Session Renewal & Auto-Relogin (Phòng Tránh Cơ Chế Bắt Offline 1H) (T62)
 - File đã đổi: [server.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [test.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/test.js), [.agent/TASKS.md](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/.agent/TASKS.md), [.agent/DECISIONS.md](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/.agent/DECISIONS.md).
 - Đã làm:
