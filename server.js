@@ -2493,10 +2493,12 @@ class BotInstance {
           session_token: this.session_token,
           action: 'idlestat',
           k: 'chpass',
+          rt: -1,
           lang: 'vi'
         });
-        if (res && res.ok) {
-          this.addLog('SYSTEM', '🖐️ [Check-in Guard] Đã tự động gửi xác nhận điểm danh tương tác (chpass ok)');
+        if (res && (res.ok || typeof res.ci === 'number')) {
+          this.lastChpassSentAt = Date.now();
+          this.addLog('SYSTEM', `🖐️ [Check-in Guard] Xác nhận điểm danh tương tác thành công (chpass ok, đếm ngược: ${res.ci || 'N/A'}s)`);
           return true;
         }
       } catch (err) {
@@ -3263,9 +3265,9 @@ class BotInstance {
       }
     }
 
-    // 🕒 T62 Proactive Token Renewal: Tự động gia hạn session token mỗi 45 phút để tránh mốc 1h của Game Server
-    if (this.phpsessid && (Date.now() - this.lastSessionRefreshAt > 45 * 60 * 1000)) {
-      this.addLog('SYSTEM', '🕒 Đạt mốc 45 phút -> Tự động gia hạn Session Token để duy trì phiên Online 24/7');
+    // 🕒 T62 Proactive Token Renewal: Tự động gia hạn session token mỗi 20 phút để tránh mốc hết hạn của Game Server
+    if (this.phpsessid && (Date.now() - this.lastSessionRefreshAt > 20 * 60 * 1000)) {
+      this.addLog('SYSTEM', '🕒 Đạt mốc 20 phút -> Tự động gia hạn Session Token để duy trì phiên Online 24/7');
       await this.refreshSession();
     }
 
@@ -3328,14 +3330,12 @@ class BotInstance {
       return;
     }
 
-    // 🖐️ Auto Check-in Guard: Tự động gia hạn điểm danh server khi d.ci sắp cạn (<= 180s)
-    if (typeof d.ci === 'number') {
-      const now = Date.now();
-      // Nếu server báo ci còn dưới 180 giây (3 phút) và chưa gửi chpass trong 45 giây qua
-      if (d.ci <= 180 && (now - (this.lastChpassSentAt || 0) > 45000)) {
-        this.lastChpassSentAt = now;
-        this.sendCheckinGuardWithRetry();
-      }
+    // 🖐️ Auto Check-in Guard: Tự động gia hạn điểm danh server (chpass) định kỳ 10 phút hoặc khi ci <= 300s
+    const nowCheckin = Date.now();
+    const needsCheckin = (typeof d.ci === 'number' && d.ci <= 300) || (nowCheckin - (this.lastChpassSentAt || 0) > 10 * 60 * 1000);
+    if (needsCheckin && (nowCheckin - (this.lastChpassSentAt || 0) > 30000)) {
+      this.lastChpassSentAt = nowCheckin;
+      this.sendCheckinGuardWithRetry();
     }
 
     // Capture & log offline rewards if returned
