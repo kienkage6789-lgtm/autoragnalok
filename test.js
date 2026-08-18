@@ -411,7 +411,7 @@ try {
 
   // Test Case 4: Early-exit Map Routing Check (MVP cycle vs current map)
   instance.isMvpCycling = true;
-  instance.settings.mvpTargetMaps = '2,3,5';
+  instance.settings.bossHuntMaps = [2, 3, 5];
   instance.mvpCycleMapIndex = 0;
   instance.player = { map: 3 }; // different map
   
@@ -421,17 +421,17 @@ try {
     
   assert.strictEqual(activeTargetMapId, 2, 'activeTargetMapId must be the first map of the cycle (2) when cycle is active and index is 0');
   
-  const needsWarp = (instance.settings.autoMap || (instance.settings.bossHuntMode && instance.settings.bossHuntMode !== 'off') || instance.isMvpCycling) && Number(instance.player.map) !== Number(activeTargetMapId);
+  const needsWarp = (instance.settings.autoMap || instance.settings.bossHuntEnabled || instance.isMvpCycling) && Number(instance.player.map) !== Number(activeTargetMapId);
   assert.strictEqual(needsWarp, true, 'needsWarp must be true when player.map (3) is different from activeTargetMapId (2) during MVP cycle');
 
   // Test Case: Warp routing when autoMap is false but bossHuntMode is enabled (T57 follow-up)
   instance.isMvpCycling = false;
   instance.settings.autoMap = false;
-  instance.settings.bossHuntMode = 'type1';
+  instance.settings.bossHuntEnabled = true;
   instance.settings.targetMap = 3;
   instance.player = { map: 1 };
   const targetMapT57 = instance.isMvpCycling ? instance.getCurrentMvpCycleMap() : (parseInt(instance.settings.targetMap) || 1);
-  const needsWarpT57 = (instance.settings.autoMap || (instance.settings.bossHuntMode && instance.settings.bossHuntMode !== 'off') || instance.isMvpCycling) && Number(instance.player.map) !== Number(targetMapT57);
+  const needsWarpT57 = (instance.settings.autoMap || instance.settings.bossHuntEnabled || instance.isMvpCycling) && Number(instance.player.map) !== Number(targetMapT57);
   assert.strictEqual(needsWarpT57, true, 'needsWarp must be true when autoMap is false but bossHuntMode is enabled');
 
   // Test Case: Boss with hp === undefined treated as alive in all MVP cycle pathways
@@ -460,7 +460,7 @@ try {
   assert.ok(manualTargetAlive, 'Manual boss target must find boss with hp === undefined as alive');
 
   // Clean up to avoid pollution
-  instance.settings.bossHuntMode = 'off';
+  instance.settings.bossHuntEnabled = false;
   instance.settings.autoMap = true;
   instance.isMvpCycling = false;
 
@@ -479,7 +479,7 @@ try {
   console.log('Testing isFull logic with MVP cycle...');
   instance.isMvpCycling = true;
   instance.player = { map: 2 };
-  instance.settings.mvpTargetMaps = '2,3,5';
+  instance.settings.bossHuntMaps = [2, 3, 5];
   instance.mvpCycleMapIndex = 0;
   instance.bosses = [];
   instance.monsters = [{ id: 1 }];
@@ -986,8 +986,8 @@ try {
   // Condition 1: Leader is offline (status !== 'running' or player is null). Member should NOT sync/follow leader.
   leader1.status = 'idle';
   leader1.player = null;
-  leader1.settings.bossHuntMode = 'type2';
-  member1.settings.bossHuntMode = 'type2';
+  leader1.settings.bossHuntEnabled = true;
+  member1.settings.bossHuntEnabled = true;
   member1.settings.targetMap = 3;
   member1.player = { map: 3, lv: 50 };
   
@@ -999,7 +999,7 @@ try {
       : null;
       
     let activeTargetMapId;
-    if (isMember && leader && leader.status === 'running' && leader.player && bot.settings.teamSynced === true && bot.settings.bossHuntMode && bot.settings.bossHuntMode !== 'off' && leader.settings.bossHuntMode && leader.settings.bossHuntMode !== 'off') {
+    if (isMember && leader && leader.status === 'running' && leader.player && bot.settings.teamSynced === true && bot.settings.bossHuntEnabled && leader.settings.bossHuntEnabled) {
       activeTargetMapId = leader.isMvpCycling 
         ? leader.getCurrentMvpCycleMap() 
         : (leader.player ? Number(leader.player.map) : (parseInt(leader.settings.targetMap) || 1));
@@ -1016,20 +1016,20 @@ try {
   // 2. Leader is running but member has teamSynced = false (never clicked Sync Team Settings) -> member should NOT follow leader
   leader1.status = 'running';
   leader1.player = { map: 2, lv: 50 };
-  leader1.settings.bossHuntMode = 'type2';
-  member1.settings.bossHuntMode = 'type2';
+  leader1.settings.bossHuntEnabled = true;
+  member1.settings.bossHuntEnabled = true;
   member1.settings.teamSynced = false;
   targetMap = getMapTarget(member1);
   assert.strictEqual(targetMap, 3, 'Member with teamSynced = false should not follow Leader');
 
   // 3. Leader is running, member has teamSynced = true, but bossHuntMode === 'off' -> member returns to personal farm map (3)
   member1.settings.teamSynced = true;
-  member1.settings.bossHuntMode = 'off';
+  member1.settings.bossHuntEnabled = false;
   targetMap = getMapTarget(member1);
   assert.strictEqual(targetMap, 3, 'Member with bossHuntMode = off should return to personal targetMap (3)');
 
   // 4. Leader and Member are both running, teamSynced = true, both have bossHuntMode enabled -> member follows leader (2)
-  member1.settings.bossHuntMode = 'type2';
+  member1.settings.bossHuntEnabled = true;
   targetMap = getMapTarget(member1);
   assert.strictEqual(targetMap, 2, 'Member should follow active Leader to map 2 when teamSynced = true and bossHuntMode enabled');
 

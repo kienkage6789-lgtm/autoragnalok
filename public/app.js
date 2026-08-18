@@ -1900,43 +1900,44 @@ document.addEventListener('DOMContentLoaded', () => {
 
           <!-- Sub-pane 1: Cấu Hình -->
           <div id="mvp-subpane-cfg-${acc.line_uid}" style="display:block;">
-            <div class="settings-group">
-              <div class="input-control" style="grid-column: span 2; margin-bottom: 6px;">
-                <label for="sel-boss-hunt-mode-${acc.line_uid}">👿 Chế độ Săn Boss</label>
-                <select id="sel-boss-hunt-mode-${acc.line_uid}" onchange="updateStringSetting('${acc.line_uid}', 'bossHuntMode')" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; padding: 6px; font-family: inherit; font-size: 0.85rem; outline: none; margin-top:2px; width: 100%;">
-                  <option value="off">❌ Tắt tự động săn Boss</option>
-                  <option value="type1">📍 Loại 1: Săn tại bản đồ hiện tại</option>
-                  <option value="type2">🗺️ Loại 2: Săn theo bản đồ chỉ định</option>
-                </select>
+            <div class="settings-group" style="display: flex; flex-direction: column; gap: 8px;">
+              <div class="toggle-control" style="display: flex; justify-content: space-between; align-items: center;">
+                <span class="toggle-label">👿 Tự động Săn Boss MVP</span>
+                <label class="switch">
+                  <input type="checkbox" id="chk-bosshuntenabled-${acc.line_uid}" onchange="toggleSetting('${acc.line_uid}', 'bossHuntEnabled')">
+                  <span class="slider"></span>
+                </label>
               </div>
               
-              <div class="toggle-control" style="margin-top: 4px;">
+              <div class="toggle-control" style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px;">
                 <span class="toggle-label">🏟️ Auto Đấu Trường</span>
                 <label class="switch">
                   <input type="checkbox" id="chk-autoarena-${acc.line_uid}" onchange="toggleSetting('${acc.line_uid}', 'autoArena')">
                   <span class="slider"></span>
                 </label>
               </div>
-            </div>
 
-            <!-- Section cho Loại 1 -->
-            <div id="group-boss-type1-${acc.line_uid}" class="settings-group" style="margin-top: 10px; display: none;">
-              <div class="input-control" style="grid-column: span 2;">
-                <label for="sel-mvp-priority-mode-${acc.line_uid}">🎯 Tiêu chí ưu tiên săn Boss</label>
-                <select id="sel-mvp-priority-mode-${acc.line_uid}" onchange="updateStringSetting('${acc.line_uid}', 'mvpPriorityMode')" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; padding: 6px; font-family: inherit; font-size: 0.85rem; outline: none; margin-top:2px; width: 100%;">
+              <div class="input-control" style="margin-top: 4px;">
+                <label for="sel-boss-hunt-priority-${acc.line_uid}">🎯 Tiêu chí ưu tiên săn Boss</label>
+                <select id="sel-boss-hunt-priority-${acc.line_uid}" onchange="updateStringSetting('${acc.line_uid}', 'bossHuntPriority')" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; padding: 6px; font-family: inherit; font-size: 0.85rem; outline: none; margin-top:2px; width: 100%;">
                   <option value="distance">📍 Gần nhất (Khoảng cách)</option>
+                  <option value="hp_asc">🩸 Ít máu nhất (HP thấp nhất)</option>
                   <option value="level_asc">🐣 Cấp độ thấp nhất (Lv tăng dần)</option>
                   <option value="level_desc">🦅 Cấp độ cao nhất (Lv giảm dần)</option>
                 </select>
               </div>
-            </div>
 
-            <!-- Section cho Loại 2 -->
-            <div id="group-boss-type2-${acc.line_uid}" class="settings-group" style="margin-top: 10px; display: none;">
-              <div class="input-control" style="grid-column: span 2;">
-                <label for="txt-mvp-target-maps-${acc.line_uid}">🗺️ Bản đồ chỉ định (VD: 1, 2, 3, 5, 6)</label>
-                <input type="text" id="txt-mvp-target-maps-${acc.line_uid}" placeholder="VD: 1, 2, 3, 5, 6" onchange="updateStringSetting('${acc.line_uid}', 'mvpTargetMaps')" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; padding: 6px; font-family: inherit; font-size: 0.85rem; outline: none; margin-top:2px; width: 100%;">
-                <span style="font-size: 0.72rem; color: #34d399; margin-top: 4px; display: block; line-height: 1.3;">💡 Săn tất cả các boss theo thứ tự map. Sắp xếp: Máu ít diệt trước. Chu kỳ chạy mỗi giờ tròn hoặc kích hoạt thủ công.</span>
+              <div class="input-control" style="margin-top: 8px;">
+                <label style="display: flex; justify-content: space-between; align-items: center;">
+                  <span>🗺️ Thứ tự bản đồ săn Boss:</span>
+                  <div style="position: relative; display: inline-block;">
+                    <button type="button" id="btn-add-map-menu-${acc.line_uid}" onclick="toggleAddMapDropdown('${acc.line_uid}')" style="background: rgba(16,185,129,0.25); border: 1px solid rgba(16,185,129,0.5); color: #a7f3d0; border-radius: 6px; padding: 2px 8px; font-size: 0.78rem; cursor: pointer; font-weight: 600;">➕ Thêm Map</button>
+                    <div id="dropdown-add-map-${acc.line_uid}" style="display: none; position: absolute; right: 0; top: 26px; background: #1e293b; border: 1px solid var(--border-color); border-radius: 6px; width: 180px; z-index: 100; max-height: 200px; overflow-y: auto; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);">
+                    </div>
+                  </div>
+                </label>
+                <div id="boss-hunt-maps-container-${acc.line_uid}" style="margin-top: 6px; display: flex; flex-direction: column; gap: 4px; background: rgba(0,0,0,0.2); padding: 6px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.05); min-height: 38px;">
+                </div>
               </div>
             </div>
 
@@ -2835,18 +2836,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const chkAutoGear = document.getElementById(`chk-autogear-${acc.line_uid}`);
     if (chkAutoGear && document.activeElement !== chkAutoGear) chkAutoGear.checked = acc.settings.autoGear === true;
 
-    const selBossHuntMode = document.getElementById(`sel-boss-hunt-mode-${acc.line_uid}`);
-    if (selBossHuntMode && document.activeElement !== selBossHuntMode) {
-      selBossHuntMode.value = acc.settings.bossHuntMode || 'off';
-    }
-
-    const groupType1 = document.getElementById(`group-boss-type1-${acc.line_uid}`);
-    if (groupType1) {
-      groupType1.style.display = (acc.settings.bossHuntMode === 'type1') ? 'block' : 'none';
-    }
-    const groupType2 = document.getElementById(`group-boss-type2-${acc.line_uid}`);
-    if (groupType2) {
-      groupType2.style.display = (acc.settings.bossHuntMode === 'type2') ? 'block' : 'none';
+    const chkBossHuntEnabled = document.getElementById(`chk-bosshuntenabled-${acc.line_uid}`);
+    if (chkBossHuntEnabled && document.activeElement !== chkBossHuntEnabled) {
+      chkBossHuntEnabled.checked = acc.settings.bossHuntEnabled === true;
     }
 
     const chkAutoArena = document.getElementById(`chk-autoarena-${acc.line_uid}`);
@@ -2880,11 +2872,36 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // MVP Boss settings sync
-    const selMvpPriority = document.getElementById(`sel-mvp-priority-mode-${acc.line_uid}`);
-    if (selMvpPriority && document.activeElement !== selMvpPriority) selMvpPriority.value = acc.settings.mvpPriorityMode || 'distance';
+    const selBossHuntPriority = document.getElementById(`sel-boss-hunt-priority-${acc.line_uid}`);
+    if (selBossHuntPriority && document.activeElement !== selBossHuntPriority) {
+      selBossHuntPriority.value = acc.settings.bossHuntPriority || 'distance';
+    }
 
-    const txtMvpTargetMaps = document.getElementById(`txt-mvp-target-maps-${acc.line_uid}`);
-    if (txtMvpTargetMaps && document.activeElement !== txtMvpTargetMaps) txtMvpTargetMaps.value = acc.settings.mvpTargetMaps || '';
+    const mapsContainer = document.getElementById(`boss-hunt-maps-container-${acc.line_uid}`);
+    if (mapsContainer) {
+      const selectedMaps = acc.settings.bossHuntMaps || [];
+      if (selectedMaps.length === 0) {
+        mapsContainer.innerHTML = `<span style="font-size: 0.75rem; color: #64748b; font-style: italic; display: block; text-align: center; width: 100%; margin: 6px 0;">Chưa chọn bản đồ nào. Nhấp "+ Thêm Map" để chọn.</span>`;
+      } else {
+        mapsContainer.innerHTML = selectedMaps.map((mapId, index) => {
+          const mapDef = (window.cachedMapsList || []).find(m => m.id === mapId);
+          const mapName = mapDef ? `${mapDef.emoji || '🗺️'} ${mapDef.name} (Lv.${mapDef.req}+)` : `Bản đồ #${mapId}`;
+          return `
+            <div style="display: flex; align-items: center; justify-content: space-between; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 4px; padding: 4px 6px; font-size: 0.8rem; color: #f8fafc;">
+              <span style="font-weight: 500; display: flex; align-items: center; gap: 4px;">
+                <span style="color: var(--primary-color); font-size: 0.75rem; font-weight: bold;">#${index + 1}</span>
+                ${mapName}
+              </span>
+              <div style="display: flex; gap: 4px; align-items: center;">
+                <button type="button" onclick="moveBossHuntMap('${acc.line_uid}', ${index}, -1)" ${index === 0 ? 'disabled style="opacity: 0.3; cursor: not-allowed;"' : ''} style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 1px 4px; border-radius: 3px; font-size: 0.7rem; cursor: pointer;">↑</button>
+                <button type="button" onclick="moveBossHuntMap('${acc.line_uid}', ${index}, 1)" ${index === selectedMaps.length - 1 ? 'disabled style="opacity: 0.3; cursor: not-allowed;"' : ''} style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 1px 4px; border-radius: 3px; font-size: 0.7rem; cursor: pointer;">↓</button>
+                <button type="button" onclick="removeBossHuntMap('${acc.line_uid}', ${index})" style="background: rgba(239,68,68,0.15); border: 1px solid rgba(239,68,68,0.3); color: #fca5a5; padding: 1px 4px; border-radius: 3px; font-size: 0.7rem; cursor: pointer; margin-left: 2px;">🗑️</button>
+              </div>
+            </div>
+          `;
+        }).join('');
+      }
+    }
 
     // Team role settings sync
     const selTeamRole = document.getElementById(`sel-team-role-${acc.line_uid}`);
@@ -3133,22 +3150,8 @@ document.addEventListener('DOMContentLoaded', () => {
               <span style="font-size: 0.65rem; color: #818cf8;">⏳ Quét Boss</span>
             </div>
           `;
-        } else if (acc.settings.bossHuntMode === 'type1') {
-          // Type 1: Canh boss tại map hiện tại
-          banner.className = "boss-hunt-banner idle";
-          banner.style.display = 'block';
-          banner.style.background = 'rgba(34,197,94,0.1)';
-          banner.style.border = '1px solid rgba(34,197,94,0.25)';
-          banner.style.color = '#86efac';
-          const bossCount = acc.aliveBossCount || 0;
-          banner.innerHTML = `
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-              <span>📍 <b>[Loại 1]</b> Canh Boss tại Map ${p.map || '--'} — ${bossCount > 0 ? bossCount + ' Boss' : 'Chưa có Boss'}</span>
-              <span style="font-size: 0.65rem;">🔍 Đang quét</span>
-            </div>
-          `;
-        } else {
-          // Type 2: Đợi chu kỳ tiếp theo
+        } else if (acc.settings.bossHuntEnabled === true) {
+          // Chờ chu kỳ tiếp theo
           banner.className = "boss-hunt-banner idle";
           banner.style.display = 'block';
           banner.style.background = 'rgba(99, 102, 241, 0.08)';
@@ -3156,7 +3159,7 @@ document.addEventListener('DOMContentLoaded', () => {
           banner.style.color = '#a5b4fc';
           banner.innerHTML = `
             <div style="display: flex; justify-content: space-between; align-items: center;">
-              <span>🗺️ <b>[Loại 2]</b> Chờ chu kỳ săn tiếp theo — Map ${p.map || '--'}</span>
+              <span>🗺️ <b>Tự động Săn Boss:</b> Chờ chu kỳ săn tiếp theo — Map ${p.map || '--'}</span>
               <span style="font-size: 0.65rem;">⏳ Chờ chu kỳ</span>
             </div>
           `;
@@ -5930,29 +5933,6 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!input) return;
 
     let val = input.value;
-    
-    // Instant visibility toggle for Săn Boss type sections
-    if (settingKey === 'bossHuntMode') {
-      const groupType1 = document.getElementById(`group-boss-type1-${uid}`);
-      const groupType2 = document.getElementById(`group-boss-type2-${uid}`);
-      if (groupType1) groupType1.style.display = (val === 'type1') ? 'block' : 'none';
-      if (groupType2) groupType2.style.display = (val === 'type2') ? 'block' : 'none';
-    }
-    
-    // Kiểm tra và định dạng danh sách bản đồ săn Boss xoay vòng
-    if (settingKey === 'mvpTargetMaps') {
-      const cleanVal = val.trim();
-      if (cleanVal !== '') {
-        const parts = cleanVal.split(',').map(s => s.trim()).filter(Boolean);
-        const invalid = parts.some(p => isNaN(parseInt(p)) || !/^\d+$/.test(p));
-        if (invalid) {
-          alert('⚠️ Danh sách bản đồ săn Boss không hợp lệ. Chỉ chấp nhận các số bản đồ ngăn cách bằng dấu phẩy (VD: 1, 2, 3).');
-          return;
-        }
-        val = parts.join(', ');
-        input.value = val;
-      }
-    }
 
     try {
       await fetch(`/api/accounts/${uid}`, {
@@ -5962,6 +5942,127 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     } catch (err) {
       console.error('Error updating setting:', err);
+    }
+  };
+
+  // Helper functions for Boss Hunt Maps v2
+  window.toggleAddMapDropdown = function(uid) {
+    const dropdown = document.getElementById(`dropdown-add-map-${uid}`);
+    if (!dropdown) return;
+    
+    if (dropdown.style.display === 'block') {
+      dropdown.style.display = 'none';
+      return;
+    }
+    
+    // Close other dropdowns first
+    document.querySelectorAll('[id^="dropdown-add-map-"]').forEach(d => {
+      d.style.display = 'none';
+    });
+
+    const maps = window.cachedMapsList || [];
+    if (maps.length === 0) {
+      dropdown.innerHTML = `<div style="padding: 6px 10px; font-size: 0.75rem; color: #94a3b8; font-style: italic;">Chờ tải danh sách map...</div>`;
+    } else {
+      dropdown.innerHTML = maps.map(m => {
+        return `<div onclick="addBossHuntMap('${uid}', ${m.id})" style="padding: 6px 10px; font-size: 0.78rem; color: #f1f5f9; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.05); transition: background 0.2s;" onmouseover="this.style.background='rgba(99,102,241,0.2)'" onmouseout="this.style.background='none'">${m.emoji || '🗺️'} ${m.name} <span style="font-size: 0.65rem; color: #94a3b8;">(Lv.${m.req}+)</span></div>`;
+      }).join('');
+    }
+    
+    dropdown.style.display = 'block';
+
+    const outsideClick = function(e) {
+      const btn = document.getElementById(`btn-add-map-menu-${uid}`);
+      if (!dropdown.contains(e.target) && (!btn || !btn.contains(e.target))) {
+        dropdown.style.display = 'none';
+        document.removeEventListener('click', outsideClick);
+      }
+    };
+    setTimeout(() => {
+      document.addEventListener('click', outsideClick);
+    }, 10);
+  };
+
+  window.addBossHuntMap = async function(uid, mapId) {
+    const dropdown = document.getElementById(`dropdown-add-map-${uid}`);
+    if (dropdown) dropdown.style.display = 'none';
+
+    const acc = (window.lastFetchedAccounts || []).find(a => a.line_uid === uid);
+    if (!acc) return;
+    
+    const currentMaps = acc.settings.bossHuntMaps || [];
+    if (currentMaps.includes(mapId)) {
+      alert('⚠️ Bản đồ này đã được thêm vào danh sách.');
+      return;
+    }
+    
+    const newMaps = [...currentMaps, mapId];
+    acc.settings.bossHuntMaps = newMaps;
+    
+    // Refresh card representation immediately
+    const mapsContainer = document.getElementById(`boss-hunt-maps-container-${uid}`);
+    if (mapsContainer) {
+      if (typeof updateCard === 'function') updateCard(acc);
+    }
+
+    try {
+      await fetch(`/api/accounts/${uid}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bossHuntMaps: newMaps })
+      });
+      if (typeof fetchAccounts === 'function') fetchAccounts();
+    } catch (e) {
+      console.error('Error adding boss hunt map:', e);
+    }
+  };
+
+  window.removeBossHuntMap = async function(uid, index) {
+    const acc = (window.lastFetchedAccounts || []).find(a => a.line_uid === uid);
+    if (!acc) return;
+    
+    const currentMaps = acc.settings.bossHuntMaps || [];
+    const newMaps = currentMaps.filter((_, idx) => idx !== index);
+    acc.settings.bossHuntMaps = newMaps;
+
+    if (typeof updateCard === 'function') updateCard(acc);
+
+    try {
+      await fetch(`/api/accounts/${uid}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bossHuntMaps: newMaps })
+      });
+      if (typeof fetchAccounts === 'function') fetchAccounts();
+    } catch (e) {
+      console.error('Error removing boss hunt map:', e);
+    }
+  };
+
+  window.moveBossHuntMap = async function(uid, index, direction) {
+    const acc = (window.lastFetchedAccounts || []).find(a => a.line_uid === uid);
+    if (!acc) return;
+    
+    const currentMaps = [...(acc.settings.bossHuntMaps || [])];
+    const targetIdx = index + direction;
+    if (targetIdx < 0 || targetIdx >= currentMaps.length) return;
+    
+    const temp = currentMaps[index];
+    currentMaps[index] = currentMaps[targetIdx];
+    currentMaps[targetIdx] = temp;
+    acc.settings.bossHuntMaps = currentMaps;
+
+    if (typeof updateCard === 'function') updateCard(acc);
+
+    try {
+      await fetch(`/api/accounts/${uid}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bossHuntMaps: currentMaps })
+      });
+      if (typeof fetchAccounts === 'function') fetchAccounts();
+    } catch (e) {
+      console.error('Error moving boss hunt map:', e);
     }
   };
 
