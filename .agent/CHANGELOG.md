@@ -2,6 +2,19 @@
 
 > Changelog of actual changes implemented.
 
+## 2026-08-19 - Sửa Lỗi Ổn Định Chức Năng /play và Cải Tiến Báo Lỗi Client
+
+- File đã đổi: [server.js](file:///c:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/server.js), [play.html](file:///c:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/play.html), [play_battle.html](file:///c:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/play_battle.html), [test.js](file:///c:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/test.js), [.agent/4M.md](file:///c:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/.agent/4M.md).
+- Đã làm:
+  - **Đồng bộ IP kết nối Proxy (Backend)**: Truyền tham số `uid` vào hàm `fetchGameHtml` và sử dụng Proxy riêng của bot đó (thay vì luôn dùng Direct Connection) để tải trang game index. Đảm bảo luồng tải HTML và luồng gọi API POST `/xhrpg_game.php` đi qua cùng một địa chỉ IP, tránh lỗi mâu thuẫn IP gây thu hồi token.
+  - **Cải tiến bóc tách lỗi và bọc an toàn JSON.parse (Client)**:
+    - Bọc logic phân tích JSON phản hồi từ `/xhrpg_game.php` trong khối `try-catch` tại `play.html`, `play_battle.html` và đoạn script tùy chỉnh được inject bởi server.
+    - Phát hiện phản hồi dạng HTML lỗi (ví dụ Cloudflare challenge hoặc thông báo lỗi hệ thống) để đưa ra thông báo rõ ràng thay vì để script crash.
+    - Hiển thị chi tiết lỗi thực tế (`data.error || data.msg || data.info || JSON.stringify(data)`) thay vì thông báo chung chung "Lỗi không xác định".
+  - **Sửa lỗi Unit Test hiện hữu**: Sửa tham số cấu hình test trong `test.js` từ `bossHuntMaps` thành `mvpTargetMaps` (dạng chuỗi csv) để tương thích với các thay đổi trước đó, giúp bộ kiểm thử `npm test` hoạt động chính xác 100%.
+
+---
+
 ## 2026-08-18 - Khắc Phục Lỗi Săn Boss MVP & Phụ Bản Bang (Guild Dungeon)
 
 - File đã đổi: [server.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [test.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/test.js), [.agent/4M.md](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/.agent/4M.md).

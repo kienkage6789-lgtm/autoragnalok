@@ -7800,12 +7800,14 @@ async function proxyRequest(req, res, targetUrl, uid = null) {
   }
 }
 
-async function fetchGameHtml(req) {
+async function fetchGameHtml(req, uid = null) {
   const now = Date.now();
   const targetUrl = `https://ragnalok.online/human/index.php?_cb=${now}`;
   
+  const dispatcher = uid ? proxyPool.getDispatcher(uid) : proxyPool.getDefaultDispatcher();
+
   const response = await fetch(targetUrl, {
-    dispatcher: proxyPool.getDefaultDispatcher(),
+    dispatcher: dispatcher,
     headers: {
       'user-agent': req.headers['user-agent'] || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     }
@@ -7882,11 +7884,27 @@ if (uid && token) {
     have_static: 0
   })
   .done(res => {
-    const data = typeof res === 'string' ? JSON.parse(res) : res;
-    if (data.ok) {
+    let data;
+    try {
+      if (typeof res === 'string') {
+        if (res.trim().startsWith('<')) {
+          throw new Error('Máy chủ game trả về HTML (có thể bị chặn bởi Cloudflare hoặc hết hạn phiên)');
+        }
+        data = JSON.parse(res);
+      } else {
+        data = res;
+      }
+    } catch (parseErr) {
+      console.error('Lỗi giải mã phản hồi game:', parseErr);
+      document.getElementById('loading-msg').textContent = 'Đăng nhập thất bại: ' + parseErr.message;
+      return;
+    }
+
+    if (data && data.ok) {
       startGame(data.player, token, data.offline_reward);
     } else {
-      document.getElementById('loading-msg').textContent = 'Đăng nhập thất bại: ' + (data.error || 'Lỗi không xác định');
+      const errMsg = data ? (data.error || data.msg || data.info || JSON.stringify(data)) : 'Lỗi không xác định';
+      document.getElementById('loading-msg').textContent = 'Đăng nhập thất bại: ' + errMsg;
     }
   })
   .fail(() => {
@@ -8048,7 +8066,7 @@ app.get('/play', requireAuth, async (req, res) => {
     }
   }
   try {
-    const html = await fetchGameHtml(req);
+    const html = await fetchGameHtml(req, uid);
     res.send(html);
   } catch (e) {
     console.error('Fetch HTML error, serving patched play.html fallback:', e.message);
@@ -8095,11 +8113,27 @@ if (uid && token) {
     have_static: 0
   })
   .done(res => {
-    const data = typeof res === 'string' ? JSON.parse(res) : res;
-    if (data.ok) {
+    let data;
+    try {
+      if (typeof res === 'string') {
+        if (res.trim().startsWith('<')) {
+          throw new Error('Máy chủ game trả về HTML (có thể bị chặn bởi Cloudflare hoặc hết hạn phiên)');
+        }
+        data = JSON.parse(res);
+      } else {
+        data = res;
+      }
+    } catch (parseErr) {
+      console.error('Lỗi giải mã phản hồi game:', parseErr);
+      document.getElementById('loading-msg').textContent = 'Đăng nhập thất bại: ' + parseErr.message;
+      return;
+    }
+
+    if (data && data.ok) {
       startGame(data.player, token, data.offline_reward);
     } else {
-      document.getElementById('loading-msg').textContent = 'Đăng nhập thất bại: ' + (data.error || 'Lỗi không xác định');
+      const errMsg = data ? (data.error || data.msg || data.info || JSON.stringify(data)) : 'Lỗi không xác định';
+      document.getElementById('loading-msg').textContent = 'Đăng nhập thất bại: ' + errMsg;
     }
   })
   .fail(() => {

@@ -1321,12 +1321,29 @@ if (uid && token) {
     have_static: 0
   })
   .done(res => {
-    const data = typeof res === 'string' ? JSON.parse(res) : res;
-    if (data.ok) {
+    let data;
+    try {
+      if (typeof res === 'string') {
+        if (res.trim().startsWith('<')) {
+          throw new Error('Máy chủ game trả về HTML (có thể bị chặn bởi Cloudflare hoặc hết hạn phiên)');
+        }
+        data = JSON.parse(res);
+      } else {
+        data = res;
+      }
+    } catch (parseErr) {
+      console.error('Lỗi giải mã phản hồi game:', parseErr);
+      document.getElementById('loading-msg').textContent = 'Đăng nhập thất bại: ' + parseErr.message;
+      addBattleLog('❌ Đăng nhập thất bại: ' + parseErr.message, 'ERROR');
+      return;
+    }
+
+    if (data && data.ok) {
       startGame(data.player, token, data.offline_reward);
     } else {
-      document.getElementById('loading-msg').textContent = 'Đăng nhập thất bại: ' + (data.error || 'Lỗi không xác định');
-      addBattleLog('❌ Đăng nhập thất bại: ' + (data.error || 'Lỗi'), 'ERROR');
+      const errMsg = data ? (data.error || data.msg || data.info || JSON.stringify(data)) : 'Lỗi không xác định';
+      document.getElementById('loading-msg').textContent = 'Đăng nhập thất bại: ' + errMsg;
+      addBattleLog('❌ Đăng nhập thất bại: ' + errMsg, 'ERROR');
     }
   })
   .fail(() => {

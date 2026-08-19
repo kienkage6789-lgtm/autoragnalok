@@ -411,7 +411,7 @@ try {
 
   // Test Case 4: Early-exit Map Routing Check (MVP cycle vs current map)
   instance.isMvpCycling = true;
-  instance.settings.bossHuntMaps = [2, 3, 5];
+  instance.settings.mvpTargetMaps = '2,3,5';
   instance.mvpCycleMapIndex = 0;
   instance.player = { map: 3 }; // different map
   
@@ -479,7 +479,7 @@ try {
   console.log('Testing isFull logic with MVP cycle...');
   instance.isMvpCycling = true;
   instance.player = { map: 2 };
-  instance.settings.bossHuntMaps = [2, 3, 5];
+  instance.settings.mvpTargetMaps = '2,3,5';
   instance.mvpCycleMapIndex = 0;
   instance.bosses = [];
   instance.monsters = [{ id: 1 }];
