@@ -7713,6 +7713,8 @@ async function proxyRequest(req, res, targetUrl, uid = null) {
   };
 
   const proxyId = uid ? proxyPool._assignments[uid] : null;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000); // 10s timeout
 
   try {
     let body = null;
@@ -7727,8 +7729,11 @@ async function proxyRequest(req, res, targetUrl, uid = null) {
       method: req.method,
       headers: headers,
       body: body,
-      dispatcher: dispatcher
+      dispatcher: dispatcher,
+      signal: controller.signal
     });
+
+    clearTimeout(timeout);
 
     if (proxyId && proxyId !== 'direct') {
       proxyPool.resetErrorCount(proxyId);
@@ -7819,6 +7824,7 @@ async function proxyRequest(req, res, targetUrl, uid = null) {
       res.send(text);
     }
   } catch (err) {
+    clearTimeout(timeout);
     console.error(`Proxy error for ${targetUrl}:`, err);
     if (proxyId && proxyId !== 'direct') {
       proxyPool.recordProxyFailure(proxyId);
