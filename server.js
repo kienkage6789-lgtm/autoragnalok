@@ -1384,45 +1384,13 @@ class BotInstance {
       if (userSettings.autoEventJoinGw === undefined) this.settings.autoEventJoinGw = true;
       if (userSettings.autoEventJoinCw === undefined) this.settings.autoEventJoinCw = true;
     }
-    // Migration for Boss Hunt settings v2
-    if (this.settings.bossHuntEnabled === undefined) {
-      if (this.settings.bossHuntMode === 'type2') {
-        this.settings.bossHuntEnabled = true;
-      } else if (this.settings.bossHuntMode === 'type1') {
-        this.settings.bossHuntEnabled = true;
+    if (this.settings.bossHuntMode === undefined) {
+      if (this.settings.autoMVP) {
+        this.settings.bossHuntMode = this.settings.autoMvpCycle !== false ? 'type2' : 'type1';
       } else {
-        this.settings.bossHuntEnabled = this.settings.autoMVP || false;
+        this.settings.bossHuntMode = 'off';
       }
     }
-
-    if (this.settings.bossHuntMaps === undefined) {
-      if (this.settings.mvpTargetMaps && typeof this.settings.mvpTargetMaps === 'string') {
-        this.settings.bossHuntMaps = this.settings.mvpTargetMaps
-          .split(',')
-          .map(s => parseInt(s.trim()))
-          .filter(n => !isNaN(n));
-      } else {
-        this.settings.bossHuntMaps = [];
-      }
-      if (this.settings.bossHuntEnabled && this.settings.bossHuntMaps.length === 0) {
-        const defaultMap = parseInt(this.settings.targetMap) || 1;
-        this.settings.bossHuntMaps = [defaultMap];
-      }
-    }
-
-    if (this.settings.bossHuntPriority === undefined) {
-      this.settings.bossHuntPriority = this.settings.mvpPriorityMode || 'distance';
-    }
-
-    if (this.settings.bossHuntClearPolls === undefined) {
-      this.settings.bossHuntClearPolls = 4;
-    }
-
-    // Clean up old settings keys
-    delete this.settings.bossHuntMode;
-    delete this.settings.mvpPriorityMode;
-    delete this.settings.mvpTargetMaps;
-    delete this.settings.currentMvpMapIndex;
     
     this.player = null;
     this.logs = [];
@@ -1451,7 +1419,6 @@ class BotInstance {
     this.mvpCycleMapIndex = 0;
     this.mvpCycleMapStayCount = 0;
     this.mvpConfirmClearCount = 0; // Số polls liên tiếp xác nhận map đã sạch boss
-    this.mvpMapClearStartTs = null; // Timestamp khi bắt đầu xác nhận sạch boss (real-time)
     this.mvpCycleOriginalMap = null;
     this.mvpCycleOriginalAutoMap = null;
     this.lastMvpCycleCheckHour = -1;
@@ -1618,10 +1585,10 @@ class BotInstance {
       autoSyncOfflineZone: false,
       offlineTargetMap: 1,
       offlineTargetZones: [],
-      bossHuntEnabled: false,
-      bossHuntMaps: [],
-      bossHuntPriority: 'distance',
-      bossHuntClearPolls: 4,
+      bossHuntMode: 'off', // 'off' | 'type1' | 'type2'
+      currentMvpMapIndex: 0,
+      mvpPriorityMode: 'distance',
+      mvpTargetMaps: '',
       autoArena: false,
       autoHomeHarvest: false,
       autoHomePlant: false,
@@ -1677,17 +1644,24 @@ class BotInstance {
   }
 
   updateSettings(newSettings) {
-    const oldBossHuntEnabled = this.settings.bossHuntEnabled;
+    const oldBossHuntMode = this.settings.bossHuntMode;
 
     this.settings = { ...this.settings, ...newSettings };
     this.addLog('SYSTEM', 'Cập nhật cấu hình bot thành công');
 
-    // Nếu đang trong chu kỳ săn boss mà bị tắt, hoặc xóa/đổi danh sách map
+    // Nếu đang trong chu kỳ săn boss mà bị tắt hoặc đổi sang chế độ khác Loại 2, hoặc xóa/đổi danh sách map
     if (this.isMvpCycling) {
-      const turnedOff = (newSettings.bossHuntEnabled === false && oldBossHuntEnabled === true);
-      const mapsCleared = (newSettings.bossHuntMaps !== undefined && (!Array.isArray(newSettings.bossHuntMaps) || newSettings.bossHuntMaps.length === 0));
+      const turnedOffOrChanged = (newSettings.bossHuntMode !== undefined && newSettings.bossHuntMode !== 'type2' && oldBossHuntMode === 'type2');
+      
+      let mapsCleared = false;
+      if (newSettings.mvpTargetMaps !== undefined) {
+        const maps = newSettings.mvpTargetMaps.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+        if (maps.length === 0) {
+          mapsCleared = true;
+        }
+      }
 
-      if (turnedOff || mapsCleared) {
+      if (turnedOffOrChanged || mapsCleared) {
         this.isMvpCycling = false;
         this.mvpCycleMapIndex = 0;
         this.mvpCycleMapStayCount = 0;
@@ -1696,27 +1670,14 @@ class BotInstance {
         this._bossNameCache = {};
         this._lastBossStatusLogAt = 0;
         
-        // Khôi phục map và zone ban đầu
+        // Khôi phục autoMap ban đầu
         if (this.mvpCycleOriginalAutoMap !== null) {
           this.settings.autoMap = this.mvpCycleOriginalAutoMap;
           this.mvpCycleOriginalAutoMap = null;
         }
-        if (this.mvpCycleOriginalAutoZone !== null) {
-          this.settings.autoZone = this.mvpCycleOriginalAutoZone;
-          this.mvpCycleOriginalAutoZone = null;
-        }
-        if (this.mvpCycleOriginalTargetZone !== null) {
-          this.settings.targetZone = this.mvpCycleOriginalTargetZone;
-          this.mvpCycleOriginalTargetZone = null;
-        }
-        if (this.mvpCycleOriginalTargetMap !== null) {
-          this.settings.targetMap = this.mvpCycleOriginalTargetMap;
-          this.mvpCycleOriginalTargetMap = null;
-        }
 
         if (this.mvpCycleOriginalMap !== null) {
           const returnMap = this.mvpCycleOriginalMap;
-          this.mvpCycleOriginalMap = null;
           this.addLog('SYSTEM', `⏹️ [Auto Boss] Cấu hình thay đổi -> Hủy chu kỳ săn Boss xoay vòng, tự động quay về Map farm gốc (Map ${returnMap}).`);
         } else {
           this.addLog('SYSTEM', `⏹️ [Auto Boss] Cấu hình thay đổi -> Hủy chu kỳ săn Boss xoay vòng.`);
@@ -1880,13 +1841,16 @@ class BotInstance {
 
   // Rotate to next MVP map in the configured list
   async warpToNextMvpMap() {
-    const mapIds = this.settings.bossHuntMaps || [];
+    const mapIds = (this.settings.mvpTargetMaps || '')
+      .split(',')
+      .map(s => parseInt(s.trim()))
+      .filter(Number.isInteger);
     if (!mapIds.length) {
       this.addLog('WARNING', '⚠️ Chưa cấu hình danh sách Map Săn Boss.');
       return;
     }
-    this.mvpCycleMapIndex = ((this.mvpCycleMapIndex || 0) + 1) % mapIds.length;
-    const targetMap = mapIds[this.mvpCycleMapIndex];
+    this.settings.currentMvpMapIndex = ((this.settings.currentMvpMapIndex || 0) + 1) % mapIds.length;
+    const targetMap = mapIds[this.settings.currentMvpMapIndex];
     this.addLog('SYSTEM', `🗺️ [Auto MVP] Di chuyển sang Map Boss tiếp theo: Map ${targetMap}`);
     await this.warpToMap(targetMap);
   }
@@ -2556,15 +2520,22 @@ class BotInstance {
   }
 
   getCurrentMvpCycleMap() {
-    const maps = this.settings.bossHuntMaps || [];
+    if (!this.settings.mvpTargetMaps) return 1;
+    const maps = this.settings.mvpTargetMaps.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
     return maps[this.mvpCycleMapIndex] || 1;
   }
 
   triggerMvpCycle(forced = false) {
-    const maps = this.settings.bossHuntMaps || [];
+    if (!this.settings.mvpTargetMaps) {
+      if (forced) {
+        this.addLog('WARNING', `⚠️ Chưa cấu hình danh sách bản đồ săn Boss (mvpTargetMaps).`);
+      }
+      return;
+    }
+    const maps = this.settings.mvpTargetMaps.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
     if (maps.length === 0) {
       if (forced) {
-        this.addLog('WARNING', `⚠️ Chưa cấu hình danh sách bản đồ săn Boss (bossHuntMaps).`);
+        this.addLog('WARNING', `⚠️ Danh sách bản đồ săn Boss không hợp lệ.`);
       }
       return;
     }
@@ -2585,16 +2556,12 @@ class BotInstance {
     
     this.mvpCycleOriginalMap = farmMap;
     this.mvpCycleOriginalAutoMap = this.settings.autoMap;
-    this.mvpCycleOriginalAutoZone = this.settings.autoZone;
-    this.mvpCycleOriginalTargetZone = this.settings.targetZone;
-    this.mvpCycleOriginalTargetMap = this.settings.targetMap;
 
     const nowTs = Date.now();
     this.isMvpCycling = true;
     this.mvpCycleMapIndex = 0;
     this.mvpCycleMapStayCount = 0;
     this.mvpConfirmClearCount = 0;
-    this.mvpMapClearStartTs = null;
     this.bosses = null; // Ép tải danh sách boss trên map mới ngay lập tức
     this.mvpCycleStats = {
       cycleStartTs: nowTs,
@@ -2618,9 +2585,12 @@ class BotInstance {
       return;
     }
     
-    const maps = this.settings.bossHuntMaps || [];
+    const maps = (this.settings.mvpTargetMaps || '')
+      .split(',')
+      .map(s => parseInt(s.trim()))
+      .filter(n => !isNaN(n));
 
-    if (maps.length === 0 || !this.settings.bossHuntEnabled) {
+    if (maps.length === 0 || this.settings.bossHuntMode !== 'type2') {
       this.isMvpCycling = false;
       return;
     }
@@ -2629,8 +2599,6 @@ class BotInstance {
     if (this.mvpCycleMapIndex >= maps.length) {
       this.isMvpCycling = false;
       this.mvpCycleMapIndex = 0;
-      this.mvpConfirmClearCount = 0;
-      this.mvpMapClearStartTs = null;
       const returnMap = this.mvpCycleOriginalMap || (parseInt(this.settings.targetMap) || 1);
       this.addLog('SYSTEM', `✅ [Auto Boss] Đã đi hết danh sách bản đồ -> Quay về Map farm gốc (Map ${returnMap}).`);
       await this.warpToMap(returnMap);
@@ -2649,7 +2617,6 @@ class BotInstance {
       this.mvpCycleMapIndex++;
       this.mvpCycleMapStayCount = 0;
       this.mvpConfirmClearCount = 0;
-      this.mvpMapClearStartTs = null;
       this.bosses = null;
       if (this.mvpCycleMapIndex < maps.length) {
         await this.warpToMap(maps[this.mvpCycleMapIndex]);
@@ -2673,7 +2640,6 @@ class BotInstance {
         this.mvpCycleMapStayCount = 0;
         this.mvpTransitCount = 0;
         this.mvpConfirmClearCount = 0;
-        this.mvpMapClearStartTs = null;
         this.bosses = null;
         if (this.mvpCycleMapIndex < maps.length) {
           await this.warpToMap(maps[this.mvpCycleMapIndex]);
@@ -2697,9 +2663,7 @@ class BotInstance {
         const dx = this.player.x - activeBoss.x;
         const dy = this.player.y - activeBoss.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
-        const isUsingDaoDai = this.player && (Number(this.player.active_gun) === 1);
-        const MAX_BOSS_DIST = isUsingDaoDai ? 65 : 40;
-        if (dist <= MAX_BOSS_DIST) {
+        if (dist <= 5) {
           isAttackingMvp = true;
         }
       }
@@ -2714,24 +2678,20 @@ class BotInstance {
     // 5. Quản lý danh sách Boss khi đã đến đúng map mục tiêu
     const aliveTargetBosses = this.bosses ? this.bosses.filter(b => (b.hp === undefined || (b.hp || 0) > 0)) : [];
     
-    // Cập nhật bộ đếm xác nhận map sạch boss bằng thời gian thực 5s
+    // Cập nhật bộ đếm xác nhận map sạch boss
     if (this.bosses === null) {
-      // Chưa tải xong danh sách boss từ server
-      this.mvpMapClearStartTs = null;
+      // Chưa tải xong danh sách boss từ server -> Chưa xác nhận
+      this.mvpConfirmClearCount = 0;
     } else if (aliveTargetBosses.length === 0) {
-      if (this.mvpMapClearStartTs === null) {
-        this.mvpMapClearStartTs = Date.now();
-      }
+      this.mvpConfirmClearCount++;
     } else {
-      this.mvpMapClearStartTs = null;
+      this.mvpConfirmClearCount = 0;
     }
 
     const timeSpentMs = Date.now() - (this.mvpCycleStats ? (this.mvpCycleStats.mapStartTs || Date.now()) : Date.now());
     const isMapTimeout = (timeSpentMs >= 300000); // 5 phút (5 * 60 * 1000)
-    
-    // Đợi server xác nhận sạch boss trong 5s thời gian thực liên tục
-    const isClearConfirmed = this.mvpMapClearStartTs !== null && (Date.now() - this.mvpMapClearStartTs >= 5000);
-    const isDoneWithCurrentMap = isClearConfirmed || isMapTimeout;
+    // Confirm map is clear only after staying for at least 3.0 seconds (timeSpentMs >= 3000) and confirming 3 times, or if map timed out
+    const isDoneWithCurrentMap = (this.mvpConfirmClearCount >= 3 && timeSpentMs >= 3000) || isMapTimeout;
     
     if (isDoneWithCurrentMap) {
       const killedCount = this.mvpCycleStats ? (this.mvpCycleStats.bossKilledInMap || 0) : 0;
@@ -2756,8 +2716,7 @@ class BotInstance {
 
       this.mvpCycleMapIndex++;
       this.mvpCycleMapStayCount = 0;
-      this.mvpConfirmClearCount = 0; 
-      this.mvpMapClearStartTs = null;
+      this.mvpConfirmClearCount = 0; // Reset khi chuyển sang map tiếp theo
       this.bosses = null;
       if (this.mvpCycleStats) {
         this.mvpCycleStats.bossKilledInMap = 0;
@@ -2781,7 +2740,6 @@ class BotInstance {
           totalTimeMs,
           returnMap
         });
-
         await this.warpToMap(returnMap);
       }
     }
@@ -2853,7 +2811,7 @@ class BotInstance {
       let activeTargetMapId;
       let shouldWarpCheck = false;
 
-      if (isMember && leader && leader.status === 'running' && leader.player && this.settings.teamSynced === true && this.settings.bossHuntEnabled && leader.settings.bossHuntEnabled) {
+      if (isMember && leader && leader.status === 'running' && leader.player && this.settings.teamSynced === true && this.settings.bossHuntMode && this.settings.bossHuntMode !== 'off' && leader.settings.bossHuntMode && leader.settings.bossHuntMode !== 'off') {
         // Đồng bộ trạng thái Cycle và Map từ Leader trước
         this.isMvpCycling = leader.isMvpCycling;
         this.mvpCycleMapIndex = leader.mvpCycleMapIndex;
@@ -2871,7 +2829,7 @@ class BotInstance {
           ? this.getCurrentMvpCycleMap() 
           : (isMvpReturning ? Number(this.mvpCycleOriginalMap) : (parseInt(this.settings.targetMap) || 1));
           
-        shouldWarpCheck = (this.settings.autoMap || this.settings.bossHuntEnabled || this.isMvpCycling || isMvpReturning);
+        shouldWarpCheck = (this.settings.autoMap || (this.settings.bossHuntMode && this.settings.bossHuntMode !== 'off') || this.isMvpCycling || isMvpReturning);
       }
 
       if (shouldWarpCheck && !this.guildDungeonActive && !this.inEventMode && Number(this.player.gdun_in) !== 1 && Number(this.player.map) !== Number(activeTargetMapId) && Number(this.player.map) !== 5) {
@@ -2919,7 +2877,7 @@ class BotInstance {
     const nowTime = new Date();
     const currentHour = nowTime.getHours();
     const currentMinute = nowTime.getMinutes();
-    if (this.settings.bossHuntEnabled && this.settings.bossHuntMaps && this.settings.bossHuntMaps.length > 0 && this.settings.teamRole !== 'member') {
+    if (this.settings.bossHuntMode === 'type2' && this.settings.mvpTargetMaps && this.settings.teamRole !== 'member') {
       if (currentMinute <= 2 && this.lastMvpCycleCheckHour !== currentHour) {
         this.lastMvpCycleCheckHour = currentHour;
         this.addLog('SYSTEM', `⏰ [Auto Boss] Đến giờ tròn (${currentHour}:00). Tự động kích hoạt chu kỳ săn Boss xoay vòng map...`);
@@ -3063,10 +3021,34 @@ class BotInstance {
 
     // 0.5 Guild Dungeon Targeting (Chủ động nhắm và tấn công Boss/Quái trong Phụ Bản Guild)
     if (this.guildDungeonActive) {
-      const dungeonTargets = [
-        ...(this.bosses || []).filter(b => (b.hp === undefined || (b.hp || 0) > 0)),
-        ...(this.monsters || []).filter(m => (m.hp === undefined || (m.hp || 0) > 0))
-      ];
+      const px = this.player ? this.player.x : 1125;
+      const py = this.player ? this.player.y : 1125;
+
+      const sortPool = (pool) => {
+        if (this.settings.bossHuntMode === 'type2') {
+          return [...pool].sort((a, b) => (a.hp || 0) - (b.hp || 0));
+        } else {
+          if (this.settings.mvpPriorityMode === 'level_asc') {
+            return [...pool].sort((a, b) => (a.lv || 0) - (b.lv || 0));
+          } else if (this.settings.mvpPriorityMode === 'level_desc') {
+            return [...pool].sort((a, b) => (b.lv || 0) - (a.lv || 0));
+          } else {
+            // Khoảng cách
+            return [...pool].sort((a, b) => {
+              const distA = Math.sqrt((px - a.x) * (px - a.x) + (py - a.y) * (py - a.y));
+              const distB = Math.sqrt((px - b.x) * (px - b.x) + (py - b.y) * (py - b.y));
+              return distA - distB;
+            });
+          }
+        }
+      };
+
+      const aliveBosses = (this.bosses || []).filter(b => (b.hp === undefined || (b.hp || 0) > 0));
+      const aliveMonsters = (this.monsters || []).filter(m => (m.hp === undefined || (m.hp || 0) > 0));
+      const sortedBosses = sortPool(aliveBosses);
+      const sortedMonsters = sortPool(aliveMonsters);
+      const dungeonTargets = [...sortedBosses, ...sortedMonsters];
+
       if (dungeonTargets.length > 0) {
         const target = dungeonTargets[0];
         exploreCx = target.x !== undefined ? target.x : 1125;
@@ -3080,7 +3062,7 @@ class BotInstance {
 
     // 1. Auto MVP Hunting (Priority 1)
     // isCorrectMvpMap is already defined above for isFull calculation
-    const isHuntingEnabled = this.settings.bossHuntEnabled === true;
+    const isHuntingEnabled = this.settings.bossHuntMode !== 'off';
     
     if (isHuntingEnabled && isCorrectMvpMap && this.bosses && this.bosses.length > 0) {
       const aliveBosses = this.bosses.filter(b => (b.hp === undefined || (b.hp || 0) > 0));
@@ -3092,20 +3074,23 @@ class BotInstance {
         const px = this.player ? this.player.x : 0;
         const py = this.player ? this.player.y : 0;
 
-        if (this.settings.bossHuntPriority === 'hp_asc') {
-          // Sort by absolute remaining HP ascending (lowest HP first)
+        if (this.settings.bossHuntMode === 'type2') {
+          // Type 2: Sort by absolute remaining HP ascending (lowest HP first)
           targetPool.sort((a, b) => (a.hp || 0) - (b.hp || 0));
-        } else if (this.settings.bossHuntPriority === 'level_asc') {
-          targetPool.sort((a, b) => (a.lv || 0) - (b.lv || 0));
-        } else if (this.settings.bossHuntPriority === 'level_desc') {
-          targetPool.sort((a, b) => (b.lv || 0) - (a.lv || 0));
         } else {
-          // Default: distance
-          targetPool.sort((a, b) => {
-            const distA = Math.sqrt((px - a.x) * (px - a.x) + (py - a.y) * (py - a.y));
-            const distB = Math.sqrt((px - b.x) * (px - b.x) + (py - b.y) * (py - b.y));
-            return distA - distB;
-          });
+          // Type 1: Sort by Priority Mode (distance, level_asc, level_desc)
+          if (this.settings.mvpPriorityMode === 'level_asc') {
+            targetPool.sort((a, b) => (a.lv || 0) - (b.lv || 0));
+          } else if (this.settings.mvpPriorityMode === 'level_desc') {
+            targetPool.sort((a, b) => (b.lv || 0) - (a.lv || 0));
+          } else {
+            // Default: distance
+            targetPool.sort((a, b) => {
+              const distA = Math.sqrt((px - a.x) * (px - a.x) + (py - a.y) * (py - a.y));
+              const distB = Math.sqrt((px - b.x) * (px - b.x) + (py - b.y) * (py - b.y));
+              return distA - distB;
+            });
+          }
         }
 
         let activeBoss = null;
@@ -3116,7 +3101,7 @@ class BotInstance {
           const leader = myTeamId !== 'none' 
             ? Object.values(botInstances).find(b => b.userId === this.userId && b.settings.teamRole === 'leader' && (b.settings.teamId || 'none') === myTeamId) 
             : null;
-          if (leader && leader.status === 'running' && leader.player && this.settings.teamSynced === true && this.settings.bossHuntEnabled && leader.settings.bossHuntEnabled) {
+          if (leader && leader.status === 'running' && leader.player && this.settings.teamSynced === true && this.settings.bossHuntMode && this.settings.bossHuntMode !== 'off' && leader.settings.bossHuntMode && leader.settings.bossHuntMode !== 'off') {
             const leaderTargetId = leader.manualTargetBossId !== null ? leader.manualTargetBossId : leader.lastTargetedBossId;
             if (leaderTargetId !== null) {
               activeBoss = aliveBosses.find(b => b.id === leaderTargetId);
@@ -3454,7 +3439,9 @@ class BotInstance {
 
     // 🏰 Tự động thoát Phụ Bản Guild khi sạch Quái & Boss (monsters: [] và bosses: [])
     if (this.guildDungeonActive && !this._exitingGuildDungeon) {
-      if (this.monsters !== null && this.bosses !== null) {
+      const timeInDungeon = this.gdunEnteredAt ? (Date.now() - this.gdunEnteredAt) : 0;
+      // Chỉ bắt đầu kiểm tra và đếm poll trống sau khi vào phụ bản ít nhất 3 giây để chờ server spawn quái/boss
+      if (timeInDungeon >= 3000 && this.monsters !== null && this.bosses !== null) {
         const aliveMonsters = (this.monsters || []).filter(m => (m.hp === undefined || (m.hp || 0) > 0));
         const aliveBosses = (this.bosses || []).filter(b => (b.hp === undefined || (b.hp || 0) > 0));
         const hasTargets = (aliveMonsters.length > 0 || aliveBosses.length > 0);
@@ -3627,26 +3614,11 @@ class BotInstance {
       }
     }
 
-    // Check if we just completed a cycle and need to restore original map and zone
+    // Check if we just completed a cycle and need to restore autoMap
     const wasMvpReturning = (!this.isMvpCycling && this.mvpCycleOriginalMap !== null);
     if (!this.isMvpCycling && this.mvpCycleOriginalMap !== null) {
       if (Number(this.player.map) === Number(this.mvpCycleOriginalMap)) {
-        if (this.mvpCycleOriginalAutoMap !== null) {
-          this.settings.autoMap = this.mvpCycleOriginalAutoMap;
-          this.mvpCycleOriginalAutoMap = null;
-        }
-        if (this.mvpCycleOriginalAutoZone !== null) {
-          this.settings.autoZone = this.mvpCycleOriginalAutoZone;
-          this.mvpCycleOriginalAutoZone = null;
-        }
-        if (this.mvpCycleOriginalTargetZone !== null) {
-          this.settings.targetZone = this.mvpCycleOriginalTargetZone;
-          this.mvpCycleOriginalTargetZone = null;
-        }
-        if (this.mvpCycleOriginalTargetMap !== null) {
-          this.settings.targetMap = this.mvpCycleOriginalTargetMap;
-          this.mvpCycleOriginalTargetMap = null;
-        }
+        this.settings.autoMap = this.mvpCycleOriginalAutoMap ?? false;
         this.mvpCycleOriginalMap = null;
         
         const currentAccounts = loadAccounts();
@@ -4198,7 +4170,7 @@ class BotInstance {
       let activeTargetMapId;
       let shouldWarpCheck = false;
 
-      if (isMember && leader && leader.status === 'running' && leader.player && this.settings.teamSynced === true && this.settings.bossHuntEnabled && leader.settings.bossHuntEnabled) {
+      if (isMember && leader && leader.status === 'running' && leader.player && this.settings.teamSynced === true && this.settings.bossHuntMode && this.settings.bossHuntMode !== 'off' && leader.settings.bossHuntMode && leader.settings.bossHuntMode !== 'off') {
         activeTargetMapId = leader.isMvpCycling 
           ? leader.getCurrentMvpCycleMap() 
           : (leader.player ? Number(leader.player.map) : (parseInt(leader.settings.targetMap) || 1));
@@ -4207,7 +4179,7 @@ class BotInstance {
         activeTargetMapId = this.isMvpCycling 
           ? this.getCurrentMvpCycleMap() 
           : (isMvpReturning ? Number(this.mvpCycleOriginalMap) : (parseInt(this.settings.targetMap) || 1));
-        shouldWarpCheck = (this.settings.autoMap || this.settings.bossHuntEnabled || this.isMvpCycling || isMvpReturning);
+        shouldWarpCheck = (this.settings.autoMap || (this.settings.bossHuntMode && this.settings.bossHuntMode !== 'off') || this.isMvpCycling || isMvpReturning);
       }
 
       if (shouldWarpCheck && !this.guildDungeonActive && !this.inEventMode && Number(this.player.gdun_in) !== 1 && Number(this.player.map) !== Number(activeTargetMapId)) {
@@ -5973,7 +5945,7 @@ app.get('/api/accounts', requireAuth, (req, res) => {
           isMvpCycling: bot.isMvpCycling || false,
           currentMvpBossInfo: bot.currentMvpBossInfo || null,
           aliveBossCount: bot.bosses ? bot.bosses.filter(b => (b.hp === undefined || (b.hp || 0) > 0)).length : 0,
-          bossHuntActive: bot.settings.bossHuntEnabled === true,
+          bossHuntActive: bot.settings.bossHuntMode !== 'off',
           aliveBosses: (bot.bosses || []).filter(b => (b.hp === undefined || (b.hp || 0) > 0)).map(b => ({
             id: b.id,
             name: b.name || 'Boss',
@@ -7395,7 +7367,7 @@ app.post('/api/accounts/:line_uid/action', requireAuth, async (req, res) => {
       const currentAccounts = loadAccounts();
       
       for (const targetBot of targetBots) {
-        targetBot.updateSettings({ bossHuntEnabled: true });
+        targetBot.updateSettings({ bossHuntMode: 'type2' });
         
         const index = currentAccounts.findIndex(acc => acc.line_uid === targetBot.line_uid);
         if (index !== -1) {
