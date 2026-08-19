@@ -345,6 +345,24 @@ class ProxyPool {
     }
   }
 
+  recordProxyFailure(id) {
+    if (id && id !== 'direct' && id !== 'auto') {
+      const p = this._proxies.find(x => x.id === id);
+      if (p) {
+        p.errorCount = (p.errorCount || 0) + 1;
+        console.log(`[Proxy Failure Recorded] Proxy ${p.label} errorCount: ${p.errorCount}/3`);
+        if (p.errorCount >= 3) {
+          p.active = false;
+          try { if (this._agents[id]) this._agents[id].destroy(); } catch (e) {}
+          delete this._agents[id];
+          this._save();
+          console.log(`Proxy ${p.label} has been deactivated due to consecutive failures (recorded globally).`);
+          this._reassignFrom(id);
+        }
+      }
+    }
+  }
+
   releaseBot(line_uid) {
     delete this._assignments[line_uid];
   }
@@ -2239,9 +2257,9 @@ class BotInstance {
         const formattedErr = err.message || (err.cause ? `${err.cause.code || err.cause.message}` : 'Lỗi kết nối');
         this.error = formattedErr;
         const elapsedSec = Math.round(elapsedTime / 1000);
-        this.addLog('ERROR', `${formattedErr} (Lỗi liên tục ${elapsedSec}s/180s)`);
+        this.addLog('ERROR', `${formattedErr} (Lỗi liên tục ${elapsedSec}s/90s)`);
 
-        if (elapsedTime >= 180000) { // 3 minutes
+        if (elapsedTime >= 90000) { // 1.5 minutes
           const oldProxyId = this.proxyId;
           const newAssigned = proxyPool.failoverAssignment(this.line_uid, oldProxyId);
           if (newAssigned !== oldProxyId) {
@@ -2258,7 +2276,7 @@ class BotInstance {
             }
             
             const newProxyInfo = proxyPool.getBotProxyInfo(this.line_uid);
-            this.addLog('SYSTEM', `🔄 Proxy cũ gặp sự cố liên tiếp 3 phút. Đã tự động đổi sang cấu hình IP mới: ${newProxyInfo.label}`);
+            this.addLog('SYSTEM', `🔄 Proxy cũ gặp sự cố liên tiếp 1.5 phút. Đã tự động đổi sang cấu hình IP mới: ${newProxyInfo.label}`);
 
             // Trigger proxy recovery check immediately if direct is overloaded
             const counts = proxyPool._getCounts();
@@ -2385,8 +2403,8 @@ class BotInstance {
 
       const searchParams = new URLSearchParams(payload);
       const controller = new AbortController();
-      const timeoutMs = url.includes('xhrpg_game.php') ? 8000 : 10000;
-      const timeout = setTimeout(() => controller.abort(), timeoutMs); // 8-10s timeout chịu trễ mạng tốt hơn
+      const timeoutMs = 10000;
+      const timeout = setTimeout(() => controller.abort(), timeoutMs); // 10s timeout chịu trễ mạng tốt hơn
       
       const reqStartTime = Date.now();
       try {
@@ -7694,6 +7712,8 @@ async function proxyRequest(req, res, targetUrl, uid = null) {
     'connection': 'keep-alive'
   };
 
+  const proxyId = uid ? proxyPool._assignments[uid] : null;
+
   try {
     let body = null;
     if (req.method === 'POST') {
@@ -7709,6 +7729,10 @@ async function proxyRequest(req, res, targetUrl, uid = null) {
       body: body,
       dispatcher: dispatcher
     });
+
+    if (proxyId && proxyId !== 'direct') {
+      proxyPool.resetErrorCount(proxyId);
+    }
 
     res.status(response.status);
     res.setHeader('content-type', response.headers.get('content-type') || 'application/json');
@@ -7796,6 +7820,9 @@ async function proxyRequest(req, res, targetUrl, uid = null) {
     }
   } catch (err) {
     console.error(`Proxy error for ${targetUrl}:`, err);
+    if (proxyId && proxyId !== 'direct') {
+      proxyPool.recordProxyFailure(proxyId);
+    }
     res.status(500).json({ error: `Proxy error: ${err.message}` });
   }
 }
