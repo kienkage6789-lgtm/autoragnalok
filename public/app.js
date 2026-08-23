@@ -1951,6 +1951,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 <span>🏰 Phụ Bản Boss Guild</span>
                 <span id="gdun-status-badge-${acc.line_uid}" style="display:none; font-size:0.65rem; background:rgba(192,132,252,0.2); color:#c084fc; border:1px solid rgba(192,132,252,0.4); border-radius:4px; padding:1px 5px;">Trong Phụ Bản</span>
               </div>
+              <div class="toggle-control" style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px; margin-bottom: 6px;">
+                <span class="toggle-label" style="font-size: 0.78rem; color: #e9d5ff; font-weight: 500;">⏰ Tự động vào phút 30 (Cá nhân)</span>
+                <label class="switch" style="transform: scale(0.8); margin-right: -2px;">
+                  <input type="checkbox" id="chk-autoentergdunat30-${acc.line_uid}" onchange="toggleSetting('${acc.line_uid}', 'autoEnterGdunAt30')">
+                  <span class="slider" style="background-color: #5b21b6;"></span>
+                </label>
+              </div>
               <div style="display: flex; gap: 6px;">
                 <button type="button" id="btn-gdun-team-${acc.line_uid}" onclick="sendAccountAction('${acc.line_uid}', 'gdun_enter_team')" style="flex: 1; background: linear-gradient(135deg, rgba(147,51,234,0.3), rgba(126,34,206,0.4)); border: 1px solid rgba(192,132,252,0.5); color: #e9d5ff; border-radius: 6px; padding: 6px 4px; font-size: 0.78rem; cursor: pointer; font-weight: 600; text-align: center; transition: all 0.2s;" title="Đội trưởng kéo cả Team vào Phụ Bản Guild">🏰 Cả Team</button>
                 <button type="button" id="btn-gdun-solo-${acc.line_uid}" onclick="sendAccountAction('${acc.line_uid}', 'gdun_enter_solo')" style="flex: 1; background: linear-gradient(135deg, rgba(14,165,233,0.25), rgba(3,105,161,0.35)); border: 1px solid rgba(56,189,248,0.5); color: #7dd3fc; border-radius: 6px; padding: 6px 4px; font-size: 0.78rem; cursor: pointer; font-weight: 600; text-align: center; transition: all 0.2s;" title="Chỉ bot này vào Phụ Bản Guild (không kéo team)">👤 Đi 1 Mình</button>
@@ -2843,6 +2850,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const chkAutoArena = document.getElementById(`chk-autoarena-${acc.line_uid}`);
     if (chkAutoArena && document.activeElement !== chkAutoArena) chkAutoArena.checked = acc.settings.autoArena === true;
+
+    const chkAutoEnterGdunAt30 = document.getElementById(`chk-autoentergdunat30-${acc.line_uid}`);
+    if (chkAutoEnterGdunAt30 && document.activeElement !== chkAutoEnterGdunAt30) {
+      chkAutoEnterGdunAt30.checked = acc.settings.autoEnterGdunAt30 === true;
+    }
 
     // Event settings checkboxes sync
     const chkAutoEventJoinInv = document.getElementById(`chk-auto-event-join-inv-${acc.line_uid}`);

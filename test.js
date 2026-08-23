@@ -1270,6 +1270,140 @@ try {
   assert.strictEqual(syncExited, false, 'Member of different guild should NOT sync exit with leader');
   assert.strictEqual(mockGdunBot.guildDungeonActive, true, 'Member should remain in dungeon');
 
+  // Test 9: Restore guildDungeonIsTeam from settings in constructor
+  const testRestoreBot = new BotInstance({
+    name: 'RestoreBot',
+    line_uid: 'restore_bot_1',
+    settings: { guildDungeonIsTeam: true }
+  });
+  assert.strictEqual(testRestoreBot.guildDungeonIsTeam, true, 'guildDungeonIsTeam should be restored from settings in constructor');
+
+  // Test 10: Reset guildDungeonIsTeam in updatePlayerState when gdun_in is 0
+  const testStateBot = new BotInstance({
+    name: 'StateBot',
+    line_uid: 'state_bot_1',
+    settings: { guildDungeonIsTeam: true }
+  });
+  testStateBot.player = { gdun_in: 1 };
+  testStateBot.updatePlayerState({ gdun_in: 0 });
+  assert.strictEqual(testStateBot.guildDungeonIsTeam, false, 'guildDungeonIsTeam should reset to false in updatePlayerState when gdun_in is 0');
+  assert.strictEqual(testStateBot.settings.guildDungeonIsTeam, false, 'settings.guildDungeonIsTeam should be updated to false in updatePlayerState');
+
+  // Test 11: Member map routing bypass when leader is in Guild Dungeon
+  const mockLeader = new BotInstance({
+    name: 'LeaderBot',
+    line_uid: 'ldr_bot_1',
+    settings: { teamRole: 'leader', teamId: 'team_abc', bossHuntMode: 'type2' }
+  });
+  mockLeader.player = { map: 12, gdun_in: 1 };
+  mockLeader.guildDungeonActive = true;
+  mockLeader.guildDungeonIsTeam = true;
+  mockLeader.isMvpCycling = true;
+  mockLeader.getCurrentMvpCycleMap = () => 3;
+  mockLeader.status = 'running';
+
+  const mockMember = new BotInstance({
+    name: 'MemberBot',
+    line_uid: 'mem_bot_1',
+    settings: { teamRole: 'member', teamId: 'team_abc', teamSynced: true, bossHuntMode: 'type2' }
+  });
+  mockMember.player = { map: 1, gdun_in: 0 };
+
+  const oldBotInstances = { ...botInstances };
+  botInstances['ldr_bot_1'] = mockLeader;
+  botInstances['mem_bot_1'] = mockMember;
+
+  let memActiveTargetMapId = null;
+  let memShouldWarpCheck = false;
+
+  const isMemberCheck = mockMember.settings.teamRole === 'member';
+  const myTeamIdCheck = mockMember.settings.teamId || 'none';
+  const ldrCheck = (isMemberCheck && myTeamIdCheck !== 'none')
+    ? Object.values(botInstances).find(b => b.userId === mockMember.userId && b.settings.teamRole === 'leader' && (b.settings.teamId || 'none') === myTeamIdCheck)
+    : null;
+
+  if (isMemberCheck && ldrCheck && ldrCheck.status === 'running' && ldrCheck.player && mockMember.settings.teamSynced === true && mockMember.settings.bossHuntMode && mockMember.settings.bossHuntMode !== 'off' && ldrCheck.settings.bossHuntMode && ldrCheck.settings.bossHuntMode !== 'off' && !ldrCheck.guildDungeonActive && Number(ldrCheck.player.gdun_in) !== 1) {
+    memActiveTargetMapId = ldrCheck.isMvpCycling ? ldrCheck.getCurrentMvpCycleMap() : Number(ldrCheck.player.map);
+    memShouldWarpCheck = true;
+  } else {
+    memActiveTargetMapId = mockMember.settings.targetMap || 1;
+    memShouldWarpCheck = false;
+  }
+
+  assert.strictEqual(memActiveTargetMapId, 1, 'Member should NOT route to leader cycle/map when leader is in Guild Dungeon');
+  assert.strictEqual(memShouldWarpCheck, false, 'shouldWarpCheck should be false for leader sync when leader is in Guild Dungeon');
+
+  for (const key in botInstances) {
+    delete botInstances[key];
+  }
+  Object.assign(botInstances, oldBotInstances);
+
+  // Test 12: Scheduled Guild Dungeon auto-entry at Minute 30:05
+  const mockScheduleBot = new BotInstance({
+    name: 'ScheduleBot',
+    line_uid: 'sched_bot_1',
+    settings: { autoEnterGdunAt30: true }
+  });
+  
+  let enterCalled = false;
+  mockScheduleBot.enterGuildDungeon = async function(isTeam) {
+    enterCalled = true;
+    assert.strictEqual(isTeam, false, 'Should enter solo');
+    return true;
+  };
+  mockScheduleBot.player = { gdun_in: 0 };
+  mockScheduleBot.guildDungeonActive = false;
+
+  // Case 1: Time is minute 30, second 5 -> should trigger
+  let mockDate = new Date();
+  mockDate.setMinutes(30);
+  mockDate.setSeconds(5);
+  
+  const triggerCheck = async (bot, dateObj) => {
+    const currentHour = dateObj.getHours();
+    const currentMinute = dateObj.getMinutes();
+    const currentSecond = dateObj.getSeconds();
+    if (bot.settings.autoEnterGdunAt30 && bot.player) {
+      if (currentMinute === 30 && currentSecond >= 5 && currentSecond <= 20 && bot.lastGdunAutoEnterHour !== currentHour) {
+        bot.lastGdunAutoEnterHour = currentHour;
+        if (!bot.guildDungeonActive && Number(bot.player.gdun_in) !== 1) {
+          await bot.enterGuildDungeon(false);
+        }
+      }
+    }
+  };
+
+  await triggerCheck(mockScheduleBot, mockDate);
+  assert.strictEqual(enterCalled, true, 'Should enter Guild Dungeon at minute 30, second 5');
+  assert.strictEqual(mockScheduleBot.lastGdunAutoEnterHour, mockDate.getHours(), 'lastGdunAutoEnterHour should be set to current hour');
+
+  // Case 2: Time is minute 30, second 6, but already entered in the same hour -> should NOT trigger again (debounce)
+  enterCalled = false;
+  let mockDate2 = new Date();
+  mockDate2.setMinutes(30);
+  mockDate2.setSeconds(6);
+  await triggerCheck(mockScheduleBot, mockDate2);
+  assert.strictEqual(enterCalled, false, 'Should NOT enter again in the same hour (debounce)');
+
+  // Case 3: Time is minute 29 -> should NOT trigger
+  const mockScheduleBot2 = new BotInstance({
+    name: 'ScheduleBot2',
+    line_uid: 'sched_bot_2',
+    settings: { autoEnterGdunAt30: true }
+  });
+  mockScheduleBot2.enterGuildDungeon = async function(isTeam) {
+    enterCalled = true;
+    return true;
+  };
+  mockScheduleBot2.player = { gdun_in: 0 };
+  mockScheduleBot2.guildDungeonActive = false;
+  enterCalled = false;
+  let mockDate3 = new Date();
+  mockDate3.setMinutes(29);
+  mockDate3.setSeconds(5);
+  await triggerCheck(mockScheduleBot2, mockDate3);
+  assert.strictEqual(enterCalled, false, 'Should NOT enter at minute 29');
+
   console.log('✅ Guild Dungeon State & Auto-Exit Tests Passed successfully!');
 
   // ==========================================

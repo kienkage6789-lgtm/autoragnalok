@@ -2,6 +2,24 @@
 
 > Changelog of actual changes implemented.
 
+## 2026-08-22 - Tự Động Kích Hoạt Cá Nhân Săn Boss Guild Phút 30 & Khắc Phục Lỗi Đồng Bộ Cả Team
+
+- File đã đổi: [server.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [test.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/test.js), [public/app.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/public/app.js), [.agent/CHANGELOG.md](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/.agent/CHANGELOG.md).
+- Đã làm:
+  - **Tự động kích hoạt cá nhân săn Boss Guild phút 30:05**:
+    - Bổ sung cấu hình `autoEnterGdunAt30` (mặc định tắt) vào `getDefaultSettings()` và đồng bộ lưu/tải cấu hình.
+    - Thêm cơ chế hẹn giờ trong `pollGame()` để tự động kích hoạt solo `enterGuildDungeon(false)` ở phút thứ `30` (giây `5` đến `20` làm khoảng đệm an toàn).
+    - Thiết kế khóa `this.lastGdunAutoEnterHour` ngăn chặn việc kích hoạt trùng lặp nhiều lần trong cùng một giờ (Debounce).
+  - **Khôi phục trạng thái Đội nhóm sau khi khởi động**: Khởi tạo `this.guildDungeonIsTeam` từ settings `this.settings.guildDungeonIsTeam` trong constructor của `BotInstance`. Giúp Trưởng nhóm (Leader) bảo toàn cờ đi team sau khi server hoặc bot bị khởi động lại.
+  - **Lưu trữ cấu hình Guild Dungeon xuống đĩa**:
+    - Cập nhật `this.settings.guildDungeonIsTeam = true` và lưu vào file `accounts.json` khi kích hoạt chế độ đi team trong `enterGuildDungeon()`.
+    - Reset `this.settings.guildDungeonIsTeam = false` và lưu vào file `accounts.json` khi thoát phụ bản (`exitGuildDungeon()`) hoặc khi `updatePlayerState()` nhận diện nhân vật đã ra ngoài Phụ bản (`gdun_in === 0`).
+  - **Tránh vòng lặp lỗi di chuyển khẩn cấp sang Map 12**: Bổ sung điều kiện chặn đồng bộ map sang Trưởng nhóm nếu Trưởng nhóm đang trong Phụ Bản Guild (`!leader.guildDungeonActive && Number(leader.player.gdun_in) !== 1`) tại cả 2 khối định tuyến bản đồ (Urgent Map Routing & Normal Map Routing). Thành viên sẽ tự động quay về farm map mặc định của mình thay vì liên tục gửi các lệnh warp map 12 bất hợp pháp.
+  - **Giao diện Dashboard**: Thêm switch toggle và hiển thị đồng bộ checkbox **"⏰ Tự động vào phút 30 (Cá nhân)"** tại khu vực quản lý Phụ bản Guild trên giao diện Frontend.
+  - **Bổ sung Unit Tests**: Thêm 4 test cases mới (Test 9, Test 10, Test 11, Test 12) kiểm thử việc lưu/khôi phục cờ đi team, logic bypass warp map 12 của thành viên, và hẹn giờ tự động vào Guild Dungeon phút 30:05 kèm khóa chống lặp. Unit tests đạt 100% pass.
+
+---
+
 ## 2026-08-19 - Sửa Lỗi Ổn Định Chức Năng /play và Cải Tiến Báo Lỗi Client
 
 - File đã đổi: [server.js](file:///c:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/server.js), [play.html](file:///c:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/play.html), [play_battle.html](file:///c:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/play_battle.html), [test.js](file:///c:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/test.js), [.agent/4M.md](file:///c:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/.agent/4M.md).

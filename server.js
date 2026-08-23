@@ -1409,7 +1409,7 @@ class BotInstance {
     this._bossNameCache = {}; // Cache boss names for logging when they disappear
     this._lastBossStatusLogAt = 0; // Track last time boss status log was sent to prevent spamming
     this.guildDungeonActive = false;
-    this.guildDungeonIsTeam = false;
+    this.guildDungeonIsTeam = this.settings.guildDungeonIsTeam || false;
     this.monsters = null;
     this.gdunEmptyPolls = 0;
     this.gdunEnteredAt = 0;         // Timestamp khi vào Phụ Bản Guild (dùng cho timer-based auto-exit)
@@ -1422,6 +1422,7 @@ class BotInstance {
     this.mvpCycleOriginalMap = null;
     this.mvpCycleOriginalAutoMap = null;
     this.lastMvpCycleCheckHour = -1;
+    this.lastGdunAutoEnterHour = -1;
     this.lootLogs = [];
     this.mvpHuntLog = []; // Nhật ký sự kiện săn Boss MVP
     this.currentMvpBossInfo = null; // Thông tin Boss đang được nhắm { id, name, emoji, lv, mapId, startTs }
@@ -1557,6 +1558,16 @@ class BotInstance {
       this.guildDungeonActive = true;
     } else {
       this.guildDungeonActive = false;
+      this.guildDungeonIsTeam = false;
+      if (this.settings.guildDungeonIsTeam) {
+        this.settings.guildDungeonIsTeam = false;
+        const currentAccounts = loadAccounts();
+        const idx = currentAccounts.findIndex(acc => acc.line_uid === this.line_uid);
+        if (idx !== -1) {
+          currentAccounts[idx].settings = this.settings;
+          saveAccounts(currentAccounts);
+        }
+      }
     }
   }
 
@@ -1639,7 +1650,8 @@ class BotInstance {
       autoEventJoinCw: false,
       eventPotionThreshold: 0,
       eventTargetMinDef: false,
-      eventAttackRange: 300
+      eventAttackRange: 300,
+      autoEnterGdunAt30: false
     };
   }
 
@@ -1990,6 +2002,13 @@ class BotInstance {
         this.monsters = null;
         this.guildDungeonActive = true;
         this.guildDungeonIsTeam = !!isTeam;
+        this.settings.guildDungeonIsTeam = !!isTeam;
+        const currentAccounts = loadAccounts();
+        const idx = currentAccounts.findIndex(acc => acc.line_uid === this.line_uid);
+        if (idx !== -1) {
+          currentAccounts[idx].settings = this.settings;
+          saveAccounts(currentAccounts);
+        }
         this.gdunEmptyPolls = 0;
         this.gdunEnteredAt = Date.now(); // Bắt đầu bộ đếm thời gian auto-exit
         this.gdunLastKillAt = 0;         // Reset kill timestamp khi vào dungeon mới
@@ -2031,6 +2050,13 @@ class BotInstance {
         this.monsters = null;
         this.guildDungeonActive = false;
         this.guildDungeonIsTeam = false;
+        this.settings.guildDungeonIsTeam = false;
+        const currentAccounts = loadAccounts();
+        const idx = currentAccounts.findIndex(acc => acc.line_uid === this.line_uid);
+        if (idx !== -1) {
+          currentAccounts[idx].settings = this.settings;
+          saveAccounts(currentAccounts);
+        }
         this.gdunEmptyPolls = 0;
         this.gdunEnteredAt = 0;
         this.gdunLastKillAt = 0;
@@ -2811,7 +2837,7 @@ class BotInstance {
       let activeTargetMapId;
       let shouldWarpCheck = false;
 
-      if (isMember && leader && leader.status === 'running' && leader.player && this.settings.teamSynced === true && this.settings.bossHuntMode && this.settings.bossHuntMode !== 'off' && leader.settings.bossHuntMode && leader.settings.bossHuntMode !== 'off') {
+      if (isMember && leader && leader.status === 'running' && leader.player && this.settings.teamSynced === true && this.settings.bossHuntMode && this.settings.bossHuntMode !== 'off' && leader.settings.bossHuntMode && leader.settings.bossHuntMode !== 'off' && !leader.guildDungeonActive && Number(leader.player.gdun_in) !== 1) {
         // Đồng bộ trạng thái Cycle và Map từ Leader trước
         this.isMvpCycling = leader.isMvpCycling;
         this.mvpCycleMapIndex = leader.mvpCycleMapIndex;
@@ -2882,6 +2908,22 @@ class BotInstance {
         this.lastMvpCycleCheckHour = currentHour;
         this.addLog('SYSTEM', `⏰ [Auto Boss] Đến giờ tròn (${currentHour}:00). Tự động kích hoạt chu kỳ săn Boss xoay vòng map...`);
         this.triggerMvpCycle();
+      }
+    }
+
+    // ⏰ Check scheduled Guild Dungeon auto-entry (At XX:30:05 every hour)
+    if (this.settings.autoEnterGdunAt30 && this.player) {
+      const nowTime = new Date();
+      const currentHour = nowTime.getHours();
+      const currentMinute = nowTime.getMinutes();
+      const currentSecond = nowTime.getSeconds();
+
+      if (currentMinute === 30 && currentSecond >= 5 && currentSecond <= 20 && this.lastGdunAutoEnterHour !== currentHour) {
+        this.lastGdunAutoEnterHour = currentHour;
+        if (!this.guildDungeonActive && Number(this.player.gdun_in) !== 1 && !this.inEventMode) {
+          this.addLog('SYSTEM', `⏰ [Auto Boss Guild] Đến phút thứ 30:05. Tự động kích hoạt cá nhân vào Phụ Bản Guild...`);
+          await this.enterGuildDungeon(false); // Solo entry
+        }
       }
     }
 
@@ -4170,7 +4212,7 @@ class BotInstance {
       let activeTargetMapId;
       let shouldWarpCheck = false;
 
-      if (isMember && leader && leader.status === 'running' && leader.player && this.settings.teamSynced === true && this.settings.bossHuntMode && this.settings.bossHuntMode !== 'off' && leader.settings.bossHuntMode && leader.settings.bossHuntMode !== 'off') {
+      if (isMember && leader && leader.status === 'running' && leader.player && this.settings.teamSynced === true && this.settings.bossHuntMode && this.settings.bossHuntMode !== 'off' && leader.settings.bossHuntMode && leader.settings.bossHuntMode !== 'off' && !leader.guildDungeonActive && Number(leader.player.gdun_in) !== 1) {
         activeTargetMapId = leader.isMvpCycling 
           ? leader.getCurrentMvpCycleMap() 
           : (leader.player ? Number(leader.player.map) : (parseInt(leader.settings.targetMap) || 1));
