@@ -1411,6 +1411,7 @@ class BotInstance {
     this.guildDungeonActive = false;
     this.guildDungeonIsTeam = this.settings.guildDungeonIsTeam || false;
     this.monsters = null;
+    this.bosses = null;
     this.gdunEmptyPolls = 0;
     this.gdunEnteredAt = 0;         // Timestamp khi vào Phụ Bản Guild (dùng cho timer-based auto-exit)
     this.gdunLastKillAt = 0;        // Timestamp khi hạ gục Boss Guild gần nhất
@@ -3138,7 +3139,7 @@ class BotInstance {
     // isCorrectMvpMap is already defined above for isFull calculation
     const isHuntingEnabled = this.settings.bossHuntMode !== 'off';
     
-    if (isHuntingEnabled && isCorrectMvpMap && this.bosses && this.bosses.length > 0) {
+    if (isHuntingEnabled && isCorrectMvpMap && !this.guildDungeonActive && this.bosses && this.bosses.length > 0) {
       const aliveBosses = this.bosses.filter(b => (b.hp === undefined || (b.hp || 0) > 0));
 
       if (aliveBosses.length > 0) {
@@ -3317,7 +3318,7 @@ class BotInstance {
 
     // 2. Auto Zone checking (Priority 2, only runs if no MVP is being targeted)
     const canRunAutoZone = !this.isMvpCycling || (this.player && Number(this.player.map) === Number(this.getCurrentMvpCycleMap()));
-    if (!this.targetedMvp && canRunAutoZone && this.settings.autoZone && this.spots) {
+    if (!this.targetedMvp && !this.guildDungeonActive && canRunAutoZone && this.settings.autoZone && this.spots) {
       const spotsList = Object.values(this.spots);
       const targetIdx = parseInt(this.settings.targetZone) || 0;
       if (spotsList[targetIdx]) {

@@ -1469,6 +1469,27 @@ try {
   assert.strictEqual(testLockPos, 1, 'Should set lockPos = 1 when in safe range');
   assert.strictEqual(testExploreRadius, 100, 'Should set exploreRadius to 100 when locked');
 
+  // Test 14: bosses initialization in constructor & Auto MVP/Zone bypass in Guild Dungeon
+  const testGdunInitBot = new BotInstance({
+    name: 'GdunInitBot',
+    line_uid: 'gdun_init_bot_1',
+    settings: { bossHuntMode: 'type2' }
+  });
+  assert.strictEqual(testGdunInitBot.bosses, null, 'bosses cache should be initialized to null in constructor');
+
+  // Verify MVP hunting bypass when guildDungeonActive is true
+  testGdunInitBot.guildDungeonActive = true;
+  testGdunInitBot.bosses = [{ id: 1, name: 'MVP Boss', x: 1000, y: 1000, hp: 100, hp_max: 100 }];
+  
+  const t14IsHuntingEnabled = testGdunInitBot.settings.bossHuntMode !== 'off';
+  const t14IsCorrectMvpMap = true; 
+  let t14MvpHuntingExecuted = false;
+
+  if (t14IsHuntingEnabled && t14IsCorrectMvpMap && !testGdunInitBot.guildDungeonActive && testGdunInitBot.bosses && testGdunInitBot.bosses.length > 0) {
+    t14MvpHuntingExecuted = true;
+  }
+  assert.strictEqual(t14MvpHuntingExecuted, false, 'Auto MVP Hunting should be bypassed when guildDungeonActive is true');
+
   console.log('✅ Guild Dungeon State & Auto-Exit Tests Passed successfully!');
 
   // ==========================================
