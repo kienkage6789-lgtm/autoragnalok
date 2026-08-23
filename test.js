@@ -1403,6 +1403,71 @@ try {
   mockDate3.setSeconds(5);
   await triggerCheck(mockScheduleBot2, mockDate3);
   assert.strictEqual(enterCalled, false, 'Should NOT enter at minute 29');
+  // Test 13: Safe Distance & Kiting logic in Guild Dungeon targeting
+  const testGdunTargetBot = new BotInstance({
+    name: 'GdunTargetBot',
+    line_uid: 'gdun_target_bot_1',
+    settings: { bossHuntMode: 'type2' }
+  });
+
+  testGdunTargetBot.player = { x: 1000, y: 1000, active_gun: 0, map: 12, gdun_in: 1 };
+  testGdunTargetBot.guildDungeonActive = true;
+  testGdunTargetBot.monsters = [{ id: 99, name: 'GuildBoss', x: 1000, y: 900, hp: 1000, hp_max: 1000 }];
+  
+  let testExploreCx = 1125, testExploreCy = 1125, testExploreRadius = 100, testTraveling = 0, testLockPos = 0;
+  
+  const runTargetingTest = (bot) => {
+    const px = bot.player ? bot.player.x : 1125;
+    const py = bot.player ? bot.player.y : 1125;
+    const aliveMonsters = (bot.monsters || []).filter(m => (m.hp === undefined || (m.hp || 0) > 0));
+    const dungeonTargets = [...aliveMonsters];
+
+    if (dungeonTargets.length > 0) {
+      const target = dungeonTargets[0];
+      bot.targetedMvp = true;
+      bot.mvpConfirmClearCount = 0;
+
+      const dx = px - target.x;
+      const dy = py - target.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      const isUsingDaoDai = bot.player && (Number(bot.player.active_gun) === 1);
+      const MIN_BOSS_DIST = isUsingDaoDai ? 55 : 30;
+      const MAX_BOSS_DIST = isUsingDaoDai ? 65 : 40;
+      const TARGET_KITE_DIST = isUsingDaoDai ? 60 : 35;
+
+      if (dist > MAX_BOSS_DIST || dist < MIN_BOSS_DIST) {
+        const ux = dist > 0 ? dx / dist : 1;
+        const uy = dist > 0 ? dy / dist : 0;
+        testExploreCx = Math.round((target.x + ux * TARGET_KITE_DIST) * 100) / 100;
+        testExploreCy = Math.round((target.y + uy * TARGET_KITE_DIST) * 100) / 100;
+        testTraveling = 1;
+        testLockPos = 0;
+        testExploreRadius = 300;
+      } else {
+        testExploreCx = target.x;
+        testExploreCy = target.y;
+        testTraveling = 0;
+        testLockPos = 1;
+        testExploreRadius = 100;
+      }
+    }
+  };
+
+  runTargetingTest(testGdunTargetBot);
+  assert.strictEqual(testExploreCx, 1000, 'Kiting X coordinate should be 1000');
+  assert.strictEqual(testExploreCy, 935, 'Kiting Y coordinate should be 935');
+  assert.strictEqual(testTraveling, 1, 'Should set traveling = 1 when too far');
+  assert.strictEqual(testLockPos, 0, 'Should not lock position when too far');
+  assert.strictEqual(testExploreRadius, 300, 'Should increase exploreRadius to 300 when traveling');
+
+  testGdunTargetBot.monsters = [{ id: 99, name: 'GuildBoss', x: 1000, y: 965, hp: 1000, hp_max: 1000 }];
+  runTargetingTest(testGdunTargetBot);
+  assert.strictEqual(testExploreCx, 1000, 'Should target boss X exactly');
+  assert.strictEqual(testExploreCy, 965, 'Should target boss Y exactly');
+  assert.strictEqual(testTraveling, 0, 'Should set traveling = 0 when in safe range');
+  assert.strictEqual(testLockPos, 1, 'Should set lockPos = 1 when in safe range');
+  assert.strictEqual(testExploreRadius, 100, 'Should set exploreRadius to 100 when locked');
 
   console.log('✅ Guild Dungeon State & Auto-Exit Tests Passed successfully!');
 

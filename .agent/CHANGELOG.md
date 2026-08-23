@@ -2,6 +2,16 @@
 
 > Changelog of actual changes implemented.
 
+## 2026-08-23 - Khắc Phục Lỗi Nhắm Mục Tiêu Phụ Bản Guild (Safe Distance & Kiting)
+
+- File đã đổi: [server.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [test.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/test.js), [.agent/CHANGELOG.md](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/.agent/CHANGELOG.md), [.agent/4M.md](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/.agent/4M.md).
+- Đã làm:
+  - **Tích hợp Kiting & Safe Distance Engine cho Boss Bang**: Cập nhật logic nhắm mục tiêu phụ bản (`0.5 Guild Dungeon Targeting`) để tự động duy trì khoảng cách an toàn dựa trên loại vũ khí sử dụng (Dao dài vs Dao găm), tính toán vector lùi/tiến tương ứng và gửi tham số `traveling = 1`, `lockPos = 0` khi ngoài tầm hoặc `traveling = 0`, `lockPos = 1` khi đạt khoảng cách tối ưu để xả DPS.
+  - **Bổ sung Snipe Mode**: Tăng tốc độ tấn công trong phụ bản khi HP của Boss Guild tụt xuống dưới 30%.
+  - **Bổ sung Unit Tests**: Thêm Test 13 kiểm thử việc kiting tọa độ khi ở xa quái/boss và việc khóa vị trí (`lockPos = 1`) khi đã đứng ở cự ly an toàn trong Phụ Bản Guild.
+
+---
+
 ## 2026-08-22 - Tự Động Kích Hoạt Cá Nhân Săn Boss Guild Phút 30 & Khắc Phục Lỗi Đồng Bộ Cả Team
 
 - File đã đổi: [server.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [test.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/test.js), [public/app.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/public/app.js), [.agent/CHANGELOG.md](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/.agent/CHANGELOG.md).

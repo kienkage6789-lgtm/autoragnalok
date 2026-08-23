@@ -3093,12 +3093,44 @@ class BotInstance {
 
       if (dungeonTargets.length > 0) {
         const target = dungeonTargets[0];
-        exploreCx = target.x !== undefined ? target.x : 1125;
-        exploreCy = target.y !== undefined ? target.y : 1125;
-        exploreRadius = 100;
-        traveling = 0;
-        lockPos = 0;
         this.targetedMvp = true;
+        this.mvpConfirmClearCount = 0; // Reset clear count vì vẫn còn mục tiêu
+
+        const dx = px - target.x;
+        const dy = py - target.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        // Định cấu hình khoảng cách an toàn dựa trên vũ khí đang sử dụng
+        const isUsingDaoDai = this.player && (Number(this.player.active_gun) === 1);
+        const MIN_BOSS_DIST = isUsingDaoDai ? 55 : 30;
+        const MAX_BOSS_DIST = isUsingDaoDai ? 65 : 40;
+        const TARGET_KITE_DIST = isUsingDaoDai ? 60 : 35;
+
+        // Tính toán Snipe Mode nếu Boss có đầy đủ thông số HP
+        if (target.hp !== undefined && target.hp_max) {
+          const bossHpPct = Math.round(target.hp / target.hp_max * 100);
+          this._bossSnipeActive = (bossHpPct <= 30);
+          if (this._bossSnipeActive && !this._snipeLoggedOnce) {
+            this._snipeLoggedOnce = true;
+            this.addLog('SYSTEM', `⚡ [Snipe Mode] Boss Guild ${target.name || 'Boss'} HP xuống ${bossHpPct}% -> Tăng tốc tấn công!`);
+          }
+        }
+
+        if (dist > MAX_BOSS_DIST || dist < MIN_BOSS_DIST) {
+          const ux = dist > 0 ? dx / dist : 1;
+          const uy = dist > 0 ? dy / dist : 0;
+          exploreCx = Math.round((target.x + ux * TARGET_KITE_DIST) * 100) / 100;
+          exploreCy = Math.round((target.y + uy * TARGET_KITE_DIST) * 100) / 100;
+          traveling = 1;
+          lockPos = 0;
+          exploreRadius = 300;
+        } else {
+          exploreCx = target.x;
+          exploreCy = target.y;
+          traveling = 0;
+          lockPos = 1; // Khóa vị trí để xả dps
+          exploreRadius = 100;
+        }
       }
     }
 
