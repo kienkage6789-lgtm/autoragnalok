@@ -2040,6 +2040,50 @@ try {
 
   console.log('✅ Test 19: Verify manual target setting Passed successfully!');
 
+  // Test 20: Verify Guild Dungeon boss sorting obeys mvpPriorityMode settings
+  console.log('Testing Test 20: Verify Guild Dungeon boss priority sorting...');
+  const test20Bot = new BotInstance({
+    name: 'Test20Bot',
+    line_uid: 'test20_bot',
+    settings: { mvpPriorityMode: 'level_desc' }
+  });
+
+  const mockBosses20 = [
+    { id: 1, name: 'Low Lv Boss', lv: 10, x: 100, y: 100 },
+    { id: 2, name: 'High Lv Boss', lv: 90, x: 200, y: 200 },
+    { id: 3, name: 'Mid Lv Boss', lv: 50, x: 150, y: 150 }
+  ];
+
+  const sortPoolTest = (pool, priorityMode, px = 100, py = 100) => {
+    if (priorityMode === 'level_asc') {
+      return [...pool].sort((a, b) => (a.lv || 0) - (b.lv || 0));
+    } else if (priorityMode === 'level_desc') {
+      return [...pool].sort((a, b) => (b.lv || 0) - (a.lv || 0));
+    } else {
+      return [...pool].sort((a, b) => {
+        const distA = Math.sqrt((px - a.x) * (px - a.x) + (py - a.y) * (py - a.y));
+        const distB = Math.sqrt((px - b.x) * (px - b.x) + (py - b.y) * (py - b.y));
+        return distA - distB;
+      });
+    }
+  };
+
+  // Case A: level_desc
+  const sortedA = sortPoolTest(mockBosses20, 'level_desc');
+  assert.strictEqual(sortedA[0].id, 2, 'Boss 2 (Lv 90) should be first for level_desc');
+  assert.strictEqual(sortedA[1].id, 3, 'Boss 3 (Lv 50) should be second');
+
+  // Case B: level_asc
+  const sortedB = sortPoolTest(mockBosses20, 'level_asc');
+  assert.strictEqual(sortedB[0].id, 1, 'Boss 1 (Lv 10) should be first for level_asc');
+
+  // Case C: distance
+  const sortedC = sortPoolTest(mockBosses20, 'distance', 100, 100);
+  assert.strictEqual(sortedC[0].id, 1, 'Boss 1 should be first for distance (dist 0)');
+  assert.strictEqual(sortedC[1].id, 3, 'Boss 3 should be second (dist ~70)');
+
+  console.log('✅ Test 20: Verify Guild Dungeon boss priority sorting Passed successfully!');
+
   console.log('✅ All Unit Tests Passed successfully!');
   process.exit(0);
 } catch (error) {

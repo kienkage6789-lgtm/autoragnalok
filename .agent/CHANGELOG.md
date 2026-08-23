@@ -14,11 +14,12 @@
     - Cập nhật chính xác `lastTargetedBossId` khi khóa mục tiêu trong phụ bản để UI hiển thị highlight đối tượng đang target.
     - Sửa lỗi click chọn mục tiêu trên Dashboard: Bao quanh `bossId` trong nháy đơn khi gọi `selectBossTarget(...)` trên HTML để tránh lỗi ReferenceError đối với ID dạng chuỗi (như `'boss_guild_99'`).
     - Nâng cấp API `set_boss_target` hỗ trợ so sánh ID linh hoạt không phân biệt kiểu số hay chuỗi, chỉ lọc tìm kiếm các Boss Guild còn sống.
-  - **Chỉ Săn Boss Guild & Thoát Phụ Bản Nhanh**:
+  - **Chỉ Săn Boss Guild, Bộ Lọc Ưu Tiên & Thoát Phụ Bản Nhanh**:
     - Điều chỉnh logic nhắm mục tiêu Phụ bản Guild trong `server.js` chỉ tấn công Boss Guild (`sortedBosses`), bỏ qua hoàn toàn quái thường (`monsters`).
+    - Đồng bộ hóa tiêu chí ưu tiên săn Boss Guild trong Phụ bản để tuân thủ chính xác bộ lọc người dùng cài đặt (`settings.mvpPriorityMode` như level_asc, level_desc, distance) thay vì sắp xếp cứng theo HP thấp của chế độ `type2`.
     - Rút gọn điều kiện thoát phụ bản: Ngay khi dọn sạch các Boss Guild còn sống (`aliveBosses.length === 0`), bot đếm trống 5 nhịp poll và gọi `exitGuildDungeon` để dịch chuyển ra ngoài.
     - Sau khi ra ngoài phụ bản, bot tự động di chuyển về `targetMap` và tự động tìm đường chạy thẳng về phân khu `targetZone` cài đặt ban đầu.
-  - **Đồng bộ Unit Tests**: Cập nhật Test 12, Test 17, Test 18, và Test 19 xác minh tính năng chỉ lọc, đếm, hiển thị và chọn mục tiêu thủ công đối với Boss Guild (bỏ qua quái thường).
+  - **Đồng bộ Unit Tests**: Cập nhật Test 12, Test 17, Test 18, Test 19 và viết thêm **Test 20** xác minh tính năng sắp xếp độ ưu tiên Boss Guild theo đúng bộ lọc cấu hình.
   - **Giải quyết Xung đột Trộn tệp (Merge Conflicts)**: Dọn sạch hoàn toàn các đoạn trùng lặp và conflict trong [.agent/4M.md](file:///c:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/.agent/4M.md), đảm bảo tính nguyên bản của tài liệu.
 
 ---

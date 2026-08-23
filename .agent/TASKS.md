@@ -4,7 +4,7 @@
 > Statuses: todo | doing | blocked | review | done
 
 ### [x] T79 - Sửa lỗi Tự động vào Phụ bản Guild Phút 30, Tránh kẹt Map, Hiển thị Dashboard & Chỉ Săn Boss Guild
-- Description: Sửa đổi logic hẹn giờ tự động phút 30 (`autoEnterGdunAt30`) tôn trọng cấu hình đi nhóm (`guildDungeonIsTeam`) và tự động kéo thành viên nhóm đi theo. Loại bỏ các bản đồ đặc biệt (Map 4, 5, 11, 12) khỏi việc ghi nhớ làm bản đồ quay về trong `triggerMvpCycle` để tránh kẹt map. Đồng bộ cờ hiển thị hoạt động Săn Boss và highlight mục tiêu trên Web Dashboard. Cấu hình cho bot chỉ nhắm mục tiêu tấn công vào các Boss Guild, bỏ qua quái thường và tự động thoát phụ bản ngay khi tiêu diệt hết Boss để quay về Map & Zone ban đầu.
+- Description: Sửa đổi logic hẹn giờ tự động phút 30 (`autoEnterGdunAt30`) tôn trọng cấu hình đi nhóm (`guildDungeonIsTeam`) và tự động kéo thành viên nhóm đi theo. Loại bỏ các bản đồ đặc biệt (Map 4, 5, 11, 12) khỏi việc ghi nhớ làm bản đồ quay về trong `triggerMvpCycle` để tránh kẹt map. Đồng bộ cờ hiển thị hoạt động Săn Boss và highlight mục tiêu trên Web Dashboard. Cấu hình cho bot chỉ nhắm mục tiêu tấn công vào các Boss Guild, bỏ qua quái thường và tự động thoát phụ bản ngay khi tiêu diệt hết Boss để quay về Map & Zone ban đầu. Hỗ trợ sắp xếp độ ưu tiên Boss Guild theo đúng bộ lọc `settings.mvpPriorityMode` người dùng cài đặt.
 - Files related: `server.js`, `test.js`, `public/app.js`
 - Acceptance criteria:
   - [x] Tự động đọc cờ `guildDungeonIsTeam` của Leader khi hẹn giờ phút 30 kích hoạt.
@@ -16,6 +16,7 @@
   - [x] Chỉ nhắm mục tiêu tấn công Boss Guild trong Phụ bản, bỏ qua hoàn toàn quái thường.
   - [x] Tự động thoát Phụ bản Guild khi sạch Boss (không đợi tiêu diệt hết quái thường) sau 5 nhịp poll trống.
   - [x] Tự động quay về bản đồ cấu hình `settings.targetMap` và tìm đường di chuyển về phân khu `settings.targetZone` ban đầu.
+  - [x] Sắp xếp độ ưu tiên chọn Boss Guild trong Phụ bản tuân theo bộ lọc `settings.mvpPriorityMode` (level_asc, level_desc, distance).
   - [x] Viết unit tests kiểm thử thành công 100%.
 - Status: done
 

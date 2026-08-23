@@ -3128,21 +3128,17 @@ class BotInstance {
       const py = this.player ? this.player.y : 1125;
 
       const sortPool = (pool) => {
-        if (this.settings.bossHuntMode === 'type2') {
-          return [...pool].sort((a, b) => (a.hp || 0) - (b.hp || 0));
+        if (this.settings.mvpPriorityMode === 'level_asc') {
+          return [...pool].sort((a, b) => (a.lv || 0) - (b.lv || 0));
+        } else if (this.settings.mvpPriorityMode === 'level_desc') {
+          return [...pool].sort((a, b) => (b.lv || 0) - (a.lv || 0));
         } else {
-          if (this.settings.mvpPriorityMode === 'level_asc') {
-            return [...pool].sort((a, b) => (a.lv || 0) - (b.lv || 0));
-          } else if (this.settings.mvpPriorityMode === 'level_desc') {
-            return [...pool].sort((a, b) => (b.lv || 0) - (a.lv || 0));
-          } else {
-            // Khoảng cách
-            return [...pool].sort((a, b) => {
-              const distA = Math.sqrt((px - a.x) * (px - a.x) + (py - a.y) * (py - a.y));
-              const distB = Math.sqrt((px - b.x) * (px - b.x) + (py - b.y) * (py - b.y));
-              return distA - distB;
-            });
-          }
+          // Mặc định hoặc Khoảng cách (distance)
+          return [...pool].sort((a, b) => {
+            const distA = Math.sqrt((px - a.x) * (px - a.x) + (py - a.y) * (py - a.y));
+            const distB = Math.sqrt((px - b.x) * (px - b.x) + (py - b.y) * (py - b.y));
+            return distA - distB;
+          });
         }
       };
 
