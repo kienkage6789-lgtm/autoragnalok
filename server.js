@@ -1524,7 +1524,6 @@ class BotInstance {
     if (!newPlayer) return;
     if (!this.player) {
       this.player = newPlayer;
-      return;
     }
     const COLD_FIELDS = [
       'pistol_modules','sniper_modules','knife_modules','axe_modules','armor_modules','turret_modules',
@@ -1554,8 +1553,8 @@ class BotInstance {
     }
     this.player = newPlayer;
 
-    // Automatically sync guildDungeonActive with gdun_in status
-    if (this.player && Number(this.player.gdun_in) === 1) {
+    // Automatically sync guildDungeonActive with gdun_in status or Map 12
+    if (this.player && (Number(this.player.gdun_in) === 1 || Number(this.player.map) === 12)) {
       this.guildDungeonActive = true;
     } else {
       this.guildDungeonActive = false;
@@ -2016,6 +2015,7 @@ class BotInstance {
         this._exitingGuildDungeon = false;
         const modeTxt = isTeam ? 'Cả Team' : 'Đi 1 Mình (Solo)';
         this.addLog('SUCCESS', `🏰 [Guild Dungeon] Đã vào Phụ Bản Guild (Chế độ: ${modeTxt}) - Map ${this.player ? this.player.map : 12}! Tiến hành săn Boss...`);
+        this.triggerImmediatePoll();
         return true;
       } else {
         this.addLog('WARNING', `🏰 [Guild Dungeon] Không thể vào Phụ Bản Guild: ${(res && res.error) || 'Lỗi không xác định'}`);
@@ -2064,6 +2064,7 @@ class BotInstance {
         this._exitingGuildDungeon = false;
         this.addLog('SUCCESS', `↩️ [Guild Dungeon] Đã hoàn thành/thoát khỏi Phụ Bản Guild (Về Map ${returnMap})`);
         await this.warpToMap(returnMap).catch(() => {});
+        this.triggerImmediatePoll();
         return true;
       } else {
         this._exitingGuildDungeon = false; // Cho phép thử lại nếu server từ chối
@@ -2357,6 +2358,8 @@ class BotInstance {
       }
     };
 
+    this._runPoll = runPoll;
+
     // Stagger startup
     this.timer = setTimeout(runPoll, Math.random() * 1000);
   }
@@ -2366,9 +2369,20 @@ class BotInstance {
       clearTimeout(this.timer);
       this.timer = null;
     }
+    this._runPoll = null;
     this.status = status;
     if (status === 'idle') {
       this.addLog('SYSTEM', 'Đã dừng hoạt động bot');
+    }
+  }
+
+  triggerImmediatePoll() {
+    if (this.status === 'running' && this._runPoll) {
+      if (this.timer) {
+        clearTimeout(this.timer);
+        this.timer = null;
+      }
+      this._runPoll().catch(err => console.error(`[${this.name}] Immediate poll error:`, err));
     }
   }
 
@@ -2608,7 +2622,7 @@ class BotInstance {
     if (!this.player) return;
 
     // Pause MVP cycle while inside Guild Dungeon to prevent warp-out or map skipping conflicts
-    if (this.guildDungeonActive || Number(this.player.gdun_in) === 1) {
+    if (this.guildDungeonActive || Number(this.player.gdun_in) === 1 || Number(this.player.map) === 12) {
       return;
     }
     
@@ -2804,10 +2818,10 @@ class BotInstance {
           return false;
         })();
 
-        if (ldr.guildDungeonActive && ldr.guildDungeonIsTeam && !this.guildDungeonActive && Number(this.player.gdun_in) !== 1) {
+        if (ldr.guildDungeonActive && ldr.guildDungeonIsTeam && !this.guildDungeonActive && Number(this.player.gdun_in) !== 1 && Number(this.player.map) !== 12) {
           this.addLog('SYSTEM', `🏰 [Team Member] Đồng bộ vào Phụ Bản Guild theo Trưởng nhóm (${ldr.name})...`);
           await this.enterGuildDungeon(true);
-        } else if (!ldr.guildDungeonActive && !isDifferentGuild && (this.guildDungeonActive || Number(this.player.gdun_in) === 1)) {
+        } else if (!ldr.guildDungeonActive && !isDifferentGuild && (this.guildDungeonActive || Number(this.player.gdun_in) === 1 || Number(this.player.map) === 12)) {
           this.addLog('SYSTEM', `↩️ [Team Member] Đồng bộ thoát Phụ Bản Guild theo Trưởng nhóm (${ldr.name})...`);
           await this.exitGuildDungeon();
         }
@@ -2838,7 +2852,7 @@ class BotInstance {
       let activeTargetMapId;
       let shouldWarpCheck = false;
 
-      if (isMember && leader && leader.status === 'running' && leader.player && this.settings.teamSynced === true && this.settings.bossHuntMode && this.settings.bossHuntMode !== 'off' && leader.settings.bossHuntMode && leader.settings.bossHuntMode !== 'off' && !leader.guildDungeonActive && Number(leader.player.gdun_in) !== 1) {
+      if (isMember && leader && leader.status === 'running' && leader.player && this.settings.teamSynced === true && this.settings.bossHuntMode && this.settings.bossHuntMode !== 'off' && leader.settings.bossHuntMode && leader.settings.bossHuntMode !== 'off' && !leader.guildDungeonActive && Number(leader.player.gdun_in) !== 1 && Number(leader.player.map) !== 12) {
         // Đồng bộ trạng thái Cycle và Map từ Leader trước
         this.isMvpCycling = leader.isMvpCycling;
         this.mvpCycleMapIndex = leader.mvpCycleMapIndex;
@@ -2859,7 +2873,7 @@ class BotInstance {
         shouldWarpCheck = (this.settings.autoMap || (this.settings.bossHuntMode && this.settings.bossHuntMode !== 'off') || this.isMvpCycling || isMvpReturning);
       }
 
-      if (shouldWarpCheck && !this.guildDungeonActive && !this.inEventMode && Number(this.player.gdun_in) !== 1 && Number(this.player.map) !== Number(activeTargetMapId) && Number(this.player.map) !== 5) {
+      if (shouldWarpCheck && !this.guildDungeonActive && !this.inEventMode && Number(this.player.gdun_in) !== 1 && Number(this.player.map) !== 12 && Number(this.player.map) !== Number(activeTargetMapId) && Number(this.player.map) !== 5) {
         const targetMapId = activeTargetMapId;
         const mapDef = getMapDefs().find(m => m.id === targetMapId);
         if (mapDef && (this.player.lv || 1) >= mapDef.req) {
@@ -2921,7 +2935,7 @@ class BotInstance {
 
       if (currentMinute === 30 && currentSecond >= 5 && currentSecond <= 20 && this.lastGdunAutoEnterHour !== currentHour) {
         this.lastGdunAutoEnterHour = currentHour;
-        if (!this.guildDungeonActive && Number(this.player.gdun_in) !== 1 && !this.inEventMode) {
+        if (!this.guildDungeonActive && Number(this.player.gdun_in) !== 1 && Number(this.player.map) !== 12 && !this.inEventMode) {
           this.addLog('SYSTEM', `⏰ [Auto Boss Guild] Đến phút thứ 30:05. Tự động kích hoạt cá nhân vào Phụ Bản Guild...`);
           await this.enterGuildDungeon(false); // Solo entry
         }
@@ -2931,7 +2945,7 @@ class BotInstance {
     // Request full payload every 2 polls or when monsters/bosses empty for fast spawn detection
     // Enforce isFull = 1 during MVP Cycle on the correct target map to ensure the latest boss list is retrieved
     const isCorrectMvpMap = !this.isMvpCycling || (this.player && Number(this.player.map) === Number(this.getCurrentMvpCycleMap()));
-    const isFull = ((this.pollCount % 2 === 0) || this.targetedMvp || this.bosses === null || !this.monsters || this.monsters.length === 0 || this.guildDungeonActive || (this.player && Number(this.player.gdun_in) === 1) || (this.isMvpCycling && isCorrectMvpMap)) ? 1 : 0;
+    const isFull = ((this.pollCount % 2 === 0) || this.targetedMvp || this.bosses === null || !this.monsters || this.monsters.length === 0 || this.guildDungeonActive || (this.player && (Number(this.player.gdun_in) === 1 || Number(this.player.map) === 12)) || (this.isMvpCycling && isCorrectMvpMap)) ? 1 : 0;
 
     // 😴 Anti-idle: Tính act flag mô phỏng hành vi người dùng thật
     // - Poll đầu tiên = act=1 (giống user vừa load trang/F5)
@@ -4245,7 +4259,7 @@ class BotInstance {
       let activeTargetMapId;
       let shouldWarpCheck = false;
 
-      if (isMember && leader && leader.status === 'running' && leader.player && this.settings.teamSynced === true && this.settings.bossHuntMode && this.settings.bossHuntMode !== 'off' && leader.settings.bossHuntMode && leader.settings.bossHuntMode !== 'off' && !leader.guildDungeonActive && Number(leader.player.gdun_in) !== 1) {
+      if (isMember && leader && leader.status === 'running' && leader.player && this.settings.teamSynced === true && this.settings.bossHuntMode && this.settings.bossHuntMode !== 'off' && leader.settings.bossHuntMode && leader.settings.bossHuntMode !== 'off' && !leader.guildDungeonActive && Number(leader.player.gdun_in) !== 1 && Number(leader.player.map) !== 12) {
         activeTargetMapId = leader.isMvpCycling 
           ? leader.getCurrentMvpCycleMap() 
           : (leader.player ? Number(leader.player.map) : (parseInt(leader.settings.targetMap) || 1));
@@ -4257,7 +4271,7 @@ class BotInstance {
         shouldWarpCheck = (this.settings.autoMap || (this.settings.bossHuntMode && this.settings.bossHuntMode !== 'off') || this.isMvpCycling || isMvpReturning);
       }
 
-      if (shouldWarpCheck && !this.guildDungeonActive && !this.inEventMode && Number(this.player.gdun_in) !== 1 && Number(this.player.map) !== Number(activeTargetMapId)) {
+      if (shouldWarpCheck && !this.guildDungeonActive && !this.inEventMode && Number(this.player.gdun_in) !== 1 && Number(this.player.map) !== 12 && Number(this.player.map) !== Number(activeTargetMapId)) {
         const targetMapId = activeTargetMapId;
         const mapDef = getMapDefs().find(m => m.id === targetMapId);
         if (mapDef && (this.player.lv || 1) >= mapDef.req) {

@@ -1490,6 +1490,27 @@ try {
   }
   assert.strictEqual(t14MvpHuntingExecuted, false, 'Auto MVP Hunting should be bypassed when guildDungeonActive is true');
 
+  // Test 15: updatePlayerState Map 12 fallback & triggerImmediatePoll verification
+  const testGdunStateBot = new BotInstance({
+    name: 'GdunStateBot',
+    line_uid: 'gdun_state_bot_1',
+    settings: { bossHuntMode: 'type2' }
+  });
+
+  testGdunStateBot.updatePlayerState({ map: 12, gdun_in: 0 });
+  assert.strictEqual(testGdunStateBot.guildDungeonActive, true, 'guildDungeonActive should be true when player map is 12 even if gdun_in is 0');
+
+  let immediatePollCalled = false;
+  testGdunStateBot.status = 'running';
+  testGdunStateBot._runPoll = async function() {
+    immediatePollCalled = true;
+  };
+  testGdunStateBot.timer = setTimeout(() => {}, 10000);
+
+  testGdunStateBot.triggerImmediatePoll();
+  assert.strictEqual(testGdunStateBot.timer, null, 'triggerImmediatePoll should clear the existing timer');
+  assert.strictEqual(immediatePollCalled, true, '_runPoll should be executed immediately');
+
   console.log('✅ Guild Dungeon State & Auto-Exit Tests Passed successfully!');
 
   // ==========================================

@@ -2,17 +2,26 @@
 
 > Changelog of actual changes implemented.
 
-## 2026-08-23 - Khắc Phục Lỗi Nhắm Mục Tiêu Phụ Bản Guild & Cô Lập Luồng Định Tuyến (Safe Distance, Kiting & Flow Isolation)
+## 2026-08-23 - Khắc Phục Lỗi Nhắm Mục Tiêu, Sửa Lỗi Tự Thoát Phụ Bản & Tối Ưu Tốc Độ Poll (Guild Dungeon Overhaul)
 
-- File đã đổi: [server.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [test.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/test.js), [.agent/CHANGELOG.md](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/.agent/CHANGELOG.md), [.agent/4M.md](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/.agent/4M.md).
+- File đã đổi: [server.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [test.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/test.js), [accounts.json](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/accounts.json), [.agent/CHANGELOG.md](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/.agent/CHANGELOG.md), [.agent/4M.md](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/.agent/4M.md).
 - Đã làm:
+  - **Khắc phục lỗi vào Phụ Bản tự thoát ra ngay**:
+    - Nhận diện Game Server không trả về cờ `gdun_in` trong `xhrpg_game.php`, làm bot hiểu lầm đã rời phụ bản và định tuyến map thường kéo nhân vật ra ngoài.
+    - Sửa đổi hàm `updatePlayerState()` để tự động nhận diện ở trong phụ bản khi bản đồ hiện tại là Map 12 (`Number(this.player.map) === 12` hoặc `gdun_in === 1`).
+    - Cập nhật tất cả các điều kiện rẽ nhánh và định tuyến di chuyển để kết hợp kiểm tra Map 12.
+    - Sửa lỗi return sớm khi `this.player` là `null` trong `updatePlayerState()` để đảm bảo cờ `guildDungeonActive` được đồng bộ chuẩn xác ngay ở nhịp startup khi bot đã ở sẵn trong phụ bản.
+  - **Tối ưu hóa phản hồi tức thì (`triggerImmediatePoll`)**:
+    - Thiết kế cơ chế lưu trữ hàm `runPoll` vào thực thể (`this._runPoll = runPoll`).
+    - Thêm helper `triggerImmediatePoll()` để hủy timer cũ và chạy poll ngay lập tức.
+    - Gọi `triggerImmediatePoll()` ngay sau khi vào/thoát phụ bản thành công để bot cập nhật danh sách boss và bắt đầu chiến đấu/warp mà không phải chờ chu kỳ 2 giây.
   - **Tích hợp Kiting & Safe Distance Engine cho Boss Bang**: Cập nhật logic nhắm mục tiêu phụ bản (`0.5 Guild Dungeon Targeting`) để tự động duy trì khoảng cách an toàn dựa trên loại vũ khí sử dụng (Dao dài vs Dao găm), tính toán vector lùi/tiến tương ứng và gửi tham số `traveling = 1`, `lockPos = 0` khi ngoài tầm hoặc `traveling = 0`, `lockPos = 1` khi đạt khoảng cách tối ưu để xả DPS.
-  - **Bổ sung Snipe Mode**: Tăng tốc độ tấn công trong phụ bản khi HP của Boss Guild tụt xuống dưới 30%.
-  - **Khởi tạo cache Boss đúng cách**: Khởi tạo `this.bosses = null;` trong constructor để đảm bảo bot luôn thực hiện poll đầy đủ (`full: 1`) khi vào phụ bản hoặc khi khởi động lại, tránh việc cache bị `undefined` làm mất danh sách Boss Bang.
   - **Cô lập luồng nhắm mục tiêu phụ bản**: Thêm cờ chặn `!this.guildDungeonActive` vào các khối định tuyến `1. Auto MVP Hunting` và `2. Auto Zone checking` để đảm bảo khi ở trong phụ bản, bot chỉ chạy duy nhất logic nhắm mục tiêu đặc thù của Guild Dungeon, tránh bị các kịch bản MVP ngoài bản đồ ghi đè tọa độ di chuyển.
-  - **Bổ sung Unit Tests**: 
+  - **Cập nhật tài khoản chạy bot**: Đổi thông tin tài khoản chạy bot chính trong `accounts.json` sang tài khoản mới do người dùng cung cấp.
+  - **Bổ sung Unit Tests**:
     - Thêm Test 13 kiểm thử việc kiting tọa độ và khóa vị trí khi Boss trong tầm an toàn trong Guild Dungeon.
     - Thêm Test 14 kiểm thử việc khởi tạo `bosses = null` và kiểm tra bỏ qua (bypass) luồng MVP Hunting thông thường khi `guildDungeonActive = true`.
+    - Thêm Test 15 kiểm thử việc lưu giữ cờ `guildDungeonActive = true` khi `map = 12` (kể cả khi `gdun_in = 0`) và tính năng hủy timer/trigger poll tức thì của `triggerImmediatePoll()`.
 
 ---
 
