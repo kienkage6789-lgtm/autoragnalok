@@ -3,6 +3,24 @@
 > Work Breakdown Structure. Update task states immediately upon changes.
 > Statuses: todo | doing | blocked | review | done
 
+### [x] T79 - Sửa lỗi Tự động vào Phụ bản Guild Phút 30, Tránh kẹt Map, Hiển thị Dashboard & Chỉ Săn Boss Guild
+- Description: Sửa đổi logic hẹn giờ tự động phút 30 (`autoEnterGdunAt30`) tôn trọng cấu hình đi nhóm (`guildDungeonIsTeam`) và tự động kéo thành viên nhóm đi theo. Loại bỏ các bản đồ đặc biệt (Map 4, 5, 11, 12) khỏi việc ghi nhớ làm bản đồ quay về trong `triggerMvpCycle` để tránh kẹt map. Đồng bộ cờ hiển thị hoạt động Săn Boss và highlight mục tiêu trên Web Dashboard. Cấu hình cho bot chỉ nhắm mục tiêu tấn công vào các Boss Guild, bỏ qua quái thường và tự động thoát phụ bản ngay khi tiêu diệt hết Boss để quay về Map & Zone ban đầu.
+- Files related: `server.js`, `test.js`, `public/app.js`
+- Acceptance criteria:
+  - [x] Tự động đọc cờ `guildDungeonIsTeam` của Leader khi hẹn giờ phút 30 kích hoạt.
+  - [x] Tự động kích hoạt các Member trong nhóm cùng vào phụ bản khi Leader auto-enter.
+  - [x] Loại trừ các map đặc biệt (Map 4, 5, 11, 12) khỏi `mvpCycleOriginalMap` trong `triggerMvpCycle`.
+  - [x] Trả về `bossHuntActive = true` khi bot đang trong Phụ bản Guild để UI hiển thị Panel Săn Boss.
+  - [x] Gộp quái và boss trong Phụ bản để hiển thị đầy đủ trên Dashboard, tự động gán `lastTargetedBossId` để highlight đối tượng đang target.
+  - [x] Sửa lỗi JavaScript click trên UI bằng cách bao quanh `bossId` trong nháy đơn để hỗ trợ ID dạng chuỗi (ReferenceError).
+  - [x] Chỉ nhắm mục tiêu tấn công Boss Guild trong Phụ bản, bỏ qua hoàn toàn quái thường.
+  - [x] Tự động thoát Phụ bản Guild khi sạch Boss (không đợi tiêu diệt hết quái thường) sau 5 nhịp poll trống.
+  - [x] Tự động quay về bản đồ cấu hình `settings.targetMap` và tìm đường di chuyển về phân khu `settings.targetZone` ban đầu.
+  - [x] Viết unit tests kiểm thử thành công 100%.
+- Status: done
+
+---
+
 ### [x] T62 - Hệ Thống Auto Session Renewal & Auto-Relogin (Phòng Tránh Cơ Chế Bắt Offline 1H)
 - Description: Nghiên cứu endpoint `xhrpg_offline.php` và cơ chế ngắt phiên 60 phút (Offline Limit) của Game Server `Ragnalok`. Triển khai tính năng Proactive Token Renewal tự động gia hạn `session_token` qua `PHPSESSID` định kỳ mỗi 45 phút (trước khi dính timeout 1h). Bổ sung luồng Auto-Relogin khẩn cấp khi nhận `d.kicked = true` hoặc lỗi session token từ `xhrpg_game.php`, tự động lấy lại `session_token` mới trong < 1s và tiếp tục luồng polling online liền mạch mà không làm ngắt bot. Bổ sung lưu trữ `phpsessid` trong `BotInstance`, `accounts.json` và API `POST /api/accounts/:line_uid/phpsessid`.
 - Files related: `server.js`, `test.js`

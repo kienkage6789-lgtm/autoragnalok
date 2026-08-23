@@ -2,6 +2,68 @@
 
 > Changelog of actual changes implemented.
 
+### 2026-08-23 - Sửa lỗi Tự động vào Phụ bản Guild Phút 30, Tránh kẹt Map, Hiển thị Dashboard & Chỉ Săn Boss Guild (T79)
+
+- File đã đổi: [server.js](file:///c:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/server.js), [test.js](file:///c:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/test.js), [public/app.js](file:///c:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/public/app.js), [.agent/TASKS.md](file:///c:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/.agent/TASKS.md), [.agent/CHANGELOG.md](file:///c:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/.agent/CHANGELOG.md), [.agent/4M.md](file:///c:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/.agent/4M.md).
+- Đã làm:
+  - **Sửa lỗi Tự động vào Phụ bản Guild phút 30**: Cập nhật logic hẹn giờ tự động phút 30 (`autoEnterGdunAt30`) tôn trọng cấu hình đi nhóm (`guildDungeonIsTeam`) thay vì gọi cứng Solo. Tự động tìm kiếm các bot thành viên đồng bộ cùng nhóm (`teamId`, `teamSynced === true`) và gọi `enterGuildDungeon(true)` kéo các thành viên vào cùng Leader ngay lập tức.
+  - **Tránh kẹt Map sau khi Săn Boss**: Sửa đổi hàm `triggerMvpCycle()` để loại trừ các bản đồ đặc biệt bao gồm Map 4 (Đấu trường), Map 5 (Nông trại), Map 11 (Lâu đài), Map 12 (Dungeon) khỏi bản đồ gốc quay về (`mvpCycleOriginalMap`). Khi bắt đầu chu kỳ MVP ở các bản đồ này, bot sẽ tự động quay về bản đồ farm thường thiết lập trong cài đặt hoặc fallback về Map 1.
+  - **Hiển thị Phụ Bản Guild & Sửa lỗi chọn mục tiêu**: 
+    - Đồng bộ cờ `bossHuntActive` trong API trả về `true` khi ở Phụ bản Guild, đảm bảo Panel Săn Boss vẫn hiển thị kể cả khi tắt Săn Boss thế giới (`bossHuntMode = 'off'`).
+    - Lọc bỏ quái thường trong Phụ bản Guild trên Dashboard hiển thị, chỉ tập trung hiển thị các Boss Guild còn sống để theo dõi.
+    - Cập nhật chính xác `lastTargetedBossId` khi khóa mục tiêu trong phụ bản để UI hiển thị highlight đối tượng đang target.
+    - Sửa lỗi click chọn mục tiêu trên Dashboard: Bao quanh `bossId` trong nháy đơn khi gọi `selectBossTarget(...)` trên HTML để tránh lỗi ReferenceError đối với ID dạng chuỗi (như `'boss_guild_99'`).
+    - Nâng cấp API `set_boss_target` hỗ trợ so sánh ID linh hoạt không phân biệt kiểu số hay chuỗi, chỉ lọc tìm kiếm các Boss Guild còn sống.
+  - **Chỉ Săn Boss Guild & Thoát Phụ Bản Nhanh**:
+    - Điều chỉnh logic nhắm mục tiêu Phụ bản Guild trong `server.js` chỉ tấn công Boss Guild (`sortedBosses`), bỏ qua hoàn toàn quái thường (`monsters`).
+    - Rút gọn điều kiện thoát phụ bản: Ngay khi dọn sạch các Boss Guild còn sống (`aliveBosses.length === 0`), bot đếm trống 5 nhịp poll và gọi `exitGuildDungeon` để dịch chuyển ra ngoài.
+    - Sau khi ra ngoài phụ bản, bot tự động di chuyển về `targetMap` và tự động tìm đường chạy thẳng về phân khu `targetZone` cài đặt ban đầu.
+  - **Đồng bộ Unit Tests**: Cập nhật Test 12, Test 17, Test 18, và Test 19 xác minh tính năng chỉ lọc, đếm, hiển thị và chọn mục tiêu thủ công đối với Boss Guild (bỏ qua quái thường).
+  - **Giải quyết Xung đột Trộn tệp (Merge Conflicts)**: Dọn sạch hoàn toàn các đoạn trùng lặp và conflict trong [.agent/4M.md](file:///c:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/.agent/4M.md), đảm bảo tính nguyên bản của tài liệu.
+
+---
+
+## 2026-08-23 - Khắc Phục Lỗi Nhắm Mục Tiêu, Sửa Lỗi Tự Thoát Phụ Bản & Tối Ưu Tốc Độ Poll (Guild Dungeon Overhaul)
+
+- File đã đổi: [server.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [test.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/test.js), [accounts.json](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/accounts.json), [.agent/CHANGELOG.md](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/.agent/CHANGELOG.md), [.agent/4M.md](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/.agent/4M.md).
+- Đã làm:
+  - **Khắc phục lỗi vào Phụ Bản tự thoát ra ngay**:
+    - Nhận diện Game Server không trả về cờ `gdun_in` trong `xhrpg_game.php`, làm bot hiểu lầm đã rời phụ bản và định tuyến map thường kéo nhân vật ra ngoài.
+    - Sửa đổi hàm `updatePlayerState()` để tự động nhận diện ở trong phụ bản khi bản đồ hiện tại là Map 12 (`Number(this.player.map) === 12` hoặc `gdun_in === 1`).
+    - Cập nhật tất cả các điều kiện rẽ nhánh và định tuyến di chuyển để kết hợp kiểm tra Map 12.
+    - Sửa lỗi return sớm khi `this.player` là `null` trong `updatePlayerState()` để đảm bảo cờ `guildDungeonActive` được đồng bộ chuẩn xác ngay ở nhịp startup khi bot đã ở sẵn trong phụ bản.
+  - **Tối ưu hóa phản hồi tức thì (`triggerImmediatePoll`)**:
+    - Thiết kế cơ chế lưu trữ hàm `runPoll` vào thực thể (`this._runPoll = runPoll`).
+    - Thêm helper `triggerImmediatePoll()` để hủy timer cũ và chạy poll ngay lập tức.
+    - Gọi `triggerImmediatePoll()` ngay sau khi vào/thoát phụ bản thành công để bot cập nhật danh sách boss và bắt đầu chiến đấu/warp mà không phải chờ chu kỳ 2 giây.
+  - **Tích hợp Kiting & Safe Distance Engine cho Boss Bang**: Cập nhật logic nhắm mục tiêu phụ bản (`0.5 Guild Dungeon Targeting`) để tự động duy trì khoảng cách an toàn dựa trên loại vũ khí sử dụng (Dao dài vs Dao găm), tính toán vector lùi/tiến tương ứng và gửi tham số `traveling = 1`, `lockPos = 0` khi ngoài tầm hoặc `traveling = 0`, `lockPos = 1` khi đạt khoảng cách tối ưu để xả DPS.
+  - **Cô lập luồng nhắm mục tiêu phụ bản**: Thêm cờ chặn `!this.guildDungeonActive` vào các khối định tuyến `1. Auto MVP Hunting` và `2. Auto Zone checking` để đảm bảo khi ở trong phụ bản, bot chỉ chạy duy nhất logic nhắm mục tiêu đặc thù của Guild Dungeon, tránh bị các kịch bản MVP ngoài bản đồ ghi đè tọa độ di chuyển.
+  - **Cập nhật tài khoản chạy bot**: Đổi thông tin tài khoản chạy bot chính trong `accounts.json` sang tài khoản mới do người dùng cung cấp.
+  - **Bổ sung Unit Tests**:
+    - Thêm Test 13 kiểm thử việc kiting tọa độ và khóa vị trí khi Boss trong tầm an toàn trong Guild Dungeon.
+    - Thêm Test 14 kiểm thử việc khởi tạo `bosses = null` và kiểm tra bỏ qua (bypass) luồng MVP Hunting thông thường khi `guildDungeonActive = true`.
+    - Thêm Test 15 kiểm thử việc lưu giữ cờ `guildDungeonActive = true` khi `map = 12` (kể cả khi `gdun_in = 0`) và tính năng hủy timer/trigger poll tức thì của `triggerImmediatePoll()`.
+
+---
+
+## 2026-08-22 - Tự Động Kích Hoạt Cá Nhân Săn Boss Guild Phút 30 & Khắc Phục Lỗi Đồng Bộ Cả Team
+
+- File đã đổi: [server.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [test.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/test.js), [public/app.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/public/app.js), [.agent/CHANGELOG.md](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/.agent/CHANGELOG.md).
+- Đã làm:
+  - **Tự động kích hoạt cá nhân săn Boss Guild phút 30:05**:
+    - Bổ sung cấu hình `autoEnterGdunAt30` (mặc định tắt) vào `getDefaultSettings()` và đồng bộ lưu/tải cấu hình.
+    - Thêm cơ chế hẹn giờ trong `pollGame()` để tự động kích hoạt solo `enterGuildDungeon(false)` ở phút thứ `30` (giây `5` đến `20` làm khoảng đệm an toàn).
+    - Thiết kế khóa `this.lastGdunAutoEnterHour` ngăn chặn việc kích hoạt trùng lặp nhiều lần trong cùng một giờ (Debounce).
+  - **Khôi phục trạng thái Đội nhóm sau khi khởi động**: Khởi tạo `this.guildDungeonIsTeam` từ settings `this.settings.guildDungeonIsTeam` trong constructor của `BotInstance`. Giúp Trưởng nhóm (Leader) bảo toàn cờ đi team sau khi server hoặc bot bị khởi động lại.
+  - **Lưu trữ cấu hình Guild Dungeon xuống đĩa**:
+    - Cập nhật `this.settings.guildDungeonIsTeam = true` và lưu vào file `accounts.json` khi kích hoạt chế độ đi team trong `enterGuildDungeon()`.
+    - Reset `this.settings.guildDungeonIsTeam = false` và lưu vào file `accounts.json` khi thoát phụ bản (`exitGuildDungeon()`) hoặc khi `updatePlayerState()` nhận diện nhân vật đã ra ngoài Phụ bản (`gdun_in === 0`).
+  - **Tránh vòng lặp lỗi di chuyển khẩn cấp sang Map 12**: Bổ sung điều kiện chặn đồng bộ map sang Trưởng nhóm nếu Trưởng nhóm đang trong Phụ Bản Guild (`!leader.guildDungeonActive && Number(leader.player.gdun_in) !== 1`) tại cả 2 khối định tuyến bản đồ (Urgent Map Routing & Normal Map Routing). Thành viên sẽ tự động quay về farm map mặc định của mình thay vì liên tục gửi các lệnh warp map 12 bất hợp pháp.
+  - **Giao diện Dashboard**: Thêm switch toggle và hiển thị đồng bộ checkbox **"⏰ Tự động vào phút 30 (Cá nhân)"** tại khu vực quản lý Phụ bản Guild trên giao diện Frontend.
+  - **Bổ sung Unit Tests**: Thêm 4 test cases mới (Test 9, Test 10, Test 11, Test 12) kiểm thử việc lưu/khôi phục cờ đi team, logic bypass warp map 12 của thành viên, và hẹn giờ tự động vào Guild Dungeon phút 30:05 kèm khóa chống lặp. Unit tests đạt 100% pass.
+
+---
+
 ## 2026-08-19 - Sửa Lỗi Ổn Định Chức Năng /play và Cải Tiến Báo Lỗi Client
 
 - File đã đổi: [server.js](file:///c:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/server.js), [play.html](file:///c:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/play.html), [play_battle.html](file:///c:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/play_battle.html), [test.js](file:///c:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/test.js), [.agent/4M.md](file:///c:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/.agent/4M.md).

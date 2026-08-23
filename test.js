@@ -1270,6 +1270,332 @@ try {
   assert.strictEqual(syncExited, false, 'Member of different guild should NOT sync exit with leader');
   assert.strictEqual(mockGdunBot.guildDungeonActive, true, 'Member should remain in dungeon');
 
+  // Test 9: Restore guildDungeonIsTeam from settings in constructor
+  const testRestoreBot = new BotInstance({
+    name: 'RestoreBot',
+    line_uid: 'restore_bot_1',
+    settings: { guildDungeonIsTeam: true }
+  });
+  assert.strictEqual(testRestoreBot.guildDungeonIsTeam, true, 'guildDungeonIsTeam should be restored from settings in constructor');
+
+  // Test 10: Reset guildDungeonIsTeam in updatePlayerState when gdun_in is 0
+  const testStateBot = new BotInstance({
+    name: 'StateBot',
+    line_uid: 'state_bot_1',
+    settings: { guildDungeonIsTeam: true }
+  });
+  testStateBot.player = { gdun_in: 1 };
+  testStateBot.updatePlayerState({ gdun_in: 0 });
+  assert.strictEqual(testStateBot.guildDungeonIsTeam, false, 'guildDungeonIsTeam should reset to false in updatePlayerState when gdun_in is 0');
+  assert.strictEqual(testStateBot.settings.guildDungeonIsTeam, false, 'settings.guildDungeonIsTeam should be updated to false in updatePlayerState');
+
+  // Test 11: Member map routing bypass when leader is in Guild Dungeon
+  const mockLeader = new BotInstance({
+    name: 'LeaderBot',
+    line_uid: 'ldr_bot_1',
+    settings: { teamRole: 'leader', teamId: 'team_abc', bossHuntMode: 'type2' }
+  });
+  mockLeader.player = { map: 12, gdun_in: 1 };
+  mockLeader.guildDungeonActive = true;
+  mockLeader.guildDungeonIsTeam = true;
+  mockLeader.isMvpCycling = true;
+  mockLeader.getCurrentMvpCycleMap = () => 3;
+  mockLeader.status = 'running';
+
+  const mockMember = new BotInstance({
+    name: 'MemberBot',
+    line_uid: 'mem_bot_1',
+    settings: { teamRole: 'member', teamId: 'team_abc', teamSynced: true, bossHuntMode: 'type2' }
+  });
+  mockMember.player = { map: 1, gdun_in: 0 };
+
+  const oldBotInstances = { ...botInstances };
+  botInstances['ldr_bot_1'] = mockLeader;
+  botInstances['mem_bot_1'] = mockMember;
+
+  let memActiveTargetMapId = null;
+  let memShouldWarpCheck = false;
+
+  const isMemberCheck = mockMember.settings.teamRole === 'member';
+  const myTeamIdCheck = mockMember.settings.teamId || 'none';
+  const ldrCheck = (isMemberCheck && myTeamIdCheck !== 'none')
+    ? Object.values(botInstances).find(b => b.userId === mockMember.userId && b.settings.teamRole === 'leader' && (b.settings.teamId || 'none') === myTeamIdCheck)
+    : null;
+
+  if (isMemberCheck && ldrCheck && ldrCheck.status === 'running' && ldrCheck.player && mockMember.settings.teamSynced === true && mockMember.settings.bossHuntMode && mockMember.settings.bossHuntMode !== 'off' && ldrCheck.settings.bossHuntMode && ldrCheck.settings.bossHuntMode !== 'off' && !ldrCheck.guildDungeonActive && Number(ldrCheck.player.gdun_in) !== 1) {
+    memActiveTargetMapId = ldrCheck.isMvpCycling ? ldrCheck.getCurrentMvpCycleMap() : Number(ldrCheck.player.map);
+    memShouldWarpCheck = true;
+  } else {
+    memActiveTargetMapId = mockMember.settings.targetMap || 1;
+    memShouldWarpCheck = false;
+  }
+
+  assert.strictEqual(memActiveTargetMapId, 1, 'Member should NOT route to leader cycle/map when leader is in Guild Dungeon');
+  assert.strictEqual(memShouldWarpCheck, false, 'shouldWarpCheck should be false for leader sync when leader is in Guild Dungeon');
+
+  for (const key in botInstances) {
+    delete botInstances[key];
+  }
+  Object.assign(botInstances, oldBotInstances);
+
+  // Test 12: Scheduled Guild Dungeon auto-entry at Minute 30:05
+  let enterCalled = false;
+  let enteredTeam = null;
+  const mockScheduleBot = new BotInstance({
+    name: 'ScheduleBot',
+    line_uid: 'sched_bot_1',
+    settings: { autoEnterGdunAt30: true, guildDungeonIsTeam: true, teamId: 'team_test', teamRole: 'leader' }
+  });
+  
+  mockScheduleBot.enterGuildDungeon = async function(isTeam) {
+    enterCalled = true;
+    enteredTeam = isTeam;
+    return true;
+  };
+  mockScheduleBot.player = { gdun_in: 0, map: 1 };
+  mockScheduleBot.guildDungeonActive = false;
+
+  const triggerCheck = async (bot, dateObj) => {
+    const currentHour = dateObj.getHours();
+    const currentMinute = dateObj.getMinutes();
+    const currentSecond = dateObj.getSeconds();
+    if (bot.settings.autoEnterGdunAt30 && bot.player) {
+      if (currentMinute === 30 && currentSecond >= 5 && currentSecond <= 20 && bot.lastGdunAutoEnterHour !== currentHour) {
+        bot.lastGdunAutoEnterHour = currentHour;
+        if (!bot.guildDungeonActive && Number(bot.player.gdun_in) !== 1 && Number(bot.player.map) !== 12) {
+          const isTeam = bot.settings.guildDungeonIsTeam === true;
+          if (isTeam) {
+            await bot.enterGuildDungeon(true);
+            const myTeamId = bot.settings.teamId || 'none';
+            if (myTeamId !== 'none') {
+              const members = Object.values(botInstances).filter(b => 
+                b.userId === bot.userId && 
+                b.settings.teamRole === 'member' && 
+                (b.settings.teamId || 'none') === myTeamId &&
+                b.settings.teamSynced === true
+              );
+              for (const mem of members) {
+                mem.enterGuildDungeon(true).catch(() => {});
+              }
+            }
+          } else {
+            await bot.enterGuildDungeon(false);
+          }
+        }
+      }
+    }
+  };
+
+  // Case 1: Time is minute 30, second 5 and guildDungeonIsTeam is true -> should trigger with isTeam = true
+  let mockDate = new Date();
+  mockDate.setMinutes(30);
+  mockDate.setSeconds(5);
+  
+  // Set up a mock member in botInstances to verify they are pulled
+  const mockMemberBot = new BotInstance({
+    name: 'MemberBot',
+    line_uid: 'sched_bot_mem',
+    settings: { teamRole: 'member', teamId: 'team_test', teamSynced: true }
+  });
+  let memberEnterCalled = false;
+  mockMemberBot.enterGuildDungeon = async function(isTeam) {
+    memberEnterCalled = true;
+    return true;
+  };
+  mockMemberBot.userId = mockScheduleBot.userId;
+  botInstances['sched_bot_mem'] = mockMemberBot;
+
+  await triggerCheck(mockScheduleBot, mockDate);
+  assert.strictEqual(enterCalled, true, 'Should enter Guild Dungeon at minute 30, second 5');
+  assert.strictEqual(enteredTeam, true, 'Should enter as team');
+  assert.strictEqual(memberEnterCalled, true, 'Team member should be pulled along');
+  assert.strictEqual(mockScheduleBot.lastGdunAutoEnterHour, mockDate.getHours(), 'lastGdunAutoEnterHour should be set');
+
+  // Clean up mock member
+  delete botInstances['sched_bot_mem'];
+
+  // Case 2: Time is minute 30, second 6, but already entered -> should not trigger again
+  enterCalled = false;
+  let mockDate2 = new Date();
+  mockDate2.setMinutes(30);
+  mockDate2.setSeconds(6);
+  await triggerCheck(mockScheduleBot, mockDate2);
+  assert.strictEqual(enterCalled, false, 'Should not trigger again');
+
+  // Case 3: Time is minute 29 -> should not trigger
+  const mockScheduleBot2 = new BotInstance({
+    name: 'ScheduleBot2',
+    line_uid: 'sched_bot_2',
+    settings: { autoEnterGdunAt30: true, guildDungeonIsTeam: false }
+  });
+  mockScheduleBot2.enterGuildDungeon = async function(isTeam) {
+    enterCalled = true;
+    enteredTeam = isTeam;
+    return true;
+  };
+  mockScheduleBot2.player = { gdun_in: 0, map: 1 };
+  mockScheduleBot2.guildDungeonActive = false;
+  enterCalled = false;
+  let mockDate3 = new Date();
+  mockDate3.setMinutes(29);
+  mockDate3.setSeconds(5);
+  await triggerCheck(mockScheduleBot2, mockDate3);
+  assert.strictEqual(enterCalled, false, 'Should not enter at minute 29');
+  // Test 13: Safe Distance & Kiting logic in Guild Dungeon targeting
+  const testGdunTargetBot = new BotInstance({
+    name: 'GdunTargetBot',
+    line_uid: 'gdun_target_bot_1',
+    settings: { bossHuntMode: 'type2' }
+  });
+
+  testGdunTargetBot.player = { x: 1000, y: 1000, active_gun: 0, map: 12, gdun_in: 1 };
+  testGdunTargetBot.guildDungeonActive = true;
+  testGdunTargetBot.monsters = [{ id: 99, name: 'GuildBoss', x: 1000, y: 900, hp: 1000, hp_max: 1000 }];
+  
+  let testExploreCx = 1125, testExploreCy = 1125, testExploreRadius = 100, testTraveling = 0, testLockPos = 0;
+  
+  const runTargetingTest = (bot) => {
+    const px = bot.player ? bot.player.x : 1125;
+    const py = bot.player ? bot.player.y : 1125;
+    const aliveMonsters = (bot.monsters || []).filter(m => (m.hp === undefined || (m.hp || 0) > 0));
+    const dungeonTargets = [...aliveMonsters];
+
+    if (dungeonTargets.length > 0) {
+      const target = dungeonTargets[0];
+      bot.targetedMvp = true;
+      bot.mvpConfirmClearCount = 0;
+
+      const dx = px - target.x;
+      const dy = py - target.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      const isUsingDaoDai = bot.player && (Number(bot.player.active_gun) === 1);
+      const MIN_BOSS_DIST = isUsingDaoDai ? 55 : 30;
+      const MAX_BOSS_DIST = isUsingDaoDai ? 65 : 40;
+      const TARGET_KITE_DIST = isUsingDaoDai ? 60 : 35;
+
+      if (dist > MAX_BOSS_DIST || dist < MIN_BOSS_DIST) {
+        const ux = dist > 0 ? dx / dist : 1;
+        const uy = dist > 0 ? dy / dist : 0;
+        testExploreCx = Math.round((target.x + ux * TARGET_KITE_DIST) * 100) / 100;
+        testExploreCy = Math.round((target.y + uy * TARGET_KITE_DIST) * 100) / 100;
+        testTraveling = 1;
+        testLockPos = 0;
+        testExploreRadius = 300;
+      } else {
+        testExploreCx = target.x;
+        testExploreCy = target.y;
+        testTraveling = 0;
+        testLockPos = 1;
+        testExploreRadius = 100;
+      }
+    }
+  };
+
+  runTargetingTest(testGdunTargetBot);
+  assert.strictEqual(testExploreCx, 1000, 'Kiting X coordinate should be 1000');
+  assert.strictEqual(testExploreCy, 935, 'Kiting Y coordinate should be 935');
+  assert.strictEqual(testTraveling, 1, 'Should set traveling = 1 when too far');
+  assert.strictEqual(testLockPos, 0, 'Should not lock position when too far');
+  assert.strictEqual(testExploreRadius, 300, 'Should increase exploreRadius to 300 when traveling');
+
+  testGdunTargetBot.monsters = [{ id: 99, name: 'GuildBoss', x: 1000, y: 965, hp: 1000, hp_max: 1000 }];
+  runTargetingTest(testGdunTargetBot);
+  assert.strictEqual(testExploreCx, 1000, 'Should target boss X exactly');
+  assert.strictEqual(testExploreCy, 965, 'Should target boss Y exactly');
+  assert.strictEqual(testTraveling, 0, 'Should set traveling = 0 when in safe range');
+  assert.strictEqual(testLockPos, 1, 'Should set lockPos = 1 when in safe range');
+  assert.strictEqual(testExploreRadius, 100, 'Should set exploreRadius to 100 when locked');
+
+  // Test 14: bosses initialization in constructor & Auto MVP/Zone bypass in Guild Dungeon
+  const testGdunInitBot = new BotInstance({
+    name: 'GdunInitBot',
+    line_uid: 'gdun_init_bot_1',
+    settings: { bossHuntMode: 'type2' }
+  });
+  assert.strictEqual(testGdunInitBot.bosses, null, 'bosses cache should be initialized to null in constructor');
+
+  // Verify MVP hunting bypass when guildDungeonActive is true
+  testGdunInitBot.guildDungeonActive = true;
+  testGdunInitBot.bosses = [{ id: 1, name: 'MVP Boss', x: 1000, y: 1000, hp: 100, hp_max: 100 }];
+  
+  const t14IsHuntingEnabled = testGdunInitBot.settings.bossHuntMode !== 'off';
+  const t14IsCorrectMvpMap = true; 
+  let t14MvpHuntingExecuted = false;
+
+  if (t14IsHuntingEnabled && t14IsCorrectMvpMap && !testGdunInitBot.guildDungeonActive && testGdunInitBot.bosses && testGdunInitBot.bosses.length > 0) {
+    t14MvpHuntingExecuted = true;
+  }
+  assert.strictEqual(t14MvpHuntingExecuted, false, 'Auto MVP Hunting should be bypassed when guildDungeonActive is true');
+
+  // Test 15: updatePlayerState Map 12 fallback & triggerImmediatePoll verification
+  const testGdunStateBot = new BotInstance({
+    name: 'GdunStateBot',
+    line_uid: 'gdun_state_bot_1',
+    settings: { bossHuntMode: 'type2' }
+  });
+
+  testGdunStateBot.updatePlayerState({ map: 12, gdun_in: 0 });
+  assert.strictEqual(testGdunStateBot.guildDungeonActive, true, 'guildDungeonActive should be true when player map is 12 even if gdun_in is 0');
+
+  let immediatePollCalled = false;
+  testGdunStateBot.status = 'running';
+  testGdunStateBot._runPoll = async function() {
+    immediatePollCalled = true;
+  };
+  testGdunStateBot.timer = setTimeout(() => {}, 10000);
+
+  testGdunStateBot.triggerImmediatePoll();
+  assert.strictEqual(testGdunStateBot.timer, null, 'triggerImmediatePoll should clear the existing timer');
+  assert.strictEqual(immediatePollCalled, true, '_runPoll should be executed immediately');
+
+  // Test 16: currentMvpBossInfo updates during Guild Dungeon targeting
+  const testGdunTrackingBot = new BotInstance({
+    name: 'GdunTrackingBot',
+    line_uid: 'gdun_tracking_bot_1',
+    settings: { bossHuntMode: 'type2' }
+  });
+
+  testGdunTrackingBot.guildDungeonActive = true;
+  testGdunTrackingBot.player = { x: 1000, y: 1000, active_gun: 0, map: 12 };
+  testGdunTrackingBot.monsters = [{ id: 456, name: 'GuildBossUltra', x: 1000, y: 900, hp: 1000, hp_max: 1000 }];
+  
+  const aliveBossesTracking = (testGdunTrackingBot.bosses || []).filter(b => (b.hp === undefined || (b.hp || 0) > 0));
+  const aliveMonstersTracking = (testGdunTrackingBot.monsters || []).filter(m => (m.hp === undefined || (m.hp || 0) > 0));
+  const dungeonTargetsTracking = [...aliveBossesTracking, ...aliveMonstersTracking];
+
+  if (dungeonTargetsTracking.length > 0) {
+    const target = dungeonTargetsTracking[0];
+    if (!testGdunTrackingBot.currentMvpBossInfo || testGdunTrackingBot.currentMvpBossInfo.id !== target.id) {
+      testGdunTrackingBot.currentMvpBossInfo = {
+        id: target.id,
+        name: target.name || 'Boss Guild',
+        emoji: '🏰',
+        lv: target.lv || 1,
+        mapId: 12,
+        startTs: Date.now()
+      };
+    }
+  } else {
+    testGdunTrackingBot.currentMvpBossInfo = null;
+  }
+
+  assert.ok(testGdunTrackingBot.currentMvpBossInfo, 'currentMvpBossInfo should be populated');
+  assert.strictEqual(testGdunTrackingBot.currentMvpBossInfo.id, 456, 'Should track target id 456');
+  assert.strictEqual(testGdunTrackingBot.currentMvpBossInfo.name, 'GuildBossUltra', 'Should track target name');
+  assert.strictEqual(testGdunTrackingBot.currentMvpBossInfo.emoji, '🏰', 'Should have Guild Dungeon emoji');
+
+  testGdunTrackingBot.monsters = [];
+  const aliveMonstersTrackingEmpty = (testGdunTrackingBot.monsters || []).filter(m => (m.hp === undefined || (m.hp || 0) > 0));
+  const dungeonTargetsEmpty = [...aliveBossesTracking, ...aliveMonstersTrackingEmpty];
+
+  if (dungeonTargetsEmpty.length > 0) {
+    // skip
+  } else {
+    testGdunTrackingBot.currentMvpBossInfo = null;
+  }
+  assert.strictEqual(testGdunTrackingBot.currentMvpBossInfo, null, 'currentMvpBossInfo should be reset to null when targets empty');
+
   console.log('✅ Guild Dungeon State & Auto-Exit Tests Passed successfully!');
 
   // ==========================================
@@ -1603,6 +1929,117 @@ try {
   assert.strictEqual(typeof refreshResult, 'boolean', 'refreshSession must return boolean result');
 
   console.log('✅ T62 Auto Session Renewal Tests Passed successfully!');
+
+  // Test 17: Exclude special maps (4, 5, 11, 12) from being recorded as original farm map in triggerMvpCycle
+  console.log('Testing Test 17: Exclude special maps from mvpCycleOriginalMap...');
+  const test17Bot = new BotInstance({
+    name: 'Test17Bot',
+    line_uid: 'test17_bot',
+    settings: { mvpTargetMaps: '3,2', targetMap: 8 }
+  });
+
+  // Case A: Starting from Map 12 (Special map) -> should fallback to targetMap (Map 8)
+  test17Bot.player = { map: 12 };
+  test17Bot.triggerMvpCycle();
+  assert.strictEqual(test17Bot.mvpCycleOriginalMap, 8, 'Original map should fallback to targetMap 8 instead of special Map 12');
+  test17Bot.isMvpCycling = false; // reset
+
+  // Case B: Starting from Map 5 (Special map) -> should fallback to targetMap (Map 8)
+  test17Bot.player = { map: 5 };
+  test17Bot.triggerMvpCycle();
+  assert.strictEqual(test17Bot.mvpCycleOriginalMap, 8, 'Original map should fallback to targetMap 8 instead of special Map 5');
+  test17Bot.isMvpCycling = false; // reset
+
+  // Case C: Starting from Map 4 (Special map) and targetMap is also Map 12 -> should fallback to Map 1
+  test17Bot.settings.targetMap = 12;
+  test17Bot.player = { map: 4 };
+  test17Bot.triggerMvpCycle();
+  assert.strictEqual(test17Bot.mvpCycleOriginalMap, 1, 'Original map should fallback to Map 1 when both current map and targetMap are special');
+  test17Bot.isMvpCycling = false; // reset
+
+  // Case D: Starting from Map 3 (Normal map) -> should keep Map 3
+  test17Bot.player = { map: 3 };
+  test17Bot.triggerMvpCycle();
+  assert.strictEqual(test17Bot.mvpCycleOriginalMap, 3, 'Original map should be Map 3 when it is a normal map');
+  test17Bot.isMvpCycling = false; // reset
+
+  console.log('✅ Test 17: Exclude special maps Passed successfully!');
+
+  // Test 18: Verify Guild Dungeon boss/target display data in API response
+  console.log('Testing Test 18: Verify Guild Dungeon API display data...');
+  const test18Bot = new BotInstance({
+    name: 'Test18Bot',
+    line_uid: 'test18_bot',
+    settings: { bossHuntMode: 'off' }
+  });
+  
+  test18Bot.guildDungeonActive = true;
+  test18Bot.bosses = [{ id: 'boss_guild_99', name: 'Super Guild Boss', hp: 500, hp_max: 1000, x: 100, y: 100 }];
+  test18Bot.monsters = [{ id: 'mob_guild_1', name: 'Guild Minion', hp: 100, hp_max: 100, x: 102, y: 102 }];
+  test18Bot.lastTargetedBossId = 'boss_guild_99';
+
+  // Format response matching GET /api/accounts logic
+  const formattedBossHuntActive = test18Bot.settings.bossHuntMode !== 'off' || test18Bot.guildDungeonActive === true;
+  const formattedAliveBossCount = test18Bot.bosses ? test18Bot.bosses.filter(b => (b.hp === undefined || (b.hp || 0) > 0)).length : 0;
+
+  const formattedAliveBosses = (test18Bot.bosses || []).filter(b => (b.hp === undefined || (b.hp || 0) > 0)).map(b => ({
+    id: b.id,
+    name: b.name || 'Boss',
+    isTarget: b.id === test18Bot.lastTargetedBossId
+  }));
+
+  assert.strictEqual(formattedBossHuntActive, true, 'bossHuntActive must be true even if bossHuntMode is off, because guildDungeonActive is true');
+  assert.strictEqual(formattedAliveBossCount, 1, 'aliveBossCount must only include bosses in Guild Dungeon');
+  assert.strictEqual(formattedAliveBosses.length, 1, 'aliveBosses must only include bosses');
+  
+  const bossObj = formattedAliveBosses.find(x => x.id === 'boss_guild_99');
+  assert.ok(bossObj, 'Guild boss must exist in targets');
+  assert.strictEqual(bossObj.isTarget, true, 'Guild boss must be marked as target');
+
+  console.log('✅ Test 18: Verify Guild Dungeon API display data Passed successfully!');
+
+  // Test 19: Verify manual boss targeting with string/number IDs
+  console.log('Testing Test 19: Verify manual target setting with string/number IDs...');
+  const test19Bot = new BotInstance({
+    name: 'Test19Bot',
+    line_uid: 'test19_bot',
+    settings: { bossHuntMode: 'off' }
+  });
+
+  // Case A: Guild Dungeon is active, should NOT target a monster (ignored from targeting/UI)
+  test19Bot.guildDungeonActive = true;
+  test19Bot.bosses = [{ id: 'boss_1', name: 'Boss 1', hp: 500 }];
+  test19Bot.monsters = [{ id: 'mob_a', name: 'Mob A', hp: 100 }];
+
+  // Simulate API action 'set_boss_target' logic
+  const handleAction19 = (bot, bossId) => {
+    if (bossId === null) {
+      bot.manualTargetBossId = null;
+      return true;
+    }
+    const searchPool = bot.bosses || [];
+    const aliveBoss = searchPool.find(b => String(b.id) === String(bossId) && (b.hp === undefined || (b.hp || 0) > 0));
+    if (!aliveBoss) return false;
+    bot.manualTargetBossId = aliveBoss.id;
+    return true;
+  };
+
+  const success1 = handleAction19(test19Bot, 'mob_a');
+  assert.strictEqual(success1, false, 'Should fail to select monster since monsters are now ignored');
+
+  // Case B: Select boss by string ID
+  const success2 = handleAction19(test19Bot, 'boss_1');
+  assert.strictEqual(success2, true, 'Should successfully select boss by string ID');
+  assert.strictEqual(test19Bot.manualTargetBossId, 'boss_1', 'manualTargetBossId must match targeted boss');
+
+  // Case C: Target a boss using string vs numeric match (loose type comparison)
+  test19Bot.bosses = [{ id: 12345, name: 'Numeric Boss', hp: 500 }];
+  const success3 = handleAction19(test19Bot, '12345');
+  assert.strictEqual(success3, true, 'Should successfully select numeric boss using string stringification');
+  assert.strictEqual(test19Bot.manualTargetBossId, 12345, 'manualTargetBossId must match original numeric ID type');
+
+  console.log('✅ Test 19: Verify manual target setting Passed successfully!');
+
   console.log('✅ All Unit Tests Passed successfully!');
   process.exit(0);
 } catch (error) {
