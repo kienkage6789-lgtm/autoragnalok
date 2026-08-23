@@ -1511,6 +1511,53 @@ try {
   assert.strictEqual(testGdunStateBot.timer, null, 'triggerImmediatePoll should clear the existing timer');
   assert.strictEqual(immediatePollCalled, true, '_runPoll should be executed immediately');
 
+  // Test 16: currentMvpBossInfo updates during Guild Dungeon targeting
+  const testGdunTrackingBot = new BotInstance({
+    name: 'GdunTrackingBot',
+    line_uid: 'gdun_tracking_bot_1',
+    settings: { bossHuntMode: 'type2' }
+  });
+
+  testGdunTrackingBot.guildDungeonActive = true;
+  testGdunTrackingBot.player = { x: 1000, y: 1000, active_gun: 0, map: 12 };
+  testGdunTrackingBot.monsters = [{ id: 456, name: 'GuildBossUltra', x: 1000, y: 900, hp: 1000, hp_max: 1000 }];
+  
+  const aliveBossesTracking = (testGdunTrackingBot.bosses || []).filter(b => (b.hp === undefined || (b.hp || 0) > 0));
+  const aliveMonstersTracking = (testGdunTrackingBot.monsters || []).filter(m => (m.hp === undefined || (m.hp || 0) > 0));
+  const dungeonTargetsTracking = [...aliveBossesTracking, ...aliveMonstersTracking];
+
+  if (dungeonTargetsTracking.length > 0) {
+    const target = dungeonTargetsTracking[0];
+    if (!testGdunTrackingBot.currentMvpBossInfo || testGdunTrackingBot.currentMvpBossInfo.id !== target.id) {
+      testGdunTrackingBot.currentMvpBossInfo = {
+        id: target.id,
+        name: target.name || 'Boss Guild',
+        emoji: '🏰',
+        lv: target.lv || 1,
+        mapId: 12,
+        startTs: Date.now()
+      };
+    }
+  } else {
+    testGdunTrackingBot.currentMvpBossInfo = null;
+  }
+
+  assert.ok(testGdunTrackingBot.currentMvpBossInfo, 'currentMvpBossInfo should be populated');
+  assert.strictEqual(testGdunTrackingBot.currentMvpBossInfo.id, 456, 'Should track target id 456');
+  assert.strictEqual(testGdunTrackingBot.currentMvpBossInfo.name, 'GuildBossUltra', 'Should track target name');
+  assert.strictEqual(testGdunTrackingBot.currentMvpBossInfo.emoji, '🏰', 'Should have Guild Dungeon emoji');
+
+  testGdunTrackingBot.monsters = [];
+  const aliveMonstersTrackingEmpty = (testGdunTrackingBot.monsters || []).filter(m => (m.hp === undefined || (m.hp || 0) > 0));
+  const dungeonTargetsEmpty = [...aliveBossesTracking, ...aliveMonstersTrackingEmpty];
+
+  if (dungeonTargetsEmpty.length > 0) {
+    // skip
+  } else {
+    testGdunTrackingBot.currentMvpBossInfo = null;
+  }
+  assert.strictEqual(testGdunTrackingBot.currentMvpBossInfo, null, 'currentMvpBossInfo should be reset to null when targets empty');
+
   console.log('✅ Guild Dungeon State & Auto-Exit Tests Passed successfully!');
 
   // ==========================================

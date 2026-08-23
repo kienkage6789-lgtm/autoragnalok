@@ -2051,6 +2051,7 @@ class BotInstance {
         this.monsters = null;
         this.guildDungeonActive = false;
         this.guildDungeonIsTeam = false;
+        this.currentMvpBossInfo = null;
         this.settings.guildDungeonIsTeam = false;
         const currentAccounts = loadAccounts();
         const idx = currentAccounts.findIndex(acc => acc.line_uid === this.line_uid);
@@ -3111,6 +3112,18 @@ class BotInstance {
         this.targetedMvp = true;
         this.mvpConfirmClearCount = 0; // Reset clear count vì vẫn còn mục tiêu
 
+        // Cập nhật thông tin boss đang săn để hiển thị trên Dashboard
+        if (!this.currentMvpBossInfo || this.currentMvpBossInfo.id !== target.id) {
+          this.currentMvpBossInfo = {
+            id: target.id,
+            name: target.name || 'Boss Guild',
+            emoji: '🏰',
+            lv: target.lv || 1,
+            mapId: 12,
+            startTs: Date.now()
+          };
+        }
+
         const dx = px - target.x;
         const dy = py - target.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
@@ -3146,6 +3159,8 @@ class BotInstance {
           lockPos = 1; // Khóa vị trí để xả dps
           exploreRadius = 100;
         }
+      } else {
+        this.currentMvpBossInfo = null;
       }
     }
 
