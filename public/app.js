@@ -5803,13 +5803,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Open Client game window
   window.openGameLink = function(uid, token) {
-    const url = `/play?line_uid=${uid}&session_token=${token}`;
+    const safeUid = encodeURIComponent(uid || '');
+    const safeToken = encodeURIComponent(token || '');
+    const url = `/play?line_uid=${safeUid}&session_token=${safeToken}`;
     window.open(url, '_blank');
   };
 
   // Open Battle Radar window
   window.openBattleLink = function(uid, token) {
-    const url = `/battle?line_uid=${uid}&session_token=${token}`;
+    const safeUid = encodeURIComponent(uid || '');
+    const safeToken = encodeURIComponent(token || '');
+    const url = `/battle?line_uid=${safeUid}&session_token=${safeToken}`;
     window.open(url, '_blank');
   };
 

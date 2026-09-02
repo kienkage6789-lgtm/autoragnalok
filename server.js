@@ -128,10 +128,10 @@ class ProxyPool {
     } else {
       dispatcher = this._createAgent(url);
     }
-    
+
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 6000); // 6s timeout
-    
+
     try {
       const response = await fetch('https://ragnalok.online/human/index.php', {
         method: 'GET',
@@ -345,34 +345,21 @@ class ProxyPool {
     }
   }
 
-  recordProxyFailure(id) {
-    if (id && id !== 'direct' && id !== 'auto') {
-      const p = this._proxies.find(x => x.id === id);
-      if (p) {
-        p.errorCount = (p.errorCount || 0) + 1;
-        console.log(`[Proxy Failure Recorded] Proxy ${p.label} errorCount: ${p.errorCount}/3`);
-        if (p.errorCount >= 3) {
-          p.active = false;
-          try { if (this._agents[id]) this._agents[id].destroy(); } catch (e) {}
-          delete this._agents[id];
-          this._save();
-          console.log(`Proxy ${p.label} has been deactivated due to consecutive failures (recorded globally).`);
-          this._reassignFrom(id);
-        }
-      }
-    }
-  }
-
   releaseBot(line_uid) {
     delete this._assignments[line_uid];
   }
 
   getDispatcher(line_uid) {
+    if (!line_uid) return this.getDefaultDispatcher();
     const slot = this._assignments[line_uid] || this.assignBot(line_uid);
     if (slot === 'direct') return this._directAgent;
     if (this._agents[slot]) return this._agents[slot];
     // Proxy removed/inactive — reassign
     delete this._assignments[line_uid];
+    return this.getDispatcher(line_uid);
+  }
+
+  getDispatcherForBot(line_uid) {
     return this.getDispatcher(line_uid);
   }
 
@@ -388,10 +375,10 @@ class ProxyPool {
       if (this._assignments[uid] === proxyId) {
         delete this._assignments[uid];
         const newAssigned = this.assignBot(uid);
-        
+
         if (typeof botInstances !== 'undefined' && botInstances[uid]) {
           botInstances[uid].proxyId = newAssigned;
-          
+
           try {
             const currentAccounts = loadAccounts();
             const index = currentAccounts.findIndex(acc => acc.line_uid === uid);
@@ -515,25 +502,25 @@ Object.assign(viDict, {
 
 function translateThaiText(text) {
   if (!text || typeof text !== 'string') return text;
-  
+
   // 1. Exact match lookup
   if (viDict[text]) return viDict[text];
-  
+
   let translated = text;
-  
+
   // 2. Perform word/phrase translation using keys of viDict
   if (!global.sortedViKeys) {
     global.sortedViKeys = Object.keys(viDict)
       .filter(k => k.trim().length > 1 && /[\u0e00-\u0e7f]/.test(k)) // Thai characters only
       .sort((a, b) => b.length - a.length); // Longest first to avoid partial replacements
   }
-  
+
   for (const key of global.sortedViKeys) {
     if (translated.includes(key)) {
       translated = translated.split(key).join(viDict[key]);
     }
   }
-  
+
   // 3. Additional common replacements for combat logs & market items if still containing Thai
   const commonReplacements = [
     { raw: 'วัตถุดิบสำหรับยานบิน', val: 'Nguyên liệu phi thuyền' },
@@ -569,13 +556,13 @@ function translateThaiText(text) {
     { raw: 'กล่องสุ่มไข่', val: 'Hộp trứng' },
     { raw: 'กล่องไข่', val: 'Hộp trứng' }
   ];
-  
+
   for (const rep of commonReplacements) {
     if (translated.includes(rep.raw)) {
       translated = translated.split(rep.raw).join(rep.val);
     }
   }
-  
+
   return translated;
 }
 
@@ -967,11 +954,11 @@ function loadAccounts() {
 // Save accounts (Debounced Async Write with In-memory Cache)
 function saveAccounts(accounts) {
   accountsCache = accounts;
-  
+
   if (saveAccountsTimeout) {
     clearTimeout(saveAccountsTimeout);
   }
-  
+
   saveAccountsTimeout = setTimeout(() => {
     fs.writeFile(ACCOUNTS_FILE, JSON.stringify(accountsCache, null, 2), 'utf8', (err) => {
       if (err) {
@@ -1142,9 +1129,9 @@ const SKILL_REQS = {
 function isSkillUnlocked(skillId, playerLv, skills) {
   const req = SKILL_REQS[skillId];
   if (!req) return true;
-  
+
   if (req.player_lv && playerLv < req.player_lv) return false;
-  
+
   if (req.skills) {
     return req.skills.every(c => (skills[c.skill] || 0) >= c.lv);
   }
@@ -1387,7 +1374,7 @@ class BotInstance {
     this.name = account.name;
     this.userId = account.userId || 'usr_admin';
     this.fingerprint = getAccountFingerprint(this.line_uid);
-    
+
     // Load user-level poll configuration
     const users = loadUsers();
     const user = users.find(u => u.id === this.userId);
@@ -1402,6 +1389,16 @@ class BotInstance {
       if (userSettings.autoEventJoinGw === undefined) this.settings.autoEventJoinGw = true;
       if (userSettings.autoEventJoinCw === undefined) this.settings.autoEventJoinCw = true;
     }
+
+    // Migration & Aliasing for bossHuntEnabled <-> bossHuntMode
+    if (userSettings.bossHuntEnabled !== undefined) {
+      this.settings.bossHuntEnabled = userSettings.bossHuntEnabled === true;
+      if (this.settings.bossHuntMode === undefined || this.settings.bossHuntMode === 'off') {
+        if (this.settings.bossHuntEnabled) {
+          this.settings.bossHuntMode = 'type2';
+        }
+      }
+    }
     if (this.settings.bossHuntMode === undefined) {
       if (this.settings.autoMVP) {
         this.settings.bossHuntMode = this.settings.autoMvpCycle !== false ? 'type2' : 'type1';
@@ -1409,7 +1406,26 @@ class BotInstance {
         this.settings.bossHuntMode = 'off';
       }
     }
-    
+    this.settings.bossHuntEnabled = (this.settings.bossHuntMode !== 'off');
+
+    // Migration & Aliasing for bossHuntPriority <-> mvpPriorityMode
+    if (userSettings.bossHuntPriority !== undefined) {
+      this.settings.bossHuntPriority = userSettings.bossHuntPriority;
+      this.settings.mvpPriorityMode = userSettings.bossHuntPriority;
+    } else if (userSettings.mvpPriorityMode !== undefined) {
+      this.settings.mvpPriorityMode = userSettings.mvpPriorityMode;
+      this.settings.bossHuntPriority = userSettings.mvpPriorityMode;
+    }
+
+    // Migration & Aliasing for bossHuntMaps <-> mvpTargetMaps (preserving user ordering)
+    if (Array.isArray(userSettings.bossHuntMaps)) {
+      this.settings.bossHuntMaps = userSettings.bossHuntMaps.map(m => parseInt(m)).filter(n => !isNaN(n));
+      this.settings.mvpTargetMaps = this.settings.bossHuntMaps.join(',');
+    } else if (userSettings.mvpTargetMaps !== undefined) {
+      this.settings.mvpTargetMaps = String(userSettings.mvpTargetMaps);
+      this.settings.bossHuntMaps = this.settings.mvpTargetMaps.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+    }
+
     this.player = null;
     this.logs = [];
     this.lastUpdate = null;
@@ -1434,6 +1450,9 @@ class BotInstance {
     this.gdunEnteredAt = 0;         // Timestamp khi vào Phụ Bản Guild (dùng cho timer-based auto-exit)
     this.gdunLastKillAt = 0;        // Timestamp khi hạ gục Boss Guild gần nhất
     this._exitingGuildDungeon = false; // Guard chống gọi exitGuildDungeon() liên tiếp
+    this.gdunSnapshot = null;       // Snapshot vị trí/cấu hình trước khi vào Guild Dungeon
+    this.gdunCurrentTargetId = null; // ID mục tiêu hiện tại trong Guild Dungeon (chống đổi target liên tục)
+    this.gdunTargetQueue = [];      // Queue mục tiêu ổn định trong Guild Dungeon
     this.isMvpCycling = false;
     this.mvpCycleMapIndex = 0;
     this.mvpCycleMapStayCount = 0;
@@ -1577,6 +1596,7 @@ class BotInstance {
     } else {
       this.guildDungeonActive = false;
       this.guildDungeonIsTeam = false;
+      this.gdunCurrentTargetId = null;
       if (this.settings.guildDungeonIsTeam) {
         this.settings.guildDungeonIsTeam = false;
         const currentAccounts = loadAccounts();
@@ -1615,6 +1635,9 @@ class BotInstance {
       offlineTargetMap: 1,
       offlineTargetZones: [],
       bossHuntMode: 'off', // 'off' | 'type1' | 'type2'
+      bossHuntEnabled: false,
+      bossHuntPriority: 'distance', // 'distance' | 'hp_asc' | 'level_asc' | 'level_desc'
+      bossHuntMaps: [],
       currentMvpMapIndex: 0,
       mvpPriorityMode: 'distance',
       mvpTargetMaps: '',
@@ -1673,8 +1696,56 @@ class BotInstance {
     };
   }
 
+  // Helper lấy danh sách map săn Boss giữ nguyên thứ tự sắp xếp của người dùng
+  getBossHuntMaps() {
+    if (Array.isArray(this.settings.bossHuntMaps) && this.settings.bossHuntMaps.length > 0) {
+      return this.settings.bossHuntMaps.map(m => parseInt(m)).filter(n => !isNaN(n));
+    }
+    if (this.settings.mvpTargetMaps) {
+      return String(this.settings.mvpTargetMaps).split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+    }
+    return [];
+  }
+
+  // Helper lấy tiêu chí ưu tiên săn Boss
+  getBossHuntPriority() {
+    return this.settings.bossHuntPriority || this.settings.mvpPriorityMode || 'distance';
+  }
+
   updateSettings(newSettings) {
     const oldBossHuntMode = this.settings.bossHuntMode;
+
+    // Đồng bộ 2 chiều bossHuntPriority <-> mvpPriorityMode
+    if (newSettings.bossHuntPriority !== undefined) {
+      newSettings.mvpPriorityMode = newSettings.bossHuntPriority;
+    } else if (newSettings.mvpPriorityMode !== undefined) {
+      newSettings.bossHuntPriority = newSettings.mvpPriorityMode;
+    }
+
+    // Đồng bộ 2 chiều bossHuntMaps <-> mvpTargetMaps (bảo toàn thứ tự mảng)
+    if (newSettings.bossHuntMaps !== undefined) {
+      if (Array.isArray(newSettings.bossHuntMaps)) {
+        newSettings.bossHuntMaps = newSettings.bossHuntMaps.map(m => parseInt(m)).filter(n => !isNaN(n));
+        newSettings.mvpTargetMaps = newSettings.bossHuntMaps.join(',');
+      } else if (typeof newSettings.bossHuntMaps === 'string') {
+        newSettings.mvpTargetMaps = newSettings.bossHuntMaps;
+        newSettings.bossHuntMaps = newSettings.bossHuntMaps.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+      }
+    } else if (newSettings.mvpTargetMaps !== undefined) {
+      newSettings.mvpTargetMaps = String(newSettings.mvpTargetMaps);
+      newSettings.bossHuntMaps = newSettings.mvpTargetMaps.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+    }
+
+    // Đồng bộ 2 chiều bossHuntEnabled <-> bossHuntMode
+    if (newSettings.bossHuntEnabled !== undefined) {
+      if (newSettings.bossHuntEnabled && (this.settings.bossHuntMode === 'off' || newSettings.bossHuntMode === 'off')) {
+        newSettings.bossHuntMode = 'type2';
+      } else if (!newSettings.bossHuntEnabled) {
+        newSettings.bossHuntMode = 'off';
+      }
+    } else if (newSettings.bossHuntMode !== undefined) {
+      newSettings.bossHuntEnabled = (newSettings.bossHuntMode !== 'off');
+    }
 
     this.settings = { ...this.settings, ...newSettings };
     this.addLog('SYSTEM', 'Cập nhật cấu hình bot thành công');
@@ -1682,10 +1753,10 @@ class BotInstance {
     // Nếu đang trong chu kỳ săn boss mà bị tắt hoặc đổi sang chế độ khác Loại 2, hoặc xóa/đổi danh sách map
     if (this.isMvpCycling) {
       const turnedOffOrChanged = (newSettings.bossHuntMode !== undefined && newSettings.bossHuntMode !== 'type2' && oldBossHuntMode === 'type2');
-      
+
       let mapsCleared = false;
-      if (newSettings.mvpTargetMaps !== undefined) {
-        const maps = newSettings.mvpTargetMaps.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+      if (newSettings.bossHuntMaps !== undefined || newSettings.mvpTargetMaps !== undefined) {
+        const maps = this.getBossHuntMaps();
         if (maps.length === 0) {
           mapsCleared = true;
         }
@@ -1699,7 +1770,7 @@ class BotInstance {
         this.bosses = null;
         this._bossNameCache = {};
         this._lastBossStatusLogAt = 0;
-        
+
         // Khôi phục autoMap ban đầu
         if (this.mvpCycleOriginalAutoMap !== null) {
           this.settings.autoMap = this.mvpCycleOriginalAutoMap;
@@ -1798,10 +1869,10 @@ class BotInstance {
     const now = Date.now();
     const windowMs = 5 * 60 * 1000; // 5 minute window
     const cutoff = now - windowMs;
-    
+
     // Prune history entries older than 5 minutes
     this.combatStatsHistory = (this.combatStatsHistory || []).filter(h => h.time >= cutoff);
-    
+
     let totalKills = 0;
     let totalGold = 0;
     let totalExp = 0;
@@ -1810,7 +1881,7 @@ class BotInstance {
     let totalIron = 0;
     let totalCopper = 0;
     let totalHerb = 0;
-    
+
     this.combatStatsHistory.forEach(h => {
       totalKills += (h.kills || 0);
       totalGold += (h.gold || 0);
@@ -1821,12 +1892,12 @@ class BotInstance {
       totalCopper += (h.copper || 0);
       totalHerb += (h.herb || 0);
     });
-    
+
     // Window start time is either when bot started running or 5 mins ago (cutoff)
     const startOfMeasurement = this.startTime ? Math.max(this.startTime, cutoff) : cutoff;
     const diffMs = now - startOfMeasurement;
     const elapsedMin = Math.max(0.1, diffMs / 60000); // min 6 seconds
-    
+
     return {
       killsPerMin: Math.round((totalKills / elapsedMin) * 10) / 10,
       goldPerMin: Math.round(totalGold / elapsedMin),
@@ -1889,7 +1960,7 @@ class BotInstance {
     if (this.inEventMode) return;
     this.inEventMode = true;
     this.currentEventKind = kind;
-    
+
     // Save original states
     let originalMap = 1;
     if (this.settings.targetMap && Number(this.settings.targetMap) !== Number(mapId)) {
@@ -1904,16 +1975,16 @@ class BotInstance {
     this.eventOriginalAutoZone = this.settings.autoZone;
     this.eventOriginalLockZoneCenter = this.settings.lock_zone_center;
     this.eventOriginalTargetZone = this.settings.targetZone;
-    
+
     this.addLog('SYSTEM', `🚀 Kích hoạt Chế độ Event [${kind.toUpperCase()}]. Đã lưu vị trí bản đồ farm gốc (Map ${this.eventOriginalMap}).`);
-    
+
     // Override settings to keep bot in event map
     this.settings.targetMap = mapId;
     this.settings.autoMap = true;
     this.settings.autoZone = false;
     this.settings.lock_zone_center = false;
     this.settings.targetZone = 0;
-    
+
     const currentAccounts = loadAccounts();
     const index = currentAccounts.findIndex(acc => acc.line_uid === this.line_uid);
     if (index !== -1) {
@@ -1937,26 +2008,26 @@ class BotInstance {
       return;
     }
     this.inEventMode = false;
-    
+
     const returnMap = this.eventOriginalMap || 1;
     this.addLog('SYSTEM', `⏹️ Event kết thúc -> Thoát Chế độ Event, tự động quay về bản đồ farm gốc (Map ${returnMap}).`);
-    
+
     // Restore settings
     this.settings.targetMap = returnMap;
     this.settings.autoMap = this.eventOriginalAutoMap !== undefined ? this.eventOriginalAutoMap : true;
     this.settings.autoZone = this.eventOriginalAutoZone !== undefined ? this.eventOriginalAutoZone : false;
     this.settings.lock_zone_center = this.eventOriginalLockZoneCenter !== undefined ? this.eventOriginalLockZoneCenter : false;
     this.settings.targetZone = this.eventOriginalTargetZone !== undefined ? this.eventOriginalTargetZone : 0;
-    
+
     this.isEventReturning = true;
     this.eventReturnMapTarget = returnMap;
-    
+
     this.eventOriginalMap = null;
     this.eventOriginalAutoMap = null;
     this.eventOriginalAutoZone = null;
     this.eventOriginalLockZoneCenter = null;
     this.eventOriginalTargetZone = null;
-    
+
     const currentAccounts = loadAccounts();
     const index = currentAccounts.findIndex(acc => acc.line_uid === this.line_uid);
     if (index !== -1) {
@@ -1996,6 +2067,35 @@ class BotInstance {
   }
 
   async enterGuildDungeon(isTeam = false) {
+    // Snapshot vị trí, tọa độ explore, và các cấu hình map/zone trước khi vào Phụ Bản Guild
+    if (this.player && Number(this.player.map) !== 12 && Number(this.player.gdun_in) !== 1) {
+      this.gdunSnapshot = {
+        map: Number(this.player.map),
+        x: this.player.x != null ? this.player.x : 1125,
+        y: this.player.y != null ? this.player.y : 1125,
+        explore_cx: this.player.explore_cx != null ? this.player.explore_cx : (this.settings.explore_cx != null ? this.settings.explore_cx : 1125),
+        explore_cy: this.player.explore_cy != null ? this.player.explore_cy : (this.settings.explore_cy != null ? this.settings.explore_cy : 1125),
+        autoMap: this.settings.autoMap,
+        autoZone: this.settings.autoZone,
+        lock_zone_center: this.settings.lock_zone_center,
+        targetZone: this.settings.targetZone,
+        targetMap: this.settings.targetMap
+      };
+    } else if (!this.gdunSnapshot) {
+      this.gdunSnapshot = {
+        map: parseInt(this.settings.targetMap) || 1,
+        x: 1125,
+        y: 1125,
+        explore_cx: 1125,
+        explore_cy: 1125,
+        autoMap: this.settings.autoMap,
+        autoZone: this.settings.autoZone,
+        lock_zone_center: this.settings.lock_zone_center,
+        targetZone: this.settings.targetZone,
+        targetMap: this.settings.targetMap
+      };
+    }
+
     try {
       const res = await this.sendRequest('https://ragnalok.online/human/xhrpg_guild.php', {
         line_uid: this.line_uid,
@@ -2021,6 +2121,8 @@ class BotInstance {
         this.guildDungeonActive = true;
         this.guildDungeonIsTeam = !!isTeam;
         this.settings.guildDungeonIsTeam = !!isTeam;
+        this.gdunCurrentTargetId = null;
+        this.gdunTargetQueue = [];
         const currentAccounts = loadAccounts();
         const idx = currentAccounts.findIndex(acc => acc.line_uid === this.line_uid);
         if (idx !== -1) {
@@ -2036,16 +2138,20 @@ class BotInstance {
         this.triggerImmediatePoll();
         return true;
       } else {
+        this.gdunSnapshot = null;
         this.addLog('WARNING', `🏰 [Guild Dungeon] Không thể vào Phụ Bản Guild: ${(res && res.error) || 'Lỗi không xác định'}`);
         return false;
       }
     } catch (e) {
+      this.gdunSnapshot = null;
       this.addLog('ERROR', `Lỗi vào Phụ Bản Guild: ${e.message}`);
       return false;
     }
   }
 
   async exitGuildDungeon() {
+    // Lưu giữ snapshot trước khi gửi request và cập nhật trạng thái phản hồi
+    const snap = this.gdunSnapshot;
     try {
       const res = await this.sendRequest('https://ragnalok.online/human/xhrpg_guild.php', {
         line_uid: this.line_uid,
@@ -2058,19 +2164,50 @@ class BotInstance {
           this.updatePlayerState(res.player);
         }
         if (!this.player) this.player = {};
-        // Luôn reset gdun_in = 0 khi exit thành công, bất kể server có trả res.map hay không
         this.player.gdun_in = 0;
-        const returnMap = (res.map | 0) || parseInt(this.settings.targetMap) || 1;
+
+        // Khôi phục snapshot ưu tiên hàng đầu, fallback theo res.map/res.x/res.y
+        const returnMap = (snap && snap.map) ? snap.map : ((res.player && res.player.map != null) ? Number(res.player.map) : ((res.map | 0) || parseInt(this.settings.targetMap) || 1));
+        const returnX = (snap && snap.x != null) ? snap.x : ((res.player && res.player.x != null) ? res.player.x : ((res.x != null) ? res.x : 1125));
+        const returnY = (snap && snap.y != null) ? snap.y : ((res.player && res.player.y != null) ? res.player.y : ((res.y != null) ? res.y : 1125));
+        const returnExploreCx = (snap && snap.explore_cx != null) ? snap.explore_cx : ((res.player && res.player.explore_cx != null) ? res.player.explore_cx : returnX);
+        const returnExploreCy = (snap && snap.explore_cy != null) ? snap.explore_cy : ((res.player && res.player.explore_cy != null) ? res.player.explore_cy : returnY);
+
+        if (snap) {
+          if (snap.autoMap !== undefined) this.settings.autoMap = snap.autoMap;
+          if (snap.autoZone !== undefined) this.settings.autoZone = snap.autoZone;
+          if (snap.lock_zone_center !== undefined) this.settings.lock_zone_center = snap.lock_zone_center;
+          if (snap.targetZone !== undefined) this.settings.targetZone = snap.targetZone;
+          if (snap.targetMap !== undefined) this.settings.targetMap = snap.targetMap;
+        }
+
+        // Kiểm tra xem phản hồi từ server đã xác nhận nhân vật ở đúng returnMap chưa
+        const serverConfirmedMap = (res.player && res.player.map != null)
+          ? Number(res.player.map)
+          : (res.map != null ? (res.map | 0) : null);
+
+        // Nếu server chưa xác nhận nhân vật đã ở returnMap, thực sự gửi lệnh warpToMap lên server
+        if (serverConfirmedMap !== returnMap) {
+          await this.warpToMap(returnMap).catch(() => {});
+        }
+
         this.player.map = returnMap;
-        if (res.x != null) this.player.x = res.x;
-        if (res.y != null) this.player.y = res.y;
+        this.player.x = returnX;
+        this.player.y = returnY;
+        this.player.explore_cx = returnExploreCx;
+        this.player.explore_cy = returnExploreCy;
+
         this.spots = null;
         this.bosses = null;
         this.monsters = null;
         this.guildDungeonActive = false;
         this.guildDungeonIsTeam = false;
         this.currentMvpBossInfo = null;
+        this.gdunCurrentTargetId = null;
+        this.gdunTargetQueue = [];
+        this.gdunSnapshot = null;
         this.settings.guildDungeonIsTeam = false;
+
         const currentAccounts = loadAccounts();
         const idx = currentAccounts.findIndex(acc => acc.line_uid === this.line_uid);
         if (idx !== -1) {
@@ -2081,8 +2218,7 @@ class BotInstance {
         this.gdunEnteredAt = 0;
         this.gdunLastKillAt = 0;
         this._exitingGuildDungeon = false;
-        this.addLog('SUCCESS', `↩️ [Guild Dungeon] Đã hoàn thành/thoát khỏi Phụ Bản Guild (Về Map ${returnMap})`);
-        await this.warpToMap(returnMap).catch(() => {});
+        this.addLog('SUCCESS', `↩️ [Guild Dungeon] Đã hoàn thành/thoát khỏi Phụ Bản Guild (Khôi phục về Map ${returnMap} tại [${returnX}, ${returnY}])`);
         this.triggerImmediatePoll();
         return true;
       } else {
@@ -2156,7 +2292,7 @@ class BotInstance {
       if (res && res.ok && Array.isArray(res.feed)) {
         if (!this.eventWarHistory) this.eventWarHistory = [];
         const existingKeys = new Set(this.eventWarHistory.map(h => `${h.time}_${h.killer}_${h.victim}`));
-        
+
         let addedCount = 0;
         res.feed.forEach(r => {
           const timeMs = (r.t | 0) * 1000;
@@ -2174,7 +2310,7 @@ class BotInstance {
             addedCount++;
           }
         });
-        
+
         // Giới hạn tối đa 150 bản ghi
         if (this.eventWarHistory.length > 150) {
           this.eventWarHistory = this.eventWarHistory.slice(0, 150);
@@ -2204,14 +2340,14 @@ class BotInstance {
     if (!this.playerDefCache) this.playerDefCache = {};
     const cached = this.playerDefCache[name];
     const now = Date.now();
-    
+
     // Avoid double fetching
     if (cached && (cached.loading || (now - cached.ts < 30000))) {
       return;
     }
-    
+
     this.playerDefCache[name] = { def: 999999, ts: now, loading: true };
-    
+
     try {
       const res = await this.sendRequest(`https://ragnalok.online/human/xhrpg_leaderboard.php?show=${uid}`, {});
       if (res && res.ok && res.def !== undefined) {
@@ -2237,7 +2373,7 @@ class BotInstance {
     this.startTime = Date.now();
     this.combatStatsHistory = [];
     this.addLog('SYSTEM', 'Bắt đầu hoạt động (đang kết nối...)');
-    
+
     const runPoll = async () => {
       if (this.status !== 'running') return;
 
@@ -2286,16 +2422,16 @@ class BotInstance {
         const formattedErr = err.message || (err.cause ? `${err.cause.code || err.cause.message}` : 'Lỗi kết nối');
         this.error = formattedErr;
         const elapsedSec = Math.round(elapsedTime / 1000);
-        this.addLog('ERROR', `${formattedErr} (Lỗi liên tục ${elapsedSec}s/90s)`);
+        this.addLog('ERROR', `${formattedErr} (Lỗi liên tục ${elapsedSec}s/180s)`);
 
-        if (elapsedTime >= 90000) { // 1.5 minutes
+        if (elapsedTime >= 180000) { // 3 minutes
           const oldProxyId = this.proxyId;
           const newAssigned = proxyPool.failoverAssignment(this.line_uid, oldProxyId);
           if (newAssigned !== oldProxyId) {
             this.proxyId = newAssigned;
             this.consecutiveErrors = 0;
             this.firstErrorAt = null;
-            
+
             // Save updated proxyId to accounts.json
             const currentAccounts = loadAccounts();
             const index = currentAccounts.findIndex(acc => acc.line_uid === this.line_uid);
@@ -2303,9 +2439,9 @@ class BotInstance {
               currentAccounts[index].proxyId = newAssigned;
               saveAccounts(currentAccounts);
             }
-            
+
             const newProxyInfo = proxyPool.getBotProxyInfo(this.line_uid);
-            this.addLog('SYSTEM', `🔄 Proxy cũ gặp sự cố liên tiếp 1.5 phút. Đã tự động đổi sang cấu hình IP mới: ${newProxyInfo.label}`);
+            this.addLog('SYSTEM', `🔄 Proxy cũ gặp sự cố liên tiếp 3 phút. Đã tự động đổi sang cấu hình IP mới: ${newProxyInfo.label}`);
 
             // Trigger proxy recovery check immediately if direct is overloaded
             const counts = proxyPool._getCounts();
@@ -2354,7 +2490,7 @@ class BotInstance {
           }
           const isSnipe = this.targetedMvp && this._bossSnipeActive;
           const isPkEvent = this.inEventMode && (this.currentEventKind === 'gw' || this.currentEventKind === 'cw');
-          
+
           let baseDelay = userPollInterval;
           if (isSnipe || isPkEvent) {
             baseDelay = Math.min(baseDelay, 1200);
@@ -2371,7 +2507,7 @@ class BotInstance {
           const isPositiveSkew = Math.random() < 0.7;
           const jitterMag = Math.floor(Math.random() * jitterBound);
           const jitter = isPositiveSkew ? jitterMag : -Math.floor(jitterMag * 0.75);
-          
+
           this.timer = setTimeout(runPoll, Math.max(500, baseDelay + jitter));
         }
       }
@@ -2445,9 +2581,9 @@ class BotInstance {
 
       const searchParams = new URLSearchParams(payload);
       const controller = new AbortController();
-      const timeoutMs = 10000;
-      const timeout = setTimeout(() => controller.abort(), timeoutMs); // 10s timeout chịu trễ mạng tốt hơn
-      
+      const timeoutMs = url.includes('xhrpg_game.php') ? 8000 : 10000;
+      const timeout = setTimeout(() => controller.abort(), timeoutMs); // 8-10s timeout chịu trễ mạng tốt hơn
+
       const reqStartTime = Date.now();
       try {
         const response = await fetch(url, {
@@ -2493,7 +2629,7 @@ class BotInstance {
             formattedErr = new Error(`Lỗi kết nối bị ngắt đột ngột (ECONNRESET)`);
           }
         }
-        
+
         lastError = formattedErr;
 
         if (attempt < maxAttempts) {
@@ -2580,22 +2716,16 @@ class BotInstance {
   }
 
   getCurrentMvpCycleMap() {
-    if (!this.settings.mvpTargetMaps) return 1;
-    const maps = this.settings.mvpTargetMaps.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
-    return maps[this.mvpCycleMapIndex] || 1;
+    const maps = this.getBossHuntMaps();
+    if (maps.length === 0) return 1;
+    return maps[this.mvpCycleMapIndex % maps.length] || 1;
   }
 
   triggerMvpCycle(forced = false) {
-    if (!this.settings.mvpTargetMaps) {
-      if (forced) {
-        this.addLog('WARNING', `⚠️ Chưa cấu hình danh sách bản đồ săn Boss (mvpTargetMaps).`);
-      }
-      return;
-    }
-    const maps = this.settings.mvpTargetMaps.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+    const maps = this.getBossHuntMaps();
     if (maps.length === 0) {
       if (forced) {
-        this.addLog('WARNING', `⚠️ Danh sách bản đồ săn Boss không hợp lệ.`);
+        this.addLog('WARNING', `⚠️ Chưa cấu hình danh sách bản đồ săn Boss.`);
       }
       return;
     }
@@ -2609,18 +2739,11 @@ class BotInstance {
       }
     }
 
-    // Ghi nhớ bản đồ farm gốc (Loại trừ các map đặc biệt: 4, 5, 11, 12 để tránh kẹt map sau khi kết thúc chu kỳ)
+    // Ghi nhớ bản đồ farm gốc (Ưu tiên player.map hiện tại nếu không ở Nông trại, fallback theo settings.targetMap hoặc 1)
     const currentMapNum = this.player ? Number(this.player.map) : null;
     const configuredTargetMap = parseInt(this.settings.targetMap);
-    const isSpecialMap = (m) => m === 4 || m === 5 || m === 11 || m === 12;
-    
-    let farmMap = 1;
-    if (currentMapNum && !isSpecialMap(currentMapNum)) {
-      farmMap = currentMapNum;
-    } else if (configuredTargetMap && !isSpecialMap(configuredTargetMap)) {
-      farmMap = configuredTargetMap;
-    }
-    
+    const farmMap = (currentMapNum && currentMapNum !== 5) ? currentMapNum : (configuredTargetMap || 1);
+
     this.mvpCycleOriginalMap = farmMap;
     this.mvpCycleOriginalAutoMap = this.settings.autoMap;
 
@@ -2651,11 +2774,8 @@ class BotInstance {
     if (this.guildDungeonActive || Number(this.player.gdun_in) === 1 || Number(this.player.map) === 12) {
       return;
     }
-    
-    const maps = (this.settings.mvpTargetMaps || '')
-      .split(',')
-      .map(s => parseInt(s.trim()))
-      .filter(n => !isNaN(n));
+
+    const maps = this.getBossHuntMaps();
 
     if (maps.length === 0 || this.settings.bossHuntMode !== 'type2') {
       this.isMvpCycling = false;
@@ -2680,7 +2800,7 @@ class BotInstance {
     if (mapDef && (this.player.lv || 1) < mapDef.req) {
       this.addLog('WARNING', `⚠️ [Auto Boss] Cấp độ nhân vật (Lv.${this.player.lv || 1}) không đủ yêu cầu của Map ${activeTargetMapId} (${mapDef.name}, Yêu cầu Lv.${mapDef.req}+). Tự động bỏ qua.`);
       this.addMvpLog('map_skip_level', { mapId: activeTargetMapId, reqLv: mapDef.req, playerLv: this.player.lv || 1 });
-      
+
       this.mvpCycleMapIndex++;
       this.mvpCycleMapStayCount = 0;
       this.mvpConfirmClearCount = 0;
@@ -2702,7 +2822,7 @@ class BotInstance {
       if (this.mvpTransitCount >= 8) {
         this.addLog('WARNING', `⚠️ [Auto Boss] Không thể di chuyển sang Map ${activeTargetMapId} sau 16s. Tự động bỏ qua map này.`);
         this.addMvpLog('map_skip_warp_failed', { mapId: activeTargetMapId });
-        
+
         this.mvpCycleMapIndex++;
         this.mvpCycleMapStayCount = 0;
         this.mvpTransitCount = 0;
@@ -2744,7 +2864,7 @@ class BotInstance {
 
     // 5. Quản lý danh sách Boss khi đã đến đúng map mục tiêu
     const aliveTargetBosses = this.bosses ? this.bosses.filter(b => (b.hp === undefined || (b.hp || 0) > 0)) : [];
-    
+
     // Cập nhật bộ đếm xác nhận map sạch boss
     if (this.bosses === null) {
       // Chưa tải xong danh sách boss từ server -> Chưa xác nhận
@@ -2759,11 +2879,11 @@ class BotInstance {
     const isMapTimeout = (timeSpentMs >= 300000); // 5 phút (5 * 60 * 1000)
     // Confirm map is clear only after staying for at least 3.0 seconds (timeSpentMs >= 3000) and confirming 3 times, or if map timed out
     const isDoneWithCurrentMap = (this.mvpConfirmClearCount >= 3 && timeSpentMs >= 3000) || isMapTimeout;
-    
+
     if (isDoneWithCurrentMap) {
       const killedCount = this.mvpCycleStats ? (this.mvpCycleStats.bossKilledInMap || 0) : 0;
       let reason = '';
-      
+
       if (isMapTimeout) {
         reason = `Quá thời gian chờ 5 phút (Đã diệt ${killedCount} Boss)`;
         this.addLog('WARNING', `⏳ [Auto Boss] Quá thời gian lưu lại (5 phút) tại Map ${currentMap}. Tự động chuyển bản đồ.`);
@@ -2789,7 +2909,7 @@ class BotInstance {
         this.mvpCycleStats.bossKilledInMap = 0;
         this.mvpCycleStats.mapStartTs = Date.now();
       }
-      
+
       if (this.mvpCycleMapIndex < maps.length) {
         const nextMap = maps[this.mvpCycleMapIndex];
         this.addLog('SYSTEM', `🗺️ [Auto Boss] ${reason} tại Map ${currentMap}. Chuyển sang Map tiếp theo: Map ${nextMap}.`);
@@ -2830,8 +2950,8 @@ class BotInstance {
     if (this.player) {
       const isMem = this.settings.teamRole === 'member';
       const mTeamId = this.settings.teamId || 'none';
-      const ldr = (isMem && mTeamId !== 'none') 
-        ? Object.values(botInstances).find(b => b.userId === this.userId && b.settings.teamRole === 'leader' && (b.settings.teamId || 'none') === mTeamId) 
+      const ldr = (isMem && mTeamId !== 'none')
+        ? Object.values(botInstances).find(b => b.userId === this.userId && b.settings.teamRole === 'leader' && (b.settings.teamId || 'none') === mTeamId)
         : null;
 
       if (isMem && ldr && ldr.status === 'running' && ldr.player && this.settings.teamSynced === true) {
@@ -2871,10 +2991,10 @@ class BotInstance {
     if (this.player) {
       const isMember = this.settings.teamRole === 'member';
       const myTeamId = this.settings.teamId || 'none';
-      const leader = (isMember && myTeamId !== 'none') 
-        ? Object.values(botInstances).find(b => b.userId === this.userId && b.settings.teamRole === 'leader' && (b.settings.teamId || 'none') === myTeamId) 
+      const leader = (isMember && myTeamId !== 'none')
+        ? Object.values(botInstances).find(b => b.userId === this.userId && b.settings.teamRole === 'leader' && (b.settings.teamId || 'none') === myTeamId)
         : null;
-      
+
       let activeTargetMapId;
       let shouldWarpCheck = false;
 
@@ -2885,17 +3005,17 @@ class BotInstance {
         this.mvpCycleOriginalMap = leader.mvpCycleOriginalMap;
 
         // Ưu tiên bản đồ chu kỳ hiện tại của Leader, nếu không có thì theo bản đồ hiện tại của Leader
-        activeTargetMapId = leader.isMvpCycling 
-          ? leader.getCurrentMvpCycleMap() 
+        activeTargetMapId = leader.isMvpCycling
+          ? leader.getCurrentMvpCycleMap()
           : (leader.player ? Number(leader.player.map) : (parseInt(leader.settings.targetMap) || 1));
-          
+
         shouldWarpCheck = true; // Thành viên luôn đồng bộ theo Leader khi Leader đang hoạt động
       } else {
         const isMvpReturning = (!this.isMvpCycling && this.mvpCycleOriginalMap !== null);
-        activeTargetMapId = this.isMvpCycling 
-          ? this.getCurrentMvpCycleMap() 
+        activeTargetMapId = this.isMvpCycling
+          ? this.getCurrentMvpCycleMap()
           : (isMvpReturning ? Number(this.mvpCycleOriginalMap) : (parseInt(this.settings.targetMap) || 1));
-          
+
         shouldWarpCheck = (this.settings.autoMap || (this.settings.bossHuntMode && this.settings.bossHuntMode !== 'off') || this.isMvpCycling || isMvpReturning);
       }
 
@@ -2962,28 +3082,8 @@ class BotInstance {
       if (currentMinute === 30 && currentSecond >= 5 && currentSecond <= 20 && this.lastGdunAutoEnterHour !== currentHour) {
         this.lastGdunAutoEnterHour = currentHour;
         if (!this.guildDungeonActive && Number(this.player.gdun_in) !== 1 && Number(this.player.map) !== 12 && !this.inEventMode) {
-          const isTeam = this.settings.guildDungeonIsTeam === true;
-          const modeTxt = isTeam ? 'Cả Team' : 'Cá nhân';
-          this.addLog('SYSTEM', `⏰ [Auto Boss Guild] Đến phút thứ 30:05. Tự động kích hoạt ${modeTxt} vào Phụ Bản Guild...`);
-          
-          if (isTeam) {
-            await this.enterGuildDungeon(true);
-            const myTeamId = this.settings.teamId || 'none';
-            if (myTeamId !== 'none') {
-              const members = Object.values(botInstances).filter(b => 
-                b.userId === this.userId && 
-                b.settings.teamRole === 'member' && 
-                (b.settings.teamId || 'none') === myTeamId &&
-                b.settings.teamSynced === true &&
-                b.status === 'running'
-              );
-              for (const mem of members) {
-                mem.enterGuildDungeon(true).catch(() => {});
-              }
-            }
-          } else {
-            await this.enterGuildDungeon(false);
-          }
+          this.addLog('SYSTEM', `⏰ [Auto Boss Guild] Đến phút thứ 30:05. Tự động kích hoạt cá nhân vào Phụ Bản Guild...`);
+          await this.enterGuildDungeon(false); // Solo entry
         }
       }
     }
@@ -3014,7 +3114,7 @@ class BotInstance {
       this.lastActSentAt = now;
       this.nextActInterval = logNormalActInterval();
     }
-    
+
     let exploreCx = this.player ? (this.settings.explore_cx || this.player.x) : this.settings.explore_cx;
     let exploreCy = this.player ? (this.settings.explore_cy || this.player.y) : this.settings.explore_cy;
     let exploreRadius = this.settings.explore_radius;
@@ -3030,14 +3130,14 @@ class BotInstance {
         const px = this.player ? this.player.x : 0;
         const py = this.player ? this.player.y : 0;
         const attackRange = this.settings.eventAttackRange || 300;
-        
+
         let scanPlayers = alivePlayers.map(p => {
           const dx = px - p.x;
           const dy = py - p.y;
           const dist = Math.sqrt(dx * dx + dy * dy);
           return { ...p, dist };
         }).filter(p => p.dist <= attackRange);
-        
+
         if (scanPlayers.length > 0) {
           // Sort by defense if enabled
           if (this.settings.eventTargetMinDef) {
@@ -3050,21 +3150,21 @@ class BotInstance {
             // Otherwise sort by distance
             scanPlayers.sort((a, b) => a.dist - b.dist);
           }
-          
+
           const activePlayer = scanPlayers[0];
           targetedPk = true;
           this.targetedMvp = true; // Set this to bypass normal farming/MVP logic
-          
+
           const tx = activePlayer.x;
           const ty = activePlayer.y;
           const dx = px - tx;
           const dy = py - ty;
           const dist = activePlayer.dist;
-          
+
           const MIN_DIST = 15;
           const MAX_DIST = 20;
           const TARGET_KITE_DIST = 17.5;
-          
+
           if (dist > MAX_DIST || dist < MIN_DIST) {
             const ux = dist > 0 ? dx / dist : 1;
             const uy = dist > 0 ? dy / dist : 0;
@@ -3080,13 +3180,13 @@ class BotInstance {
             lockPos = 1;
             exploreRadius = 100;
           }
-          
+
           // Trigger fetch in background
           if (activePlayer.uid || activePlayer.line_uid || activePlayer.id) {
             const targetUid = activePlayer.uid || activePlayer.line_uid || activePlayer.id;
             this.fetchPlayerDefBackground(activePlayer.name, targetUid);
           }
-          
+
           if (this.pollCount % 5 === 0) {
             const cacheData = this.playerDefCache[activePlayer.name];
             const defStr = cacheData ? `Giáp: ${cacheData.def}` : 'Giáp: Quét...';
@@ -3103,12 +3203,12 @@ class BotInstance {
       const dx = px - 1125;
       const dy = py - 1125;
       const distToCenter = Math.sqrt(dx * dx + dy * dy);
-      
+
       exploreCx = 1125;
       exploreCy = 1125;
       exploreRadius = 50; // Giới hạn phạm vi hoạt động ở tâm bản đồ
       this.targetedMvp = true; // Bỏ qua cơ chế săn MVP khác hoặc farm thường
-      
+
       if (distToCenter > 15) {
         traveling = 1;
         lockPos = 0;
@@ -3116,39 +3216,114 @@ class BotInstance {
         traveling = 0;
         lockPos = 1;
       }
-      
+
       if (this.pollCount % 10 === 0) {
         this.addLog('SYSTEM', `🌳 [Event Cây Thế Giới] Đang đứng ở tâm bản đồ (Khóa vị trí để đánh Boss)`);
       }
     }
 
-    // 0.5 Guild Dungeon Targeting (Chủ động nhắm và tấn công Boss/Quái trong Phụ Bản Guild)
+    // 0.5 Guild Dungeon Targeting (Chủ động nhắm và tấn công Boss/Quái trong Phụ Bản Guild với Queue ổn định)
     if (this.guildDungeonActive) {
       const px = this.player ? this.player.x : 1125;
       const py = this.player ? this.player.y : 1125;
-
-      const sortPool = (pool) => {
-        if (this.settings.mvpPriorityMode === 'level_asc') {
-          return [...pool].sort((a, b) => (a.lv || 0) - (b.lv || 0));
-        } else if (this.settings.mvpPriorityMode === 'level_desc') {
-          return [...pool].sort((a, b) => (b.lv || 0) - (a.lv || 0));
-        } else {
-          // Mặc định hoặc Khoảng cách (distance)
-          return [...pool].sort((a, b) => {
-            const distA = Math.sqrt((px - a.x) * (px - a.x) + (py - a.y) * (py - a.y));
-            const distB = Math.sqrt((px - b.x) * (px - b.x) + (py - b.y) * (py - b.y));
-            return distA - distB;
-          });
-        }
-      };
+      const priority = this.getBossHuntPriority();
 
       const aliveBosses = (this.bosses || []).filter(b => (b.hp === undefined || (b.hp || 0) > 0));
-      const sortedBosses = sortPool(aliveBosses);
-      // Chỉ nhắm mục tiêu vào Boss Guild, bỏ qua hoàn toàn quái thường
-      const dungeonTargets = sortedBosses;
+      const aliveMonsters = (this.monsters || []).filter(m => (m.hp === undefined || (m.hp || 0) > 0));
+      const allAliveTargets = [...aliveBosses, ...aliveMonsters];
 
-      if (dungeonTargets.length > 0) {
-        const target = dungeonTargets[0];
+      let target = null;
+
+      // 👥 Nếu là Team Member và Team Synced, ưu tiên tuyệt đối mục tiêu của Leader nếu Leader cũng đang ở trong Guild Dungeon
+      if (this.settings.teamRole === 'member') {
+        const myTeamId = this.settings.teamId || 'none';
+        const leader = (myTeamId !== 'none')
+          ? Object.values(botInstances).find(b => b.userId === this.userId && b.settings.teamRole === 'leader' && (b.settings.teamId || 'none') === myTeamId)
+          : null;
+        if (leader && leader.status === 'running' && leader.guildDungeonActive && this.settings.teamSynced === true) {
+          const leaderTargetId = leader.gdunCurrentTargetId || leader.manualTargetBossId;
+          if (leaderTargetId !== null) {
+            const ldrTarget = allAliveTargets.find(t => t.id === leaderTargetId);
+            if (ldrTarget) {
+              target = ldrTarget;
+              this.gdunCurrentTargetId = leaderTargetId;
+            }
+          }
+        }
+      }
+
+      // Nếu không đồng bộ theo leader (hoặc leader chưa chọn target/solo):
+      if (!target) {
+        // 1. Giữ vững mục tiêu hiện tại nếu mục tiêu đó còn sống trong Phụ Bản (không đổi target giữa chừng)
+        if (this.gdunCurrentTargetId !== null) {
+          target = allAliveTargets.find(t => t.id === this.gdunCurrentTargetId);
+          if (!target) {
+            // Target cũ đã chết hoặc biến mất -> giải phóng để lấy phần tử kế tiếp từ queue
+            this.gdunCurrentTargetId = null;
+          }
+        }
+
+        // 2. Nếu chưa có target hoặc target cũ đã chết -> dùng queue ổn định để chọn mục tiêu kế tiếp
+        if (!target && allAliveTargets.length > 0) {
+          const sortGdunTargets = (targets) => {
+            return [...targets].sort((a, b) => {
+              if (priority === 'hp_asc') {
+                const hpA = a.hp !== undefined ? (a.hp || 0) : (a.hp_max || 0);
+                const hpB = b.hp !== undefined ? (b.hp || 0) : (b.hp_max || 0);
+                if (hpA !== hpB) return hpA - hpB;
+                const distA = Math.sqrt((px - a.x) * (px - a.x) + (py - a.y) * (py - a.y));
+                const distB = Math.sqrt((px - b.x) * (px - b.x) + (py - b.y) * (py - b.y));
+                return distA - distB;
+              } else if (priority === 'level_asc') {
+                const lvA = a.lv || 0;
+                const lvB = b.lv || 0;
+                if (lvA !== lvB) return lvA - lvB;
+                const distA = Math.sqrt((px - a.x) * (px - a.x) + (py - a.y) * (py - a.y));
+                const distB = Math.sqrt((px - b.x) * (px - b.x) + (py - b.y) * (py - b.y));
+                return distA - distB;
+              } else if (priority === 'level_desc') {
+                const lvA = a.lv || 0;
+                const lvB = b.lv || 0;
+                if (lvA !== lvB) return lvB - lvA;
+                const distA = Math.sqrt((px - a.x) * (px - a.x) + (py - a.y) * (py - a.y));
+                const distB = Math.sqrt((px - b.x) * (px - b.x) + (py - b.y) * (py - b.y));
+                return distA - distB;
+              } else {
+                // 'distance' (default)
+                const distA = Math.sqrt((px - a.x) * (px - a.x) + (py - a.y) * (py - a.y));
+                const distB = Math.sqrt((px - b.x) * (px - b.x) + (py - b.y) * (py - b.y));
+                return distA - distB;
+              }
+            });
+          };
+
+          // Lọc queue cũ chỉ giữ lại các target còn sống
+          const validQueue = (this.gdunTargetQueue || []).filter(id => allAliveTargets.some(t => t.id === id));
+          const unqueuedTargets = allAliveTargets.filter(t => !validQueue.includes(t.id));
+
+          if (validQueue.length === 0) {
+            // Initial build khi queue rỗng
+            const sortedTargets = sortGdunTargets(allAliveTargets);
+            this.gdunTargetQueue = sortedTargets.map(t => t.id);
+          } else {
+            // Giữ nguyên validQueue theo thứ tự cam kết cũ, không re-order các phần tử cũ
+            this.gdunTargetQueue = validQueue;
+            // Nếu có target mới xuất hiện (spawn thêm), sắp xếp riêng nhóm mới rồi append vào cuối queue (không cướp vị trí đang chờ)
+            if (unqueuedTargets.length > 0) {
+              const sortedNewTargets = sortGdunTargets(unqueuedTargets);
+              this.gdunTargetQueue.push(...sortedNewTargets.map(t => t.id));
+            }
+          }
+
+          if (this.gdunTargetQueue.length > 0) {
+            const nextTargetId = this.gdunTargetQueue[0];
+            target = allAliveTargets.find(t => t.id === nextTargetId);
+            this.gdunCurrentTargetId = target ? target.id : null;
+          }
+        }
+      }
+
+      if (target) {
         this.targetedMvp = true;
         this.mvpConfirmClearCount = 0; // Reset clear count vì vẫn còn mục tiêu
 
@@ -3163,7 +3338,6 @@ class BotInstance {
             startTs: Date.now()
           };
         }
-        this.lastTargetedBossId = target.id;
 
         const dx = px - target.x;
         const dy = py - target.y;
@@ -3202,41 +3376,60 @@ class BotInstance {
         }
       } else {
         this.currentMvpBossInfo = null;
-        this.lastTargetedBossId = null;
+        this.gdunCurrentTargetId = null;
       }
     }
 
     // 1. Auto MVP Hunting (Priority 1)
     // isCorrectMvpMap is already defined above for isFull calculation
     const isHuntingEnabled = this.settings.bossHuntMode !== 'off';
-    
+
     if (isHuntingEnabled && isCorrectMvpMap && !this.guildDungeonActive && this.bosses && this.bosses.length > 0) {
       const aliveBosses = this.bosses.filter(b => (b.hp === undefined || (b.hp || 0) > 0));
 
       if (aliveBosses.length > 0) {
-        let targetPool = aliveBosses;
+        let targetPool = [...aliveBosses];
 
         // Sort target pool based on settings
         const px = this.player ? this.player.x : 0;
         const py = this.player ? this.player.y : 0;
+        const priority = this.getBossHuntPriority();
 
-        if (this.settings.bossHuntMode === 'type2') {
-          // Type 2: Sort by absolute remaining HP ascending (lowest HP first)
-          targetPool.sort((a, b) => (a.hp || 0) - (b.hp || 0));
+        if (this.settings.bossHuntMode === 'type2' || priority === 'hp_asc') {
+          // Type 2 / hp_asc: Sort by absolute remaining HP ascending (lowest HP first)
+          targetPool.sort((a, b) => {
+            const hpA = a.hp !== undefined ? (a.hp || 0) : (a.hp_max || 0);
+            const hpB = b.hp !== undefined ? (b.hp || 0) : (b.hp_max || 0);
+            if (hpA !== hpB) return hpA - hpB;
+            const distA = Math.sqrt((px - a.x) * (px - a.x) + (py - a.y) * (py - a.y));
+            const distB = Math.sqrt((px - b.x) * (px - b.x) + (py - b.y) * (py - b.y));
+            return distA - distB;
+          });
+        } else if (priority === 'level_asc') {
+          targetPool.sort((a, b) => {
+            const lvA = a.lv || 0;
+            const lvB = b.lv || 0;
+            if (lvA !== lvB) return lvA - lvB;
+            const distA = Math.sqrt((px - a.x) * (px - a.x) + (py - a.y) * (py - a.y));
+            const distB = Math.sqrt((px - b.x) * (px - b.x) + (py - b.y) * (py - b.y));
+            return distA - distB;
+          });
+        } else if (priority === 'level_desc') {
+          targetPool.sort((a, b) => {
+            const lvA = a.lv || 0;
+            const lvB = b.lv || 0;
+            if (lvA !== lvB) return lvB - lvA;
+            const distA = Math.sqrt((px - a.x) * (px - a.x) + (py - a.y) * (py - a.y));
+            const distB = Math.sqrt((px - b.x) * (px - b.x) + (py - b.y) * (py - b.y));
+            return distA - distB;
+          });
         } else {
-          // Type 1: Sort by Priority Mode (distance, level_asc, level_desc)
-          if (this.settings.mvpPriorityMode === 'level_asc') {
-            targetPool.sort((a, b) => (a.lv || 0) - (b.lv || 0));
-          } else if (this.settings.mvpPriorityMode === 'level_desc') {
-            targetPool.sort((a, b) => (b.lv || 0) - (a.lv || 0));
-          } else {
-            // Default: distance
-            targetPool.sort((a, b) => {
-              const distA = Math.sqrt((px - a.x) * (px - a.x) + (py - a.y) * (py - a.y));
-              const distB = Math.sqrt((px - b.x) * (px - b.x) + (py - b.y) * (py - b.y));
-              return distA - distB;
-            });
-          }
+          // Default: distance
+          targetPool.sort((a, b) => {
+            const distA = Math.sqrt((px - a.x) * (px - a.x) + (py - a.y) * (py - a.y));
+            const distB = Math.sqrt((px - b.x) * (px - b.x) + (py - b.y) * (py - b.y));
+            return distA - distB;
+          });
         }
 
         let activeBoss = null;
@@ -3244,8 +3437,8 @@ class BotInstance {
         // 👥 Nếu là Member, ưu tiên tuyệt đối mục tiêu Boss của Leader
         if (this.settings.teamRole === 'member') {
           const myTeamId = this.settings.teamId || 'none';
-          const leader = myTeamId !== 'none' 
-            ? Object.values(botInstances).find(b => b.userId === this.userId && b.settings.teamRole === 'leader' && (b.settings.teamId || 'none') === myTeamId) 
+          const leader = myTeamId !== 'none'
+            ? Object.values(botInstances).find(b => b.userId === this.userId && b.settings.teamRole === 'leader' && (b.settings.teamId || 'none') === myTeamId)
             : null;
           if (leader && leader.status === 'running' && leader.player && this.settings.teamSynced === true && this.settings.bossHuntMode && this.settings.bossHuntMode !== 'off' && leader.settings.bossHuntMode && leader.settings.bossHuntMode !== 'off') {
             const leaderTargetId = leader.manualTargetBossId !== null ? leader.manualTargetBossId : leader.lastTargetedBossId;
@@ -3283,10 +3476,10 @@ class BotInstance {
             }
             this.lastTargetedBossId = activeBoss.id;
             this._lastBossStatusLogAt = 0; // Force immediate status log for the new boss
-            
+
             // Get actual spawn time from bossSpawnTimes, fallback to Date.now()
             const spawnTs = this.bossSpawnTimes[activeBoss.id] || Date.now();
-            
+
             this.currentMvpBossInfo = {
               id: activeBoss.id,
               name: activeBoss.name || 'Boss',
@@ -3398,7 +3591,7 @@ class BotInstance {
           const dx = this.player.x - spot.cx;
           const dy = this.player.y - spot.cy;
           const dist = Math.sqrt(dx * dx + dy * dy);
-          
+
           if (this.settings.lock_zone_center) {
             // Lock zone center active: walk to center and lock position
             if (dist > 30) {
@@ -3583,19 +3776,20 @@ class BotInstance {
       this.lastCw = null;
     }
 
-    // 🏰 Tự động thoát Phụ Bản Guild khi sạch Boss (chỉ đánh Boss và thoát ngay khi hết Boss)
+    // 🏰 Tự động thoát Phụ Bản Guild khi sạch Quái & Boss (monsters: [] và bosses: [])
     if (this.guildDungeonActive && !this._exitingGuildDungeon) {
       const timeInDungeon = this.gdunEnteredAt ? (Date.now() - this.gdunEnteredAt) : 0;
       // Chỉ bắt đầu kiểm tra và đếm poll trống sau khi vào phụ bản ít nhất 3 giây để chờ server spawn quái/boss
-      if (timeInDungeon >= 3000 && this.bosses !== null) {
+      if (timeInDungeon >= 3000 && this.monsters !== null && this.bosses !== null) {
+        const aliveMonsters = (this.monsters || []).filter(m => (m.hp === undefined || (m.hp || 0) > 0));
         const aliveBosses = (this.bosses || []).filter(b => (b.hp === undefined || (b.hp || 0) > 0));
-        const hasTargets = (aliveBosses.length > 0);
+        const hasTargets = (aliveMonsters.length > 0 || aliveBosses.length > 0);
 
         if (!hasTargets) {
           this.gdunEmptyPolls = (this.gdunEmptyPolls || 0) + 1;
-          if (this.gdunEmptyPolls >= 5) {
+          if (this.gdunEmptyPolls >= 10) {
             this._exitingGuildDungeon = true;
-            this.addLog('SUCCESS', `🎉 [Guild Dungeon] Đã sạch Boss trong Phụ Bản! Tự động thoát Phụ Bản ra ngoài.`);
+            this.addLog('SUCCESS', `🎉 [Guild Dungeon] Đã sạch Boss/Quái trong Phụ Bản! Tự động thoát Phụ Bản ra ngoài.`);
             await this.exitGuildDungeon();
           }
         } else {
@@ -3688,7 +3882,7 @@ class BotInstance {
     if (this.bosses) {
       const nowTs = Date.now();
       const aliveBosses = this.bosses.filter(b => (b.hp === undefined || (b.hp || 0) > 0));
-      
+
       // Track newly appeared bosses
       aliveBosses.forEach(b => {
         if (!this._bossNameCache) this._bossNameCache = {};
@@ -3700,7 +3894,7 @@ class BotInstance {
           this.addLog('SYSTEM', `👁️ [Auto Boss] Phát hiện Boss xuất hiện: ${b.emoji || '👾'} ${b.name || 'Boss'} (Lv.${b.lv || 1}) lúc ${timeStr}!`);
         }
       });
-      
+
       // Cleanup bosses that are no longer alive or not on the map anymore from spawn times
       const aliveIds = new Set(aliveBosses.map(b => b.id));
       Object.keys(this.bossSpawnTimes).forEach(id => {
@@ -3731,7 +3925,7 @@ class BotInstance {
     if (this.player && !this.player.is_dead) {
       const maxHp = this.player.hp_max_eff || this.player.hp_max || 100;
       const hpPct = Math.min(100, Math.round((this.player.hp / maxHp) * 100));
-      
+
       let shouldActiveHeal = false;
       let healReason = '';
 
@@ -3765,7 +3959,7 @@ class BotInstance {
       if (Number(this.player.map) === Number(this.mvpCycleOriginalMap)) {
         this.settings.autoMap = this.mvpCycleOriginalAutoMap ?? false;
         this.mvpCycleOriginalMap = null;
-        
+
         const currentAccounts = loadAccounts();
         const idx = currentAccounts.findIndex(acc => acc.line_uid === this.line_uid);
         if (idx !== -1) {
@@ -3798,16 +3992,16 @@ class BotInstance {
     if (prevP && prevP.map !== this.player.map) {
       this.spots = null; // Force reload static zone details for the new map
       this.bosses = null; // Clear bosses list to refresh on new map
-      
+
       const wasMvpReturning = (!this.isMvpCycling && this.mvpCycleOriginalMap !== null);
       const isEventReturning = this.isEventReturning || false;
-      
+
       // Do NOT reset zone settings if transitioning to/from Home map (map 5), if in MVP cycle, if returning to the original map, or if returning from an event
       if (prevP.map !== 5 && this.player.map !== 5 && !this.isMvpCycling && this.mvpCycleOriginalMap === null && !wasMvpReturning && !isEventReturning) {
         this.settings.autoZone = false;
         this.settings.lock_zone_center = false;
         this.settings.targetZone = 0;
-        
+
         // Save settings changes to accounts.json
         const currentAccounts = loadAccounts();
         const idx = currentAccounts.findIndex(acc => acc.line_uid === this.line_uid);
@@ -3828,7 +4022,7 @@ class BotInstance {
       d.events.forEach(e => {
         if (!e.msg) return;
         const cleanMsg = e.msg.replace(/<[^>]*>/g, '');
-        
+
         // Count kills - strictly match kill events from game server
         if (e.type === 'kill') {
           pollKills++;
@@ -3840,13 +4034,13 @@ class BotInstance {
             }
           }
         }
-        
+
         // Count EXP
         const expMatch = cleanMsg.match(/EXP\+(\d+)/i);
         if (expMatch) {
           pollExp += parseInt(expMatch[1]);
         }
-        
+
         // Count Gold
         const goldMatch = cleanMsg.match(/(?:G|Gold)\+(\d+)/i);
         if (goldMatch) {
@@ -3909,12 +4103,12 @@ class BotInstance {
           this.addLog(e.type, cleanMsg);
 
           // Check if this is a valuable loot/drop event (Cards, Eggs, Gear, Gems/Treasures)
-          const isValuableLoot = (e.type === 'drop' || e.type === 'loot' || 
-                                 cleanMsg.includes('Nhận được') || 
-                                 cleanMsg.includes('nhận được') || 
+          const isValuableLoot = (e.type === 'drop' || e.type === 'loot' ||
+                                 cleanMsg.includes('Nhận được') ||
+                                 cleanMsg.includes('nhận được') ||
                                  cleanMsg.startsWith('+')) &&
                                  /🎴|🥚|💎|🔮|👑|🏆|🎁|⚔️|🛡️|💍|card|egg|trang bị/i.test(cleanMsg);
-                         
+
           if (isValuableLoot) {
             this.addLootLog(cleanMsg);
           }
@@ -3935,7 +4129,7 @@ class BotInstance {
     const isInvActive = this.lastInv && (this.lastInv.st === 'pre' || this.lastInv.st === 'active') && (!this.lastInv.ends || this.lastInv.ends > currentEpoch);
     const isGwActive = this.lastGw && (this.lastGw.st === 'open' || this.lastGw.st === 'fight') && (!this.lastGw.ends || this.lastGw.ends > currentEpoch);
     const isCwActive = this.lastCw && (this.lastCw.st === 'open' || this.lastCw.st === 'fight') && (!this.lastCw.ends || this.lastCw.ends > currentEpoch);
-    
+
     let isEventActive = false;
     if (this.player) {
       const playerLv = this.player.lv || 1;
@@ -3965,7 +4159,7 @@ class BotInstance {
       const HOME_PLOT_LV = [20, 40, 60, 80, 100];
       const plots = 1 + HOME_PLOT_LV.filter(q => lv >= q).length;
       const totalHoles = plots * 16;
-      
+
       let crops = [];
       try {
         const c = this.player.home_crops;
@@ -4202,12 +4396,12 @@ class BotInstance {
         // B. Upgrade Mine
         else if (level < 100 && level < (this.player.house_lv || 0)) {
           const cost = getMineUpgradeCost(level);
-          if ((this.player.gold || 0) >= cost.gold && 
-              (this.player.wood || 0) >= cost.wood && 
+          if ((this.player.gold || 0) >= cost.gold &&
+              (this.player.wood || 0) >= cost.wood &&
               (this.player.stone || 0) >= cost.stone &&
               (this.player.iron || 0) >= cost.iron &&
               (this.player.copper || 0) >= cost.copper) {
-            
+
             this.addLog('SYSTEM', `⛏️ [Tự động] Nâng cấp mỏ khai thác ô ${s + 1} lên Lv.${level + 1}`);
             try {
               const res = await this.sendRequest('https://ragnalok.online/human/xhrpg_upgrade.php', {
@@ -4272,7 +4466,7 @@ class BotInstance {
     } else {
       // Không có việc nông vụ (hoặc bypassHomeWarp=true) mà vẫn kẹt ở nông trại -> Warp quay ra
       if (isAtHome) {
-        const logMsg = isEventActive 
+        const logMsg = isEventActive
           ? `↩️ [Tự động] Có sự kiện Event đang mở, rời Nông trại để tham gia Event`
           : `↩️ [Tự động] Đã hoàn tất công việc làm vườn, rời Nông trại để quay lại farm`;
         this.addLog('SYSTEM', logMsg);
@@ -4307,8 +4501,8 @@ class BotInstance {
       // Di chuyển bản đồ mục tiêu thường hoặc bản đồ săn Boss xoay vòng
       const isMember = this.settings.teamRole === 'member';
       const myTeamId = this.settings.teamId || 'none';
-      const leader = (isMember && myTeamId !== 'none') 
-        ? Object.values(botInstances).find(b => b.userId === this.userId && b.settings.teamRole === 'leader' && (b.settings.teamId || 'none') === myTeamId) 
+      const leader = (isMember && myTeamId !== 'none')
+        ? Object.values(botInstances).find(b => b.userId === this.userId && b.settings.teamRole === 'leader' && (b.settings.teamId || 'none') === myTeamId)
         : null;
 
       const isMvpReturning = (!this.isMvpCycling && this.mvpCycleOriginalMap !== null);
@@ -4316,13 +4510,13 @@ class BotInstance {
       let shouldWarpCheck = false;
 
       if (isMember && leader && leader.status === 'running' && leader.player && this.settings.teamSynced === true && this.settings.bossHuntMode && this.settings.bossHuntMode !== 'off' && leader.settings.bossHuntMode && leader.settings.bossHuntMode !== 'off' && !leader.guildDungeonActive && Number(leader.player.gdun_in) !== 1 && Number(leader.player.map) !== 12) {
-        activeTargetMapId = leader.isMvpCycling 
-          ? leader.getCurrentMvpCycleMap() 
+        activeTargetMapId = leader.isMvpCycling
+          ? leader.getCurrentMvpCycleMap()
           : (leader.player ? Number(leader.player.map) : (parseInt(leader.settings.targetMap) || 1));
         shouldWarpCheck = true;
       } else {
-        activeTargetMapId = this.isMvpCycling 
-          ? this.getCurrentMvpCycleMap() 
+        activeTargetMapId = this.isMvpCycling
+          ? this.getCurrentMvpCycleMap()
           : (isMvpReturning ? Number(this.mvpCycleOriginalMap) : (parseInt(this.settings.targetMap) || 1));
         shouldWarpCheck = (this.settings.autoMap || (this.settings.bossHuntMode && this.settings.bossHuntMode !== 'off') || this.isMvpCycling || isMvpReturning);
       }
@@ -4417,7 +4611,7 @@ class BotInstance {
         const HOME_PLOT_LV = [20, 40, 60, 80, 100];
         const plots = 1 + HOME_PLOT_LV.filter(q => lv >= q).length;
         const totalHoles = plots * 16;
-        
+
         let crops = [];
         try {
           const c = this.player.home_crops;
@@ -4551,12 +4745,12 @@ class BotInstance {
     // 1. Kiểm tra điều kiện bật tính năng
     if (!this.settings.autoMarketBuy) return;
     if (this.status !== 'running') return;
-    
+
     // 2. Kiểm tra chu kỳ quét (cấu hình được từ 5s-60s, mặc định 10s)
     const intervalSec = Math.max(5, Number(this.settings.marketScanInterval || 10));
     const now = Date.now();
     if (this.lastMarketScanAt && (now - this.lastMarketScanAt < intervalSec * 1000)) return;
-    
+
     // 3. Kiểm tra phân quyền và giới hạn bot chạy chợ của user sở hữu
     const users = loadUsers();
     const owner = users.find(u => u.id === this.userId);
@@ -4570,15 +4764,15 @@ class BotInstance {
         }
         return;
       }
-      
-      const userBots = Object.values(botInstances).filter(bot => 
-        bot.userId === this.userId && 
-        bot.status === 'running' && 
+
+      const userBots = Object.values(botInstances).filter(bot =>
+        bot.userId === this.userId &&
+        bot.status === 'running' &&
         bot.settings.autoMarketBuy === true
       );
-      
+
       userBots.sort((a, b) => a.line_uid.localeCompare(b.line_uid));
-      
+
       const myIndex = userBots.findIndex(bot => bot.line_uid === this.line_uid);
       if (myIndex >= limit) {
         if (this.pollCount % 30 === 0) {
@@ -4612,15 +4806,15 @@ class BotInstance {
 
       for (const item of listings) {
         const category = getItemCategory(item);
-        
+
         // A. Kiểm tra xem category này có đang được BẬT không
         if (!categoriesConfig[category]) continue;
 
         const price = Number(item.price_per || 0);
 
         // B. Tính giá tối đa hiệu lực cho category này
-        const catMaxPrice = categoryMaxPrices[category] !== undefined && categoryMaxPrices[category] !== null && categoryMaxPrices[category] !== '' 
-          ? Number(categoryMaxPrices[category]) 
+        const catMaxPrice = categoryMaxPrices[category] !== undefined && categoryMaxPrices[category] !== null && categoryMaxPrices[category] !== ''
+          ? Number(categoryMaxPrices[category])
           : globalMaxPrice;
         const effectiveMaxPrice = catMaxPrice > 0 ? catMaxPrice : globalMaxPrice;
 
@@ -4736,8 +4930,8 @@ class BotInstance {
 
       for (const targetItem of matchingItems) {
         const categoryMaxQtys = this.settings.marketCategoryMaxQtys || {};
-        const limitQty = categoryMaxQtys[targetItem.category] !== undefined 
-          ? Number(categoryMaxQtys[targetItem.category]) 
+        const limitQty = categoryMaxQtys[targetItem.category] !== undefined
+          ? Number(categoryMaxQtys[targetItem.category])
           : (targetItem.category === 'resource' ? 100 : 1);
 
         const maxAffordable = Math.floor(currentGold / targetItem.price);
@@ -5267,14 +5461,14 @@ app.put('/api/admin/users/:userId/allow-market', requireAdmin, (req, res) => {
   users[index].allowMarket = allowMarket === true;
   saveUsers(users);
 
-  res.json({ 
-    success: true, 
-    user: { 
-      id: users[index].id, 
-      username: users[index].username, 
-      role: users[index].role, 
-      allowMarket: users[index].allowMarket 
-    } 
+  res.json({
+    success: true,
+    user: {
+      id: users[index].id,
+      username: users[index].username,
+      role: users[index].role,
+      allowMarket: users[index].allowMarket
+    }
   });
 });
 
@@ -5298,15 +5492,15 @@ app.put('/api/admin/users/:userId/market-limit', requireAdmin, (req, res) => {
   users[index].allowMarket = parsed > 0;
   saveUsers(users);
 
-  res.json({ 
-    success: true, 
-    user: { 
-      id: users[index].id, 
-      username: users[index].username, 
-      role: users[index].role, 
+  res.json({
+    success: true,
+    user: {
+      id: users[index].id,
+      username: users[index].username,
+      role: users[index].role,
       marketBotLimit: users[index].marketBotLimit,
       allowMarket: users[index].allowMarket
-    } 
+    }
   });
 });
 
@@ -5401,7 +5595,7 @@ app.post('/api/admin/proxies', requireAuth, (req, res) => {
 app.put('/api/admin/proxies/settings', requireAuth, (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'Chỉ Admin mới có quyền truy cập' });
   const { useDirectConnection, maxBotsPerProxy, telegramBotToken, telegramChatId, backupIntervalHours, autoBackupEnabled } = req.body;
-  
+
   if (telegramBotToken && telegramChatId) {
     const botId = telegramBotToken.trim().split(':')[0];
     if (telegramChatId.trim() === botId) {
@@ -5443,7 +5637,7 @@ app.delete('/api/admin/proxies/:id', requireAuth, (req, res) => {
 app.post('/api/admin/proxies/:id/test', requireAuth, async (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'Chỉ Admin mới có quyền truy cập' });
   const { id } = req.params;
-  
+
   let url = null;
   if (id === 'direct') {
     url = 'direct';
@@ -5452,7 +5646,7 @@ app.post('/api/admin/proxies/:id/test', requireAuth, async (req, res) => {
     if (!p) return res.status(404).json({ error: 'Không tìm thấy proxy' });
     url = p.url;
   }
-  
+
   try {
     const start = Date.now();
     let dispatcher;
@@ -5461,10 +5655,10 @@ app.post('/api/admin/proxies/:id/test', requireAuth, async (req, res) => {
     } else {
       dispatcher = proxyPool._createAgent(url);
     }
-    
+
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 6000); // 6s timeout
-    
+
     try {
       const response = await fetch('https://ragnalok.online/human/index.php', {
         method: 'GET',
@@ -5474,7 +5668,7 @@ app.post('/api/admin/proxies/:id/test', requireAuth, async (req, res) => {
         dispatcher,
         signal: controller.signal
       });
-      
+
       const latency = Date.now() - start;
       if (response.ok) {
         res.json({ success: true, latency });
@@ -5911,7 +6105,7 @@ app.get('/api/accounts', requireAuth, (req, res) => {
           guildDungeonActive: bot.guildDungeonActive || false,
           guildDungeonIsTeam: bot.guildDungeonIsTeam || false,
           proxyInfo: req.user.role === 'admin' ? proxyPool.getBotProxyInfo(bot.line_uid) : null,
-          combatRates: bot.getCombatRates ? bot.getCombatRates() : { 
+          combatRates: bot.getCombatRates ? bot.getCombatRates() : {
             killsPerMin: 0, goldPerMin: 0, expPerMin: 0,
             woodPerMin: 0, stonePerMin: 0, ironPerMin: 0, copperPerMin: 0, herbPerMin: 0
           },
@@ -6090,7 +6284,7 @@ app.get('/api/accounts', requireAuth, (req, res) => {
           isMvpCycling: bot.isMvpCycling || false,
           currentMvpBossInfo: bot.currentMvpBossInfo || null,
           aliveBossCount: bot.bosses ? bot.bosses.filter(b => (b.hp === undefined || (b.hp || 0) > 0)).length : 0,
-          bossHuntActive: bot.settings.bossHuntMode !== 'off' || bot.guildDungeonActive === true,
+          bossHuntActive: bot.settings.bossHuntMode !== 'off',
           aliveBosses: (bot.bosses || []).filter(b => (b.hp === undefined || (b.hp || 0) > 0)).map(b => ({
             id: b.id,
             name: b.name || 'Boss',
@@ -6252,7 +6446,7 @@ app.put('/api/accounts/:line_uid', requireAuth, async (req, res) => {
       bot.player = check.player;
       bot.error = null;
       bot.addLog('SYSTEM', 'Đã cập nhật Session Token mới thành công');
-      
+
       if (bot.status !== 'running') {
         bot.start();
       }
@@ -6378,8 +6572,8 @@ app.post('/api/team/sync', requireAuth, (req, res) => {
 
   currentAccounts.forEach(acc => {
     if (acc.userId === leaderBot.userId && acc.line_uid !== leaderBot.line_uid) {
-      const isMemberOfSameTeam = acc.settings && 
-                                 acc.settings.teamRole === 'member' && 
+      const isMemberOfSameTeam = acc.settings &&
+                                 acc.settings.teamRole === 'member' &&
                                  (acc.settings.teamId || 'none') === leaderTeamId;
       if (isMemberOfSameTeam) {
         // Copy settings
@@ -6520,7 +6714,7 @@ app.get('/api/accounts/:line_uid/droplogs', requireAuth, async (req, res) => {
       const formattedDrops = rawData.drops.map(item => {
         const actionType = item.a || '';
         const isOffline = actionType.startsWith('off_');
-        
+
         let typeIcon = '🎁';
         let category = 'item';
         if (actionType.includes('card')) { typeIcon = '🎴'; category = 'card'; }
@@ -6626,7 +6820,7 @@ app.get('/api/accounts/:line_uid/market-history', requireAuth, async (req, res) 
       let typeIcon = '📋';
       let typeLabel = 'Giao dịch';
       const rawAct = String(item.action || item.type || item.a || item.status || item.st || '').toLowerCase();
-      
+
       if (rawAct.includes('sell') || rawAct.includes('sold') || rawAct.includes('ขายได้') || rawAct.includes('bán')) {
         typeIcon = '🏷️'; typeLabel = 'Đã bán';
       } else if (rawAct.includes('buy') || rawAct.includes('bought') || rawAct.includes('ซื้อมา') || rawAct.includes('mua')) {
@@ -7283,7 +7477,7 @@ app.get('/api/accounts/:line_uid/event-war-history', requireAuth, async (req, re
   const currentEpoch = Math.floor(Date.now() / 1000);
   const isGwActive = bot.lastGw && (bot.lastGw.st === 'open' || bot.lastGw.st === 'fight') && (!bot.lastGw.ends || bot.lastGw.ends > currentEpoch);
   const isCwActive = bot.lastCw && (bot.lastCw.st === 'open' || bot.lastCw.st === 'fight') && (!bot.lastCw.ends || bot.lastCw.ends > currentEpoch);
-  
+
   if (bot.inEventMode || isGwActive || isCwActive) {
     if (!bot.currentEventKind && (isGwActive || isCwActive)) {
       bot.currentEventKind = isGwActive ? 'gw' : 'cw';
@@ -7293,10 +7487,10 @@ app.get('/api/accounts/:line_uid/event-war-history', requireAuth, async (req, re
     } catch (e) {}
   }
 
-  res.json({ 
-    ok: true, 
+  res.json({
+    ok: true,
     playerName: bot.player ? bot.player.name : '',
-    history: bot.eventWarHistory || [] 
+    history: bot.eventWarHistory || []
   });
 });
 
@@ -7466,7 +7660,7 @@ app.post('/api/accounts/:line_uid/trade', requireAuth, async (req, res) => {
     }, req.body || {});
 
     const gameRes = await bot.sendRequest('https://ragnalok.online/human/xhrpg_trade.php', payload);
-    
+
     let parsedRes = gameRes;
     if (typeof gameRes === 'string') {
       try {
@@ -7510,15 +7704,15 @@ app.post('/api/accounts/:line_uid/action', requireAuth, async (req, res) => {
         }
       });
       const currentAccounts = loadAccounts();
-      
+
       for (const targetBot of targetBots) {
         targetBot.updateSettings({ bossHuntMode: 'type2' });
-        
+
         const index = currentAccounts.findIndex(acc => acc.line_uid === targetBot.line_uid);
         if (index !== -1) {
           currentAccounts[index].settings = targetBot.settings;
         }
-        
+
         // Chỉ gọi triggerMvpCycle cho trưởng nhóm hoặc bot chạy độc lập
         // Thành viên sẽ tự động đồng bộ theo trưởng nhóm trong pollGame()
         if (targetBot.settings.teamRole !== 'member') {
@@ -7533,11 +7727,11 @@ app.post('/api/accounts/:line_uid/action', requireAuth, async (req, res) => {
             targetBot.triggerMvpCycle(true);
           }
         }
-        
+
         const msgTeam = myTeamId !== 'none' ? `cho Team [${myTeamId.toUpperCase()}]` : 'độc lập';
         targetBot.addLog('SYSTEM', `🚀 [Auto Boss] Kích hoạt chế độ đi săn Boss xoay vòng ${msgTeam}!`);
       }
-      
+
       saveAccounts(currentAccounts);
       const successMsg = myTeamId !== 'none'
         ? `Đã kích hoạt chế độ đi săn Boss xoay vòng cho Team [${myTeamId.toUpperCase()}]!`
@@ -7549,18 +7743,17 @@ app.post('/api/accounts/:line_uid/action', requireAuth, async (req, res) => {
   }
 
   if (action === 'set_boss_target') {
-    const bossId = extra && extra.bossId !== undefined && extra.bossId !== null ? extra.bossId : null;
+    const bossId = extra && extra.bossId !== undefined ? Number(extra.bossId) : null;
     if (bossId === null) {
       bot.manualTargetBossId = null;
       bot.addLog('SYSTEM', '🎯 [Manual Target] Đã hủy chỉ định boss thủ công. Quay lại chế độ tự động.');
       return res.json({ ok: true, msg: 'Đã hủy chỉ định boss. Bot sẽ tự chọn mục tiêu.' });
     }
-    const searchPool = bot.bosses || [];
-    const aliveBoss = searchPool.find(b => String(b.id) === String(bossId) && (b.hp === undefined || (b.hp || 0) > 0));
+    const aliveBoss = bot.bosses ? bot.bosses.find(b => b.id === bossId && (b.hp === undefined || (b.hp || 0) > 0)) : null;
     if (!aliveBoss) {
       return res.status(400).json({ error: 'Boss không tồn tại hoặc đã chết.' });
     }
-    bot.manualTargetBossId = aliveBoss.id;
+    bot.manualTargetBossId = bossId;
     bot.addLog('SYSTEM', `🎯 [Manual Target] User chỉ định mục tiêu: ${aliveBoss.emoji || '👾'} ${aliveBoss.name || 'Boss'} (Lv.${aliveBoss.lv || 1})`);
     return res.json({ ok: true, msg: `Đã chỉ định mục tiêu: ${aliveBoss.emoji || '👾'} ${aliveBoss.name}` });
   }
@@ -7580,9 +7773,9 @@ app.post('/api/accounts/:line_uid/action', requireAuth, async (req, res) => {
       const ok = await bot.enterGuildDungeon(true);
       const myTeamId = bot.settings.teamId || 'none';
       if (myTeamId !== 'none') {
-        const members = Object.values(botInstances).filter(b => 
-          b.userId === bot.userId && 
-          b.settings.teamRole === 'member' && 
+        const members = Object.values(botInstances).filter(b =>
+          b.userId === bot.userId &&
+          b.settings.teamRole === 'member' &&
           (b.settings.teamId || 'none') === myTeamId &&
           b.settings.teamSynced === true &&
           b.status === 'running'
@@ -7631,7 +7824,7 @@ app.post('/api/accounts/:line_uid/action', requireAuth, async (req, res) => {
 
       if (payload.target_map !== undefined) {
         const targetMapNum = Number(payload.target_map);
-        
+
         // Trực tiếp kích hoạt Event Mode nếu người dùng nhấn vào thông báo
         const isInvActive = bot.lastInv && (bot.lastInv.st === 'pre' || bot.lastInv.st === 'active');
         if (targetMapNum === 2 && isInvActive) {
@@ -7703,7 +7896,7 @@ app.post('/api/accounts/:line_uid/action', requireAuth, async (req, res) => {
     }
 
     const response = await bot.sendRequest(url, payload);
-    
+
     // Fix: Đối với gwar_join và cwar_join, server game không trả về đối tượng player, mà chỉ trả về {ok: true, map: 4, x, y}
     if (response && response.ok && (action === 'gwar_join' || action === 'cwar_join')) {
       bot.enterEventMode(action === 'gwar_join' ? 'gw' : 'cw', 4);
@@ -7816,7 +8009,7 @@ app.post('/api/accounts/:line_uid/action', requireAuth, async (req, res) => {
         }
       }
     }
-    
+
     if (response.msg) {
       bot.addLog('ACTION', response.msg);
     } else if (response.error) {
@@ -7831,27 +8024,67 @@ app.post('/api/accounts/:line_uid/action', requireAuth, async (req, res) => {
 
 // Proxy helper function
 async function proxyRequest(req, res, targetUrl, uid = null) {
+  const effectiveUid = uid || (req.body && req.body.line_uid) || (req.query && req.query.line_uid) || null;
+  const bot = effectiveUid ? botInstances[effectiveUid] : null;
+
   const headers = {
     'content-type': req.headers['content-type'] || 'application/x-www-form-urlencoded; charset=UTF-8',
-    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'accept': '*/*',
+    'user-agent': req.headers['user-agent'] || (bot && bot.fingerprint && bot.fingerprint.userAgent) || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'accept': req.headers['accept'] || '*/*',
+    'accept-language': req.headers['accept-language'] || (bot && bot.fingerprint && bot.fingerprint.acceptLanguage) || 'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7',
     'origin': 'https://ragnalok.online',
     'referer': 'https://ragnalok.online/human/',
     'connection': 'keep-alive'
   };
 
-  const proxyId = uid ? proxyPool._assignments[uid] : null;
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10000); // 10s timeout
+  if (req.headers['x-requested-with']) {
+    headers['x-requested-with'] = req.headers['x-requested-with'];
+  } else {
+    headers['x-requested-with'] = 'XMLHttpRequest';
+  }
 
+  // Forward cookie header + bot phpsessid if available
+  let cookieHeader = req.headers['cookie'] || '';
+  if (bot && bot.phpsessid) {
+    if (!cookieHeader.includes('PHPSESSID=')) {
+      cookieHeader = cookieHeader ? `${cookieHeader}; PHPSESSID=${bot.phpsessid}` : `PHPSESSID=${bot.phpsessid}`;
+    }
+  }
+  if (cookieHeader) {
+    headers['cookie'] = cookieHeader;
+  }
+
+  // Client hint headers
+  if (req.headers['sec-ch-ua']) headers['sec-ch-ua'] = req.headers['sec-ch-ua'];
+  else if (bot && bot.fingerprint && bot.fingerprint.chUa) headers['sec-ch-ua'] = bot.fingerprint.chUa;
+
+  if (req.headers['sec-ch-ua-mobile']) headers['sec-ch-ua-mobile'] = req.headers['sec-ch-ua-mobile'];
+  else if (bot && bot.fingerprint && bot.fingerprint.mobile) headers['sec-ch-ua-mobile'] = bot.fingerprint.mobile;
+
+  if (req.headers['sec-ch-ua-platform']) headers['sec-ch-ua-platform'] = req.headers['sec-ch-ua-platform'];
+  else if (bot && bot.fingerprint && bot.fingerprint.platform) headers['sec-ch-ua-platform'] = bot.fingerprint.platform;
+
+  if (req.headers['sec-fetch-dest']) headers['sec-fetch-dest'] = req.headers['sec-fetch-dest'];
+  if (req.headers['sec-fetch-mode']) headers['sec-fetch-mode'] = req.headers['sec-fetch-mode'];
+  if (req.headers['sec-fetch-site']) headers['sec-fetch-site'] = req.headers['sec-fetch-site'];
+
+  const controller = new AbortController();
+  const timeoutMs = targetUrl.includes('xhrpg_game.php') ? 10000 : 12000;
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  const startTime = Date.now();
   try {
     let body = null;
-    if (req.method === 'POST') {
-      body = new URLSearchParams(req.body).toString();
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+      if (typeof req.body === 'string') {
+        body = req.body;
+      } else if (req.body && typeof req.body === 'object' && Object.keys(req.body).length > 0) {
+        body = new URLSearchParams(req.body).toString();
+      }
     }
 
     // Use specific bot's dispatcher if uid is provided, to ensure matching outbound IP addresses
-    const dispatcher = uid ? proxyPool.getDispatcher(uid) : proxyPool.getDefaultDispatcher();
+    const dispatcher = effectiveUid ? proxyPool.getDispatcher(effectiveUid) : proxyPool.getDefaultDispatcher();
 
     const response = await fetch(targetUrl, {
       method: req.method,
@@ -7861,10 +8094,9 @@ async function proxyRequest(req, res, targetUrl, uid = null) {
       signal: controller.signal
     });
 
-    clearTimeout(timeout);
-
-    if (proxyId && proxyId !== 'direct') {
-      proxyPool.resetErrorCount(proxyId);
+    const elapsed = Date.now() - startTime;
+    if (!response.ok) {
+      console.warn(`[Proxy Upstream Status] ${req.method} ${targetUrl} -> HTTP ${response.status} ${response.statusText || ''} | uid: ${effectiveUid || 'N/A'} | Time: ${elapsed}ms`);
     }
 
     res.status(response.status);
@@ -7876,58 +8108,58 @@ async function proxyRequest(req, res, targetUrl, uid = null) {
       res.send(Buffer.from(buffer));
     } else {
       const text = await response.text();
-      
+
       // Update bot state if response is valid JSON from a game API call
-      if (uid && botInstances[uid]) {
+      if (effectiveUid && botInstances[effectiveUid]) {
         try {
           const json = JSON.parse(text);
           if (json && json.ok) {
-            const bot = botInstances[uid];
+            const currentBot = botInstances[effectiveUid];
             if (json.player) {
-              bot.updatePlayerState(json.player);
-              bot.lastUpdate = Date.now();
+              currentBot.updatePlayerState(json.player);
+              currentBot.lastUpdate = Date.now();
             }
             if (json.spots) {
-              bot.spots = json.spots;
+              currentBot.spots = json.spots;
             }
             if (json.bosses) {
-              bot.bosses = json.bosses;
+              currentBot.bosses = json.bosses;
             }
             if (json.inv !== undefined) {
-              bot.lastInv = json.inv;
+              currentBot.lastInv = json.inv;
             }
             if (json.gw !== undefined) {
-              bot.lastGw = json.gw;
+              currentBot.lastGw = json.gw;
             }
             if (json.cw !== undefined) {
-              bot.lastCw = json.cw;
+              currentBot.lastCw = json.cw;
             }
 
             // If player is on Map 4 and GW/CW is active, ensure bot inEventMode is true
-            const playerMap = json.player ? Number(json.player.map) : (bot.player ? Number(bot.player.map) : 0);
+            const playerMap = json.player ? Number(json.player.map) : (currentBot.player ? Number(currentBot.player.map) : 0);
             const currentEpoch = Math.floor(Date.now() / 1000);
-            const lastGw = json.gw !== undefined ? json.gw : bot.lastGw;
-            const lastCw = json.cw !== undefined ? json.cw : bot.lastCw;
+            const lastGw = json.gw !== undefined ? json.gw : currentBot.lastGw;
+            const lastCw = json.cw !== undefined ? json.cw : currentBot.lastCw;
             const isGwActive = lastGw && (lastGw.st === 'open' || lastGw.st === 'fight') && (!lastGw.ends || lastGw.ends > currentEpoch);
             const isCwActive = lastCw && (lastCw.st === 'open' || lastCw.st === 'fight') && (!lastCw.ends || lastCw.ends > currentEpoch);
 
             if (playerMap === 4 && (isGwActive || isCwActive)) {
-              if (!bot.inEventMode) {
-                bot.enterEventMode(isGwActive ? 'gw' : 'cw', 4);
+              if (!currentBot.inEventMode) {
+                currentBot.enterEventMode(isGwActive ? 'gw' : 'cw', 4);
               }
             }
 
             // Intercept war log feed from proxy responses (e.g. manual play requests to xhrpg_cwar.php)
             if (json.feed && Array.isArray(json.feed)) {
-              const feedKind = req.body.kind || req.query.kind || bot.currentEventKind || 'gw';
-              if (!bot.eventWarHistory) bot.eventWarHistory = [];
-              const existingKeys = new Set(bot.eventWarHistory.map(h => `${h.time}_${h.killer}_${h.victim}`));
-              
+              const feedKind = (req.body && req.body.kind) || (req.query && req.query.kind) || currentBot.currentEventKind || 'gw';
+              if (!currentBot.eventWarHistory) currentBot.eventWarHistory = [];
+              const existingKeys = new Set(currentBot.eventWarHistory.map(h => `${h.time}_${h.killer}_${h.victim}`));
+
               json.feed.forEach(r => {
                 const timeMs = (r.t | 0) * 1000;
                 const key = `${timeMs}_${r.k}_${r.v}`;
                 if (!existingKeys.has(key)) {
-                  bot.eventWarHistory.unshift({
+                  currentBot.eventWarHistory.unshift({
                     time: timeMs,
                     eventKind: feedKind,
                     killer: r.k,
@@ -7938,9 +8170,9 @@ async function proxyRequest(req, res, targetUrl, uid = null) {
                   });
                 }
               });
-              
-              if (bot.eventWarHistory.length > 150) {
-                bot.eventWarHistory = bot.eventWarHistory.slice(0, 150);
+
+              if (currentBot.eventWarHistory.length > 150) {
+                currentBot.eventWarHistory = currentBot.eventWarHistory.slice(0, 150);
               }
             }
           }
@@ -7948,301 +8180,137 @@ async function proxyRequest(req, res, targetUrl, uid = null) {
           // Ignore parse errors for HTML, JS, or non-JSON resources
         }
       }
-      
+
       res.send(text);
     }
   } catch (err) {
-    clearTimeout(timeout);
-    console.error(`Proxy error for ${targetUrl}:`, err);
-    if (proxyId && proxyId !== 'direct') {
-      proxyPool.recordProxyFailure(proxyId);
+    let formattedMsg = err.message;
+    if (err.name === 'AbortError') {
+      formattedMsg = `Upstream Request Timeout (${Math.round(timeoutMs / 1000)}s)`;
+    } else if (err.cause) {
+      if (err.cause.code === 'ENOTFOUND') {
+        const host = err.cause.hostname || 'ragnalok.online';
+        formattedMsg = `DNS Error (ENOTFOUND): Host not found ${host}`;
+      } else if (err.cause.code === 'ECONNREFUSED') {
+        formattedMsg = 'Connection Refused (ECONNREFUSED)';
+      } else if (err.cause.code === 'ETIMEDOUT' || err.cause.code === 'UND_ERR_CONNECT_TIMEOUT') {
+        formattedMsg = `Connection Timeout (${err.cause.code})`;
+      } else if (err.cause.code === 'ECONNRESET') {
+        formattedMsg = 'Connection Reset (ECONNRESET)';
+      }
     }
-    res.status(500).json({ error: `Proxy error: ${err.message}` });
+    console.error(`[Proxy Error] ${req.method} ${targetUrl} | Upstream Error: ${formattedMsg} | uid: ${effectiveUid || 'N/A'} | Time: ${Date.now() - startTime}ms`);
+    if (!res.headersSent) {
+      res.status(502).json({ error: `Proxy error: ${formattedMsg}` });
+    }
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
 async function fetchGameHtml(req, uid = null) {
+  const effectiveUid = uid || (req.query && req.query.line_uid) || (req.body && req.body.line_uid) || null;
+  const bot = effectiveUid ? botInstances[effectiveUid] : null;
+
   const now = Date.now();
   const targetUrl = `https://ragnalok.online/human/index.php?_cb=${now}`;
-  
-  const dispatcher = uid ? proxyPool.getDispatcher(uid) : proxyPool.getDefaultDispatcher();
 
-  const response = await fetch(targetUrl, {
-    dispatcher: dispatcher,
-    headers: {
-      'user-agent': req.headers['user-agent'] || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    }
-  });
-  
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  let html = await response.text();
-  
-  if (!html.includes('xhrpg_canvas.js')) {
-    throw new Error('Fetched HTML does not contain game scripts (likely Cloudflare block or redirect)');
-  }
-  
-  // 1. Vá lỗi DOM: Đổi id log-list thành event-log (nếu có)
-  html = html.replace('id="log-list"', 'id="event-log"');
-  
-  // 2. Vá lỗi DOM: Thêm login-overlay chống crash engine
-  html = html.replace('</body>', '<div id="login-overlay" style="display:none"></div>\n</body>');
-  
-  // 3. Sửa đường dẫn canvas JS để đi qua Proxy và thêm cache buster
-  html = html.replace(/src="js\/xhrpg_canvas\.js[^"]*"/, `src="/js/xhrpg_canvas.js?v=${now}"`);
-  
-  // 4. Inject file ngôn ngữ tiếng Việt (xhrpg_lang_vi.js) ngay sau xhrpg_canvas.js
-  html = html.replace(
-    /(<script src="\/js\/xhrpg_canvas\.js\?v=\d+"><\/script>)/,
-    `$1\n<script src="/js/xhrpg_lang_vi.js?v=${now}"></script>`
-  );
-
-  // 4.5. Phục dựng các tab bảng xếp hạng (Người chơi & Gold) bị ẩn
-  // Gỡ comment của nút tab 'lv' (Người chơi)
-  html = html.replace(
-    /<!--\s*<button class="rank-tab"\s+data-tab="lv"[\s\S]*?<\/button>\s*-->/,
-    `<button class="rank-tab active" data-tab="lv" onclick="xhrpg.rankTab('lv')"><span class="rt-ico">🏆</span><span class="rt-txt">ผู้เล่น</span></button>`
-  );
-  // Thay đổi nút 'mvp' từ active thành thường
-  html = html.replace(
-    /<button class="rank-tab active"\s+data-tab="mvp"[\s\S]*?<\/button>/,
-    `<button class="rank-tab" data-tab="mvp" onclick="xhrpg.rankTab('mvp')"><span class="rt-ico">⭐</span><span class="rt-txt">MVP</span></button>`
-  );
-  // Gỡ comment của nút tab 'gold' (Gold)
-  html = html.replace(
-    /<!--\s*<button class="rank-tab"\s+data-tab="gold"[\s\S]*?<\/button>\s*-->/,
-    `<button class="rank-tab" data-tab="gold" onclick="xhrpg.rankTab('gold')"><span class="rt-ico">💰</span><span class="rt-txt">Gold</span></button>`
-  );
-
-  // 5. Thay thế Script Khởi động LIFF bằng Proxy Startup Script
-  const customScript = `
-<script>
-const BASE_URL = "/";
-const CF_REGION = "VN";
-const _L = true;
-document.getElementById('loading-msg').textContent = 'Đang kết nối qua proxy chống ngắt kết nối...';
-
-function startGame(player, token, offlineReward) {
-  document.getElementById('loading-screen').style.display = 'none';
-  document.getElementById('game-screen').style.display    = 'flex';
-  xhrpg.init(player, BASE_URL, token);
-  if (offlineReward && offlineReward.kills > 0) {
-    setTimeout(() => xhrpg.showOfflineReward(offlineReward), 800);
-  }
-}
-
-const urlParams = new URLSearchParams(window.location.search);
-const uid = urlParams.get('line_uid');
-const token = urlParams.get('session_token');
-
-if (uid && token) {
-  $.post('/xhrpg_game.php', {
-    line_uid: uid,
-    session_token: token,
-    act: 1,
-    full: 1,
-    bot: 1,
-    lang: 'vi',
-    have_static: 0
-  })
-  .done(res => {
-    let data;
-    try {
-      if (typeof res === 'string') {
-        if (res.trim().startsWith('<')) {
-          throw new Error('Máy chủ game trả về HTML (có thể bị chặn bởi Cloudflare hoặc hết hạn phiên)');
-        }
-        data = JSON.parse(res);
-      } else {
-        data = res;
-      }
-    } catch (parseErr) {
-      console.error('Lỗi giải mã phản hồi game:', parseErr);
-      document.getElementById('loading-msg').textContent = 'Đăng nhập thất bại: ' + parseErr.message;
-      return;
-    }
-
-    if (data && data.ok) {
-      startGame(data.player, token, data.offline_reward);
-    } else {
-      const errMsg = data ? (data.error || data.msg || data.info || JSON.stringify(data)) : 'Lỗi không xác định';
-      document.getElementById('loading-msg').textContent = 'Đăng nhập thất bại: ' + errMsg;
-    }
-  })
-  .fail(() => {
-    document.getElementById('loading-msg').textContent = 'Không thể kết nối tới máy chủ Proxy';
-  });
-} else {
-  document.getElementById('loading-msg').textContent = 'Lỗi: Thiếu tham số line_uid hoặc session_token trên link';
-}
-</script>`;
-
-  html = html.replace(/<script>[\s\S]*?LIFF_ID[\s\S]*?<\/script>/, customScript);
-  
-  return html;
-}
-
-async function fetchGameLoginHtml(req) {
-  const now = Date.now();
-  const targetUrl = `https://ragnalok.online/human/index.php?_cb=${now}`;
-  
-  const response = await fetch(targetUrl, {
-    dispatcher: proxyPool.getDefaultDispatcher(),
-    headers: {
-      'user-agent': req.headers['user-agent'] || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    }
-  });
-  
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  let html = await response.text();
-  
-  if (!html.includes('xhrpg_canvas.js')) {
-    throw new Error('Fetched HTML does not contain game scripts (likely Cloudflare block or redirect)');
-  }
-  
-  // 1. Fix DOM: Hide loading screen and show login overlay
-  html = html.replace('id="log-list"', 'id="event-log"');
-  html = html.replace('id="loading-screen"', 'id="loading-screen" style="display:none;"');
-  html = html.replace('id="login-overlay" style="display:none"', 'id="login-overlay" style="display:flex; z-index:999999;"');
-  
-  html = html.replace(/src="js\/xhrpg_canvas\.js[^"]*"/, `src="/js/xhrpg_canvas.js?v=${now}"`);
-  html = html.replace(
-    /(<script src="\/js\/xhrpg_canvas\.js\?v=\d+"><\/script>)/,
-    `$1\n<script src="/js/xhrpg_lang_vi.js?v=${now}"></script>`
-  );
-
-  // 2. Inject Head Guard Script
-  const headGuard = `
-<script>
-window.ageGate = function() { return true; };
-window.liff = {
-  init: function() { return Promise.resolve(); },
-  isLoggedIn: function() { return false; },
-  login: function() {},
-  logout: function() {}
-};
-(function() {
-  const _origParse = JSON.parse;
-  JSON.parse = function(text, reviver) {
-    if (typeof text === 'string' && text.trim().startsWith('<')) {
-      return { ok: false, error: 'Chưa đăng nhập' };
-    }
-    return _origParse(text, reviver);
+  const headers = {
+    'user-agent': req.headers['user-agent'] || (bot && bot.fingerprint && bot.fingerprint.userAgent) || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'accept': req.headers['accept'] || 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+    'accept-language': req.headers['accept-language'] || (bot && bot.fingerprint && bot.fingerprint.acceptLanguage) || 'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7',
+    'origin': 'https://ragnalok.online',
+    'referer': 'https://ragnalok.online/human/',
+    'connection': 'keep-alive'
   };
-})();
-</script>`;
 
-  html = html.replace('<head>', '<head>\n' + headGuard);
-
-  // 3. Inject Token Sniffer & Login Script
-  const loginProxyScript = `
-<script>
-const BASE_URL = "/";
-const CF_REGION = "VN";
-const _L = true;
-
-document.addEventListener('DOMContentLoaded', () => {
-  document.getElementById('loading-screen').style.display = 'none';
-  document.getElementById('game-screen').style.display = 'block';
-  document.getElementById('login-overlay').style.display = 'flex';
-  if (window.xhrpg && xhrpg.startDemo) {
-    xhrpg.startDemo('/');
+  if (req.headers['x-requested-with']) {
+    headers['x-requested-with'] = req.headers['x-requested-with'];
   }
-});
 
-(function() {
-  let captured = false;
-  function checkAndCapture(uid, token, name) {
-    if (captured || !uid || !token || uid === 'demo') return;
-    captured = true;
-    
-    const loadingDiv = document.createElement('div');
-    loadingDiv.style.cssText = 'position:fixed; inset:0; background:rgba(15,23,42,0.95); z-index:9999999; display:flex; flex-direction:column; align-items:center; justify-content:center; font-family:sans-serif; text-align:center; padding:20px; color:#fff;';
-    loadingDiv.innerHTML = '<div style="font-size:48px; margin-bottom:12px;">⏳</div><h3 style="color:#a78bfa;">Đang lưu token và thêm tài khoản vào Manager...</h3>';
-    document.body.appendChild(loadingDiv);
+  let cookieHeader = req.headers['cookie'] || '';
+  if (bot && bot.phpsessid) {
+    if (!cookieHeader.includes('PHPSESSID=')) {
+      cookieHeader = cookieHeader ? `${cookieHeader}; PHPSESSID=${bot.phpsessid}` : `PHPSESSID=${bot.phpsessid}`;
+    }
+  }
+  if (cookieHeader) {
+    headers['cookie'] = cookieHeader;
+  }
 
-    fetch('/api/auto-add-account', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        line_uid: uid,
-        session_token: token,
-        name: name || ('Google Acc (' + String(uid).slice(-4) + ')')
-      })
-    })
-    .then(res => res.json())
-    .then(data => {
-      if (data.error) {
-        loadingDiv.innerHTML = '<div style="font-size:48px; margin-bottom:12px;">❌</div><h3 style="color:#ef4444;">Lỗi: ' + data.error + '</h3><button onclick="location.href=\\'/\\'" style="margin-top:15px; padding:10px 20px; background:#7c3aed; color:#fff; border:none; border-radius:8px; font-weight:bold; cursor:pointer;">Quay lại Bảng điều khiển</button>';
-      } else {
-        loadingDiv.innerHTML = '<div style="font-size:60px; margin-bottom:12px;">🎉</div><h2 style="color:#34d399; margin-bottom:8px;">TỰ ĐỘNG LẤY TOKEN THÀNH CÔNG!</h2><p style="color:#94a3b8; font-size:15px;">' + (data.updated ? 'Đã cập nhật Token mới' : 'Đã thêm tài khoản mới') + ': <strong style="color:#fff;">' + (data.name || name || uid) + '</strong></p><p style="color:#a78bfa; font-size:13px; margin-top:12px;">⏳ Đang chuyển về Bảng điều khiển trong 1.5 giây...</p>';
-        setTimeout(() => { window.location.href = '/'; }, 1500);
-      }
-    })
-    .catch(err => {
-      loadingDiv.innerHTML = '<div style="font-size:48px; margin-bottom:12px;">❌</div><h3 style="color:#ef4444;">Lỗi kết nối tới máy chủ Manager</h3><button onclick="location.href=\\'/\\'" style="margin-top:15px; padding:10px 20px; background:#7c3aed; color:#fff; border:none; border-radius:8px; font-weight:bold; cursor:pointer;">Quay lại Bảng điều khiển</button>';
+  if (req.headers['sec-ch-ua']) headers['sec-ch-ua'] = req.headers['sec-ch-ua'];
+  else if (bot && bot.fingerprint && bot.fingerprint.chUa) headers['sec-ch-ua'] = bot.fingerprint.chUa;
+
+  if (req.headers['sec-ch-ua-mobile']) headers['sec-ch-ua-mobile'] = req.headers['sec-ch-ua-mobile'];
+  else if (bot && bot.fingerprint && bot.fingerprint.mobile) headers['sec-ch-ua-mobile'] = bot.fingerprint.mobile;
+
+  if (req.headers['sec-ch-ua-platform']) headers['sec-ch-ua-platform'] = req.headers['sec-ch-ua-platform'];
+  else if (bot && bot.fingerprint && bot.fingerprint.platform) headers['sec-ch-ua-platform'] = bot.fingerprint.platform;
+
+  if (req.headers['sec-fetch-dest']) headers['sec-fetch-dest'] = req.headers['sec-fetch-dest'];
+  if (req.headers['sec-fetch-mode']) headers['sec-fetch-mode'] = req.headers['sec-fetch-mode'];
+  if (req.headers['sec-fetch-site']) headers['sec-fetch-site'] = req.headers['sec-fetch-site'];
+
+  const dispatcher = effectiveUid ? proxyPool.getDispatcher(effectiveUid) : proxyPool.getDefaultDispatcher();
+
+  const controller = new AbortController();
+  const timeoutMs = 10000;
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  const startTime = Date.now();
+  console.log(`[FetchGameHtml Start] Fetching game HTML from ${targetUrl} | uid: ${effectiveUid || 'N/A'}`);
+
+  try {
+    const response = await fetch(targetUrl, {
+      dispatcher: dispatcher,
+      headers: headers,
+      signal: controller.signal
     });
-  }
 
-  window.startGame = function(player, token, offlineReward) {
-    if (player && player.line_uid && token) {
-      checkAndCapture(player.line_uid, token, player.name);
+    const elapsed = Date.now() - startTime;
+    if (!response.ok) {
+      console.warn(`[FetchGameHtml Non-OK] Upstream returned HTTP ${response.status} ${response.statusText || ''} | uid: ${effectiveUid || 'N/A'} | Time: ${elapsed}ms`);
+      throw new Error(`HTTP ${response.status}`);
     }
-  };
+    let html = await response.text();
 
-  const checkJQuery = setInterval(() => {
-    if (window.$ && $.post) {
-      clearInterval(checkJQuery);
-      const origPost = $.post;
-      $.post = function(url, data, ...rest) {
-        if (data && typeof data === 'object' && data.line_uid && data.session_token) {
-          checkAndCapture(data.line_uid, data.session_token, data.name);
-        }
-        return origPost.apply(this, [url, data, ...rest]);
-      };
+    if (!html.includes('xhrpg_canvas.js')) {
+      console.warn(`[FetchGameHtml Invalid Content] HTML missing xhrpg_canvas.js (Cloudflare or redirect) | uid: ${effectiveUid || 'N/A'}`);
+      throw new Error('Fetched HTML does not contain game scripts (likely Cloudflare block or redirect)');
     }
-  }, 100);
-})();
-</script>`;
 
-  html = html.replace(/<script>[\s\S]*?LIFF_ID[\s\S]*?<\/script>/, loginProxyScript);
-  return html;
-}
+    console.log(`[FetchGameHtml Success] Game HTML fetched successfully | uid: ${effectiveUid || 'N/A'} | Time: ${elapsed}ms`);
 
-// Local game client routes (Protected)
-app.get('/login-helper', requireAuth, async (req, res) => {
-  try {
-    const html = await fetchGameLoginHtml(req);
-    res.send(html);
-  } catch (e) {
-    console.error('Fetch Login Helper HTML error:', e.message);
-    res.status(500).send('<h2 style="color:#ef4444; font-family:sans-serif; text-align:center; margin-top:50px;">⚠️ Không thể kết nối tới máy chủ game để lấy token!</h2>');
-  }
-});
+    // 1. Vá lỗi DOM: Đổi id log-list thành event-log (nếu có)
+    html = html.replace('id="log-list"', 'id="event-log"');
 
-app.get('/play', requireAuth, async (req, res) => {
-  const uid = req.query.line_uid;
-  if (uid && botInstances[uid]) {
-    if (req.user.role !== 'admin' && botInstances[uid].userId !== req.user.id) {
-      return res.status(403).send('<h2 style="color:#ef4444; font-family:sans-serif; text-align:center; margin-top:50px;">⚠️ Bạn không có quyền truy cập tài khoản game này!</h2>');
-    }
-  }
-  try {
-    const html = await fetchGameHtml(req, uid);
-    res.send(html);
-  } catch (e) {
-    console.error('Fetch HTML error, serving patched play.html fallback:', e.message);
-    let fallback = fs.readFileSync(path.join(__dirname, 'play.html'), 'utf8');
-    const now = Date.now();
-    
-    // Vá lỗi DOM và áp dụng tất cả các thay thế giống fetchGameHtml
-    fallback = fallback.replace('id="log-list"', 'id="event-log"');
-    fallback = fallback.replace('</body>', '<div id="login-overlay" style="display:none"></div>\n</body>');
-    fallback = fallback.replace(/src="js\/xhrpg_canvas\.js[^"]*"/, `src="/js/xhrpg_canvas.js?v=${now}"`);
-    fallback = fallback.replace(
+    // 2. Vá lỗi DOM: Thêm login-overlay chống crash engine
+    html = html.replace('</body>', '<div id="login-overlay" style="display:none"></div>\n</body>');
+
+    // 3. Sửa đường dẫn canvas JS để đi qua Proxy và thêm cache buster
+    html = html.replace(/src="js\/xhrpg_canvas\.js[^"]*"/, `src="/js/xhrpg_canvas.js?v=${now}"`);
+
+    // 4. Inject file ngôn ngữ tiếng Việt (xhrpg_lang_vi.js) ngay sau xhrpg_canvas.js
+    html = html.replace(
       /(<script src="\/js\/xhrpg_canvas\.js\?v=\d+"><\/script>)/,
       `$1\n<script src="/js/xhrpg_lang_vi.js?v=${now}"></script>`
     );
-    
+
+    // 4.5. Phục dựng các tab bảng xếp hạng (Người chơi & Gold) bị ẩn
+    html = html.replace(
+      /<!--\s*<button class="rank-tab"\s+data-tab="lv"[\s\S]*?<\/button>\s*-->/,
+      '<button class="rank-tab active" data-tab="lv" onclick="xhrpg.rankTab(\'lv\')"><span class="rt-ico">🏆</span><span class="rt-txt">ผู้เล่น</span></button>'
+    );
+    html = html.replace(
+      /<button class="rank-tab active"\s+data-tab="mvp"[\s\S]*?<\/button>/,
+      '<button class="rank-tab" data-tab="mvp" onclick="xhrpg.rankTab(\'mvp\')"><span class="rt-ico">⭐</span><span class="rt-txt">MVP</span></button>'
+    );
+    html = html.replace(
+      /<!--\s*<button class="rank-tab"\s+data-tab="gold"[\s\S]*?<\/button>\s*-->/,
+      '<button class="rank-tab" data-tab="gold" onclick="xhrpg.rankTab(\'gold\')"><span class="rt-ico">💰</span><span class="rt-txt">Gold</span></button>'
+    );
+
+    // 5. Thay thế Script Khởi động LIFF bằng Proxy Startup Script
     const customScript = `
 <script>
 const BASE_URL = "/";
@@ -8297,8 +8365,321 @@ if (uid && token) {
       document.getElementById('loading-msg').textContent = 'Đăng nhập thất bại: ' + errMsg;
     }
   })
-  .fail(() => {
-    document.getElementById('loading-msg').textContent = 'Không thể kết nối tới máy chủ Proxy';
+  .fail((jqXHR, textStatus, errorThrown) => {
+    console.error('Lỗi kết nối proxy xhrpg_game.php:', textStatus, errorThrown);
+    const detail = jqXHR.responseJSON?.error ? (': ' + jqXHR.responseJSON.error) : '';
+    document.getElementById('loading-msg').textContent = 'Không thể kết nối tới máy chủ Proxy' + detail;
+  });
+} else {
+  document.getElementById('loading-msg').textContent = 'Lỗi: Thiếu tham số line_uid hoặc session_token trên link';
+}
+</script>`;
+
+    html = html.replace(/<script\b[^>]*>(?:(?!<\/script>)[\s\S])*?LIFF_ID(?:(?!<\/script>)[\s\S])*?<\/script>/, customScript);
+
+    return html;
+  } catch (err) {
+    let formattedErr = err;
+    if (err.name === 'AbortError') {
+      formattedErr = new Error(`Game server connection timeout (${Math.round(timeoutMs / 1000)}s)`);
+    } else if (err.cause) {
+      if (err.cause.code === 'ENOTFOUND') {
+        const host = err.cause.hostname || 'ragnalok.online';
+        formattedErr = new Error(`DNS Error (ENOTFOUND): Host not found ${host}`);
+      } else if (err.cause.code === 'ECONNREFUSED') {
+        formattedErr = new Error('Connection Refused (ECONNREFUSED)');
+      } else if (err.cause.code === 'ETIMEDOUT' || err.cause.code === 'UND_ERR_CONNECT_TIMEOUT') {
+        formattedErr = new Error(`Connection Timeout (${err.cause.code})`);
+      } else if (err.cause.code === 'ECONNRESET') {
+        formattedErr = new Error('Connection Reset (ECONNRESET)');
+      }
+    }
+    console.error(`[FetchGameHtml Error] Error fetching game HTML: ${formattedErr.message} | uid: ${effectiveUid || 'N/A'} | Time: ${Date.now() - startTime}ms`);
+    throw formattedErr;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function fetchGameLoginHtml(req) {
+  const now = Date.now();
+  const targetUrl = `https://ragnalok.online/human/index.php?_cb=${now}`;
+
+  const headers = {
+    'user-agent': req.headers['user-agent'] || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'accept': req.headers['accept'] || 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'accept-language': req.headers['accept-language'] || 'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7',
+    'origin': 'https://ragnalok.online',
+    'referer': 'https://ragnalok.online/human/',
+    'connection': 'keep-alive'
+  };
+
+  if (req.headers['x-requested-with']) {
+    headers['x-requested-with'] = req.headers['x-requested-with'];
+  }
+
+  if (req.headers['cookie']) {
+    headers['cookie'] = req.headers['cookie'];
+  }
+
+  if (req.headers['sec-ch-ua']) headers['sec-ch-ua'] = req.headers['sec-ch-ua'];
+  if (req.headers['sec-ch-ua-mobile']) headers['sec-ch-ua-mobile'] = req.headers['sec-ch-ua-mobile'];
+  if (req.headers['sec-ch-ua-platform']) headers['sec-ch-ua-platform'] = req.headers['sec-ch-ua-platform'];
+  if (req.headers['sec-fetch-dest']) headers['sec-fetch-dest'] = req.headers['sec-fetch-dest'];
+  if (req.headers['sec-fetch-mode']) headers['sec-fetch-mode'] = req.headers['sec-fetch-mode'];
+  if (req.headers['sec-fetch-site']) headers['sec-fetch-site'] = req.headers['sec-fetch-site'];
+
+  const controller = new AbortController();
+  const timeoutMs = 10000;
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  const startTime = Date.now();
+  console.log(`[FetchGameLoginHtml Start] Fetching login HTML from ${targetUrl}`);
+
+  try {
+    const response = await fetch(targetUrl, {
+      dispatcher: proxyPool.getDefaultDispatcher(),
+      headers: headers,
+      signal: controller.signal
+    });
+
+    const elapsed = Date.now() - startTime;
+    if (!response.ok) {
+      console.warn(`[FetchGameLoginHtml Non-OK] Upstream returned HTTP ${response.status} ${response.statusText || ''} | Time: ${elapsed}ms`);
+      throw new Error(`HTTP ${response.status}`);
+    }
+    let html = await response.text();
+
+    if (!html.includes('xhrpg_canvas.js')) {
+      console.warn(`[FetchGameLoginHtml Invalid Content] HTML missing xhrpg_canvas.js (Cloudflare or redirect) | Time: ${elapsed}ms`);
+      throw new Error('Fetched HTML does not contain game scripts (likely Cloudflare block or redirect)');
+    }
+
+    console.log(`[FetchGameLoginHtml Success] Game login HTML fetched successfully | Time: ${elapsed}ms`);
+
+    // 1. Fix DOM: Hide loading screen and show login overlay
+    html = html.replace('id="log-list"', 'id="event-log"');
+    html = html.replace('id="loading-screen"', 'id="loading-screen" style="display:none;"');
+    html = html.replace('id="login-overlay" style="display:none"', 'id="login-overlay" style="display:flex; z-index:999999;"');
+
+    html = html.replace(/src="js\/xhrpg_canvas\.js[^"]*"/, `src="/js/xhrpg_canvas.js?v=${now}"`);
+    html = html.replace(
+      /(<script src="\/js\/xhrpg_canvas\.js\?v=\d+"><\/script>)/,
+      `$1\n<script src="/js/xhrpg_lang_vi.js?v=${now}"></script>`
+    );
+
+    // 2. Inject Head Guard Script
+    const headGuard = `
+<script>
+window.ageGate = function() { return true; };
+window.liff = {
+  init: function() { return Promise.resolve(); },
+  isLoggedIn: function() { return false; },
+  login: function() {},
+  logout: function() {}
+};
+(function() {
+  const _origParse = JSON.parse;
+  JSON.parse = function(text, reviver) {
+    if (typeof text === 'string' && text.trim().startsWith('<')) {
+      return { ok: false, error: 'Chưa đăng nhập' };
+    }
+    return _origParse(text, reviver);
+  };
+})();
+</script>`;
+
+    html = html.replace('<head>', '<head>\n' + headGuard);
+
+    // 3. Inject Token Sniffer & Login Script
+    const loginProxyScript = `
+<script>
+const BASE_URL = "/";
+const CF_REGION = "VN";
+const _L = true;
+
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('loading-screen').style.display = 'none';
+  document.getElementById('game-screen').style.display = 'block';
+  document.getElementById('login-overlay').style.display = 'flex';
+  if (window.xhrpg && xhrpg.startDemo) {
+    xhrpg.startDemo('/');
+  }
+});
+
+(function() {
+  let captured = false;
+  function checkAndCapture(uid, token, name) {
+    if (captured || !uid || !token || uid === 'demo') return;
+    captured = true;
+
+    const loadingDiv = document.createElement('div');
+    loadingDiv.style.cssText = 'position:fixed; inset:0; background:rgba(15,23,42,0.95); z-index:9999999; display:flex; flex-direction:column; align-items:center; justify-content:center; font-family:sans-serif; text-align:center; padding:20px; color:#fff;';
+    loadingDiv.innerHTML = '<div style="font-size:48px; margin-bottom:12px;">⏳</div><h3 style="color:#a78bfa;">Đang lưu token và thêm tài khoản vào Manager...</h3>';
+    document.body.appendChild(loadingDiv);
+
+    fetch('/api/auto-add-account', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        line_uid: uid,
+        session_token: token,
+        name: name || ('Google Acc (' + String(uid).slice(-4) + ')')
+      })
+    })
+    .then(res => res.json())
+    .then(data => {
+      if (data.error) {
+        loadingDiv.innerHTML = '<div style="font-size:48px; margin-bottom:12px;">❌</div><h3 style="color:#ef4444;">Lỗi: ' + data.error + '</h3><button onclick="location.href=\\'/\\'" style="margin-top:15px; padding:10px 20px; background:#7c3aed; color:#fff; border:none; border-radius:8px; font-weight:bold; cursor:pointer;">Quay lại Bảng điều khiển</button>';
+      } else {
+        loadingDiv.innerHTML = '<div style="font-size:60px; margin-bottom:12px;">🎉</div><h2 style="color:#34d399; margin-bottom:8px;">TỰ ĐỘNG LẤY TOKEN THÀNH CÔNG!</h2><p style="color:#94a3b8; font-size:15px;">' + (data.updated ? 'Đã cập nhật Token mới' : 'Đã thêm tài khoản mới') + ': <strong style="color:#fff;">' + (data.name || name || uid) + '</strong></p><p style="color:#a78bfa; font-size:13px; margin-top:12px;">⏳ Đang chuyển về Bảng điều khiển trong 1.5 giây...</p>';
+        setTimeout(() => { window.location.href = '/'; }, 1500);
+      }
+    })
+    .catch(err => {
+      loadingDiv.innerHTML = '<div style="font-size:48px; margin-bottom:12px;">❌</div><h3 style="color:#ef4444;">Lỗi kết nối tới máy chủ Manager</h3><button onclick="location.href=\\'/\\'" style="margin-top:15px; padding:10px 20px; background:#7c3aed; color:#fff; border:none; border-radius:8px; font-weight:bold; cursor:pointer;">Quay lại Bảng điều khiển</button>';
+    });
+  }
+
+  window.startGame = function(player, token, offlineReward) {
+    if (player && player.line_uid && token) {
+      checkAndCapture(player.line_uid, token, player.name);
+    }
+  };
+
+  const checkJQuery = setInterval(() => {
+    if (window.$ && $.post) {
+      clearInterval(checkJQuery);
+      const origPost = $.post;
+      $.post = function(url, data, ...rest) {
+        if (data && typeof data === 'object' && data.line_uid && data.session_token) {
+          checkAndCapture(data.line_uid, data.session_token, data.name);
+        }
+        return origPost.apply(this, [url, data, ...rest]);
+      };
+    }
+  }, 100);
+})();
+</script>`;
+
+    html = html.replace(/<script\b[^>]*>(?:(?!<\/script>)[\s\S])*?LIFF_ID(?:(?!<\/script>)[\s\S])*?<\/script>/, loginProxyScript);
+    return html;
+  } catch (err) {
+    let formattedErr = err;
+    if (err.name === 'AbortError') {
+      formattedErr = new Error(`Game server connection timeout (${Math.round(timeoutMs / 1000)}s)`);
+    } else if (err.cause) {
+      if (err.cause.code === 'ENOTFOUND') {
+        const host = err.cause.hostname || 'ragnalok.online';
+        formattedErr = new Error(`DNS Error (ENOTFOUND): Host not found ${host}`);
+      } else if (err.cause.code === 'ECONNREFUSED') {
+        formattedErr = new Error('Connection Refused (ECONNREFUSED)');
+      } else if (err.cause.code === 'ETIMEDOUT' || err.cause.code === 'UND_ERR_CONNECT_TIMEOUT') {
+        formattedErr = new Error(`Connection Timeout (${err.cause.code})`);
+      } else if (err.cause.code === 'ECONNRESET') {
+        formattedErr = new Error('Connection Reset (ECONNRESET)');
+      }
+    }
+    console.error(`[FetchGameLoginHtml Error] Error fetching game login HTML: ${formattedErr.message} | Time: ${Date.now() - startTime}ms`);
+    throw formattedErr;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+// Local game client routes (Protected)
+app.get('/login-helper', requireAuth, async (req, res) => {
+  try {
+    const html = await fetchGameLoginHtml(req);
+    res.send(html);
+  } catch (e) {
+    console.error('Fetch Login Helper HTML error:', e.message);
+    res.status(500).send('<h2 style="color:#ef4444; font-family:sans-serif; text-align:center; margin-top:50px;">⚠️ Không thể kết nối tới máy chủ game để lấy token!</h2>');
+  }
+});
+
+app.get('/play', requireAuth, async (req, res) => {
+  const uid = req.query.line_uid;
+  if (uid && botInstances[uid]) {
+    if (req.user.role !== 'admin' && botInstances[uid].userId !== req.user.id) {
+      return res.status(403).send('<h2 style="color:#ef4444; font-family:sans-serif; text-align:center; margin-top:50px;">⚠️ Bạn không có quyền truy cập tài khoản game này!</h2>');
+    }
+  }
+  try {
+    const html = await fetchGameHtml(req, uid);
+    res.send(html);
+  } catch (e) {
+    console.warn(`[Play Route Fallback] Serving patched play.html fallback due to: ${e.message} | uid: ${uid || 'N/A'}`);
+    let fallback = fs.readFileSync(path.join(__dirname, 'play.html'), 'utf8');
+    const now = Date.now();
+
+    // Vá lỗi DOM và áp dụng tất cả các thay thế giống fetchGameHtml
+    fallback = fallback.replace('id="log-list"', 'id="event-log"');
+    fallback = fallback.replace('</body>', '<div id="login-overlay" style="display:none"></div>\n</body>');
+    fallback = fallback.replace(/src="js\/xhrpg_canvas\.js[^"]*"/, `src="/js/xhrpg_canvas.js?v=${now}"`);
+    fallback = fallback.replace(
+      /(<script src="\/js\/xhrpg_canvas\.js\?v=\d+"><\/script>)/,
+      `$1\n<script src="/js/xhrpg_lang_vi.js?v=${now}"></script>`
+    );
+
+    const customScript = `
+<script>
+const BASE_URL = "/";
+const CF_REGION = "VN";
+const _L = true;
+document.getElementById('loading-msg').textContent = 'Đang kết nối qua proxy chống ngắt kết nối...';
+
+function startGame(player, token, offlineReward) {
+  document.getElementById('loading-screen').style.display = 'none';
+  document.getElementById('game-screen').style.display    = 'flex';
+  xhrpg.init(player, BASE_URL, token);
+  if (offlineReward && offlineReward.kills > 0) {
+    setTimeout(() => xhrpg.showOfflineReward(offlineReward), 800);
+  }
+}
+
+const urlParams = new URLSearchParams(window.location.search);
+const uid = urlParams.get('line_uid');
+const token = urlParams.get('session_token');
+
+if (uid && token) {
+  $.post('/xhrpg_game.php', {
+    line_uid: uid,
+    session_token: token,
+    act: 1,
+    full: 1,
+    bot: 1,
+    lang: 'vi',
+    have_static: 0
+  })
+  .done(res => {
+    let data;
+    try {
+      if (typeof res === 'string') {
+        if (res.trim().startsWith('<')) {
+          throw new Error('Máy chủ game trả về HTML (có thể bị chặn bởi Cloudflare hoặc hết hạn phiên)');
+        }
+        data = JSON.parse(res);
+      } else {
+        data = res;
+      }
+    } catch (parseErr) {
+      console.error('Lỗi giải mã phản hồi game:', parseErr);
+      document.getElementById('loading-msg').textContent = 'Đăng nhập thất bại: ' + parseErr.message;
+      return;
+    }
+
+    if (data && data.ok) {
+      startGame(data.player, token, data.offline_reward);
+    } else {
+      const errMsg = data ? (data.error || data.msg || data.info || JSON.stringify(data)) : 'Lỗi không xác định';
+      document.getElementById('loading-msg').textContent = 'Đăng nhập thất bại: ' + errMsg;
+    }
+  })
+  .fail((jqXHR, textStatus, errorThrown) => {
+    console.error('Lỗi kết nối proxy xhrpg_game.php (fallback):', textStatus, errorThrown);
+    const detail = jqXHR.responseJSON?.error ? (': ' + jqXHR.responseJSON.error) : '';
+    document.getElementById('loading-msg').textContent = 'Không thể kết nối tới máy chủ Proxy' + detail;
   });
 } else {
   document.getElementById('loading-msg').textContent = 'Lỗi: Thiếu tham số line_uid hoặc session_token trên link';
@@ -8320,11 +8701,11 @@ app.get('/battle', requireAuth, async (req, res) => {
   try {
     let html = fs.readFileSync(path.join(__dirname, 'play_battle.html'), 'utf8');
     const now = Date.now();
-    
+
     // Áp dụng các thay thế và cache-buster
     html = html.replace(/src="\/js\/xhrpg_canvas\.js[^"]*"/, `src="/js/xhrpg_canvas.js?v=${now}"`);
     html = html.replace(/src="\/js\/xhrpg_lang_vi\.js[^"]*"/, `src="/js/xhrpg_lang_vi.js?v=${now}"`);
-    
+
     res.send(html);
   } catch (e) {
     console.error('Serve battle html error:', e.message);
@@ -8341,29 +8722,35 @@ async function fetchGameAsset(urlPath) {
   if (assetCache[urlPath] && (now - assetCache[urlPath].time < 1800000)) {
     return assetCache[urlPath].data;
   }
-  
+
   // Thêm cache-buster để tránh tải nhầm bản cũ từ Cloudflare Cache của server game
   const targetUrl = `https://ragnalok.online/human${urlPath}?_cb=${now}`;
-  const response = await fetch(targetUrl, {
-    dispatcher: proxyPool.getDefaultDispatcher(),
-    headers: {
-      'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      'referer': 'https://ragnalok.online/human/'
-    }
-  });
-  
+  const controller = new AbortController();
+  const timeoutMs = 10000;
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(targetUrl, {
+      dispatcher: proxyPool.getDefaultDispatcher(),
+      headers: {
+        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'referer': 'https://ragnalok.online/human/'
+      },
+      signal: controller.signal
+    });
+
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   let text = await response.text();
-  
+
   if (text && text.trim().startsWith('<')) {
     throw new Error(`Fetched asset ${urlPath} is HTML, not JavaScript (likely blocked by Cloudflare or redirected)`);
   }
-  
+
   // Inject bypass into main game engine file and auto-save fallback copy to disk
   if (urlPath === '/js/xhrpg_canvas.js') {
     const patchTarget = `if (_pollStopped || _inflight) return;`;
     const bypassCode = `if (_pollStopped || _inflight) return;\n    _lastInputAt = Date.now(); // Bypass idle timeout\n    _tabHiddenAt = 0; // Bypass hidden tab timeout`;
-    
+
     if (text.includes(patchTarget)) {
       text = text.replace(patchTarget, bypassCode);
     }
@@ -8373,7 +8760,7 @@ async function fetchGameAsset(urlPath) {
     if (text.includes(patchChShow)) {
       text = text.replace(patchChShow, bypassChShow);
     }
-    
+
     try {
       const canvasPath = path.join(__dirname, 'xhrpg_canvas.js');
       fs.writeFileSync(canvasPath, text, 'utf8');
@@ -8382,7 +8769,7 @@ async function fetchGameAsset(urlPath) {
       console.error('Failed to auto-save canvas to disk:', err.message);
     }
   }
-  
+
   // Auto-save sdk.js to local disk fallback
   if (urlPath === '/js/sdk.js') {
     try {
@@ -8393,9 +8780,12 @@ async function fetchGameAsset(urlPath) {
       console.error('Failed to auto-save sdk to disk:', err.message);
     }
   }
-  
+
   assetCache[urlPath] = { time: now, data: text };
-  return text;
+    return text;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 app.get(['/js/xhrpg_canvas.js', '/human/js/xhrpg_canvas.js'], async (req, res) => {
@@ -8457,22 +8847,22 @@ app.all(['/xhrpg_*.php', '/human/xhrpg_*.php'], async (req, res) => {
     cleanPath = cleanPath.slice(6);
   }
   const targetUrl = `https://ragnalok.online/human${cleanPath}`;
-  
+
   // Track client activity to pause bot loop
-  const uid = req.body.line_uid || req.query.line_uid;
+  const uid = (req.body && req.body.line_uid) || (req.query && req.query.line_uid) || null;
   if (uid && botInstances[uid]) {
     botInstances[uid].lastClientActive = Date.now();
   }
-  
+
   const startTime = Date.now();
   console.log(`[Proxy Req Start] ${req.method} ${req.originalUrl} | uid: ${uid || 'N/A'}`);
   try {
     await proxyRequest(req, res, targetUrl, uid);
-    console.log(`[Proxy Req Success] ${req.method} ${req.originalUrl} | Time: ${Date.now() - startTime}ms`);
+    console.log(`[Proxy Req Finished] ${req.method} ${req.originalUrl} | uid: ${uid || 'N/A'} | Time: ${Date.now() - startTime}ms`);
   } catch (err) {
-    console.log(`[Proxy Req Error] ${req.method} ${req.originalUrl} | Error: ${err.message} | Time: ${Date.now() - startTime}ms`);
+    console.error(`[Proxy Req Unhandled Error] ${req.method} ${req.originalUrl} | Error: ${err.message} | Time: ${Date.now() - startTime}ms`);
     if (!res.headersSent) {
-      res.status(500).json({ error: 'Lỗi máy chủ trung gian (Proxy failed)', details: err.message });
+      res.status(502).json({ error: 'Lỗi máy chủ trung gian (Proxy failed)', details: err.message });
     }
   }
 });
@@ -8522,7 +8912,7 @@ if (require.main === module) {
     console.log(`🚀 Ragnalok Headless Dashboard running at:`);
     console.log(`👉 http://localhost:${PORT}`);
     console.log(`===============================================`);
-    
+
     // Auto-sync game assets at startup in background
     syncMapsAndZonesFromGame().catch(err => {
       console.error('❌ Startup Map/Zone synchronization failed:', err.message);
@@ -8577,5 +8967,10 @@ module.exports = {
   logNormalActInterval,
   BROWSER_PROFILES,
   ACCEPT_LANG_POOL,
-  checkAndRecoverZombieBots
+  checkAndRecoverZombieBots,
+  proxyRequest,
+  fetchGameHtml,
+  fetchGameLoginHtml,
+  fetchGameAsset,
+  app
 };

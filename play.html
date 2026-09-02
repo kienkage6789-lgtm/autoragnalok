@@ -394,8 +394,10 @@ if (uid && token) {
       document.getElementById('loading-msg').textContent = 'Đăng nhập thất bại: ' + errMsg;
     }
   })
-  .fail(() => {
-    document.getElementById('loading-msg').textContent = 'Không thể kết nối tới máy chủ Proxy';
+  .fail((jqXHR, textStatus, errorThrown) => {
+    console.error('Lỗi kết nối proxy xhrpg_game.php:', textStatus, errorThrown);
+    const detail = jqXHR.responseJSON?.error ? (': ' + jqXHR.responseJSON.error) : '';
+    document.getElementById('loading-msg').textContent = 'Không thể kết nối tới máy chủ Proxy' + detail;
   });
 } else {
   document.getElementById('loading-msg').textContent = 'Lỗi: Thiếu tham số line_uid hoặc session_token trên link';
