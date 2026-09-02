@@ -988,10 +988,22 @@ document.addEventListener('DOMContentLoaded', () => {
     submitSpinner.classList.add('active');
     modalSubmitBtn.disabled = true;
 
+    const rawToken = document.getElementById('acc-token').value.trim();
+    let session_token = rawToken;
+    if (session_token) {
+      const matchParam = session_token.match(/[?&]session_token=([^&\s]+)/i);
+      if (matchParam) session_token = matchParam[1];
+      else {
+        const matchEq = session_token.match(/^session_token=([^&\s]+)/i);
+        if (matchEq) session_token = matchEq[1];
+      }
+      session_token = session_token.replace(/^["']|["']$/g, '').trim();
+    }
+
     const payload = {
       name: document.getElementById('acc-name').value.trim(),
       line_uid: document.getElementById('acc-uid').value.trim(),
-      session_token: document.getElementById('acc-token').value.trim()
+      session_token
     };
 
     try {
@@ -1009,7 +1021,7 @@ document.addEventListener('DOMContentLoaded', () => {
         modalError.textContent = data.error || 'Có lỗi xảy ra khi thêm tài khoản';
       }
     } catch (err) {
-      modalError.textContent = 'Không thể kết nối đến server quản lý';
+      modalError.textContent = 'Không thể kết nối đến server quản lý: ' + err.message;
     } finally {
       submitSpinner.classList.remove('active');
       modalSubmitBtn.disabled = false;
@@ -1023,31 +1035,42 @@ document.addEventListener('DOMContentLoaded', () => {
       phpsessidError.textContent = '';
       const submitBtn = addPhpsessidForm.querySelector('button[type="submit"]');
       const originalBtnText = submitBtn ? submitBtn.textContent : 'Thêm Ngay';
+      const cookieInput = document.getElementById('phpsessid-cookie');
+      const nameInput = document.getElementById('phpsessid-name');
+
+      if (!cookieInput || !cookieInput.value.trim()) {
+        phpsessidError.textContent = 'Vui lòng nhập mã Cookie PHPSESSID';
+        return;
+      }
 
       if (submitBtn) {
         submitBtn.disabled = true;
-        submitBtn.textContent = 'Đang xử lý...';
+        submitBtn.innerHTML = '<span class="spinner active" style="display:inline-block; vertical-align:middle; width:14px; height:14px; border-width:2px; margin-right:6px;"></span> Đang xác thực...';
       }
-
-      const phpsessid = inputPhpsessid.value.trim();
 
       try {
         const response = await fetch('/api/add-by-phpsessid', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ phpsessid })
+          body: JSON.stringify({
+            phpsessid: cookieInput.value.trim(),
+            name: nameInput ? nameInput.value.trim() : ''
+          })
         });
         const data = await response.json();
 
         if (response.ok && data.success) {
+          if (typeof showToast === 'function') {
+            showToast('success', data.updated ? 'Cập nhật PHPSESSID và Token thành công!' : 'Thêm tài khoản qua PHPSESSID thành công!');
+          }
           closeModal();
           fetchAccounts();
           addPhpsessidForm.reset();
         } else {
-          phpsessidError.textContent = data.error || 'PHPSESSID không hợp lệ hoặc hết hạn!';
+          phpsessidError.textContent = data.error || 'Có lỗi xảy ra khi xác thực PHPSESSID';
         }
       } catch (err) {
-        phpsessidError.textContent = 'Không thể kết nối đến server quản lý';
+        phpsessidError.textContent = 'Không thể kết nối đến máy chủ quản lý';
       } finally {
         if (submitBtn) {
           submitBtn.disabled = false;
@@ -1066,7 +1089,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const uid = document.getElementById('edit-acc-uid').value;
     const name = document.getElementById('edit-acc-name').value.trim();
-    const token = document.getElementById('edit-acc-token').value.trim();
+    let token = document.getElementById('edit-acc-token').value.trim();
+
+    if (token) {
+      const matchParam = token.match(/[?&]session_token=([^&\s]+)/i);
+      if (matchParam) token = matchParam[1];
+      else {
+        const matchEq = token.match(/^session_token=([^&\s]+)/i);
+        if (matchEq) token = matchEq[1];
+      }
+      token = token.replace(/^["']|["']$/g, '').trim();
+    }
 
     const payload = { name };
     if (token) {

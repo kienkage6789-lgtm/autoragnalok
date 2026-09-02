@@ -653,6 +653,26 @@ function saveSpotsCache() {
   } catch(e) {}
 }
 
+// Helper chuẩn hóa và trích xuất Session Token sạch sẽ từ raw input / URL / param
+function sanitizeSessionToken(raw) {
+  if (!raw) return '';
+  let token = String(raw).trim();
+  const matchParam = token.match(/[?&]session_token=([^&\s]+)/i);
+  if (matchParam) {
+    token = matchParam[1];
+  } else {
+    const matchEq = token.match(/^session_token=([^&\s]+)/i);
+    if (matchEq) {
+      token = matchEq[1];
+    }
+  }
+  token = token.replace(/^[\"']|[\"']$/g, '').trim();
+  try {
+    token = decodeURIComponent(token);
+  } catch (e) {}
+  return token;
+}
+
 function getMapDefs() {
   return (mapsCache && mapsCache.length > 0) ? mapsCache : DEFAULT_MAP_DEFS;
 }
@@ -1514,23 +1534,60 @@ class BotInstance {
     }
     try {
       this.addLog('SYSTEM', '🔄 Đang làm mới Session Token qua PHPSESSID từ game server...');
-      const fetchOptions = {
-        headers: {
-          'cookie': `PHPSESSID=${this.phpsessid}`,
-          'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        }
+      const headers = {
+        'cookie': `PHPSESSID=${this.phpsessid}`,
+        'user-agent': (this.fingerprint && this.fingerprint.userAgent) || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+        'accept': 'application/json, text/javascript, */*; q=0.01',
+        'accept-language': (this.fingerprint && this.fingerprint.acceptLanguage) || 'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7',
+        'origin': 'https://ragnalok.online',
+        'referer': 'https://ragnalok.online/human/',
+        'x-requested-with': 'XMLHttpRequest',
+        'sec-fetch-dest': 'empty',
+        'sec-fetch-mode': 'cors',
+        'sec-fetch-site': 'same-origin'
       };
+
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 10000);
+
+      let fetchOptions = {
+        headers,
+        signal: controller.signal
+      };
+
       if (typeof proxyPool !== 'undefined' && proxyPool.getDispatcherForBot) {
         const disp = proxyPool.getDispatcherForBot(this.line_uid);
         if (disp) fetchOptions.dispatcher = disp;
       }
-      const response = await fetch('https://ragnalok.online/human/xhrpg_google_auth.php', fetchOptions);
+
+      let response;
+      try {
+        response = await fetch('https://ragnalok.online/human/xhrpg_google_auth.php', fetchOptions);
+      } catch (fetchErr) {
+        // Fallback sang kết nối trực tiếp nếu proxy của bot bị lỗi
+        if (typeof proxyPool !== 'undefined' && fetchOptions.dispatcher && fetchOptions.dispatcher !== proxyPool.getDefaultDispatcher()) {
+          const directController = new AbortController();
+          const directTimeout = setTimeout(() => directController.abort(), 10000);
+          response = await fetch('https://ragnalok.online/human/xhrpg_google_auth.php', {
+            headers,
+            dispatcher: proxyPool.getDefaultDispatcher(),
+            signal: directController.signal
+          });
+          clearTimeout(directTimeout);
+        } else {
+          throw fetchErr;
+        }
+      } finally {
+        clearTimeout(timeout);
+      }
+
       const text = await response.text();
       let data;
       try { data = JSON.parse(text); } catch (e) {}
       if (data && data.ok && data.session_token) {
         this.session_token = String(data.session_token);
         this.lastSessionRefreshAt = Date.now();
+        this.error = null;
         this.addLog('SYSTEM', `✅ Làm mới Session Token thành công! Token mới: ${this.session_token.slice(0, 8)}...`);
 
         // Cập nhật lại file accounts.json
@@ -5981,7 +6038,7 @@ app.all('/api/add-by-phpsessid', requireAuth, async (req, res) => {
 
 app.all('/api/auto-add-account', requireAuth, (req, res) => {
   const line_uid = req.body.line_uid || req.query.line_uid;
-  const session_token = req.body.session_token || req.query.session_token;
+  const session_token = sanitizeSessionToken(req.body.session_token || req.query.session_token);
   const name = req.body.name || req.query.name;
 
   if (!line_uid || !session_token) {
@@ -6343,7 +6400,10 @@ app.post('/api/accounts/:line_uid/phpsessid', requireAuth, async (req, res) => {
 
 // Add account (Protected + Quota check)
 app.post('/api/accounts', requireAuth, async (req, res) => {
-  const { name, line_uid, session_token } = req.body;
+  const { name } = req.body;
+  const line_uid = req.body.line_uid ? String(req.body.line_uid).trim() : '';
+  const session_token = sanitizeSessionToken(req.body.session_token);
+
   if (!name || !line_uid || !session_token) {
     return res.status(400).json({ error: 'Thiếu thông tin (Name, Line UID, Session Token)' });
   }
@@ -6420,7 +6480,8 @@ app.put('/api/accounts/:line_uid', requireAuth, async (req, res) => {
   const bot = botInstances[line_uid];
   if (!checkAccountOwnership(req, res, bot)) return;
 
-  const { session_token, name, proxyId, ...settings } = req.body;
+  const { session_token: rawToken, name, proxyId, ...settings } = req.body;
+  const session_token = rawToken ? sanitizeSessionToken(rawToken) : undefined;
 
   if (settings.pollInterval !== undefined && req.user.role !== 'admin' && req.user.allowEditPollInterval !== true) {
     delete settings.pollInterval;
@@ -6428,24 +6489,83 @@ app.put('/api/accounts/:line_uid', requireAuth, async (req, res) => {
 
   try {
     if (session_token && session_token !== bot.session_token) {
-      const check = await bot.sendRequest('https://ragnalok.online/human/xhrpg_game.php', {
-        line_uid,
-        session_token,
-        act: 0,
-        full: 0,
-        bot: 1,
-        lang: 'vi',
-        have_static: 1
-      });
+      let check = null;
+      let checkError = null;
+
+      // 1. Thử xác thực Session Token mới qua bot.sendRequest (dùng dispatcher hiện tại của bot)
+      try {
+        check = await bot.sendRequest('https://ragnalok.online/human/xhrpg_game.php', {
+          line_uid,
+          session_token,
+          act: 0,
+          full: 0,
+          bot: 1,
+          lang: 'vi',
+          have_static: 1
+        });
+      } catch (reqErr) {
+        checkError = reqErr;
+      }
+
+      // 2. Nếu bot.sendRequest gặp lỗi kết nối/proxy/timeout, fallback thử kết nối trực tiếp (default dispatcher)
+      if (!check && checkError) {
+        try {
+          const directParams = new URLSearchParams({
+            line_uid,
+            session_token,
+            act: '0',
+            full: '0',
+            bot: '1',
+            lang: 'vi',
+            have_static: '1'
+          });
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 10000);
+          const directResp = await fetch('https://ragnalok.online/human/xhrpg_game.php', {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/x-www-form-urlencoded; charset=UTF-8',
+              'user-agent': (bot.fingerprint && bot.fingerprint.userAgent) || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+              'accept': '*/*',
+              'accept-language': (bot.fingerprint && bot.fingerprint.acceptLanguage) || 'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7',
+              'origin': 'https://ragnalok.online',
+              'referer': 'https://ragnalok.online/human/',
+              'sec-fetch-dest': 'empty',
+              'sec-fetch-mode': 'cors',
+              'sec-fetch-site': 'same-origin'
+            },
+            body: directParams.toString(),
+            dispatcher: proxyPool.getDefaultDispatcher(),
+            signal: controller.signal
+          });
+          clearTimeout(timer);
+          if (directResp.ok) {
+            const txt = await directResp.text();
+            try { check = JSON.parse(txt); } catch (e) {}
+          }
+        } catch (directErr) {
+          // Fallback direct verification error
+        }
+      }
+
+      if (!check) {
+        return res.status(502).json({
+          error: `Không thể kết nối đến máy chủ game để xác thực Session Token: ${checkError ? checkError.message : 'Lỗi kết nối mạng/proxy'}`
+        });
+      }
 
       if (!check.ok) {
-        return res.status(400).json({ error: check.error || 'Sai Session Token mới' });
+        const detailErr = check.error || (check.kicked ? 'Tài khoản bị Kick/Hết hạn' : 'Sai Session Token mới');
+        return res.status(400).json({
+          error: `Xác thực thất bại từ Game Server: ${detailErr} (Vui lòng kiểm tra lại Token hoặc đăng nhập lại)`
+        });
       }
 
       bot.session_token = session_token;
-      bot.player = check.player;
+      bot.player = check.player || bot.player;
       bot.error = null;
-      bot.addLog('SYSTEM', 'Đã cập nhật Session Token mới thành công');
+      bot.lastSessionRefreshAt = Date.now();
+      bot.addLog('SYSTEM', '✅ Đã cập nhật và xác thực Session Token mới thành công');
 
       if (bot.status !== 'running') {
         bot.start();
@@ -8972,5 +9092,6 @@ module.exports = {
   fetchGameHtml,
   fetchGameLoginHtml,
   fetchGameAsset,
+  sanitizeSessionToken,
   app
 };

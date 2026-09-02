@@ -21,7 +21,8 @@ const {
   proxyRequest,
   fetchGameHtml,
   fetchGameLoginHtml,
-  fetchGameAsset
+  fetchGameAsset,
+  sanitizeSessionToken
 } = require('./server');
 
 console.log('🧪 Running Unit Tests...');
@@ -1802,6 +1803,14 @@ try {
   // Test refreshing with dummy/invalid phpsessid handles failure gracefully
   const refreshResultGraceful = await t62Bot.refreshSession();
   assert.strictEqual(typeof refreshResultGraceful, 'boolean', 'refreshSession must return boolean result');
+
+  // Test sanitizeSessionToken utility
+  assert.strictEqual(sanitizeSessionToken('  token_abc123  '), 'token_abc123', 'Should trim whitespace');
+  assert.strictEqual(sanitizeSessionToken('"token_quoted"'), 'token_quoted', 'Should strip quotes');
+  assert.strictEqual(sanitizeSessionToken('session_token=token_param_val'), 'token_param_val', 'Should extract value from session_token= prefix');
+  assert.strictEqual(sanitizeSessionToken('https://ragnalok.online/human/?session_token=token_url_param&other=1'), 'token_url_param', 'Should extract token from URL query');
+  assert.strictEqual(sanitizeSessionToken(''), '', 'Should handle empty string');
+  assert.strictEqual(sanitizeSessionToken(null), '', 'Should handle null');
 
   console.log('✅ T62 Auto Session Renewal Tests Passed successfully!');
 
