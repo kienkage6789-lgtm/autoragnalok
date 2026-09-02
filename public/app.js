@@ -1035,11 +1035,21 @@ document.addEventListener('DOMContentLoaded', () => {
       phpsessidError.textContent = '';
       const submitBtn = addPhpsessidForm.querySelector('button[type="submit"]');
       const originalBtnText = submitBtn ? submitBtn.textContent : 'Thêm Ngay';
-      const cookieInput = document.getElementById('phpsessid-cookie');
+      const cookieInput = inputPhpsessid || document.getElementById('input-phpsessid') || document.getElementById('phpsessid-cookie');
       const nameInput = document.getElementById('phpsessid-name');
 
-      if (!cookieInput || !cookieInput.value.trim()) {
+      const rawCookie = cookieInput ? cookieInput.value.trim() : '';
+      if (!rawCookie) {
         phpsessidError.textContent = 'Vui lòng nhập mã Cookie PHPSESSID';
+        return;
+      }
+
+      // Tự động bóc tách nếu dán nguyên cụm PHPSESSID=... hoặc chuỗi cookie dài
+      const match = rawCookie.match(/PHPSESSID=([^;\s]+)/i);
+      const phpsessid = match ? match[1].trim() : rawCookie.replace(/^["']|["']$/g, '').trim();
+
+      if (!phpsessid) {
+        phpsessidError.textContent = 'Mã PHPSESSID không hợp lệ';
         return;
       }
 
@@ -1053,7 +1063,7 @@ document.addEventListener('DOMContentLoaded', () => {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            phpsessid: cookieInput.value.trim(),
+            phpsessid,
             name: nameInput ? nameInput.value.trim() : ''
           })
         });
@@ -1070,7 +1080,7 @@ document.addEventListener('DOMContentLoaded', () => {
           phpsessidError.textContent = data.error || 'Có lỗi xảy ra khi xác thực PHPSESSID';
         }
       } catch (err) {
-        phpsessidError.textContent = 'Không thể kết nối đến máy chủ quản lý';
+        phpsessidError.textContent = 'Không thể kết nối đến máy chủ quản lý: ' + err.message;
       } finally {
         if (submitBtn) {
           submitBtn.disabled = false;
@@ -1106,6 +1116,13 @@ document.addEventListener('DOMContentLoaded', () => {
       payload.session_token = token;
     }
 
+    const phpsessidInput = document.getElementById('edit-acc-phpsessid');
+    if (phpsessidInput && phpsessidInput.value.trim()) {
+      let rawPhp = phpsessidInput.value.trim();
+      const match = rawPhp.match(/PHPSESSID=([^;\s]+)/i);
+      payload.phpsessid = match ? match[1].trim() : rawPhp.replace(/^["']|["']$/g, '').trim();
+    }
+
     try {
       const response = await fetch(`/api/accounts/${uid}`, {
         method: 'PUT',
@@ -1117,11 +1134,14 @@ document.addEventListener('DOMContentLoaded', () => {
       if (response.ok && data.success) {
         closeEditModal();
         fetchAccounts();
+        if (typeof showToast === 'function') {
+          showToast('success', 'Cập nhật tài khoản thành công!');
+        }
       } else {
         editModalError.textContent = data.error || 'Có lỗi xảy ra khi cập nhật tài khoản';
       }
     } catch (err) {
-      editModalError.textContent = 'Không thể kết nối đến server quản lý';
+      editModalError.textContent = 'Không thể kết nối đến server quản lý: ' + err.message;
     } finally {
       editSubmitSpinner.classList.remove('active');
       editModalSubmitBtn.disabled = false;
@@ -5854,9 +5874,12 @@ document.addEventListener('DOMContentLoaded', () => {
   window.openEditTokenModal = function(uid) {
     const nameEl = document.getElementById(`name-${uid}`);
     const currentName = nameEl ? nameEl.textContent : '';
+    const acc = (window.lastFetchedAccounts || []).find(a => a.line_uid === uid);
     document.getElementById('edit-acc-uid').value = uid;
     document.getElementById('edit-acc-name').value = currentName;
     document.getElementById('edit-acc-token').value = '';
+    const phpInput = document.getElementById('edit-acc-phpsessid');
+    if (phpInput) phpInput.value = (acc && acc.phpsessid) || '';
     editAccountModal.classList.add('open');
     editModalError.textContent = '';
   };

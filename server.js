@@ -3279,15 +3279,14 @@ class BotInstance {
       }
     }
 
-    // 0.5 Guild Dungeon Targeting (Chủ động nhắm và tấn công Boss/Quái trong Phụ Bản Guild với Queue ổn định)
+    // 0.5 Guild Dungeon Targeting (Chỉ nhắm và tấn công BOSS trong Phụ Bản Guild - không đánh quái thường)
     if (this.guildDungeonActive) {
       const px = this.player ? this.player.x : 1125;
       const py = this.player ? this.player.y : 1125;
       const priority = this.getBossHuntPriority();
 
+      // ⚔️ Chỉ lấy danh sách BOSS còn sống - KHÔNG target quái thường
       const aliveBosses = (this.bosses || []).filter(b => (b.hp === undefined || (b.hp || 0) > 0));
-      const aliveMonsters = (this.monsters || []).filter(m => (m.hp === undefined || (m.hp || 0) > 0));
-      const allAliveTargets = [...aliveBosses, ...aliveMonsters];
 
       let target = null;
 
@@ -3300,7 +3299,7 @@ class BotInstance {
         if (leader && leader.status === 'running' && leader.guildDungeonActive && this.settings.teamSynced === true) {
           const leaderTargetId = leader.gdunCurrentTargetId || leader.manualTargetBossId;
           if (leaderTargetId !== null) {
-            const ldrTarget = allAliveTargets.find(t => t.id === leaderTargetId);
+            const ldrTarget = aliveBosses.find(t => t.id === leaderTargetId);
             if (ldrTarget) {
               target = ldrTarget;
               this.gdunCurrentTargetId = leaderTargetId;
@@ -3313,15 +3312,16 @@ class BotInstance {
       if (!target) {
         // 1. Giữ vững mục tiêu hiện tại nếu mục tiêu đó còn sống trong Phụ Bản (không đổi target giữa chừng)
         if (this.gdunCurrentTargetId !== null) {
-          target = allAliveTargets.find(t => t.id === this.gdunCurrentTargetId);
+          target = aliveBosses.find(t => t.id === this.gdunCurrentTargetId) || null;
           if (!target) {
-            // Target cũ đã chết hoặc biến mất -> giải phóng để lấy phần tử kế tiếp từ queue
+            // Target cũ đã chết hoặc biến mất -> giải phóng để lấy boss kế tiếp từ queue
             this.gdunCurrentTargetId = null;
           }
         }
 
-        // 2. Nếu chưa có target hoặc target cũ đã chết -> dùng queue ổn định để chọn mục tiêu kế tiếp
-        if (!target && allAliveTargets.length > 0) {
+        // 2. Nếu chưa có target hoặc target cũ đã chết -> dùng queue ổn định để chọn boss kế tiếp
+        // Khi aliveBosses rỗng (hết boss) -> không target gì cả, bot idle trong dungeon
+        if (!target && aliveBosses.length > 0) {
           const sortGdunTargets = (targets) => {
             return [...targets].sort((a, b) => {
               if (priority === 'hp_asc') {
@@ -3354,28 +3354,35 @@ class BotInstance {
             });
           };
 
-          // Lọc queue cũ chỉ giữ lại các target còn sống
-          const validQueue = (this.gdunTargetQueue || []).filter(id => allAliveTargets.some(t => t.id === id));
-          const unqueuedTargets = allAliveTargets.filter(t => !validQueue.includes(t.id));
+          // Lọc queue cũ chỉ giữ lại các boss còn sống
+          const validQueue = (this.gdunTargetQueue || []).filter(id => aliveBosses.some(t => t.id === id));
+          const unqueuedBosses = aliveBosses.filter(t => !validQueue.includes(t.id));
 
           if (validQueue.length === 0) {
             // Initial build khi queue rỗng
-            const sortedTargets = sortGdunTargets(allAliveTargets);
+            const sortedTargets = sortGdunTargets(aliveBosses);
             this.gdunTargetQueue = sortedTargets.map(t => t.id);
           } else {
             // Giữ nguyên validQueue theo thứ tự cam kết cũ, không re-order các phần tử cũ
             this.gdunTargetQueue = validQueue;
-            // Nếu có target mới xuất hiện (spawn thêm), sắp xếp riêng nhóm mới rồi append vào cuối queue (không cướp vị trí đang chờ)
-            if (unqueuedTargets.length > 0) {
-              const sortedNewTargets = sortGdunTargets(unqueuedTargets);
-              this.gdunTargetQueue.push(...sortedNewTargets.map(t => t.id));
+            // Nếu có boss mới xuất hiện (spawn thêm), sắp xếp riêng nhóm mới rồi append vào cuối queue
+            if (unqueuedBosses.length > 0) {
+              const sortedNewBosses = sortGdunTargets(unqueuedBosses);
+              this.gdunTargetQueue.push(...sortedNewBosses.map(t => t.id));
             }
           }
 
           if (this.gdunTargetQueue.length > 0) {
             const nextTargetId = this.gdunTargetQueue[0];
-            target = allAliveTargets.find(t => t.id === nextTargetId);
+            target = aliveBosses.find(t => t.id === nextTargetId);
             this.gdunCurrentTargetId = target ? target.id : null;
+          }
+        } else if (aliveBosses.length === 0) {
+          // Không còn boss nào -> reset queue, không đánh quái thường, bot idle trong dungeon
+          if (this.gdunTargetQueue.length > 0) {
+            this.gdunTargetQueue = [];
+            this.gdunCurrentTargetId = null;
+            this.addLog('SYSTEM', '🏰 [Guild Dungeon] Đã tiêu diệt hết Boss. Đang chờ trong Phụ Bản...');
           }
         }
       }
@@ -3699,12 +3706,6 @@ class BotInstance {
       }
     }
 
-    // 🕒 T62 Proactive Token Renewal: Tự động gia hạn session token mỗi 20 phút để tránh mốc hết hạn của Game Server
-    if (this.phpsessid && (Date.now() - this.lastSessionRefreshAt > 20 * 60 * 1000)) {
-      this.addLog('SYSTEM', '🕒 Đạt mốc 20 phút -> Tự động gia hạn Session Token để duy trì phiên Online 24/7');
-      await this.refreshSession();
-    }
-
     const payload = {
       line_uid: this.line_uid,
       session_token: this.session_token,
@@ -3833,20 +3834,20 @@ class BotInstance {
       this.lastCw = null;
     }
 
-    // 🏰 Tự động thoát Phụ Bản Guild khi sạch Quái & Boss (monsters: [] và bosses: [])
+    // 🏰 Tự động thoát Phụ Bản Guild khi hết Boss (không cần đợi quái thường)
     if (this.guildDungeonActive && !this._exitingGuildDungeon) {
       const timeInDungeon = this.gdunEnteredAt ? (Date.now() - this.gdunEnteredAt) : 0;
-      // Chỉ bắt đầu kiểm tra và đếm poll trống sau khi vào phụ bản ít nhất 3 giây để chờ server spawn quái/boss
-      if (timeInDungeon >= 3000 && this.monsters !== null && this.bosses !== null) {
-        const aliveMonsters = (this.monsters || []).filter(m => (m.hp === undefined || (m.hp || 0) > 0));
+      // Chỉ bắt đầu kiểm tra sau khi vào phụ bản ít nhất 3 giây để chờ server spawn boss
+      if (timeInDungeon >= 3000 && this.bosses !== null) {
         const aliveBosses = (this.bosses || []).filter(b => (b.hp === undefined || (b.hp || 0) > 0));
-        const hasTargets = (aliveMonsters.length > 0 || aliveBosses.length > 0);
+        const allBossesDead = (aliveBosses.length === 0);
 
-        if (!hasTargets) {
+        if (allBossesDead) {
+          // Đếm poll buffer nhỏ (2 poll) để tránh false-positive do server lag hoặc boss chưa kịp spawn
           this.gdunEmptyPolls = (this.gdunEmptyPolls || 0) + 1;
-          if (this.gdunEmptyPolls >= 10) {
+          if (this.gdunEmptyPolls >= 2) {
             this._exitingGuildDungeon = true;
-            this.addLog('SUCCESS', `🎉 [Guild Dungeon] Đã sạch Boss/Quái trong Phụ Bản! Tự động thoát Phụ Bản ra ngoài.`);
+            this.addLog('SUCCESS', `🎉 [Guild Dungeon] Đã tiêu diệt hết Boss! Tự động thoát Phụ Bản về vị trí cũ.`);
             await this.exitGuildDungeon();
           }
         } else {
@@ -5927,16 +5928,28 @@ app.all('/api/add-by-phpsessid', requireAuth, async (req, res) => {
   // Parse PHPSESSID if user pasted raw cookie string
   const match = String(phpsessid).match(/PHPSESSID=([^;\s]+)/i);
   if (match) phpsessid = match[1];
-  phpsessid = String(phpsessid).trim();
+  phpsessid = String(phpsessid).replace(/^["']|["']$/g, '').trim();
 
   try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
     const response = await fetch('https://ragnalok.online/human/xhrpg_google_auth.php', {
       dispatcher: proxyPool.getDefaultDispatcher(),
+      signal: controller.signal,
       headers: {
         'cookie': `PHPSESSID=${phpsessid}`,
-        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+        'accept': 'application/json, text/javascript, */*; q=0.01',
+        'accept-language': 'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7',
+        'origin': 'https://ragnalok.online',
+        'referer': 'https://ragnalok.online/human/',
+        'x-requested-with': 'XMLHttpRequest',
+        'sec-fetch-dest': 'empty',
+        'sec-fetch-mode': 'cors',
+        'sec-fetch-site': 'same-origin'
       }
     });
+    clearTimeout(timeout);
 
     const text = await response.text();
     let data;
@@ -6480,8 +6493,22 @@ app.put('/api/accounts/:line_uid', requireAuth, async (req, res) => {
   const bot = botInstances[line_uid];
   if (!checkAccountOwnership(req, res, bot)) return;
 
-  const { session_token: rawToken, name, proxyId, ...settings } = req.body;
+  const { session_token: rawToken, name, proxyId, phpsessid: rawPhpsessid, ...settings } = req.body;
   const session_token = rawToken ? sanitizeSessionToken(rawToken) : undefined;
+  let phpsessid = rawPhpsessid;
+  if (phpsessid !== undefined) {
+    if (phpsessid) {
+      const match = String(phpsessid).match(/PHPSESSID=([^;\s]+)/i);
+      if (match) phpsessid = match[1];
+      phpsessid = String(phpsessid).replace(/^["']|["']$/g, '').trim();
+    } else {
+      phpsessid = null;
+    }
+    bot.phpsessid = phpsessid;
+    if (!session_token && phpsessid) {
+      await bot.refreshSession();
+    }
+  }
 
   if (settings.pollInterval !== undefined && req.user.role !== 'admin' && req.user.allowEditPollInterval !== true) {
     delete settings.pollInterval;
@@ -6611,6 +6638,7 @@ app.put('/api/accounts/:line_uid', requireAuth, async (req, res) => {
     const index = currentAccounts.findIndex(acc => acc.line_uid === line_uid);
     if (index !== -1) {
       currentAccounts[index].session_token = bot.session_token;
+      currentAccounts[index].phpsessid = bot.phpsessid;
       currentAccounts[index].name = bot.name;
       currentAccounts[index].settings = bot.settings;
       currentAccounts[index].proxyId = bot.proxyId;
@@ -6633,7 +6661,7 @@ app.put('/api/accounts/:line_uid', requireAuth, async (req, res) => {
       saveAccounts(currentAccounts);
     }
 
-    res.json({ success: true, settings: bot.settings, session_token: bot.session_token, name: bot.name, proxyId: bot.proxyId });
+    res.json({ success: true, settings: bot.settings, session_token: bot.session_token, phpsessid: bot.phpsessid, name: bot.name, proxyId: bot.proxyId });
   } catch (err) {
     res.status(400).json({ error: `Không thể kết nối đến máy chủ game: ${err.message}` });
   }

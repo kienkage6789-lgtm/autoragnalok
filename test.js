@@ -1245,6 +1245,7 @@ try {
   assert.strictEqual(mockGdunBot.gdunSnapshot, null, 'gdunSnapshot must be cleaned up after exit');
 
   // Test 3: Stable Target Queue & True Queue Continuity Across Polls [OFFLINE/LOGIC]
+  // ⚔️ Boss-Only Mode: Guild Dungeon chỉ target Boss - Quái thường bị bỏ qua hoàn toàn
   const targetBot = new BotInstance({
     name: 'TargetBot',
     line_uid: 'target_bot_1',
@@ -1259,37 +1260,36 @@ try {
 
   // Targets in dungeon:
   // Boss 1: DragonBoss (id: 101, HP 50000)
-  // Boss 2: MiniBoss (id: 102, HP 20000)
-  // Monster 1: GoblinA (id: 201, HP 500)
-  // Monster 2: GoblinB (id: 202, HP 3000)
+  // Boss 2: MiniBoss   (id: 102, HP 20000)  <-- lowest HP boss
+  // Monster 1: GoblinA (id: 201, HP 500)    <-- must be IGNORED
+  // Monster 2: GoblinB (id: 202, HP 3000)   <-- must be IGNORED
   targetBot.bosses = [
     { id: 101, name: 'DragonBoss', x: 1050, y: 1050, hp: 50000, hp_max: 50000, lv: 80 },
-    { id: 102, name: 'MiniBoss', x: 1020, y: 1020, hp: 20000, hp_max: 20000, lv: 60 }
+    { id: 102, name: 'MiniBoss',   x: 1020, y: 1020, hp: 20000, hp_max: 20000, lv: 60 }
   ];
   targetBot.monsters = [
-    { id: 201, name: 'GoblinA', x: 1010, y: 1010, hp: 500, hp_max: 500, lv: 30 },
+    { id: 201, name: 'GoblinA', x: 1010, y: 1010, hp: 500,  hp_max: 500,  lv: 30 },
     { id: 202, name: 'GoblinB', x: 1030, y: 1030, hp: 3000, hp_max: 3000, lv: 40 }
   ];
 
-  // Helper function simulating the exact targeting queue logic
+  // Helper function simulating the exact boss-only targeting queue logic
   const simulateGdunTargeting = (bot) => {
     const px = bot.player ? bot.player.x : 1125;
     const py = bot.player ? bot.player.y : 1125;
     const priority = bot.getBossHuntPriority();
 
+    // ⚔️ Boss-only: quái thường bị loại khỏi pool hoàn toàn
     const aliveBosses = (bot.bosses || []).filter(b => (b.hp === undefined || (b.hp || 0) > 0));
-    const aliveMonsters = (bot.monsters || []).filter(m => (m.hp === undefined || (m.hp || 0) > 0));
-    const allAliveTargets = [...aliveBosses, ...aliveMonsters];
 
     let target = null;
     if (bot.gdunCurrentTargetId !== null) {
-      target = allAliveTargets.find(t => t.id === bot.gdunCurrentTargetId);
+      target = aliveBosses.find(t => t.id === bot.gdunCurrentTargetId) || null;
       if (!target) {
         bot.gdunCurrentTargetId = null;
       }
     }
 
-    if (!target && allAliveTargets.length > 0) {
+    if (!target && aliveBosses.length > 0) {
       const sortGdunTargets = (targets) => {
         return [...targets].sort((a, b) => {
           if (priority === 'hp_asc') {
@@ -1322,79 +1322,86 @@ try {
         });
       };
 
-      const validQueue = (bot.gdunTargetQueue || []).filter(id => allAliveTargets.some(t => t.id === id));
-      const unqueuedTargets = allAliveTargets.filter(t => !validQueue.includes(t.id));
+      const validQueue = (bot.gdunTargetQueue || []).filter(id => aliveBosses.some(t => t.id === id));
+      const unqueuedBosses = aliveBosses.filter(t => !validQueue.includes(t.id));
 
       if (validQueue.length === 0) {
-        const sortedTargets = sortGdunTargets(allAliveTargets);
+        const sortedTargets = sortGdunTargets(aliveBosses);
         bot.gdunTargetQueue = sortedTargets.map(t => t.id);
       } else {
         bot.gdunTargetQueue = validQueue;
-        if (unqueuedTargets.length > 0) {
-          const sortedNewTargets = sortGdunTargets(unqueuedTargets);
-          bot.gdunTargetQueue.push(...sortedNewTargets.map(t => t.id));
+        if (unqueuedBosses.length > 0) {
+          const sortedNewBosses = sortGdunTargets(unqueuedBosses);
+          bot.gdunTargetQueue.push(...sortedNewBosses.map(t => t.id));
         }
       }
 
       if (bot.gdunTargetQueue.length > 0) {
         const nextTargetId = bot.gdunTargetQueue[0];
-        target = allAliveTargets.find(t => t.id === nextTargetId);
+        target = aliveBosses.find(t => t.id === nextTargetId);
         bot.gdunCurrentTargetId = target ? target.id : null;
       }
+    } else if (aliveBosses.length === 0) {
+      // Hết boss -> reset queue, không đánh quái thường
+      bot.gdunTargetQueue = [];
+      bot.gdunCurrentTargetId = null;
     }
     return target;
   };
 
-  // Poll 1: Initial targeting under hp_asc
-  // Expected initial queue: [201, 202, 102, 101]
+  // Poll 1: Initial targeting under hp_asc - ONLY bosses are in queue (Monsters ignored)
+  // Expected queue: [102 (MiniBoss 20000 HP), 101 (DragonBoss 50000 HP)]
   const poll1Target = simulateGdunTargeting(targetBot);
   assert.ok(poll1Target, 'Target must be selected in poll 1');
-  assert.strictEqual(poll1Target.id, 201, 'Target with lowest HP (GoblinA) must be selected under hp_asc');
-  assert.strictEqual(targetBot.gdunCurrentTargetId, 201, 'gdunCurrentTargetId must be locked to 201');
-  assert.deepStrictEqual(targetBot.gdunTargetQueue, [201, 202, 102, 101], 'Queue must be ordered by hp_asc across monsters and bosses');
+  assert.strictEqual(poll1Target.id, 102, 'Under boss-only hp_asc, MiniBoss (lowest HP boss) must be targeted first - GoblinA/GoblinB must be IGNORED');
+  assert.strictEqual(targetBot.gdunCurrentTargetId, 102, 'gdunCurrentTargetId must be locked to 102');
+  assert.deepStrictEqual(targetBot.gdunTargetQueue, [102, 101], 'Queue must contain ONLY bosses ordered by hp_asc');
 
-  // Poll 2: While attacking GoblinA (201):
+  // Poll 2: While attacking MiniBoss (102):
   // - Player moves right next to DragonBoss (id: 101)
-  // - DragonBoss takes massive damage, HP drops down to 1000 HP (lower than GoblinB 3000 HP!)
-  // Target 1 must NOT jitter or switch:
+  // - DragonBoss takes massive damage, HP drops down to 1000 HP (lower than MiniBoss 20000 HP!)
+  // Target must NOT jitter or switch to DragonBoss:
   targetBot.player.x = 1050;
   targetBot.player.y = 1050; // Closest to DragonBoss
   targetBot.bosses[0].hp = 1000; // DragonBoss HP now 1000
   const poll2Target = simulateGdunTargeting(targetBot);
-  assert.strictEqual(poll2Target.id, 201, 'Target must stay locked on GoblinA (201) while GoblinA is still alive');
+  assert.strictEqual(poll2Target.id, 102, 'Target must stay locked on MiniBoss (102) while MiniBoss is still alive - DragonBoss HP change must NOT cause jitter');
 
-  // Poll 3: GoblinA dies (hp = 0)
-  // CRITICAL REQUIREMENT: The second target in queue was GoblinB (202).
-  // Even though DragonBoss (101) now has 1000 HP and is 0m away, the STABLE QUEUE must pick GoblinB (202) next!
-  targetBot.monsters[0].hp = 0;
-  const poll3Target = simulateGdunTargeting(targetBot);
-  assert.ok(poll3Target, 'Target must be selected in poll 3 after GoblinA death');
-  assert.strictEqual(poll3Target.id, 202, 'Queue must strictly advance to GoblinB (202) without re-sorting remaining targets');
-  assert.strictEqual(targetBot.gdunCurrentTargetId, 202, 'gdunCurrentTargetId must now be locked to 202');
-  assert.deepStrictEqual(targetBot.gdunTargetQueue, [202, 102, 101], 'Remaining queue must be [202, 102, 101]');
-
-  // Poll 4: GoblinB dies -> Queue advances to MiniBoss (102)
-  targetBot.monsters[1].hp = 0;
-  const poll4Target = simulateGdunTargeting(targetBot);
-  assert.strictEqual(poll4Target.id, 102, 'Target must advance to MiniBoss (102)');
-  assert.deepStrictEqual(targetBot.gdunTargetQueue, [102, 101], 'Remaining queue must be [102, 101]');
-
-  // Poll 5: Newly spawned target appears (MegaBoss id: 301, HP: 50) with ultra low HP.
-  // CRITICAL REQUIREMENT: When MiniBoss (102) dies, DragonBoss (101) was ALREADY waiting in queue.
-  // MegaBoss must be appended at the END of the queue and must NOT cut in front of DragonBoss (101)!
-  targetBot.bosses.push({ id: 301, name: 'MegaBoss', x: 1000, y: 1000, hp: 50, hp_max: 50, lv: 99 });
+  // Poll 3: MiniBoss dies (hp = 0)
+  // CRITICAL REQUIREMENT: The second target in queue was DragonBoss (101).
+  // Even though DragonBoss (101) now has only 1000 HP, the STABLE QUEUE must pick it next!
   targetBot.bosses[1].hp = 0; // MiniBoss dies
-  const poll5Target = simulateGdunTargeting(targetBot);
-  assert.strictEqual(poll5Target.id, 101, 'DragonBoss (101) must remain next in queue; newly spawned MegaBoss (301) must NOT steal the queue');
-  assert.deepStrictEqual(targetBot.gdunTargetQueue, [101, 301], 'Queue must be [101, 301] with new spawn appended at tail');
+  const poll3Target = simulateGdunTargeting(targetBot);
+  assert.ok(poll3Target, 'Target must be selected in poll 3 after MiniBoss death');
+  assert.strictEqual(poll3Target.id, 101, 'Queue must advance to DragonBoss (101) after MiniBoss dies');
+  assert.strictEqual(targetBot.gdunCurrentTargetId, 101, 'gdunCurrentTargetId must now be locked to 101');
+  assert.deepStrictEqual(targetBot.gdunTargetQueue, [101], 'Remaining queue must be [101]');
 
-  // Poll 6: DragonBoss (101) dies -> Queue advances to MegaBoss (301)
+  // Poll 4: Newly spawned boss appears (MegaBoss id: 301, HP: 50 - ultra low HP)
+  // BEHAVIOR: DragonBoss (101) is still alive -> we stay on it, queue-building branch is skipped.
+  // MegaBoss stays pending and will enter the queue when DragonBoss dies.
+  // DragonBoss must NOT be abandoned in favor of MegaBoss's lower HP.
+  targetBot.bosses.push({ id: 301, name: 'MegaBoss', x: 1000, y: 1000, hp: 50, hp_max: 50, lv: 99 });
+  const poll4Target = simulateGdunTargeting(targetBot);
+  assert.strictEqual(poll4Target.id, 101, 'DragonBoss (101) must remain active target; MegaBoss must NOT steal the queue while DragonBoss is still alive');
+  // Queue stays [101] - MegaBoss will be appended on next rebuild when DragonBoss dies
+  assert.deepStrictEqual(targetBot.gdunTargetQueue, [101], 'Queue stays [101] while DragonBoss (current target) is still alive');
+
+  // Poll 5: DragonBoss (101) dies -> Queue rebuilds with remaining aliveBosses: [MegaBoss(301)]
+  // MegaBoss (HP:50) was waiting and is now the only alive boss -> becomes target immediately.
   targetBot.bosses[0].hp = 0;
-  const poll6Target = simulateGdunTargeting(targetBot);
-  assert.strictEqual(poll6Target.id, 301, 'Target must advance to MegaBoss (301) after DragonBoss is defeated');
+  const poll5Target = simulateGdunTargeting(targetBot);
+  assert.strictEqual(poll5Target.id, 301, 'Target must advance to MegaBoss (301) after DragonBoss is defeated');
   assert.deepStrictEqual(targetBot.gdunTargetQueue, [301], 'Queue must now be [301]');
 
-  // Test 4: Priority level_desc sorting [OFFLINE/LOGIC]
+  // Poll 6: MegaBoss dies -> ALL bosses dead -> no target, queue empty, monsters still ignored
+  targetBot.bosses[2].hp = 0;
+  const poll6Target = simulateGdunTargeting(targetBot);
+  assert.strictEqual(poll6Target, null, 'No target when all bosses are dead - monsters must be IGNORED even if alive');
+  assert.deepStrictEqual(targetBot.gdunTargetQueue, [], 'Queue must be empty when all bosses are dead');
+  assert.strictEqual(targetBot.gdunCurrentTargetId, null, 'gdunCurrentTargetId must be null when no bosses alive');
+
+  // Test 4: Priority level_desc sorting - Boss-Only [OFFLINE/LOGIC]
   const lvBot = new BotInstance({
     name: 'LvBot',
     line_uid: 'lv_bot_1',
@@ -1402,13 +1409,14 @@ try {
   });
   lvBot.guildDungeonActive = true;
   lvBot.player = { x: 1000, y: 1000, map: 12, gdun_in: 1 };
-  lvBot.bosses = [{ id: 1, name: 'B1', lv: 50 }, { id: 2, name: 'B2', lv: 90 }];
-  lvBot.monsters = [{ id: 3, name: 'M1', lv: 70 }];
+  lvBot.bosses   = [{ id: 1, name: 'B1', lv: 50 }, { id: 2, name: 'B2', lv: 90 }];
+  lvBot.monsters = [{ id: 3, name: 'M1', lv: 70 }]; // Must be IGNORED under boss-only mode
 
   const lvTarget = simulateGdunTargeting(lvBot);
-  assert.strictEqual(lvTarget.id, 2, 'Under level_desc, highest level target (Lv.90) must be targeted first');
+  assert.strictEqual(lvTarget.id, 2, 'Under level_desc boss-only, highest level BOSS (Lv.90) must be targeted first - M1 Lv70 must be IGNORED');
 
-  // Test 5: Regression Tests for Auto-Exit after 10 Empty Polls & Timer [OFFLINE/LOGIC]
+  // Test 5: Auto-Exit after 2 Boss-Empty Polls (Boss-Only mode) [OFFLINE/LOGIC]
+  // Behavior: only check aliveBosses; alive monsters must NOT block exit.
   targetBot.sendRequest = async function(url, payload) {
     if (payload.action === 'gdun_exit') {
       return { ok: 1, player: { map: 1, gdun_in: 0 } };
@@ -1416,29 +1424,36 @@ try {
     return { ok: 0 };
   };
 
+  // Setup: all bosses dead, but monsters still alive (must be ignored by exit condition)
   targetBot.bosses = [];
-  targetBot.monsters = [];
+  targetBot.monsters = [{ id: 201, name: 'GoblinA', hp: 500 }];
   targetBot.gdunEmptyPolls = 0;
+  targetBot.guildDungeonActive = true; // re-enable for this test
 
-  for (let i = 1; i <= 9; i++) {
-    let aliveM = (targetBot.monsters || []).filter(m => (m.hp === undefined || m.hp > 0));
-    let aliveB = (targetBot.bosses || []).filter(b => (b.hp === undefined || b.hp > 0));
-    if (aliveM.length === 0 && aliveB.length === 0) targetBot.gdunEmptyPolls++;
-    assert.strictEqual(targetBot.gdunEmptyPolls, i, `Empty poll count should be ${i}`);
-    assert.strictEqual(targetBot.guildDungeonActive, true, 'Must not exit before 10 empty polls');
+  // Poll 1: aliveBosses empty -> gdunEmptyPolls = 1, must NOT exit yet (buffer = 2)
+  {
+    const aliveB = (targetBot.bosses || []).filter(b => (b.hp === undefined || b.hp > 0));
+    if (aliveB.length === 0) targetBot.gdunEmptyPolls++;
+    assert.strictEqual(targetBot.gdunEmptyPolls, 1, 'gdunEmptyPolls should be 1 after first boss-empty poll');
+    assert.strictEqual(targetBot.guildDungeonActive, true, 'Must not exit before reaching 2 boss-empty polls');
   }
 
-  // Poll 10: triggers exit
-  if (targetBot.gdunEmptyPolls >= 9) {
-    targetBot.gdunEmptyPolls++;
+  // Poll 2: aliveBosses empty again -> gdunEmptyPolls = 2 -> triggers exit
+  {
+    const aliveB = (targetBot.bosses || []).filter(b => (b.hp === undefined || b.hp > 0));
+    if (aliveB.length === 0) targetBot.gdunEmptyPolls++;
+    assert.strictEqual(targetBot.gdunEmptyPolls, 2, 'gdunEmptyPolls should be 2 on second boss-empty poll');
+  }
+  if (targetBot.gdunEmptyPolls >= 2) {
     await targetBot.exitGuildDungeon();
   }
-  assert.strictEqual(targetBot.guildDungeonActive, false, 'Should auto-exit on 10th empty poll');
+  assert.strictEqual(targetBot.guildDungeonActive, false, 'Should auto-exit on 2nd boss-empty poll, alive monsters must NOT block exit');
 
   // Test 6: Timer-based auto-exit overdue check
   targetBot.gdunEnteredAt = Date.now() - (11 * 60 * 1000); // 11 mins ago
   const overdueExit = ((Date.now() - targetBot.gdunEnteredAt) >= 10 * 60 * 1000);
   assert.strictEqual(overdueExit, true, 'Timer-based auto-exit should be true after 10+ minutes');
+
 
   console.log('✅ Guild Dungeon State, Filter Sync & Stable Queue Tests Passed successfully!');
   // ==========================================
