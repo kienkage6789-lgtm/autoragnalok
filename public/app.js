@@ -1463,10 +1463,12 @@ document.addEventListener('DOMContentLoaded', () => {
           <span class="badge badge-${acc.status}" id="status-badge-${acc.line_uid}">${acc.status}</span>
           <span id="ping-badge-${acc.line_uid}" style="display: none;"></span>
           <span id="proxy-badge-${acc.line_uid}" style="font-size:0.7rem; padding:1px 5px; border-radius:4px; background:rgba(99,102,241,0.15); color:#818cf8; border:1px solid rgba(99,102,241,0.3); white-space:nowrap; display: none;">🌐 —</span>
+          <span id="fp-badge-${acc.line_uid}" onclick="event.stopPropagation(); openFingerprintModal('${acc.line_uid}')" style="font-size:0.7rem; padding:1px 6px; border-radius:4px; background:rgba(14,165,233,0.15); color:#38bdf8; border:1px solid rgba(14,165,233,0.3); white-space:nowrap; display: none; cursor:pointer;" title="Nhấn để xem & đổi vân tay trình duyệt">🛡️ FP</span>
         </div>
         <div class="header-actions-compact">
           <button class="btn-mini-action btn-battle" onclick="openBattleLink('${acc.line_uid}', '${acc.session_token}')" style="background:#7c3aed; border-color:#a855f7;" title="Mở Giao Diện Săn Boss & PK Chuyên Nghiệp">⚡ PK</button>
           <button class="btn-mini-action btn-play" onclick="openGameLink('${acc.line_uid}', '${acc.session_token}')" title="Mở trực tiếp Client Game">🎮 Play</button>
+          <button class="btn-mini-action" onclick="event.stopPropagation(); openFingerprintModal('${acc.line_uid}')" style="background:rgba(14,165,233,0.25); border-color:#38bdf8; color:#38bdf8;" title="Xem & Đổi Vân Tay Trình Duyệt">🛡️</button>
           <button class="btn-mini-action" onclick="openEditTokenModal('${acc.line_uid}')" title="Sửa Token">✏️</button>
           <button class="btn-mini-action btn-del" onclick="deleteAccount('${acc.line_uid}')" title="Xóa Tài Khoản">🗑️</button>
         </div>
@@ -3034,6 +3036,27 @@ document.addEventListener('DOMContentLoaded', () => {
         proxyBadge.style.display    = '';
       } else {
         proxyBadge.style.display    = 'none';
+      }
+    }
+
+    // Fingerprint badge
+    const fpBadge = document.getElementById(`fp-badge-${acc.line_uid}`);
+    if (fpBadge) {
+      if (acc.fingerprint) {
+        const bName = (acc.fingerprint.browser || 'Browser').split(' ')[0];
+        let osName = 'OS';
+        if (acc.fingerprint.os) {
+          if (acc.fingerprint.os.includes('Win')) osName = 'Win';
+          else if (acc.fingerprint.os.includes('mac')) osName = 'Mac';
+          else if (acc.fingerprint.os.includes('Android')) osName = 'Android';
+          else if (acc.fingerprint.os.includes('Linux')) osName = 'Linux';
+        }
+        fpBadge.textContent = `🛡️ ${bName}/${osName}`;
+        const screenStr = acc.fingerprint.screen ? `${acc.fingerprint.screen.width}x${acc.fingerprint.screen.height}` : '';
+        fpBadge.title = `${acc.fingerprint.browser} trên ${acc.fingerprint.os} (${screenStr})\nNhấn để xem & đổi vân tay`;
+        fpBadge.style.display = '';
+      } else {
+        fpBadge.style.display = 'none';
       }
     }
 
@@ -5868,6 +5891,111 @@ document.addEventListener('DOMContentLoaded', () => {
     const safeToken = encodeURIComponent(token || '');
     const url = `/battle?line_uid=${safeUid}&session_token=${safeToken}`;
     window.open(url, '_blank');
+  };
+
+  // Browser Fingerprint Modal Management
+  let currentFpUid = null;
+
+  window.openFingerprintModal = function(uid) {
+    currentFpUid = uid;
+    const modal = document.getElementById('fingerprint-modal');
+    if (!modal) return;
+
+    const acc = (window.lastFetchedAccounts || []).find(a => a.line_uid === uid);
+    const fp = acc ? acc.fingerprint : null;
+
+    const subEl = document.getElementById('fp-modal-subtitle');
+    if (subEl) subEl.textContent = `Tài khoản: ${acc ? acc.name : uid} (${uid})`;
+
+    if (fp) {
+      const bTitle = document.getElementById('fp-modal-browser-title');
+      if (bTitle) bTitle.textContent = `${fp.browser || 'Browser'} — ${fp.os || 'OS'}`;
+
+      const osTitle = document.getElementById('fp-modal-os-title');
+      if (osTitle) osTitle.textContent = `Platform: ${fp.platform ? fp.platform.replace(/"/g, '') : (fp.navPlatform || 'N/A')}`;
+
+      const isMobile = fp.mobile === '?1';
+      const tagEl = document.getElementById('fp-modal-mobile-tag');
+      if (tagEl) {
+        tagEl.textContent = isMobile ? '📱 Mobile' : '🖥️ Desktop';
+        tagEl.style.background = isMobile ? 'rgba(245, 158, 11, 0.2)' : 'rgba(59, 130, 246, 0.2)';
+        tagEl.style.color = isMobile ? '#fbbf24' : '#60a5fa';
+      }
+
+      const s = fp.screen || {};
+      const scrEl = document.getElementById('fp-modal-screen');
+      if (scrEl) scrEl.textContent = `${s.width || 0} × ${s.height || 0} (${s.colorDepth || 24}-bit, ${s.devicePixelRatio || 1}x)`;
+
+      const hw = fp.hardware || {};
+      const hwEl = document.getElementById('fp-modal-hardware');
+      if (hwEl) hwEl.textContent = `${hw.hardwareConcurrency || '--'} Cores CPU | ${hw.deviceMemory || '--'} GB RAM`;
+
+      const gl = fp.webgl || {};
+      const glEl = document.getElementById('fp-modal-webgl');
+      if (glEl) glEl.textContent = gl.renderer ? `${gl.vendor || ''} — ${gl.renderer}` : 'Chưa cấu hình';
+
+      const locEl = document.getElementById('fp-modal-locale');
+      if (locEl) locEl.textContent = `${fp.language || 'vi-VN'} | ${fp.timezone || 'Asia/Ho_Chi_Minh'}`;
+
+      const idEl = document.getElementById('fp-modal-id');
+      if (idEl) idEl.textContent = fp.id || 'N/A';
+
+      const uaEl = document.getElementById('fp-modal-ua');
+      if (uaEl) uaEl.textContent = fp.userAgent || 'Chưa có';
+
+      const hintsEl = document.getElementById('fp-modal-hints');
+      if (hintsEl) hintsEl.textContent = fp.chUa || 'Trình duyệt không hỗ trợ Client Hints (sec-ch-ua: null)';
+    } else {
+      const bTitle = document.getElementById('fp-modal-browser-title');
+      if (bTitle) bTitle.textContent = 'Chưa có dữ liệu vân tay';
+      const osTitle = document.getElementById('fp-modal-os-title');
+      if (osTitle) osTitle.textContent = 'Nhấn "Đổi Vân Tay Ngẫu Nhiên" để tạo mới';
+    }
+
+    modal.classList.add('open');
+  };
+
+  window.closeFingerprintModal = function() {
+    const modal = document.getElementById('fingerprint-modal');
+    if (modal) modal.classList.remove('open');
+    currentFpUid = null;
+  };
+
+  window.randomizeCurrentFingerprint = async function() {
+    if (!currentFpUid) return;
+    const btn = document.getElementById('fp-btn-randomize');
+    const origHtml = btn ? btn.innerHTML : '';
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<span>⏳</span> Đang tạo...';
+    }
+
+    try {
+      const res = await fetch(`/api/accounts/${currentFpUid}/fingerprint/randomize`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      const data = await res.json();
+      if (data.ok && data.fingerprint) {
+        const acc = (window.lastFetchedAccounts || []).find(a => a.line_uid === currentFpUid);
+        if (acc) acc.fingerprint = data.fingerprint;
+        openFingerprintModal(currentFpUid);
+        if (typeof fetchAccounts === 'function') fetchAccounts();
+        const scrStr = data.fingerprint.screen ? `${data.fingerprint.screen.width}x${data.fingerprint.screen.height}` : '';
+        const glStr = data.fingerprint.webgl ? data.fingerprint.webgl.renderer : '';
+        alert(`🎉 Đã tạo thành công vân tay mới!\n\n🌐 Trình duyệt: ${data.fingerprint.browser}\n💻 Hệ điều hành: ${data.fingerprint.os}\n📐 Độ phân giải: ${scrStr}\n🎮 GPU: ${glStr}`);
+      } else {
+        alert('Lỗi tạo vân tay: ' + (data.error || 'Không xác định'));
+      }
+    } catch(err) {
+      console.error('Error randomizing fingerprint:', err);
+      alert('Lỗi kết nối máy chủ: ' + err.message);
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = origHtml;
+      }
+    }
   };
 
   // Open Edit Account modal

@@ -3,6 +3,22 @@
 > Work Breakdown Structure. Update task states immediately upon changes.
 > Statuses: todo | doing | blocked | review | done
 
+### [x] T80 - Hệ Thống Vân Tay Trình Duyệt Bền Vững & Chống Phát Hiện Bot (Browser Fingerprint Engine)
+- Description: Xây dựng engine sinh và quản lý vân tay trình duyệt (Browser Fingerprint) chân thực, độc lập và lưu trữ bền vững trong `accounts.json`. Đồng bộ hóa HTTP headers (User-Agent, sec-ch-ua, platform, language) cho backend bot poller và inject script ẩn danh (Stealth API spoofing cho `navigator`, `screen`, `WebGL`) khi mở Web Game Client (`/play`). Cung cấp API và giao diện Dashboard để xem chi tiết thông số và tạo mới/ngẫu nhiên vân tay với 1 click.
+- Files related: `server.js`, `public/app.js`, `public/index.html`, `test.js`, `accounts.json`
+- Acceptance criteria:
+  - [x] Xây dựng thư viện hồ sơ thiết bị chân thực `REALISTIC_DEVICE_PROFILES` và hàm `generateRandomFingerprint()`.
+  - [x] Nạp và lưu bền vững `account.fingerprint` vào `accounts.json`, tự động sinh mới nếu tài khoản chưa có.
+  - [x] Sử dụng đầy đủ HTTP headers của vân tay trong `sendAct()`, `refreshSession()`, `callGameApi()`.
+  - [x] Khắc phục lỗi ưu tiên header trong `proxyRequest()` khi xử lý request của bot.
+  - [x] Bổ sung script Stealth Injection vào `/play` để giả lập `navigator`, `screen`, `WebGL` khớp với vân tay của bot.
+  - [x] Cung cấp các API: `GET /api/accounts/:line_uid/fingerprint`, `POST /api/accounts/:line_uid/fingerprint/randomize`.
+  - [x] Frontend: Hiển thị badge vân tay trên thẻ bot, modal Fingerprint Inspector và nút "🎲 Đổi Vân Tay".
+  - [x] Viết unit tests kiểm thử thành công trong `test.js` và chạy `npm test` vượt qua 100%.
+- Status: done
+
+---
+
 ### [x] T79 - Sửa lỗi Tự động vào Phụ bản Guild Phút 30, Tránh kẹt Map, Hiển thị Dashboard & Chỉ Săn Boss Guild
 - Description: Sửa đổi logic hẹn giờ tự động phút 30 (`autoEnterGdunAt30`) tôn trọng cấu hình đi nhóm (`guildDungeonIsTeam`) và tự động kéo thành viên nhóm đi theo. Loại bỏ các bản đồ đặc biệt (Map 4, 5, 11, 12) khỏi việc ghi nhớ làm bản đồ quay về trong `triggerMvpCycle` để tránh kẹt map. Đồng bộ cờ hiển thị hoạt động Săn Boss và highlight mục tiêu trên Web Dashboard. Cấu hình cho bot chỉ nhắm mục tiêu tấn công vào các Boss Guild, bỏ qua quái thường và tự động thoát phụ bản ngay khi tiêu diệt hết Boss để quay về Map & Zone ban đầu. Hỗ trợ sắp xếp độ ưu tiên Boss Guild theo đúng bộ lọc `settings.mvpPriorityMode` người dùng cài đặt.
 - Files related: `server.js`, `test.js`, `public/app.js`

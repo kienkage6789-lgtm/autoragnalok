@@ -15,6 +15,9 @@ const {
   proxyPool,
   botInstances,
   getAccountFingerprint,
+  generateRandomFingerprint,
+  generateFingerprintInjectionScript,
+  REALISTIC_DEVICE_PROFILES,
   naturalCoordNoise,
   logNormalActInterval,
   checkAndRecoverZombieBots,
@@ -1588,6 +1591,42 @@ try {
   }
   const avgInterval = intervals.reduce((a, b) => a + b, 0) / intervals.length;
   assert(avgInterval >= 150000 && avgInterval <= 280000, `Average interval ~200s expected, got ${avgInterval}`);
+
+  // 5. Test Full Rich Fingerprint Structure
+  const fullFp = generateRandomFingerprint('U_TEST_FULL_FP');
+  assert(fullFp.id && fullFp.id.startsWith('fp_'), 'Fingerprint must have unique id prefix fp_');
+  assert(fullFp.browser && typeof fullFp.browser === 'string', 'Fingerprint must contain browser name');
+  assert(fullFp.os && typeof fullFp.os === 'string', 'Fingerprint must contain OS name');
+  assert(fullFp.screen && fullFp.screen.width > 0 && fullFp.screen.height > 0, 'Fingerprint must contain valid screen dimensions');
+  assert(fullFp.hardware && fullFp.hardware.hardwareConcurrency >= 2, 'Fingerprint must specify valid CPU cores');
+  assert(fullFp.hardware && fullFp.hardware.deviceMemory >= 4, 'Fingerprint must specify valid RAM memory');
+  assert(fullFp.webgl && fullFp.webgl.vendor && fullFp.webgl.renderer, 'Fingerprint must specify WebGL vendor and renderer');
+  assert.strictEqual(fullFp.timezone, 'Asia/Ho_Chi_Minh', 'Timezone must default to Asia/Ho_Chi_Minh');
+  assert(Array.isArray(fullFp.languages) && fullFp.languages.length > 0, 'Fingerprint languages array must not be empty');
+
+  // 6. Test Random Fingerprint Generation (without seed) produces variety
+  const randFp1 = generateRandomFingerprint();
+  const randFp2 = generateRandomFingerprint();
+  assert(randFp1.id !== randFp2.id, 'Random fingerprints must have distinct IDs');
+
+  // 7. Test Stealth Script Generation for /play
+  const stealthScript = generateFingerprintInjectionScript(fullFp);
+  assert(stealthScript.includes('id="fp-stealth-shield"'), 'Stealth script must contain proper script ID');
+  assert(stealthScript.includes('navigator'), 'Stealth script must patch navigator properties');
+  assert(stealthScript.includes('screen'), 'Stealth script must patch screen properties');
+  assert(stealthScript.includes('WebGLRenderingContext'), 'Stealth script must spoof WebGL context');
+  assert(stealthScript.includes(fullFp.userAgent), 'Stealth script must contain bot specific User-Agent');
+
+  // 8. Test BotInstance custom fingerprint persistence
+  const customFp = generateRandomFingerprint('CUSTOM_SEED_1');
+  const customBot = new BotInstance({
+    line_uid: 'U_TEST_CUSTOM_FP_BOT',
+    session_token: 'custom_tok',
+    name: 'CustomFpBot',
+    fingerprint: customFp
+  });
+  assert.strictEqual(customBot.fingerprint.id, customFp.id, 'BotInstance must retain pre-configured account fingerprint');
+  assert.strictEqual(customBot.fingerprint.userAgent, customFp.userAgent, 'BotInstance must retain pre-configured userAgent');
 
   console.log('✅ Anti-Detection & Human Simulation Engine Tests Passed successfully!');
 

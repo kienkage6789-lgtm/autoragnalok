@@ -530,6 +530,74 @@
     </div>
   </div>
 
+  <!-- Browser Fingerprint Modal -->
+  <div class="modal-backdrop" id="fingerprint-modal">
+    <div class="modal-card" style="max-width: 650px; max-height: 90vh; display: flex; flex-direction: column;">
+      <div class="modal-header" style="border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 12px;">
+        <div class="modal-title" style="display:flex; align-items:center; gap:8px;">
+          <span style="font-size:1.3rem;">🛡️</span>
+          <div>
+            <h3 style="margin:0; font-size:1.15rem; color:#fff;">Vân Tay Trình Duyệt (Browser Fingerprint)</h3>
+            <p id="fp-modal-subtitle" style="margin:2px 0 0 0; font-size:0.8rem; color:#94a3b8;">Hồ sơ phần cứng & mạng bảo vệ bot chống phát hiện</p>
+          </div>
+        </div>
+        <button class="modal-close" onclick="closeFingerprintModal()">&times;</button>
+      </div>
+      <div class="modal-body" style="overflow-y:auto; flex:1; padding:16px 18px; display:flex; flex-direction:column; gap:14px;">
+        <!-- Top overview card -->
+        <div style="background: rgba(14, 165, 233, 0.08); border: 1px solid rgba(14, 165, 233, 0.25); border-radius: 8px; padding: 12px 14px; display: flex; justify-content: space-between; align-items: center;">
+          <div>
+            <div id="fp-modal-browser-title" style="font-size: 1.05rem; font-weight: bold; color: #38bdf8;">--</div>
+            <div id="fp-modal-os-title" style="font-size: 0.85rem; color: #94a3b8; margin-top: 2px;">--</div>
+          </div>
+          <span id="fp-modal-mobile-tag" style="font-size: 0.75rem; padding: 3px 8px; border-radius: 4px; background: rgba(59, 130, 246, 0.2); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3);">🖥️ Desktop</span>
+        </div>
+
+        <!-- Specs Grid -->
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+          <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 6px; padding: 10px;">
+            <div style="font-size: 0.75rem; color: #94a3b8; margin-bottom: 3px;">📐 Độ Phân Giải Màn Hình</div>
+            <div id="fp-modal-screen" style="font-size: 0.9rem; color: #fff; font-weight: 600;">--</div>
+          </div>
+          <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 6px; padding: 10px;">
+            <div style="font-size: 0.75rem; color: #94a3b8; margin-bottom: 3px;">⚙️ CPU & Bộ Nhớ RAM</div>
+            <div id="fp-modal-hardware" style="font-size: 0.9rem; color: #fff; font-weight: 600;">--</div>
+          </div>
+          <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 6px; padding: 10px; grid-column: span 2;">
+            <div style="font-size: 0.75rem; color: #94a3b8; margin-bottom: 3px;">🎮 GPU WebGL (Card đồ họa)</div>
+            <div id="fp-modal-webgl" style="font-size: 0.85rem; color: #34d399; font-family: monospace; word-break: break-all;">--</div>
+          </div>
+          <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 6px; padding: 10px;">
+            <div style="font-size: 0.75rem; color: #94a3b8; margin-bottom: 3px;">🌐 Ngôn Ngữ & Múi Giờ</div>
+            <div id="fp-modal-locale" style="font-size: 0.85rem; color: #fff;">--</div>
+          </div>
+          <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 6px; padding: 10px;">
+            <div style="font-size: 0.75rem; color: #94a3b8; margin-bottom: 3px;">🆔 Mã Vân Tay (Seed)</div>
+            <div id="fp-modal-id" style="font-size: 0.85rem; color: #a78bfa; font-family: monospace;">--</div>
+          </div>
+        </div>
+
+        <!-- Full User Agent -->
+        <div>
+          <label style="font-size: 0.75rem; color: #94a3b8; display: block; margin-bottom: 4px;">🔍 Chuỗi User-Agent Thực Tế</label>
+          <div id="fp-modal-ua" style="background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; padding: 8px 10px; font-size: 0.78rem; color: #e2e8f0; font-family: monospace; word-break: break-all; max-height: 70px; overflow-y: auto;">--</div>
+        </div>
+
+        <!-- Client hints preview -->
+        <div>
+          <label style="font-size: 0.75rem; color: #94a3b8; display: block; margin-bottom: 4px;">🏷️ Client Hints (sec-ch-ua)</label>
+          <div id="fp-modal-hints" style="background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 8px 10px; font-size: 0.75rem; color: #cbd5e1; font-family: monospace; word-break: break-all;">--</div>
+        </div>
+      </div>
+      <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 12px;">
+        <button type="button" class="btn" id="fp-btn-randomize" onclick="randomizeCurrentFingerprint()" style="background: linear-gradient(135deg, #0284c7, #2563eb); color: #fff; font-weight: 600; border: none; padding: 7px 15px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 6px;">
+          <span>🎲</span> Đổi Vân Tay Ngẫu Nhiên
+        </button>
+        <button type="button" class="btn btn-secondary" onclick="closeFingerprintModal()">Đóng</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Edit User Modal (Admin) -->
   <div class="modal-backdrop" id="edit-user-modal">
     <div class="modal-card">

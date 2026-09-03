@@ -1275,68 +1275,249 @@ function getItemCategory(item) {
 
 // ==================== ANTI-DETECTION & HUMAN SIMULATION ENGINE ====================
 
-const BROWSER_PROFILES = [
+const REALISTIC_DEVICE_PROFILES = [
   {
+    browser: 'Chrome 126',
+    os: 'Windows 11',
     ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
     chUa: '"Not/A)Brand";v="8", "Chromium";v="126", "Google Chrome";v="126"',
     platform: '"Windows"',
-    mobile: '?0'
+    mobile: '?0',
+    navPlatform: 'Win32',
+    chPlatformVersion: '"15.0.0"',
+    chArch: '"x86"',
+    chBitness: '"64"',
+    chModel: '""',
+    screens: [
+      { width: 1920, height: 1080, availWidth: 1920, availHeight: 1040, colorDepth: 24, pixelDepth: 24, devicePixelRatio: 1 },
+      { width: 2560, height: 1440, availWidth: 2560, availHeight: 1400, colorDepth: 24, pixelDepth: 24, devicePixelRatio: 1 }
+    ],
+    hardwareList: [
+      { hardwareConcurrency: 8, deviceMemory: 16 },
+      { hardwareConcurrency: 12, deviceMemory: 16 },
+      { hardwareConcurrency: 16, deviceMemory: 32 }
+    ],
+    webglList: [
+      { vendor: 'Google Inc. (NVIDIA)', renderer: 'ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)' },
+      { vendor: 'Google Inc. (NVIDIA)', renderer: 'ANGLE (NVIDIA, NVIDIA GeForce RTX 4060 Direct3D11 vs_5_0 ps_5_0, D3D11)' },
+      { vendor: 'Google Inc. (Intel)', renderer: 'ANGLE (Intel, Intel(R) UHD Graphics 630 Direct3D11 vs_5_0 ps_5_0, D3D11)' }
+    ]
   },
   {
+    browser: 'Edge 125',
+    os: 'Windows 10',
     ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36 Edg/125.0.0.0',
     chUa: '"Not/A)Brand";v="8", "Chromium";v="125", "Microsoft Edge";v="125"',
     platform: '"Windows"',
-    mobile: '?0'
+    mobile: '?0',
+    navPlatform: 'Win32',
+    chPlatformVersion: '"10.0.0"',
+    chArch: '"x86"',
+    chBitness: '"64"',
+    chModel: '""',
+    screens: [
+      { width: 1920, height: 1080, availWidth: 1920, availHeight: 1040, colorDepth: 24, pixelDepth: 24, devicePixelRatio: 1 },
+      { width: 1366, height: 768, availWidth: 1366, availHeight: 728, colorDepth: 24, pixelDepth: 24, devicePixelRatio: 1 }
+    ],
+    hardwareList: [
+      { hardwareConcurrency: 4, deviceMemory: 8 },
+      { hardwareConcurrency: 8, deviceMemory: 16 }
+    ],
+    webglList: [
+      { vendor: 'Google Inc. (NVIDIA)', renderer: 'ANGLE (NVIDIA, NVIDIA GeForce GTX 1660 SUPER Direct3D11 vs_5_0 ps_5_0, D3D11)' },
+      { vendor: 'Google Inc. (Intel)', renderer: 'ANGLE (Intel, Intel(R) Iris(R) Xe Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)' }
+    ]
   },
   {
+    browser: 'Chrome 126',
+    os: 'macOS Sonoma',
     ua: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
     chUa: '"Not/A)Brand";v="8", "Chromium";v="126", "Google Chrome";v="126"',
     platform: '"macOS"',
-    mobile: '?0'
+    mobile: '?0',
+    navPlatform: 'MacIntel',
+    chPlatformVersion: '"14.5.0"',
+    chArch: '"arm"',
+    chBitness: '"64"',
+    chModel: '""',
+    screens: [
+      { width: 1440, height: 900, availWidth: 1440, availHeight: 875, colorDepth: 30, pixelDepth: 30, devicePixelRatio: 2 },
+      { width: 1680, height: 1050, availWidth: 1680, availHeight: 1025, colorDepth: 30, pixelDepth: 30, devicePixelRatio: 2 }
+    ],
+    hardwareList: [
+      { hardwareConcurrency: 8, deviceMemory: 8 },
+      { hardwareConcurrency: 10, deviceMemory: 16 }
+    ],
+    webglList: [
+      { vendor: 'Apple Inc.', renderer: 'Apple M1' },
+      { vendor: 'Apple Inc.', renderer: 'Apple M2' }
+    ]
   },
   {
+    browser: 'Firefox 127',
+    os: 'Windows 11',
     ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:127.0) Gecko/20100101 Firefox/127.0',
     chUa: null,
     platform: null,
-    mobile: null
+    mobile: null,
+    navPlatform: 'Win32',
+    chPlatformVersion: null,
+    chArch: null,
+    chBitness: null,
+    chModel: null,
+    screens: [
+      { width: 1920, height: 1080, availWidth: 1920, availHeight: 1040, colorDepth: 24, pixelDepth: 24, devicePixelRatio: 1 }
+    ],
+    hardwareList: [
+      { hardwareConcurrency: 8, deviceMemory: 16 },
+      { hardwareConcurrency: 12, deviceMemory: 16 }
+    ],
+    webglList: [
+      { vendor: 'Google Inc. (AMD)', renderer: 'ANGLE (AMD, AMD Radeon RX 6600 Direct3D11 vs_5_0 ps_5_0, D3D11)' },
+      { vendor: 'Google Inc. (NVIDIA)', renderer: 'ANGLE (NVIDIA, NVIDIA GeForce RTX 3050 Direct3D11 vs_5_0 ps_5_0, D3D11)' }
+    ]
   },
   {
+    browser: 'Chrome 124',
+    os: 'Windows 10',
     ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
     chUa: '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
     platform: '"Windows"',
-    mobile: '?0'
+    mobile: '?0',
+    navPlatform: 'Win32',
+    chPlatformVersion: '"10.0.0"',
+    chArch: '"x86"',
+    chBitness: '"64"',
+    chModel: '""',
+    screens: [
+      { width: 1536, height: 864, availWidth: 1536, availHeight: 824, colorDepth: 24, pixelDepth: 24, devicePixelRatio: 1.25 }
+    ],
+    hardwareList: [
+      { hardwareConcurrency: 6, deviceMemory: 8 },
+      { hardwareConcurrency: 8, deviceMemory: 16 }
+    ],
+    webglList: [
+      { vendor: 'Google Inc. (Intel)', renderer: 'ANGLE (Intel, Intel(R) UHD Graphics 620 Direct3D11 vs_5_0 ps_5_0, D3D11)' }
+    ]
   },
   {
+    browser: 'Chrome 125',
+    os: 'Linux Ubuntu',
     ua: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
     chUa: '"Chromium";v="125", "Google Chrome";v="125", "Not.A/Brand";v="24"',
     platform: '"Linux"',
-    mobile: '?0'
+    mobile: '?0',
+    navPlatform: 'Linux x86_64',
+    chPlatformVersion: '"6.5.0"',
+    chArch: '"x86"',
+    chBitness: '"64"',
+    chModel: '""',
+    screens: [
+      { width: 1920, height: 1080, availWidth: 1920, availHeight: 1040, colorDepth: 24, pixelDepth: 24, devicePixelRatio: 1 }
+    ],
+    hardwareList: [
+      { hardwareConcurrency: 8, deviceMemory: 16 }
+    ],
+    webglList: [
+      { vendor: 'Mesa/X.org', renderer: 'Mesa Intel(R) UHD Graphics 630 (CFL GT2)' }
+    ]
   },
   {
+    browser: 'Safari 17.5',
+    os: 'macOS Sonoma',
     ua: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15',
     chUa: null,
     platform: null,
-    mobile: null
+    mobile: null,
+    navPlatform: 'MacIntel',
+    chPlatformVersion: null,
+    chArch: null,
+    chBitness: null,
+    chModel: null,
+    screens: [
+      { width: 1440, height: 900, availWidth: 1440, availHeight: 875, colorDepth: 30, pixelDepth: 30, devicePixelRatio: 2 }
+    ],
+    hardwareList: [
+      { hardwareConcurrency: 8, deviceMemory: 8 }
+    ],
+    webglList: [
+      { vendor: 'Apple Inc.', renderer: 'Apple M2' }
+    ]
   },
   {
+    browser: 'Opera 109',
+    os: 'Windows 11',
     ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36 OPR/109.0.0.0',
     chUa: '"Chromium";v="123", "Opera";v="109", "Not.A/Brand";v="24"',
     platform: '"Windows"',
-    mobile: '?0'
+    mobile: '?0',
+    navPlatform: 'Win32',
+    chPlatformVersion: '"15.0.0"',
+    chArch: '"x86"',
+    chBitness: '"64"',
+    chModel: '""',
+    screens: [
+      { width: 1920, height: 1080, availWidth: 1920, availHeight: 1040, colorDepth: 24, pixelDepth: 24, devicePixelRatio: 1 }
+    ],
+    hardwareList: [
+      { hardwareConcurrency: 8, deviceMemory: 16 }
+    ],
+    webglList: [
+      { vendor: 'Google Inc. (NVIDIA)', renderer: 'ANGLE (NVIDIA, NVIDIA GeForce RTX 2060 Direct3D11 vs_5_0 ps_5_0, D3D11)' }
+    ]
   },
   {
+    browser: 'Chrome Mobile 125',
+    os: 'Android 14 (Samsung Galaxy S23 Ultra)',
     ua: 'Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.6422.165 Mobile Safari/537.36',
     chUa: '"Chromium";v="125", "Google Chrome";v="125", "Not.A/Brand";v="24"',
     platform: '"Android"',
-    mobile: '?1'
+    mobile: '?1',
+    navPlatform: 'Linux armv8l',
+    chPlatformVersion: '"14.0.0"',
+    chArch: '"arm"',
+    chBitness: '"64"',
+    chModel: '"SM-S918B"',
+    screens: [
+      { width: 412, height: 915, availWidth: 412, availHeight: 915, colorDepth: 24, pixelDepth: 24, devicePixelRatio: 3 }
+    ],
+    hardwareList: [
+      { hardwareConcurrency: 8, deviceMemory: 8 }
+    ],
+    webglList: [
+      { vendor: 'Qualcomm', renderer: 'Adreno (TM) 740' }
+    ]
   },
   {
+    browser: 'Vivaldi 6.8',
+    os: 'Windows 11',
     ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 Vivaldi/6.8.3381.46',
     chUa: '"Chromium";v="126", "Vivaldi";v="6.8", "Not-A.Brand";v="99"',
     platform: '"Windows"',
-    mobile: '?0'
+    mobile: '?0',
+    navPlatform: 'Win32',
+    chPlatformVersion: '"15.0.0"',
+    chArch: '"x86"',
+    chBitness: '"64"',
+    chModel: '""',
+    screens: [
+      { width: 1920, height: 1080, availWidth: 1920, availHeight: 1040, colorDepth: 24, pixelDepth: 24, devicePixelRatio: 1 }
+    ],
+    hardwareList: [
+      { hardwareConcurrency: 12, deviceMemory: 16 }
+    ],
+    webglList: [
+      { vendor: 'Google Inc. (NVIDIA)', renderer: 'ANGLE (NVIDIA, NVIDIA GeForce RTX 3070 Direct3D11 vs_5_0 ps_5_0, D3D11)' }
+    ]
   }
 ];
+
+const BROWSER_PROFILES = REALISTIC_DEVICE_PROFILES.map(p => ({
+  ua: p.ua,
+  chUa: p.chUa,
+  platform: p.platform,
+  mobile: p.mobile
+}));
 
 const ACCEPT_LANG_POOL = [
   'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7',
@@ -1346,23 +1527,190 @@ const ACCEPT_LANG_POOL = [
   'vi-VN,vi;q=0.9,ja-JP;q=0.8,ja;q=0.7,en-US;q=0.6,en;q=0.5'
 ];
 
-function getAccountFingerprint(line_uid) {
-  let hash = 0;
-  const str = String(line_uid || 'default');
-  for (let i = 0; i < str.length; i++) {
-    hash = ((hash << 5) - hash) + str.charCodeAt(i);
-    hash |= 0;
+function createPrng(seedStr) {
+  let h = 0;
+  const s = String(seedStr || 'default');
+  for (let i = 0; i < s.length; i++) {
+    h = ((h << 5) - h) + s.charCodeAt(i);
+    h |= 0;
   }
-  const posHash = Math.abs(hash);
-  const profile = BROWSER_PROFILES[posHash % BROWSER_PROFILES.length];
+  let a = Math.abs(h) || 123456789;
+  return function() {
+    a = (a ^ (a << 13)) | 0;
+    a = (a ^ (a >>> 17)) | 0;
+    a = (a ^ (a << 5)) | 0;
+    return (Math.abs(a) % 1000000) / 1000000;
+  };
+}
+
+function generateRandomFingerprint(seed = null) {
+  let rand;
+  let posHash = 0;
+  if (seed != null) {
+    const str = String(seed);
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      hash = ((hash << 5) - hash) + str.charCodeAt(i);
+      hash |= 0;
+    }
+    posHash = Math.abs(hash);
+    rand = createPrng(seed);
+  } else {
+    posHash = Math.floor(Math.random() * 1000000);
+    rand = Math.random;
+  }
+
+  const profileIdx = posHash % REALISTIC_DEVICE_PROFILES.length;
+  const profile = REALISTIC_DEVICE_PROFILES[profileIdx];
   const lang = ACCEPT_LANG_POOL[posHash % ACCEPT_LANG_POOL.length];
+
+  const screenIdx = Math.floor(rand() * profile.screens.length);
+  const screen = profile.screens[screenIdx] || profile.screens[0];
+
+  const hwIdx = Math.floor(rand() * profile.hardwareList.length);
+  const hardware = profile.hardwareList[hwIdx] || profile.hardwareList[0];
+
+  const glIdx = Math.floor(rand() * profile.webglList.length);
+  const webgl = profile.webglList[glIdx] || profile.webglList[0];
+
+  const primaryLang = lang.split(',')[0].split(';')[0].trim();
+  const languages = [primaryLang];
+  if (primaryLang !== 'vi-VN') languages.push('vi-VN');
+  if (!languages.includes('en-US')) languages.push('en-US');
+  if (!languages.includes('en')) languages.push('en');
+
+  const fpId = 'fp_' + (seed != null ? posHash.toString(36) : Math.random().toString(36).slice(2, 10));
+
   return {
+    id: fpId,
+    browser: profile.browser,
+    os: profile.os,
     userAgent: profile.ua,
     chUa: profile.chUa,
     platform: profile.platform,
     mobile: profile.mobile,
-    acceptLanguage: lang
+    navPlatform: profile.navPlatform,
+    chPlatformVersion: profile.chPlatformVersion,
+    chArch: profile.chArch,
+    chBitness: profile.chBitness,
+    chModel: profile.chModel,
+    acceptLanguage: lang,
+    language: primaryLang,
+    languages: languages,
+    screen: { ...screen },
+    hardware: { ...hardware },
+    webgl: { ...webgl },
+    timezone: 'Asia/Ho_Chi_Minh',
+    canvasNoise: Math.round(rand() * 100000) / 100000,
+    audioNoise: Math.round(rand() * 10000) / 10000000,
+    createdAt: Date.now()
   };
+}
+
+function getAccountFingerprint(line_uid) {
+  return generateRandomFingerprint(line_uid);
+}
+
+function generateFingerprintInjectionScript(fingerprint) {
+  if (!fingerprint) return '';
+  const fpJson = JSON.stringify(fingerprint);
+  return `<script id="fp-stealth-shield">
+(function() {
+  try {
+    var fp = ${fpJson};
+    if (!fp) return;
+
+    // 1. Spoof Navigator
+    if (fp.userAgent) {
+      try {
+        Object.defineProperty(navigator, 'userAgent', { get: function() { return fp.userAgent; }, configurable: true });
+        Object.defineProperty(navigator, 'appVersion', { get: function() { return fp.userAgent.replace(/^Mozilla\\//, ''); }, configurable: true });
+      } catch(e) {}
+    }
+    if (fp.navPlatform || fp.platform) {
+      var plat = fp.navPlatform || (fp.platform && fp.platform.indexOf('Win') !== -1 ? 'Win32' : (fp.platform && fp.platform.indexOf('Mac') !== -1 ? 'MacIntel' : 'Linux x86_64'));
+      try { Object.defineProperty(navigator, 'platform', { get: function() { return plat; }, configurable: true }); } catch(e) {}
+    }
+    if (fp.language) {
+      try {
+        Object.defineProperty(navigator, 'language', { get: function() { return fp.language; }, configurable: true });
+        Object.defineProperty(navigator, 'languages', { get: function() { return fp.languages || [fp.language, 'en-US', 'en']; }, configurable: true });
+      } catch(e) {}
+    }
+    if (fp.hardware) {
+      if (fp.hardware.hardwareConcurrency) {
+        try { Object.defineProperty(navigator, 'hardwareConcurrency', { get: function() { return fp.hardware.hardwareConcurrency; }, configurable: true }); } catch(e) {}
+      }
+      if (fp.hardware.deviceMemory) {
+        try { Object.defineProperty(navigator, 'deviceMemory', { get: function() { return fp.hardware.deviceMemory; }, configurable: true }); } catch(e) {}
+      }
+    }
+
+    // 2. Spoof Screen
+    if (fp.screen) {
+      try {
+        Object.defineProperty(screen, 'width', { get: function() { return fp.screen.width; }, configurable: true });
+        Object.defineProperty(screen, 'height', { get: function() { return fp.screen.height; }, configurable: true });
+        Object.defineProperty(screen, 'availWidth', { get: function() { return fp.screen.availWidth || fp.screen.width; }, configurable: true });
+        Object.defineProperty(screen, 'availHeight', { get: function() { return fp.screen.availHeight || fp.screen.height; }, configurable: true });
+        Object.defineProperty(screen, 'colorDepth', { get: function() { return fp.screen.colorDepth || 24; }, configurable: true });
+        Object.defineProperty(screen, 'pixelDepth', { get: function() { return fp.screen.pixelDepth || 24; }, configurable: true });
+        if (fp.screen.devicePixelRatio) {
+          Object.defineProperty(window, 'devicePixelRatio', { get: function() { return fp.screen.devicePixelRatio; }, configurable: true });
+        }
+      } catch(e) {}
+    }
+
+    // 3. Spoof WebGL Vendor & Renderer
+    if (fp.webgl && (fp.webgl.vendor || fp.webgl.renderer)) {
+      var spoofGl = function(ctx) {
+        if (!ctx || !ctx.prototype) return;
+        var origGetParam = ctx.prototype.getParameter;
+        ctx.prototype.getParameter = function(param) {
+          if (param === 0x9245 && fp.webgl.vendor) return fp.webgl.vendor;
+          if (param === 0x9246 && fp.webgl.renderer) return fp.webgl.renderer;
+          return origGetParam.apply(this, arguments);
+        };
+      };
+      try { spoofGl(window.WebGLRenderingContext); } catch(e) {}
+      try { spoofGl(window.WebGL2RenderingContext); } catch(e) {}
+    }
+
+    // 4. Spoof UserAgentData (Client Hints API)
+    if (window.navigator.userAgentData && fp.chUa) {
+      try {
+        var brands = [];
+        fp.chUa.split(',').forEach(function(part) {
+          var m = part.match(/"([^"]+)";v="([^"]+)"/);
+          if (m) brands.push({ brand: m[1], version: m[2] });
+        });
+        var isMobile = fp.mobile === '?1' || fp.chMobile === '?1';
+        var platform = fp.platform ? fp.platform.replace(/"/g, '') : (fp.chPlatform ? fp.chPlatform.replace(/"/g, '') : 'Windows');
+        Object.defineProperty(navigator, 'userAgentData', {
+          get: function() {
+            return {
+              brands: brands,
+              mobile: isMobile,
+              platform: platform,
+              getHighEntropyValues: function(hints) {
+                var res = { brands: brands, mobile: isMobile, platform: platform };
+                if (hints.indexOf('platformVersion') !== -1) res.platformVersion = fp.chPlatformVersion ? fp.chPlatformVersion.replace(/"/g, '') : '15.0.0';
+                if (hints.indexOf('architecture') !== -1) res.architecture = fp.chArch ? fp.chArch.replace(/"/g, '') : 'x86';
+                if (hints.indexOf('bitness') !== -1) res.bitness = fp.chBitness ? fp.chBitness.replace(/"/g, '') : '64';
+                if (hints.indexOf('model') !== -1) res.model = fp.chModel ? fp.chModel.replace(/"/g, '') : '';
+                return Promise.resolve(res);
+              }
+            };
+          },
+          configurable: true
+        });
+      } catch(e) {}
+    }
+  } catch(err) {
+    console.warn('[Stealth Shield] Init warning:', err);
+  }
+})();
+</script>`;
 }
 
 // Gaussian-like noise (triangular approximation) to mimic human non-exact coordinate clicks
@@ -1393,7 +1741,12 @@ class BotInstance {
     this.phpsessid = account.phpsessid || null;
     this.name = account.name;
     this.userId = account.userId || 'usr_admin';
-    this.fingerprint = getAccountFingerprint(this.line_uid);
+    if (account.fingerprint && typeof account.fingerprint === 'object' && account.fingerprint.userAgent) {
+      this.fingerprint = account.fingerprint;
+    } else {
+      this.fingerprint = getAccountFingerprint(this.line_uid);
+      account.fingerprint = this.fingerprint;
+    }
 
     // Load user-level poll configuration
     const users = loadUsers();
@@ -5067,11 +5420,19 @@ class BotInstance {
 // Initialize active bots
 function startAllBots() {
   const accounts = loadAccounts();
+  let needSave = false;
   accounts.forEach(acc => {
     const instance = new BotInstance(acc);
     botInstances[acc.line_uid] = instance;
+    if (!acc.fingerprint && instance.fingerprint) {
+      acc.fingerprint = instance.fingerprint;
+      needSave = true;
+    }
     instance.start();
   });
+  if (needSave) {
+    saveAccounts(accounts);
+  }
 }
 
 // 🛡️ Global Watchdog: Quét và tự động giải cứu các bot bị treo im lặng (Zombie Bots)
@@ -6175,6 +6536,7 @@ app.get('/api/accounts', requireAuth, (req, res) => {
           guildDungeonActive: bot.guildDungeonActive || false,
           guildDungeonIsTeam: bot.guildDungeonIsTeam || false,
           proxyInfo: req.user.role === 'admin' ? proxyPool.getBotProxyInfo(bot.line_uid) : null,
+          fingerprint: bot.fingerprint || null,
           combatRates: bot.getCombatRates ? bot.getCombatRates() : {
             killsPerMin: 0, goldPerMin: 0, expPerMin: 0,
             woodPerMin: 0, stonePerMin: 0, ironPerMin: 0, copperPerMin: 0, herbPerMin: 0
@@ -7707,6 +8069,79 @@ app.get('/api/accounts/:line_uid/proxy-check', requireAuth, async (req, res) => 
   }
 });
 
+// ==================== BROWSER FINGERPRINT API ROUTES ====================
+
+// Lấy thông tin vân tay chi tiết của bot
+app.get('/api/accounts/:line_uid/fingerprint', requireAuth, (req, res) => {
+  const { line_uid } = req.params;
+  const bot = botInstances[line_uid];
+  if (!bot) return res.status(404).json({ error: 'Không tìm thấy tài khoản.' });
+  if (!checkAccountOwnership(req, res, bot)) return;
+
+  res.json({
+    ok: true,
+    line_uid,
+    name: bot.name,
+    fingerprint: bot.fingerprint || null
+  });
+});
+
+// Sinh mới ngẫu nhiên bộ vân tay trình duyệt cho bot và lưu bền vững vào accounts.json
+app.post('/api/accounts/:line_uid/fingerprint/randomize', requireAuth, (req, res) => {
+  const { line_uid } = req.params;
+  const bot = botInstances[line_uid];
+  if (!bot) return res.status(404).json({ error: 'Không tìm thấy tài khoản.' });
+  if (!checkAccountOwnership(req, res, bot)) return;
+
+  const newFingerprint = generateRandomFingerprint();
+  bot.fingerprint = newFingerprint;
+
+  const currentAccounts = loadAccounts();
+  const accIndex = currentAccounts.findIndex(a => a.line_uid === line_uid);
+  if (accIndex !== -1) {
+    currentAccounts[accIndex].fingerprint = newFingerprint;
+    saveAccounts(currentAccounts);
+  }
+
+  bot.addLog('SYSTEM', `🎲 Đã tạo mới vân tay trình duyệt: ${newFingerprint.browser} (${newFingerprint.os})`);
+
+  res.json({
+    ok: true,
+    message: 'Tạo mới vân tay trình duyệt thành công',
+    fingerprint: newFingerprint
+  });
+});
+
+// Cập nhật tùy chỉnh các thuộc tính vân tay trình duyệt
+app.put('/api/accounts/:line_uid/fingerprint', requireAuth, (req, res) => {
+  const { line_uid } = req.params;
+  const bot = botInstances[line_uid];
+  if (!bot) return res.status(404).json({ error: 'Không tìm thấy tài khoản.' });
+  if (!checkAccountOwnership(req, res, bot)) return;
+
+  const updates = req.body || {};
+  bot.fingerprint = {
+    ...(bot.fingerprint || generateRandomFingerprint(line_uid)),
+    ...updates,
+    updatedAt: Date.now()
+  };
+
+  const currentAccounts = loadAccounts();
+  const accIndex = currentAccounts.findIndex(a => a.line_uid === line_uid);
+  if (accIndex !== -1) {
+    currentAccounts[accIndex].fingerprint = bot.fingerprint;
+    saveAccounts(currentAccounts);
+  }
+
+  bot.addLog('SYSTEM', `⚙️ Đã cập nhật thông số vân tay trình duyệt`);
+
+  res.json({
+    ok: true,
+    message: 'Cập nhật vân tay thành công',
+    fingerprint: bot.fingerprint
+  });
+});
+
 // Verify outbound public IPs for all proxy streams in pool (Admin only)
 app.get('/api/admin/proxies/verify-all', requireAuth, async (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'Chỉ Admin mới có quyền' });
@@ -8177,7 +8612,7 @@ async function proxyRequest(req, res, targetUrl, uid = null) {
 
   const headers = {
     'content-type': req.headers['content-type'] || 'application/x-www-form-urlencoded; charset=UTF-8',
-    'user-agent': req.headers['user-agent'] || (bot && bot.fingerprint && bot.fingerprint.userAgent) || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'user-agent': req.headers['user-agent'] || (bot && bot.fingerprint && bot.fingerprint.userAgent) || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
     'accept': req.headers['accept'] || '*/*',
     'accept-language': req.headers['accept-language'] || (bot && bot.fingerprint && bot.fingerprint.acceptLanguage) || 'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7',
     'origin': 'https://ragnalok.online',
@@ -8364,9 +8799,9 @@ async function fetchGameHtml(req, uid = null) {
   const targetUrl = `https://ragnalok.online/human/index.php?_cb=${now}`;
 
   const headers = {
-    'user-agent': req.headers['user-agent'] || (bot && bot.fingerprint && bot.fingerprint.userAgent) || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'user-agent': (bot && bot.fingerprint && bot.fingerprint.userAgent) || req.headers['user-agent'] || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
     'accept': req.headers['accept'] || 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-    'accept-language': req.headers['accept-language'] || (bot && bot.fingerprint && bot.fingerprint.acceptLanguage) || 'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7',
+    'accept-language': (bot && bot.fingerprint && bot.fingerprint.acceptLanguage) || req.headers['accept-language'] || 'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7',
     'origin': 'https://ragnalok.online',
     'referer': 'https://ragnalok.online/human/',
     'connection': 'keep-alive'
@@ -8386,14 +8821,14 @@ async function fetchGameHtml(req, uid = null) {
     headers['cookie'] = cookieHeader;
   }
 
-  if (req.headers['sec-ch-ua']) headers['sec-ch-ua'] = req.headers['sec-ch-ua'];
-  else if (bot && bot.fingerprint && bot.fingerprint.chUa) headers['sec-ch-ua'] = bot.fingerprint.chUa;
+  if (bot && bot.fingerprint && bot.fingerprint.chUa) headers['sec-ch-ua'] = bot.fingerprint.chUa;
+  else if (req.headers['sec-ch-ua']) headers['sec-ch-ua'] = req.headers['sec-ch-ua'];
 
-  if (req.headers['sec-ch-ua-mobile']) headers['sec-ch-ua-mobile'] = req.headers['sec-ch-ua-mobile'];
-  else if (bot && bot.fingerprint && bot.fingerprint.mobile) headers['sec-ch-ua-mobile'] = bot.fingerprint.mobile;
+  if (bot && bot.fingerprint && bot.fingerprint.mobile) headers['sec-ch-ua-mobile'] = bot.fingerprint.mobile;
+  else if (req.headers['sec-ch-ua-mobile']) headers['sec-ch-ua-mobile'] = req.headers['sec-ch-ua-mobile'];
 
-  if (req.headers['sec-ch-ua-platform']) headers['sec-ch-ua-platform'] = req.headers['sec-ch-ua-platform'];
-  else if (bot && bot.fingerprint && bot.fingerprint.platform) headers['sec-ch-ua-platform'] = bot.fingerprint.platform;
+  if (bot && bot.fingerprint && bot.fingerprint.platform) headers['sec-ch-ua-platform'] = bot.fingerprint.platform;
+  else if (req.headers['sec-ch-ua-platform']) headers['sec-ch-ua-platform'] = req.headers['sec-ch-ua-platform'];
 
   if (req.headers['sec-fetch-dest']) headers['sec-fetch-dest'] = req.headers['sec-fetch-dest'];
   if (req.headers['sec-fetch-mode']) headers['sec-fetch-mode'] = req.headers['sec-fetch-mode'];
@@ -8428,6 +8863,16 @@ async function fetchGameHtml(req, uid = null) {
     }
 
     console.log(`[FetchGameHtml Success] Game HTML fetched successfully | uid: ${effectiveUid || 'N/A'} | Time: ${elapsed}ms`);
+
+    // 0. Inject Stealth Fingerprint Shield (khớp 100% vân tay của bot)
+    if (bot && bot.fingerprint) {
+      const stealthScript = generateFingerprintInjectionScript(bot.fingerprint);
+      if (html.includes('<head>')) {
+        html = html.replace('<head>', '<head>\n' + stealthScript);
+      } else {
+        html = stealthScript + '\n' + html;
+      }
+    }
 
     // 1. Vá lỗi DOM: Đổi id log-list thành event-log (nếu có)
     html = html.replace('id="log-list"', 'id="event-log"');
@@ -8760,6 +9205,17 @@ app.get('/play', requireAuth, async (req, res) => {
     console.warn(`[Play Route Fallback] Serving patched play.html fallback due to: ${e.message} | uid: ${uid || 'N/A'}`);
     let fallback = fs.readFileSync(path.join(__dirname, 'play.html'), 'utf8');
     const now = Date.now();
+
+    // 0. Inject Stealth Fingerprint Shield (khớp 100% vân tay của bot)
+    const playBot = uid ? botInstances[uid] : null;
+    if (playBot && playBot.fingerprint) {
+      const stealthScript = generateFingerprintInjectionScript(playBot.fingerprint);
+      if (fallback.includes('<head>')) {
+        fallback = fallback.replace('<head>', '<head>\n' + stealthScript);
+      } else {
+        fallback = stealthScript + '\n' + fallback;
+      }
+    }
 
     // Vá lỗi DOM và áp dụng tất cả các thay thế giống fetchGameHtml
     fallback = fallback.replace('id="log-list"', 'id="event-log"');
@@ -9111,6 +9567,9 @@ module.exports = {
   proxyPool,
   botInstances,
   getAccountFingerprint,
+  generateRandomFingerprint,
+  generateFingerprintInjectionScript,
+  REALISTIC_DEVICE_PROFILES,
   naturalCoordNoise,
   logNormalActInterval,
   BROWSER_PROFILES,

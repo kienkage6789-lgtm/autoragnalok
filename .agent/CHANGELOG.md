@@ -2,6 +2,35 @@
 
 > Changelog of actual changes implemented.
 
+### 2026-09-03 - Hệ Thống Vân Tay Trình Duyệt Bền Vững & Chống Phát Hiện Bot (T80)
+
+- File đã đổi: [server.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [test.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/test.js), [public/app.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/public/app.js), [public/index.html](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/public/index.html), [accounts.json](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/accounts.json), [.agent/TASKS.md](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/.agent/TASKS.md), [.agent/CHANGELOG.md](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/.agent/CHANGELOG.md).
+- Đã làm:
+  - **Thư viện hồ sơ thiết bị chân thực (`REALISTIC_DEVICE_PROFILES`)**:
+    - Mở rộng 10 hồ sơ trình duyệt hiện đại (Chrome 124-126, Edge 125, Firefox 127, Safari 17.5, Opera 109, Vivaldi 6.8, Chrome Mobile) trên đa nền tảng (Windows 11/10, macOS Sonoma, Linux Ubuntu, Android 14).
+    - Cấu hình nhất quán: Độ phân giải màn hình (`screen`), số nhân CPU (`hardwareConcurrency`), RAM (`deviceMemory`), GPU WebGL Vendor & Unmasked Renderer (NVIDIA RTX, Intel UHD/Iris, AMD Radeon, Apple M1/M2, Adreno), Client Hints (`sec-ch-ua*`), Ngôn ngữ và Múi giờ (`Asia/Ho_Chi_Minh`).
+  - **Hàm sinh vân tay (`generateRandomFingerprint`)**:
+    - Hỗ trợ cả sinh ngẫu nhiên 100% lẫn sinh xác định (deterministic) dựa trên seed `line_uid` qua hàm băm LCG.
+    - Duy trì khả năng tương thích ngược 100% cho `getAccountFingerprint(line_uid)` và các bộ test cũ.
+  - **Lưu trữ bền vững trong `accounts.json`**:
+    - `BotInstance` tự động nạp `account.fingerprint` nếu đã tồn tại, hoặc tạo mới và lưu lại vào `accounts.json`.
+    - Hàm `startAllBots()` tự động phát hiện và bổ sung vân tay cho các tài khoản cũ chưa có.
+  - **Đồng bộ hóa 2 chiều Network & Web Client**:
+    - Polling backend (`sendAct`, `refreshSession`, `callGameApi`): Gửi đầy đủ các HTTP headers và Client Hints từ vân tay bot.
+    - Xử lý proxy (`proxyRequest`): Fallback chuẩn xác, bảo toàn header của client test/thực tế đồng thời áp dụng vân tay bot.
+    - Chế độ chơi trực tiếp (`/play` và fallback `play.html`): Tự động nhúng script ẩn danh `generateFingerprintInjectionScript` vào `<head>` để giả lập các đối tượng JS runtime (`navigator`, `screen`, `WebGL`, `userAgentData`), loại bỏ hoàn toàn việc lộ cấu hình máy thật.
+  - **API Quản lý Vân tay**:
+    - Bổ sung các endpoint: `GET /api/accounts/:line_uid/fingerprint`, `POST /api/accounts/:line_uid/fingerprint/randomize`, `PUT /api/accounts/:line_uid/fingerprint`.
+    - Trả về trường `fingerprint` trong endpoint danh sách `GET /api/accounts`.
+  - **Giao diện Bảng điều khiển (Dashboard UI)**:
+    - Bổ sung huy hiệu `🛡️ Browser/OS` trực tiếp trên mỗi Card bot, click mở modal.
+    - Bổ sung nút bấm `🛡️` trên thanh thao tác nhanh của Card.
+    - Xây dựng Modal **Vân Tay Trình Duyệt (Browser Fingerprint)** hiển thị đầy đủ chi tiết: Trình duyệt, OS, User-Agent, Màn hình, CPU, RAM, GPU WebGL, Client Hints, kèm nút "🎲 Đổi Vân Tay Ngẫu Nhiên" gọi API cập nhật tức thì.
+  - **Kiểm thử Unit Tests**:
+    - Thêm 4 test case chuyên sâu cho cấu trúc vân tay, tính ngẫu nhiên, script stealth spoofing và tính bền vững của `BotInstance`. Chạy `npm test` vượt qua 100%.
+
+---
+
 ### 2026-08-23 - Sửa lỗi Tự động vào Phụ bản Guild Phút 30, Tránh kẹt Map, Hiển thị Dashboard & Chỉ Săn Boss Guild (T79)
 
 - File đã đổi: [server.js](file:///c:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/server.js), [test.js](file:///c:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/test.js), [public/app.js](file:///c:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/public/app.js), [.agent/TASKS.md](file:///c:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/.agent/TASKS.md), [.agent/CHANGELOG.md](file:///c:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/.agent/CHANGELOG.md), [.agent/4M.md](file:///c:/Users/kienk/OneDrive/Desktop/auto/autoragnalok/.agent/4M.md).

@@ -2,6 +2,29 @@
 
 > Captured architectural decisions and trade-offs.
 
+## 2026-09-03 - Hệ Thống Vân Tay Trình Duyệt Bền Vững & Chống Phát Hiện Bot (T80)
+
+- Bối cảnh:
+  - Game server `Ragnalok` và hệ thống bảo vệ Cloudflare phân tích các đặc trưng thiết bị (Browser Fingerprinting) để phát hiện bot tự động, bao gồm User-Agent, Client Hints (`sec-ch-ua*`), độ phân giải màn hình, card đồ họa WebGL và thông số phần cứng.
+  - Trước đây, hệ thống chỉ có một mảng mẫu nhỏ 8 User-Agent băm tĩnh từ `line_uid`, không lưu bền vững vào file, không thể tùy biến và không có giao diện kiểm soát. Đặc biệt, khi mở giao diện `/play`, trình duyệt thật của người dùng để lộ cấu hình máy thật, gây lệch vân tay (mismatch) với HTTP headers của bot chạy ngầm.
+- Quyết định:
+  1. **Thư viện hồ sơ thiết bị chân thực (`REALISTIC_DEVICE_PROFILES`)**:
+     - Xây dựng 10 hồ sơ thiết bị đầy đủ trên Windows 11/10, macOS Sonoma, Linux Ubuntu và Android 14.
+     - Đảm bảo tính nhất quán nội tại: Hệ điều hành, User-Agent, Client Hints, `navigator.platform`, CPU Cores, RAM, GPU WebGL Vendor & Renderer, Màn hình và Múi giờ.
+  2. **Lưu trữ Bền Vững trong `accounts.json`**:
+     - `BotInstance` tự động nạp hoặc sinh mới và ghi vĩnh viễn trường `fingerprint` vào `accounts.json`. Vân tay của bot không bị thay đổi khi restart server.
+  3. **Đồng bộ hóa 2 Chiều & Stealth Script Injection**:
+     - Backend requests (`sendAct`, `refreshSession`, `callGameApi`): Gửi đầy đủ headers tương ứng với vân tay bot.
+     - Web Client (`/play` và fallback `play.html`): Tự động nhúng script `generateFingerprintInjectionScript` vào `<head>` để giả lập các đối tượng runtime `navigator`, `screen`, `WebGLRenderingContext`, `navigator.userAgentData`, ngăn chặn rò rỉ thông tin máy thật.
+  4. **Giao diện Dashboard & API**:
+     - Cung cấp API `GET /api/accounts/:line_uid/fingerprint`, `POST /api/accounts/:line_uid/fingerprint/randomize`, `PUT /api/accounts/:line_uid/fingerprint`.
+     - Thêm huy hiệu `🛡️ Browser/OS` trên Card bot và Modal chi tiết Fingerprint Inspector với nút "🎲 Đổi Vân Tay Ngẫu Nhiên" 1-click.
+- Kết quả:
+  - Đảm bảo mỗi bot sở hữu một bộ nhận diện thiết bị độc lập, tự nhiên và bảo vệ tối đa trước cơ chế chống bot.
+  - Vượt qua 100% các unit test tự động trong `test.js`.
+
+---
+
 ## 2026-08-17 - Tự Động Gia Hạn Session & Auto-Relogin Khắc Phục Cơ Chế Offline 1H (T62)
 
 - Bối cảnh:
