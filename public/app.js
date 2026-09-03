@@ -1582,7 +1582,8 @@ document.addEventListener('DOMContentLoaded', () => {
         <button class="tab-link" id="tab-btn-event-${acc.line_uid}" onclick="switchTab('${acc.line_uid}', 'event')">🏆 Event</button>
         <button class="tab-link" id="tab-btn-skills-${acc.line_uid}" onclick="switchTab('${acc.line_uid}', 'skills')">👤 Nhân Vật</button>
         <button class="tab-link" id="tab-btn-market-buy-${acc.line_uid}" onclick="switchTab('${acc.line_uid}', 'market-buy')">🏪 Chợ</button>
-        <button class="tab-link" id="tab-btn-log-${acc.line_uid}" onclick="switchTab('${acc.line_uid}', 'log')">Log</button>
+        <button class="tab-link" id="tab-btn-system-${acc.line_uid}" onclick="switchTab('${acc.line_uid}', 'system')">🖥️ Hệ Thống</button>
+        <button class="tab-link" id="tab-btn-log-${acc.line_uid}" onclick="switchTab('${acc.line_uid}', 'log')">🎮 Log Game</button>
       </div>
 
       <div class="card-tab-content">
@@ -2133,6 +2134,8 @@ document.addEventListener('DOMContentLoaded', () => {
                   <!-- Price Sort Dropdown (Thấp -> Cao, Cao -> Thấp) -->
                   <div>
                     <select id="mkt-live-sort-${acc.line_uid}" onchange="onLiveMarketFilterChange('${acc.line_uid}')" style="width: 100%; background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; color: #fbbf24; padding: 5px 6px; font-size: 0.78rem; font-weight: 600; outline: none;">
+                      <option value="newest" selected>🆕 Mới đăng: Mới ➔ Cũ</option>
+                      <option value="oldest">📜 Mới đăng: Cũ ➔ Mới</option>
                       <option value="asc">🔽 Giá: Thấp ➔ Cao</option>
                       <option value="desc">🔼 Giá: Cao ➔ Thấp</option>
                     </select>
@@ -2484,18 +2487,72 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
         </div>
 
-        <!-- Log Tab Pane (Merged Logs & Loot with Sub-tabs) -->
+        <!-- System Monitoring & Diagnostic Tab Pane -->
+        <div class="tab-pane" id="pane-system-${acc.line_uid}">
+          <!-- System Status Bar (Health & Infrastructure Vitals) -->
+          <div class="system-vitals-banner" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin-bottom: 10px;">
+            <div class="sys-vital-card" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 6px 10px;">
+              <div style="font-size: 0.72rem; color: #94a3b8;">🔑 Phiên & Token</div>
+              <div id="sys-token-status-${acc.line_uid}" style="font-size: 0.8rem; font-weight: 600; color: #38bdf8; margin-top: 2px;">--</div>
+            </div>
+            <div class="sys-vital-card" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 6px 10px;">
+              <div style="font-size: 0.72rem; color: #94a3b8;">🌐 Proxy & Mạng</div>
+              <div id="sys-proxy-status-${acc.line_uid}" style="font-size: 0.8rem; font-weight: 600; color: #818cf8; margin-top: 2px;">--</div>
+            </div>
+            <div class="sys-vital-card" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 6px 10px;">
+              <div style="font-size: 0.72rem; color: #94a3b8;">⚡ Nhịp Polling / Ping</div>
+              <div id="sys-poll-status-${acc.line_uid}" style="font-size: 0.8rem; font-weight: 600; color: #34d399; margin-top: 2px;">--</div>
+            </div>
+            <div class="sys-vital-card" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 6px 10px;">
+              <div style="font-size: 0.72rem; color: #94a3b8;">🛡️ Vân Tay Trình Duyệt</div>
+              <div id="sys-fp-status-${acc.line_uid}" style="font-size: 0.8rem; font-weight: 600; color: #fbbf24; margin-top: 2px; cursor: pointer;" onclick="openFingerprintModal('${acc.line_uid}')" title="Xem chi tiết vân tay">--</div>
+            </div>
+          </div>
+
+          <!-- Filter & Action Controls -->
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 6px;">
+            <div class="system-log-filters" style="display: flex; gap: 4px;">
+              <button class="subtab-btn active" id="btn-sysfilter-all-${acc.line_uid}" onclick="filterSystemLogs('${acc.line_uid}', 'all')">Tất cả</button>
+              <button class="subtab-btn" id="btn-sysfilter-error-${acc.line_uid}" onclick="filterSystemLogs('${acc.line_uid}', 'error')" style="color: #f87171;">🚨 Lỗi <span class="err-count-badge" id="err-count-${acc.line_uid}" style="display:none; background:#ef4444; color:#fff; border-radius:10px; padding:0 5px; font-size:0.68rem; margin-left:2px;">0</span></button>
+              <button class="subtab-btn" id="btn-sysfilter-warn-${acc.line_uid}" onclick="filterSystemLogs('${acc.line_uid}', 'warn')" style="color: #fbbf24;">⚠️ Cảnh báo</button>
+              <button class="subtab-btn" id="btn-sysfilter-sys-${acc.line_uid}" onclick="filterSystemLogs('${acc.line_uid}', 'sys')" style="color: #38bdf8;">ℹ️ Hệ thống</button>
+            </div>
+            <div style="display: flex; gap: 6px;">
+              <button class="btn btn-secondary btn-sm" onclick="fetchSystemLogs('${acc.line_uid}')" style="padding: 2px 8px; font-size: 0.75rem;">🔄 Tải lại</button>
+              <button class="btn btn-secondary btn-sm" onclick="clearSystemLogs('${acc.line_uid}')" style="padding: 2px 8px; font-size: 0.75rem; color: #94a3b8;" title="Xóa nhật ký hệ thống">🗑️ Xóa</button>
+            </div>
+          </div>
+
+          <!-- Dedicated System Terminal -->
+          <div class="log-terminal system-terminal" id="system-terminal-${acc.line_uid}" style="height: 250px; max-height: 250px; overflow-y: auto; font-family: monospace; background: rgba(5, 10, 20, 0.75); border: 1px solid rgba(56, 189, 248, 0.2); border-radius: 8px; padding: 10px;">
+            <div class="log-line"><span class="log-text-content" style="font-size:0.75rem; color:#94a3b8;">Đang tải nhật ký hệ thống...</span></div>
+          </div>
+        </div>
+
+        <!-- Log Tab Pane (In-Game Gameplay Logs with Sub-tabs) -->
         <div class="tab-pane" id="pane-log-${acc.line_uid}">
           <div class="subtabs-nav" style="display:flex; gap:6px; margin-bottom:10px; border-bottom:1px solid rgba(255,255,255,0.08); padding-bottom:6px; overflow-x:auto;">
-            <button class="subtab-btn active" id="log-subtab-btn-act-${acc.line_uid}" onclick="switchLogSubTab('${acc.line_uid}', 'act')">📜 Hoạt Động</button>
+            <button class="subtab-btn active" id="log-subtab-btn-act-${acc.line_uid}" onclick="switchLogSubTab('${acc.line_uid}', 'act')">🎮 In-Game</button>
+            <button class="subtab-btn" id="log-subtab-btn-sys-${acc.line_uid}" onclick="switchLogSubTab('${acc.line_uid}', 'sys')">🖥️ Hệ Thống</button>
             <button class="subtab-btn" id="log-subtab-btn-loot-${acc.line_uid}" onclick="switchLogSubTab('${acc.line_uid}', 'loot')">🎁 Vật Phẩm</button>
             <button class="subtab-btn" id="log-subtab-btn-market-${acc.line_uid}" onclick="switchLogSubTab('${acc.line_uid}', 'market')">🏪 Chợ</button>
           </div>
           
-          <!-- Sub-pane 1: Activity Logs -->
+          <!-- Sub-pane 1: In-Game Activity Logs -->
           <div id="log-subpane-act-${acc.line_uid}" style="display:block;">
             <div class="log-terminal" id="terminal-${acc.line_uid}">
               <!-- Log lines will be appended here -->
+            </div>
+          </div>
+
+          <!-- Sub-pane 1.5: Inline System Logs -->
+          <div id="log-subpane-sys-${acc.line_uid}" style="display:none;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; padding:0 2px;">
+              <span style="font-size:0.8rem; color:var(--text-secondary); font-weight:600;">🖥️ Nhật ký lỗi & Hệ thống</span>
+              <button class="btn btn-secondary btn-sm" onclick="fetchSystemLogs('${acc.line_uid}')" style="padding:2px 8px; font-size:0.75rem;">🔄 Cập nhật</button>
+            </div>
+            <div class="log-terminal" id="terminal-sys-inline-${acc.line_uid}">
+              <div class="log-line"><span class="log-text-content" style="font-size:0.6rem;">Đang tải nhật ký hệ thống...</span></div>
             </div>
           </div>
           
@@ -3060,6 +3117,40 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }
 
+    // System tab vitals banner sync
+    const sysToken = document.getElementById(`sys-token-status-${acc.line_uid}`);
+    if (sysToken) {
+      const tokShort = acc.session_token ? `${acc.session_token.slice(0, 8)}...` : 'Chưa có';
+      const hasPhp = acc.hasPhpsessid ? '🔑 Auto-Relogin' : '⚠️ No PHPSESSID';
+      sysToken.textContent = `${tokShort} (${hasPhp})`;
+      sysToken.title = `Token: ${acc.session_token || 'N/A'}\nPHPSESSID: ${acc.hasPhpsessid ? 'Có' : 'Chưa'}`;
+    }
+
+    const sysProxy = document.getElementById(`sys-proxy-status-${acc.line_uid}`);
+    if (sysProxy) {
+      if (acc.proxyInfo) {
+        sysProxy.textContent = `${acc.proxyInfo.isDirect ? '🖥️ Direct' : '🌐 ' + acc.proxyInfo.label}`;
+      } else {
+        sysProxy.textContent = acc.proxyId ? `🌐 ${acc.proxyId}` : '🖥️ Direct';
+      }
+    }
+
+    const sysPoll = document.getElementById(`sys-poll-status-${acc.line_uid}`);
+    if (sysPoll) {
+      const pInterval = (acc.settings && acc.settings.pollInterval) || acc.ownerPollInterval || 2000;
+      const pingTxt = acc.ping ? `${acc.ping}ms` : '--';
+      sysPoll.textContent = `⏱️ ${pInterval}ms (Ping: ${pingTxt})`;
+    }
+
+    const sysFp = document.getElementById(`sys-fp-status-${acc.line_uid}`);
+    if (sysFp) {
+      if (acc.fingerprint) {
+        sysFp.textContent = `🛡️ ${acc.fingerprint.browser || 'Browser'} (${acc.fingerprint.os || 'OS'})`;
+      } else {
+        sysFp.textContent = '🛡️ Mặc định (Chưa tạo)';
+      }
+    }
+
     // Admin proxy configuration sync
     const proxyCtrl = document.getElementById(`admin-proxy-ctrl-${acc.line_uid}`);
     if (proxyCtrl) {
@@ -3317,8 +3408,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Render tab contents based on active state
     const currentTab = activeTabs[acc.line_uid];
-    if (currentTab === 'log' && (activeLogSubTabs[acc.line_uid] || 'act') === 'act') {
-      fetchLogs(acc.line_uid);
+    if (currentTab === 'log') {
+      const sub = activeLogSubTabs[acc.line_uid] || 'act';
+      if (sub === 'act') fetchLogs(acc.line_uid);
+      else if (sub === 'sys') fetchSystemLogs(acc.line_uid);
+    } else if (currentTab === 'system') {
+      fetchSystemLogs(acc.line_uid);
     }
   }
   window.updateCard = updateCard;
@@ -3509,6 +3604,8 @@ document.addEventListener('DOMContentLoaded', () => {
     } else if (targetTabId === 'market-buy') {
       const subTabId = activeMarketSubTabs[uid] || 'live';
       switchMarketSubTab(uid, subTabId);
+    } else if (targetTabId === 'system') {
+      fetchSystemLogs(uid);
     } else {
       if (targetTabId) {
         fetchAccounts();
@@ -3521,23 +3618,29 @@ document.addEventListener('DOMContentLoaded', () => {
     activeLogSubTabs[uid] = subTabId;
     
     const btnAct = document.getElementById(`log-subtab-btn-act-${uid}`);
+    const btnSys = document.getElementById(`log-subtab-btn-sys-${uid}`);
     const btnLoot = document.getElementById(`log-subtab-btn-loot-${uid}`);
     const btnMarket = document.getElementById(`log-subtab-btn-market-${uid}`);
 
     const paneAct = document.getElementById(`log-subpane-act-${uid}`);
+    const paneSys = document.getElementById(`log-subpane-sys-${uid}`);
     const paneLoot = document.getElementById(`log-subpane-loot-${uid}`);
     const paneMarket = document.getElementById(`log-subpane-market-${uid}`);
 
     if (btnAct) btnAct.classList.toggle('active', subTabId === 'act');
+    if (btnSys) btnSys.classList.toggle('active', subTabId === 'sys');
     if (btnLoot) btnLoot.classList.toggle('active', subTabId === 'loot');
     if (btnMarket) btnMarket.classList.toggle('active', subTabId === 'market');
 
     if (paneAct) paneAct.style.display = subTabId === 'act' ? 'block' : 'none';
+    if (paneSys) paneSys.style.display = subTabId === 'sys' ? 'block' : 'none';
     if (paneLoot) paneLoot.style.display = subTabId === 'loot' ? 'block' : 'none';
     if (paneMarket) paneMarket.style.display = subTabId === 'market' ? 'block' : 'none';
 
     if (subTabId === 'act') {
       fetchLogs(uid);
+    } else if (subTabId === 'sys') {
+      fetchSystemLogs(uid);
     } else if (subTabId === 'loot') {
       fetchDropLogs(uid);
     } else if (subTabId === 'market') {
@@ -4491,7 +4594,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const q = searchInput ? searchInput.value.trim().toLowerCase() : '';
     const selectedCat = catSelect ? catSelect.value : 'all';
-    const sortOrder = sortSelect ? sortSelect.value : 'asc';
+    const sortOrder = sortSelect ? sortSelect.value : 'newest';
 
     let filtered = [...cache.listings];
 
@@ -4515,10 +4618,34 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     }
 
-    // Sắp xếp theo giá (Thấp -> Cao hoặc Cao -> Thấp)
+    // Sắp xếp theo thời gian đăng hoặc giá.
+    // created_at có thể là Unix seconds, milliseconds hoặc chuỗi ngày ISO.
+    const listingTimestamp = (item) => {
+      const raw = item && item.created_at;
+      if (raw === undefined || raw === null || raw === '') return 0;
+      if (typeof raw === 'number' || /^\d+(\.\d+)?$/.test(String(raw).trim())) {
+        const n = Number(raw);
+        return n < 100000000000 ? n * 1000 : n;
+      }
+      const parsed = Date.parse(String(raw));
+      return Number.isNaN(parsed) ? 0 : parsed;
+    };
+
     filtered.sort((a, b) => {
-      const pA = a.price_per || 0;
-      const pB = b.price_per || 0;
+      if (sortOrder === 'newest' || sortOrder === 'oldest') {
+        const timeA = listingTimestamp(a);
+        const timeB = listingTimestamp(b);
+        // Listing không có timestamp được đẩy xuống cuối ở cả hai chiều.
+        if (timeA !== timeB) {
+          if (!timeA) return 1;
+          if (!timeB) return -1;
+          return sortOrder === 'newest' ? timeB - timeA : timeA - timeB;
+        }
+        return (Number(a.id) || 0) - (Number(b.id) || 0);
+      }
+
+      const pA = Number(a.price_per) || 0;
+      const pB = Number(b.price_per) || 0;
       return sortOrder === 'desc' ? (pB - pA) : (pA - pB);
     });
 
@@ -5251,30 +5378,44 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   };
 
-  // Fetch account terminal logs
+  const cachedSystemLogs = {};
+  const activeSystemLogFilters = {};
+
+  // Fetch account terminal logs (In-Game Gameplay Logs)
   async function fetchLogs(uid) {
     try {
       const response = await fetch(`/api/accounts/${uid}/logs`);
       const data = await response.json();
       
-      // Update general logs
+      // Update in-game gameplay logs (chỉ giữ các hoạt động chiến đấu, quái, farm)
       const term = document.getElementById(`terminal-${uid}`);
       if (term) {
         term.innerHTML = '';
-        const logsList = data.logs || [];
-        if (logsList.length === 0) {
-          term.innerHTML = `<div class="log-line"><span class="log-text-content">Không có nhật ký hoạt động nào.</span></div>`;
+        let gameLogsList = data.gameLogs || [];
+        if (gameLogsList.length === 0 && Array.isArray(data.logs)) {
+          // Fallback lọc từ logs tổng nếu gameLogs chưa có
+          gameLogsList = data.logs.filter(l => {
+            const t = (l.type || '').toUpperCase();
+            return t !== 'SYSTEM' && t !== 'ERROR' && t !== 'WARN' && t !== 'WARNING' && t !== 'AUTH' && t !== 'WATCHDOG' &&
+              !l.msg.includes('[Watchdog]') && !l.msg.includes('Session Token') && !l.msg.includes('PHPSESSID') &&
+              !l.msg.includes('Proxy') && !l.msg.includes('kết nối') && !l.msg.includes('Khởi tạo bot') && !l.msg.includes('Client Game');
+          });
+        }
+
+        if (gameLogsList.length === 0) {
+          term.innerHTML = `<div class="log-line"><span class="log-text-content" style="color:#94a3b8; font-size:0.75rem;">Chưa có nhật ký hoạt động in-game nào (đang dò quái / farm...).</span></div>`;
         } else {
-          logsList.forEach(l => {
+          gameLogsList.forEach(l => {
             const line = document.createElement('div');
             line.className = 'log-line';
             
-            let typeClass = 'system';
+            let typeClass = 'action';
             if (l.type === 'kill') typeClass = 'kill';
             else if (l.type === 'drop') typeClass = 'drop';
             else if (l.type === 'levelup') typeClass = 'levelup';
             else if (l.type === 'error') typeClass = 'error';
             else if (l.type === 'action') typeClass = 'action';
+            else if (l.type === 'success') typeClass = 'action';
             
             line.innerHTML = `
               <span class="log-time">[${l.time}]</span>
@@ -5286,10 +5427,129 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         term.scrollTop = term.scrollHeight;
       }
+
+      // Tự động đồng bộ số đếm lỗi và cache systemLogs nếu có dữ liệu
+      if (data.systemLogs) {
+        cachedSystemLogs[uid] = data.systemLogs;
+        const errorCount = data.systemLogs.filter(l => l.type === 'error' || l.msg.includes('❌') || l.msg.includes('Lỗi')).length;
+        const errBadge = document.getElementById(`err-count-${uid}`);
+        if (errBadge) {
+          errBadge.textContent = errorCount;
+          errBadge.style.display = errorCount > 0 ? 'inline-block' : 'none';
+        }
+      }
     } catch (err) {
       console.error('Error fetching logs:', err);
     }
   }
+
+  // Fetch Dedicated System Logs & Errors
+  window.fetchSystemLogs = async function(uid) {
+    try {
+      const response = await fetch(`/api/accounts/${uid}/logs`);
+      const data = await response.json();
+      
+      const sysLogs = data.systemLogs || (data.logs || []).filter(l => {
+        const t = (l.type || '').toUpperCase();
+        return t === 'SYSTEM' || t === 'ERROR' || t === 'WARN' || t === 'WARNING' || t === 'AUTH' || t === 'WATCHDOG' ||
+          l.msg.includes('[Watchdog]') || l.msg.includes('Session Token') || l.msg.includes('Proxy') || l.msg.includes('kết nối');
+      });
+
+      cachedSystemLogs[uid] = sysLogs;
+      
+      // Cập nhật số lỗi đếm được
+      const errorCount = sysLogs.filter(l => l.type === 'error' || l.msg.includes('❌') || l.msg.includes('Lỗi')).length;
+      const errBadge = document.getElementById(`err-count-${uid}`);
+      if (errBadge) {
+        errBadge.textContent = errorCount;
+        errBadge.style.display = errorCount > 0 ? 'inline-block' : 'none';
+      }
+
+      renderSystemLogs(uid);
+    } catch (err) {
+      console.error('Error fetching system logs:', err);
+    }
+  };
+
+  function renderSystemLogs(uid) {
+    const sysTerm = document.getElementById(`system-terminal-${uid}`);
+    const inlineTerm = document.getElementById(`terminal-sys-inline-${uid}`);
+    if (!sysTerm && !inlineTerm) return;
+
+    const logs = cachedSystemLogs[uid] || [];
+    const filter = activeSystemLogFilters[uid] || 'all';
+
+    let filtered = logs;
+    if (filter === 'error') {
+      filtered = logs.filter(l => l.type === 'error' || l.msg.includes('❌') || l.msg.includes('Lỗi'));
+    } else if (filter === 'warn') {
+      filtered = logs.filter(l => l.type === 'warn' || l.type === 'warning' || l.msg.includes('⚠️'));
+    } else if (filter === 'sys') {
+      filtered = logs.filter(l => l.type === 'system' || l.type === 'auth' || l.type === 'network' || l.type === 'watchdog');
+    }
+
+    const renderContent = (term) => {
+      if (!term) return;
+      term.innerHTML = '';
+      if (filtered.length === 0) {
+        term.innerHTML = `<div class="log-line"><span class="log-text-content" style="color:#94a3b8; font-size:0.75rem;">Không có nhật ký hệ thống nào${filter !== 'all' ? ' phù hợp bộ lọc' : ''}.</span></div>`;
+        return;
+      }
+      filtered.forEach(l => {
+        const line = document.createElement('div');
+        line.className = 'log-line';
+        
+        let badgeStyle = 'background:rgba(56,189,248,0.15); color:#38bdf8; border:1px solid rgba(56,189,248,0.3);';
+        let textStyle = 'color:#e2e8f0;';
+
+        const upperType = (l.type || '').toUpperCase();
+        if (upperType === 'ERROR' || l.msg.includes('❌') || l.msg.includes('Lỗi')) {
+          badgeStyle = 'background:rgba(239,68,68,0.2); color:#fca5a5; border:1px solid rgba(239,68,68,0.4); font-weight:bold;';
+          textStyle = 'color:#fecaca;';
+        } else if (upperType === 'WARN' || upperType === 'WARNING' || l.msg.includes('⚠️')) {
+          badgeStyle = 'background:rgba(245,158,11,0.2); color:#fcd34d; border:1px solid rgba(245,158,11,0.4);';
+          textStyle = 'color:#fef3c7;';
+        } else if (upperType === 'SUCCESS' || l.msg.includes('✅')) {
+          badgeStyle = 'background:rgba(16,185,129,0.2); color:#6ee7b7; border:1px solid rgba(16,185,129,0.4);';
+          textStyle = 'color:#d1fae5;';
+        }
+
+        line.innerHTML = `
+          <span class="log-time" style="color:#64748b; font-size:0.72rem;">[${l.time}]</span>
+          <span class="log-type" style="padding:1px 6px; border-radius:4px; font-size:0.68rem; margin:0 4px; ${badgeStyle}">${upperType || 'SYS'}</span>
+          <span class="log-text-content" style="font-size:0.75rem; ${textStyle}">${l.msg}</span>
+        `;
+        term.appendChild(line);
+      });
+      term.scrollTop = term.scrollHeight;
+    };
+
+    renderContent(sysTerm);
+    renderContent(inlineTerm);
+  }
+
+  window.filterSystemLogs = function(uid, filterType) {
+    activeSystemLogFilters[uid] = filterType;
+    const filterBtns = ['all', 'error', 'warn', 'sys'];
+    filterBtns.forEach(f => {
+      const btn = document.getElementById(`btn-sysfilter-${f}-${uid}`);
+      if (btn) btn.classList.toggle('active', f === filterType);
+    });
+    renderSystemLogs(uid);
+  };
+
+  window.clearSystemLogs = async function(uid) {
+    if (!confirm('Bạn có chắc chắn muốn xóa toàn bộ nhật ký hệ thống của bot này?')) return;
+    try {
+      const res = await fetch(`/api/accounts/${uid}/logs/clear-system`, { method: 'POST' });
+      if (res.ok) {
+        cachedSystemLogs[uid] = [];
+        renderSystemLogs(uid);
+      }
+    } catch(err) {
+      console.error('Error clearing system logs:', err);
+    }
+  };
 
   // Fetch official drop logs on-demand from server game
   window.fetchDropLogs = async function(uid) {

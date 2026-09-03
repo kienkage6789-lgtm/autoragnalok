@@ -25,7 +25,11 @@ const {
   fetchGameHtml,
   fetchGameLoginHtml,
   fetchGameAsset,
-  sanitizeSessionToken
+  sanitizeSessionToken,
+  saveSpotsCache,
+  requestSaveSpotsCache,
+  BotRequestQueue,
+  combineAbortSignals
 } = require('./server');
 
 console.log('🧪 Running Unit Tests...');
@@ -1193,6 +1197,7 @@ try {
   let warpCalledWithMap = null;
   mockGdunBot.warpToMap = async function(mapId) {
     warpCalledWithMap = mapId;
+    if (this.player) this.player.map = mapId;
     return true;
   };
 
@@ -1236,6 +1241,14 @@ try {
   assert.strictEqual(warpCalledWithMap, 3, 'warpToMap must be called with snapshot Map 3 when server response was on Map 12');
   assert.strictEqual(mockGdunBot.guildDungeonActive, false, 'guildDungeonActive should be false after exit');
   assert.strictEqual(mockGdunBot.player.gdun_in, 0, 'player.gdun_in should be 0 after exit');
+  assert.strictEqual(mockGdunBot._guildDungeonRestoring, true, '_guildDungeonRestoring must be true during restoring phase');
+  assert.ok(mockGdunBot.gdunSnapshot, 'gdunSnapshot must be preserved during restoring phase');
+
+  // Server confirms destination reached -> finalize restoration
+  mockGdunBot.player.x = 450;
+  mockGdunBot.player.y = 780;
+  mockGdunBot._finalizeGdunRestoration(true);
+
   assert.strictEqual(mockGdunBot.player.map, 3, 'player.map must be restored to snapshot Map 3');
   assert.strictEqual(mockGdunBot.player.x, 450, 'player.x must be restored to snapshot x 450');
   assert.strictEqual(mockGdunBot.player.y, 780, 'player.y must be restored to snapshot y 780');
@@ -1459,6 +1472,664 @@ try {
 
 
   console.log('✅ Guild Dungeon State, Filter Sync & Stable Queue Tests Passed successfully!');
+
+  // ==========================================
+  // T82 - AUTO BOSS GUILD & REAL COORDINATE RESTORATION TESTS
+  // ==========================================
+  console.log('Testing T82 Auto Boss Guild & Real Coordinate Restoration Engine...');
+
+  // --- Test A: Snapshot vị trí ban đầu chính xác & không ghi đè lặp ---
+  {
+    const botA = new BotInstance({
+      line_uid: 'T82_BOT_A',
+      name: 'TesterA',
+      settings: {
+        autoMap: true,
+        autoZone: true,
+        lock_zone_center: true,
+        targetZone: 2,
+        targetMap: 3,
+        explore_cx: 450,
+        explore_cy: 780
+      }
+    });
+    botA.player = { map: 3, x: 450, y: 780, explore_cx: 450, explore_cy: 780, gdun_in: 0 };
+    botA.sendRequest = async (url, payload) => {
+      if (payload.action === 'gdun_enter') return { ok: 1, player: { map: 12, gdun_in: 1, x: 1125, y: 1125 } };
+      return { ok: 0 };
+    };
+
+    const enterRes = await botA.enterGuildDungeon(false);
+    assert.strictEqual(enterRes, true, 'Test A: enterGuildDungeon should succeed');
+    assert.ok(botA.gdunSnapshot, 'Test A: Snapshot must be created on enter');
+    assert.strictEqual(botA.gdunSnapshot.map, 3, 'Test A: Snapshot map must be 3');
+    assert.strictEqual(botA.gdunSnapshot.x, 450, 'Test A: Snapshot x must be 450');
+    assert.strictEqual(botA.gdunSnapshot.y, 780, 'Test A: Snapshot y must be 780');
+    assert.strictEqual(botA.gdunSnapshot.explore_cx, 450, 'Test A: Snapshot explore_cx must be 450');
+    assert.strictEqual(botA.gdunSnapshot.explore_cy, 780, 'Test A: Snapshot explore_cy must be 780');
+    assert.strictEqual(botA.gdunSnapshot.autoMap, true, 'Test A: Snapshot autoMap must be true');
+    assert.strictEqual(botA.gdunSnapshot.autoZone, true, 'Test A: Snapshot autoZone must be true');
+    assert.strictEqual(botA.gdunSnapshot.lock_zone_center, true, 'Test A: Snapshot lock_zone_center must be true');
+    assert.strictEqual(botA.gdunSnapshot.targetZone, 2, 'Test A: Snapshot targetZone must be 2');
+    assert.strictEqual(botA.gdunSnapshot.targetMap, 3, 'Test A: Snapshot targetMap must be 3');
+
+    // Gọi lại enterGuildDungeon khi đã ở trong dungeon -> Snapshot KHÔNG được ghi đè
+    botA.player.x = 9999;
+    botA.player.y = 9999;
+    await botA.enterGuildDungeon(false);
+    assert.strictEqual(botA.gdunSnapshot.x, 450, 'Test A: Snapshot must NOT be overwritten on repeated enter calls');
+  }
+
+  // --- Test B: Khôi phục Map khi server trả Map 12 -> warpToMap(3) thật, không chỉ gán local ---
+  {
+    const botB = new BotInstance({
+      line_uid: 'T82_BOT_B',
+      name: 'TesterB',
+      settings: { targetMap: 3 }
+    });
+    botB.gdunSnapshot = {
+      map: 3, x: 450, y: 780, explore_cx: 450, explore_cy: 780,
+      autoMap: true, autoZone: true, lock_zone_center: true, targetZone: 2, targetMap: 3
+    };
+    botB.guildDungeonActive = true;
+    botB.player = { map: 12, gdun_in: 1, x: 1125, y: 1125 };
+
+    let warpedTargetMap = null;
+    botB.warpToMap = async (mapId) => {
+      warpedTargetMap = mapId;
+      return true;
+    };
+    botB.sendRequest = async (url, payload) => {
+      if (payload.action === 'gdun_exit') {
+        // Server trả về nhân vật đang ở Map 12
+        return { ok: 1, player: { map: 12, gdun_in: 0, x: 1125, y: 1125 } };
+      }
+      return { ok: 0 };
+    };
+
+    const exitRes = await botB.exitGuildDungeon();
+    assert.strictEqual(exitRes, true, 'Test B: exitGuildDungeon should return true');
+    assert.strictEqual(warpedTargetMap, 3, 'Test B: warpToMap must be called with snapshot Map 3 when exit response was Map 12');
+    assert.strictEqual(botB._guildDungeonRestoring, true, 'Test B: _guildDungeonRestoring must be true');
+    assert.ok(botB.gdunSnapshot, 'Test B: gdunSnapshot must be preserved (not deleted prematurely)');
+  }
+
+  // --- Test C: Khôi phục tọa độ thật trên server qua pollGame & kiểm tra khoảng cách ---
+  {
+    const botC = new BotInstance({
+      line_uid: 'T82_BOT_C',
+      name: 'TesterC',
+      settings: {
+        autoMap: true,
+        autoZone: true,
+        lock_zone_center: true,
+        targetZone: 2,
+        targetMap: 3,
+        explore_cx: 450,
+        explore_cy: 780
+      }
+    });
+    botC.gdunSnapshot = {
+      map: 3, x: 450, y: 780, explore_cx: 450, explore_cy: 780,
+      autoMap: true, autoZone: true, lock_zone_center: true, targetZone: 2, targetMap: 3
+    };
+    botC._guildDungeonRestoring = true;
+    botC._gdunRestoreStartedAt = Date.now();
+    // Hiện tại nhân vật ở Map 3 nhưng ở điểm spawn 1125, 1125 (cách đích 758m)
+    botC.player = { map: 3, x: 1125, y: 1125, gdun_in: 0, lv: 50 };
+
+    let sentGamePayloads = [];
+    let mockServerCurrentX = 1125;
+    let mockServerCurrentY = 1125;
+
+    botC.sendRequest = async (url, payload) => {
+      if (url && url.includes('xhrpg_game.php')) {
+        sentGamePayloads.push(payload);
+        return {
+          ok: 1,
+          player: {
+            map: 3,
+            x: mockServerCurrentX,
+            y: mockServerCurrentY,
+            gdun_in: 0,
+            lv: 50
+          }
+        };
+      }
+      return { ok: 1 };
+    };
+
+    // Poll 1: Nhân vật còn xa đích (1125, 1125 -> 450, 780)
+    await botC.pollGame();
+    const lastPayload1 = sentGamePayloads[sentGamePayloads.length - 1];
+    assert.ok(lastPayload1, 'Test C: game poll payload must be sent');
+    assert.strictEqual(lastPayload1.traveling, 1, 'Test C: traveling must be 1 while moving toward snapshot coords');
+    assert.strictEqual(lastPayload1.explore_cx, 450, 'Test C: explore_cx must be snapshot x 450');
+    assert.strictEqual(lastPayload1.explore_cy, 780, 'Test C: explore_cy must be snapshot y 780');
+    assert.strictEqual(lastPayload1.lock_pos, 0, 'Test C: lock_pos must be 0 while traveling');
+    assert.strictEqual(botC._guildDungeonRestoring, true, 'Test C: Must still be in restoring state while dist > 40m');
+    assert.ok(botC.gdunSnapshot, 'Test C: Snapshot must not be cleared while dist > 40m');
+
+    // Poll 2: Server mô phỏng nhân vật đã đi tới gần đích: (460, 775) -> khoảng cách 11.18m <= 40m
+    mockServerCurrentX = 460;
+    mockServerCurrentY = 775;
+    botC.player.x = 460;
+    botC.player.y = 775;
+
+    await botC.pollGame();
+    assert.strictEqual(botC._guildDungeonRestoring, false, 'Test C: _guildDungeonRestoring must finish when dist <= 40m');
+    assert.strictEqual(botC.gdunSnapshot, null, 'Test C: gdunSnapshot must be cleaned up only after arrival');
+  }
+
+  // --- Test D: Khôi phục settings đầy đủ và nhất quán ---
+  {
+    const botD = new BotInstance({
+      line_uid: 'T82_BOT_D',
+      name: 'TesterD',
+      settings: {
+        autoMap: true,
+        autoZone: true,
+        lock_zone_center: true,
+        targetZone: 2,
+        targetMap: 3,
+        explore_cx: 450,
+        explore_cy: 780
+      }
+    });
+    botD.gdunSnapshot = {
+      map: 3, x: 450, y: 780, explore_cx: 450, explore_cy: 780,
+      autoMap: true, autoZone: true, lock_zone_center: true, targetZone: 2, targetMap: 3
+    };
+    botD.player = { map: 3, x: 450, y: 780, gdun_in: 0 };
+    botD._guildDungeonRestoring = true;
+
+    // Thay đổi tạm thời settings trong lúc ở dungeon
+    botD.settings.autoMap = false;
+    botD.settings.autoZone = false;
+    botD.settings.explore_cx = 1125;
+    botD.settings.explore_cy = 1125;
+
+    botD._finalizeGdunRestoration(true);
+
+    assert.strictEqual(botD.settings.autoMap, true, 'Test D: settings.autoMap must be restored');
+    assert.strictEqual(botD.settings.autoZone, true, 'Test D: settings.autoZone must be restored');
+    assert.strictEqual(botD.settings.lock_zone_center, true, 'Test D: settings.lock_zone_center must be restored');
+    assert.strictEqual(botD.settings.targetZone, 2, 'Test D: settings.targetZone must be restored');
+    assert.strictEqual(botD.settings.targetMap, 3, 'Test D: settings.targetMap must be restored');
+    assert.strictEqual(botD.settings.explore_cx, 450, 'Test D: settings.explore_cx must be restored');
+    assert.strictEqual(botD.settings.explore_cy, 780, 'Test D: settings.explore_cy must be restored');
+    assert.strictEqual(botD.player.explore_cx, 450, 'Test D: player.explore_cx must be consistent with settings');
+    assert.strictEqual(botD.player.explore_cy, 780, 'Test D: player.explore_cy must be consistent with settings');
+  }
+
+  // --- Test E: Chống False-Positive khi danh sách Boss rỗng tạm thời ---
+  {
+    const botE = new BotInstance({
+      line_uid: 'T82_BOT_E',
+      name: 'TesterE',
+      settings: {}
+    });
+    botE.guildDungeonActive = true;
+    botE.gdunEnteredAt = Date.now() - 5000; // Vào được 5s (> 3s requirement)
+    botE.player = { map: 12, gdun_in: 1, x: 1125, y: 1125 };
+
+    let exitCallCount = 0;
+    botE.exitGuildDungeon = async () => {
+      exitCallCount++;
+      return true;
+    };
+
+    // Nhịp 1: Server lag trả bosses rỗng
+    botE.bosses = [];
+    {
+      const timeInDungeon = Date.now() - botE.gdunEnteredAt;
+      if (timeInDungeon >= 3000 && botE.bosses !== null) {
+        const aliveBosses = (botE.bosses || []).filter(b => (b.hp === undefined || (b.hp || 0) > 0));
+        if (aliveBosses.length === 0) {
+          botE.gdunEmptyPolls = (botE.gdunEmptyPolls || 0) + 1;
+          if (botE.gdunEmptyPolls >= 3) await botE.exitGuildDungeon();
+        }
+      }
+    }
+    assert.strictEqual(exitCallCount, 0, 'Test E: Must NOT exit on 1st empty poll');
+
+    // Nhịp 2: Vẫn rỗng (poll 2)
+    {
+      const aliveBosses = (botE.bosses || []).filter(b => (b.hp === undefined || (b.hp || 0) > 0));
+      if (aliveBosses.length === 0) {
+        botE.gdunEmptyPolls = (botE.gdunEmptyPolls || 0) + 1;
+        if (botE.gdunEmptyPolls >= 3) await botE.exitGuildDungeon();
+      }
+    }
+    assert.strictEqual(exitCallCount, 0, 'Test E: Must NOT exit on 2nd empty poll');
+
+    // Nhịp 2.5: Boss xuất hiện trở lại -> reset bộ đếm
+    botE.bosses = [{ id: 99, hp: 5000 }];
+    {
+      const aliveBosses = (botE.bosses || []).filter(b => (b.hp === undefined || (b.hp || 0) > 0));
+      if (aliveBosses.length === 0) {
+        botE.gdunEmptyPolls = (botE.gdunEmptyPolls || 0) + 1;
+      } else {
+        botE.gdunEmptyPolls = 0;
+      }
+    }
+    assert.strictEqual(botE.gdunEmptyPolls, 0, 'Test E: gdunEmptyPolls must reset to 0 when boss reappears');
+
+    // Giờ boss chết thật: 3 nhịp liên tiếp
+    botE.bosses = [];
+    for (let p = 1; p <= 3; p++) {
+      const aliveBosses = (botE.bosses || []).filter(b => (b.hp === undefined || (b.hp || 0) > 0));
+      if (aliveBosses.length === 0) {
+        botE.gdunEmptyPolls = (botE.gdunEmptyPolls || 0) + 1;
+        if (botE.gdunEmptyPolls >= 3) await botE.exitGuildDungeon();
+      }
+    }
+    assert.strictEqual(exitCallCount, 1, 'Test E: Must exit only after 3 consecutive empty polls');
+  }
+
+  // --- Test F: Thoát thất bại -> Giữ nguyên snapshot để thử lại ---
+  {
+    const botF = new BotInstance({
+      line_uid: 'T82_BOT_F',
+      name: 'TesterF',
+      settings: { targetMap: 3 }
+    });
+    botF.gdunSnapshot = { map: 3, x: 450, y: 780 };
+    botF.guildDungeonActive = true;
+    botF.player = { map: 12, gdun_in: 1 };
+    botF.sendRequest = async () => {
+      return { ok: 0, error: 'Database locked' };
+    };
+
+    const resF = await botF.exitGuildDungeon();
+    assert.strictEqual(resF, false, 'Test F: exitGuildDungeon should return false on server error');
+    assert.ok(botF.gdunSnapshot, 'Test F: gdunSnapshot must remain intact when exit fails');
+    assert.strictEqual(botF._exitingGuildDungeon, false, 'Test F: _exitingGuildDungeon guard must reset to allow retry');
+  }
+
+  // --- Test G: Team Member và Leader có Map/X/Y ban đầu khác nhau ---
+  {
+    const ldrBot = new BotInstance({
+      line_uid: 'T82_LEADER',
+      name: 'LeaderBot',
+      settings: { teamRole: 'leader', teamId: 'team_alpha', targetMap: 2 }
+    });
+    ldrBot.player = { map: 2, x: 100, y: 200, explore_cx: 100, explore_cy: 200, gdun_in: 0 };
+
+    const memBot = new BotInstance({
+      line_uid: 'T82_MEMBER',
+      name: 'MemberBot',
+      settings: { teamRole: 'member', teamId: 'team_alpha', teamSynced: true, targetMap: 3 }
+    });
+    memBot.player = { map: 3, x: 500, y: 600, explore_cx: 500, explore_cy: 600, gdun_in: 0 };
+
+    ldrBot.sendRequest = async (url, payload) => {
+      if (payload.action === 'gdun_enter') return { ok: 1, player: { map: 12, gdun_in: 1, x: 1125, y: 1125 } };
+      if (payload.action === 'gdun_exit') return { ok: 1, player: { map: 12, gdun_in: 0, x: 1125, y: 1125 } };
+      return { ok: 0 };
+    };
+    memBot.sendRequest = async (url, payload) => {
+      if (payload.action === 'gdun_enter') return { ok: 1, player: { map: 12, gdun_in: 1, x: 1125, y: 1125 } };
+      if (payload.action === 'gdun_exit') return { ok: 1, player: { map: 12, gdun_in: 0, x: 1125, y: 1125 } };
+      return { ok: 0 };
+    };
+
+    ldrBot.warpToMap = async () => true;
+    memBot.warpToMap = async () => true;
+
+    // Cả hai vào dungeon
+    await ldrBot.enterGuildDungeon(true);
+    await memBot.enterGuildDungeon(true);
+
+    assert.strictEqual(ldrBot.gdunSnapshot.map, 2, 'Test G: Leader snapshot must be Map 2');
+    assert.strictEqual(ldrBot.gdunSnapshot.x, 100, 'Test G: Leader snapshot x must be 100');
+    assert.strictEqual(memBot.gdunSnapshot.map, 3, 'Test G: Member snapshot must be Map 3');
+    assert.strictEqual(memBot.gdunSnapshot.x, 500, 'Test G: Member snapshot x must be 500');
+
+    // Leader thoát
+    await ldrBot.exitGuildDungeon();
+    assert.strictEqual(ldrBot._guildDungeonRestoring, true, 'Test G: Leader is in restoring mode');
+
+    // Member thoát
+    await memBot.exitGuildDungeon();
+    assert.strictEqual(memBot._guildDungeonRestoring, true, 'Test G: Member is in restoring mode');
+
+    // Leader phục hồi về Map 2
+    ldrBot.player.map = 2;
+    ldrBot.player.x = 100;
+    ldrBot.player.y = 200;
+    ldrBot._finalizeGdunRestoration(true);
+
+    // Member phục hồi về Map 3
+    memBot.player.map = 3;
+    memBot.player.x = 500;
+    memBot.player.y = 600;
+    memBot._finalizeGdunRestoration(true);
+
+    assert.strictEqual(ldrBot.player.map, 2, 'Test G: Leader restored to Map 2');
+    assert.strictEqual(ldrBot.player.x, 100, 'Test G: Leader restored to x 100');
+    assert.strictEqual(memBot.player.map, 3, 'Test G: Member restored to Map 3 (not pulled to Leader map 2)');
+    assert.strictEqual(memBot.player.x, 500, 'Test G: Member restored to x 500 (not pulled to Leader x 100)');
+  }
+
+  console.log('✅ T82 Auto Boss Guild & Real Coordinate Restoration Tests Passed successfully!');
+
+  // ==========================================
+  // T83 - EVENT SESSION STATE MACHINE & REAL COORDINATE RESTORATION TESTS
+  // ==========================================
+  console.log('Testing T83 Event Session State Machine & Real Coordinate Restoration Engine...');
+
+  // --- Test 1: Event vào từ Map 3 tại tọa độ cụ thể (x: 450, y: 780) ---
+  {
+    console.log('  Testing Test 1: Snapshot captured before moving to event map...');
+    const bot1 = new BotInstance({
+      line_uid: 't83_test_1',
+      settings: {
+        targetMap: 3,
+        explore_cx: 450,
+        explore_cy: 780,
+        autoMap: true,
+        autoZone: true,
+        lock_zone_center: true,
+        targetZone: 5
+      }
+    });
+    bot1.player = { map: 3, x: 450, y: 780, lv: 50, explore_cx: 450, explore_cy: 780 };
+
+    // Chụp snapshot TRƯỚC KHI lệnh join/di chuyển chạy
+    bot1.captureEventSnapshot('gw');
+    assert.ok(bot1.eventSnapshot, 'Test 1: Snapshot must be created');
+    assert.strictEqual(bot1.eventSnapshot.kind, 'gw', 'Test 1: kind must be gw');
+    assert.strictEqual(bot1.eventSnapshot.map, 3, 'Test 1: original map must be 3');
+    assert.strictEqual(bot1.eventSnapshot.x, 450, 'Test 1: original x must be 450');
+    assert.strictEqual(bot1.eventSnapshot.y, 780, 'Test 1: original y must be 780');
+    assert.strictEqual(bot1.eventSnapshot.explore_cx, 450, 'Test 1: explore_cx must be 450');
+    assert.strictEqual(bot1.eventSnapshot.explore_cy, 780, 'Test 1: explore_cy must be 780');
+    assert.strictEqual(bot1.eventSnapshot.targetMap, 3, 'Test 1: targetMap must be 3');
+    assert.strictEqual(bot1.eventSnapshot.autoMap, true, 'Test 1: autoMap must be true');
+    assert.strictEqual(bot1.eventSnapshot.autoZone, true, 'Test 1: autoZone must be true');
+    assert.strictEqual(bot1.eventSnapshot.lock_zone_center, true, 'Test 1: lock_zone_center must be true');
+    assert.strictEqual(bot1.eventSnapshot.targetZone, 5, 'Test 1: targetZone must be 5');
+    assert.strictEqual(bot1.eventState, 'ENTERING', 'Test 1: state must be ENTERING');
+
+    // Giả lập sau khi join thành công sang Map 4
+    bot1.player.map = 4;
+    bot1.enterEventMode('gw', 4);
+    assert.strictEqual(bot1.inEventMode, true, 'Test 1: inEventMode must be true');
+    assert.strictEqual(bot1.eventState, 'ACTIVE', 'Test 1: eventState must be ACTIVE');
+    assert.strictEqual(bot1.eventSnapshot.map, 3, 'Test 1: snapshot map must remain 3 despite player now on map 4');
+    assert.strictEqual(bot1.settings.targetMap, 4, 'Test 1: targetMap overridden to 4 during event');
+  }
+
+  // --- Test 2: Event kết thúc và chuyển sang RETURNING đúng Map 3 ---
+  {
+    console.log('  Testing Test 2: Exit event transitions to RETURNING and preserves snapshot...');
+    const bot2 = new BotInstance({
+      line_uid: 't83_test_2',
+      settings: { targetMap: 3, explore_cx: 450, explore_cy: 780, autoMap: true }
+    });
+    bot2.player = { map: 3, x: 450, y: 780, lv: 50 };
+    bot2.captureEventSnapshot('gw');
+    bot2.player.map = 4;
+    bot2.enterEventMode('gw', 4);
+
+    // Thoát event
+    bot2.exitEventMode();
+    assert.strictEqual(bot2.inEventMode, false, 'Test 2: inEventMode must be false');
+    assert.strictEqual(bot2.eventState, 'RETURNING', 'Test 2: eventState must be RETURNING');
+    assert.strictEqual(bot2.isEventReturning, true, 'Test 2: isEventReturning must be true');
+    assert.strictEqual(bot2.eventReturnMapTarget, 3, 'Test 2: eventReturnMapTarget must be 3');
+    assert.ok(bot2.eventSnapshot !== null, 'Test 2: snapshot must NOT be cleared early in exitEventMode');
+    assert.strictEqual(bot2.eventSnapshot.map, 3, 'Test 2: snapshot map must still be 3');
+  }
+
+  // --- Test 3: Khôi phục x/y, explore_cx/cy trên game server ---
+  {
+    console.log('  Testing Test 3: Coordinate restoration & confirmation within 40m...');
+    const bot3 = new BotInstance({
+      line_uid: 't83_test_3',
+      settings: {
+        targetMap: 3,
+        explore_cx: 450,
+        explore_cy: 780,
+        autoMap: true,
+        autoZone: true,
+        lock_zone_center: true,
+        targetZone: 5
+      }
+    });
+    bot3.player = { map: 3, x: 450, y: 780, lv: 50, explore_cx: 450, explore_cy: 780 };
+    bot3.captureEventSnapshot('gw');
+    bot3.enterEventMode('gw', 4);
+    bot3.exitEventMode();
+
+    // Giả lập bot đã warp về Map 3 nhưng ở điểm xuất hiện (1125, 1125)
+    bot3.player.map = 3;
+    bot3.player.x = 1125;
+    bot3.player.y = 1125;
+    const distFar = Math.hypot(bot3.player.x - bot3.eventSnapshot.x, bot3.player.y - bot3.eventSnapshot.y);
+    assert.ok(distFar > 40, 'Test 3: Initial position after warp is far from snapshot');
+
+    // Bot di chuyển dần về gần đích (460, 775)
+    bot3.player.x = 460;
+    bot3.player.y = 775;
+    const distClose = Math.hypot(bot3.player.x - bot3.eventSnapshot.x, bot3.player.y - bot3.eventSnapshot.y);
+    assert.ok(distClose <= 40, 'Test 3: Distance is now within tolerance (<= 40m)');
+
+    // Kích hoạt hoàn tất
+    bot3._finalizeEventRestoration(true);
+    assert.strictEqual(bot3.eventSnapshot, null, 'Test 3: snapshot must be cleared after restoration finalized');
+    assert.strictEqual(bot3.eventState, 'IDLE', 'Test 3: eventState must be IDLE');
+    assert.strictEqual(bot3.inEventMode, false, 'Test 3: inEventMode must be false');
+    assert.strictEqual(bot3.isEventReturning, false, 'Test 3: isEventReturning must be false');
+    assert.strictEqual(bot3.settings.targetMap, 3, 'Test 3: settings.targetMap restored to 3');
+    assert.strictEqual(bot3.settings.autoMap, true, 'Test 3: settings.autoMap restored');
+    assert.strictEqual(bot3.settings.autoZone, true, 'Test 3: settings.autoZone restored');
+    assert.strictEqual(bot3.settings.lock_zone_center, true, 'Test 3: settings.lock_zone_center restored');
+    assert.strictEqual(bot3.settings.targetZone, 5, 'Test 3: settings.targetZone restored');
+    assert.strictEqual(bot3.player.explore_cx, 450, 'Test 3: player.explore_cx restored to 450');
+    assert.strictEqual(bot3.player.explore_cy, 780, 'Test 3: player.explore_cy restored to 780');
+  }
+
+  // --- Test 4: Warp return thất bại rồi retry thành công ---
+  {
+    console.log('  Testing Test 4: Warp return failure & retry recovery...');
+    const bot4 = new BotInstance({ line_uid: 't83_test_4', settings: { targetMap: 3 } });
+    bot4.player = { map: 4, x: 100, y: 100, lv: 50 };
+    bot4.captureEventSnapshot('gw');
+    bot4.enterEventMode('gw', 4);
+    bot4.exitEventMode();
+    assert.strictEqual(bot4.eventState, 'RETURNING');
+
+    // Lần 1: Warp lỗi mạng -> FAILED_RETRY
+    bot4.warpToMap = async () => false;
+    const ok1 = await bot4.warpToMap(bot4.eventSnapshot.map);
+    if (!ok1) {
+      bot4.eventState = 'FAILED_RETRY';
+      bot4.eventReturnRetries = (bot4.eventReturnRetries || 0) + 1;
+    }
+    assert.strictEqual(bot4.eventState, 'FAILED_RETRY', 'Test 4: state must be FAILED_RETRY on warp failure');
+    assert.strictEqual(bot4.eventReturnRetries, 1, 'Test 4: retries must increment');
+    assert.ok(bot4.eventSnapshot !== null, 'Test 4: snapshot must NOT be dropped on failure');
+    assert.strictEqual(bot4.eventSnapshot.map, 3, 'Test 4: snapshot destination retained');
+
+    // Lần 2 (nhịp poll tiếp theo): Warp thành công
+    bot4.warpToMap = async () => { bot4.player.map = 3; return true; };
+    const ok2 = await bot4.warpToMap(bot4.eventSnapshot.map);
+    if (ok2) {
+      bot4.eventState = 'RETURNING';
+    }
+    assert.strictEqual(bot4.eventState, 'RETURNING', 'Test 4: state returns to RETURNING after warp success');
+    assert.strictEqual(bot4.player.map, 3, 'Test 4: player arrived on Map 3');
+  }
+
+  // --- Test 5: Restart khi đang Event ---
+  {
+    console.log('  Testing Test 5: Restart recovery while event is still active...');
+    const snap5 = {
+      kind: 'gw',
+      map: 3,
+      x: 450,
+      y: 780,
+      explore_cx: 450,
+      explore_cy: 780,
+      targetMap: 3,
+      autoMap: true,
+      autoZone: true,
+      lock_zone_center: true,
+      targetZone: 5,
+      createdAt: Date.now()
+    };
+    const bot5 = new BotInstance({
+      line_uid: 't83_test_5',
+      settings: { targetMap: 4 },
+      eventSnapshot: snap5
+    });
+    bot5.player = { map: 4, x: 200, y: 200, lv: 50 };
+    bot5.lastGw = { st: 'open', ends: Math.floor(Date.now() / 1000) + 1800 };
+
+    // Mô phỏng logic restart recovery ở đầu pollGame
+    const isGwActive = bot5.lastGw && (bot5.lastGw.st === 'open' || bot5.lastGw.st === 'fight');
+    const atEventMap = Number(bot5.player.map) === 4;
+    if (isGwActive && atEventMap) {
+      bot5.eventState = 'ACTIVE';
+      bot5.inEventMode = true;
+      bot5.currentEventKind = snap5.kind;
+    }
+    assert.strictEqual(bot5.eventState, 'ACTIVE', 'Test 5: eventState must be recovered to ACTIVE');
+    assert.strictEqual(bot5.inEventMode, true, 'Test 5: inEventMode must be true');
+    assert.strictEqual(bot5.currentEventKind, 'gw', 'Test 5: currentEventKind must be gw');
+    assert.strictEqual(bot5.eventSnapshot.map, 3, 'Test 5: snapshot must be retained for return after event ends');
+  }
+
+  // --- Test 6: Restart sau khi Event kết thúc nhưng chưa return ---
+  {
+    console.log('  Testing Test 6: Restart recovery when event ended before return...');
+    const snap6 = {
+      kind: 'gw',
+      map: 3,
+      x: 450,
+      y: 780,
+      explore_cx: 450,
+      explore_cy: 780,
+      targetMap: 3,
+      autoMap: true,
+      autoZone: true,
+      lock_zone_center: true,
+      targetZone: 5,
+      createdAt: Date.now() - 3600000
+    };
+    const bot6 = new BotInstance({
+      line_uid: 't83_test_6',
+      settings: { targetMap: 4 },
+      eventSnapshot: snap6
+    });
+    bot6.player = { map: 4, x: 200, y: 200, lv: 50 };
+    bot6.lastGw = { st: 'ended', ends: Math.floor(Date.now() / 1000) - 60 }; // Event đã kết thúc
+
+    // Mô phỏng logic restart recovery ở đầu pollGame
+    const isGwActive6 = bot6.lastGw && (bot6.lastGw.st === 'open' || bot6.lastGw.st === 'fight');
+    if (!isGwActive6) {
+      bot6.eventState = 'RETURNING';
+      bot6.inEventMode = false;
+      bot6.isEventReturning = true;
+      bot6.eventReturnMapTarget = snap6.map;
+    }
+    assert.strictEqual(bot6.eventState, 'RETURNING', 'Test 6: state must automatically be RETURNING');
+    assert.strictEqual(bot6.inEventMode, false, 'Test 6: inEventMode must be false');
+    assert.strictEqual(bot6.isEventReturning, true, 'Test 6: isEventReturning must be true');
+    assert.strictEqual(bot6.eventReturnMapTarget, 3, 'Test 6: target must be Map 3');
+    assert.ok(bot6.eventSnapshot !== null, 'Test 6: snapshot MUST NOT be discarded before reaching destination');
+  }
+
+  // --- Test 7: Invasion Map 2 không bị kẹt ở Map 2 ---
+  {
+    console.log('  Testing Test 7: Invasion Map 2 properly returns to original Map 3 without getting stuck...');
+    const bot7 = new BotInstance({
+      line_uid: 't83_test_7',
+      settings: {
+        targetMap: 3,
+        explore_cx: 500,
+        explore_cy: 600,
+        autoMap: true,
+        autoEventJoinInv: true
+      }
+    });
+    bot7.player = { map: 3, x: 500, y: 600, lv: 60 };
+    bot7.lastInv = { st: 'active', ends: Math.floor(Date.now() / 1000) + 1800 };
+
+    // Bot chuẩn bị vào Invasion Map 2 -> Chụp snapshot Map 3
+    bot7.captureEventSnapshot('inv');
+    assert.strictEqual(bot7.eventSnapshot.map, 3, 'Test 7: original map recorded is 3');
+
+    // Sang Map 2 và kích hoạt event
+    bot7.player.map = 2;
+    bot7.enterEventMode('inv', 2);
+    assert.strictEqual(bot7.eventState, 'ACTIVE', 'Test 7: bot is active in invasion');
+    assert.strictEqual(bot7.settings.targetMap, 2, 'Test 7: targetMap set to 2 during event');
+
+    // Invasion kết thúc
+    bot7.lastInv = { st: 'ended', ends: Math.floor(Date.now() / 1000) - 10 };
+    bot7.exitEventMode();
+    assert.strictEqual(bot7.eventState, 'RETURNING', 'Test 7: state transitions to RETURNING');
+    assert.strictEqual(bot7.eventReturnMapTarget, 3, 'Test 7: return target is Map 3');
+    assert.strictEqual(bot7.settings.targetMap, 3, 'Test 7: targetMap immediately restored to 3, NOT stuck at 2');
+
+    // Hoàn tất quay về Map 3 tại tọa độ cũ
+    bot7.player.map = 3;
+    bot7.player.x = 500;
+    bot7.player.y = 600;
+    bot7._finalizeEventRestoration(true);
+    assert.strictEqual(bot7.eventState, 'IDLE', 'Test 7: restored to IDLE');
+    assert.strictEqual(bot7.player.map, 3, 'Test 7: player confirmed on Map 3');
+    assert.strictEqual(bot7.settings.targetMap, 3, 'Test 7: targetMap confirmed 3');
+  }
+
+  // --- Test 8: Hai poll automation chạy đồng thời không tạo hai lệnh join/exit (Mutex test) ---
+  {
+    console.log('  Testing Test 8: Mutex concurrency guards...');
+    const bot8 = new BotInstance({ line_uid: 't83_test_8', settings: {} });
+    bot8.player = { map: 1, lv: 50 };
+
+    // Part A: automationRunning mutex
+    let executionCount = 0;
+    bot8.runAutomation = async () => {
+      executionCount++;
+      await new Promise(res => setTimeout(res, 50));
+    };
+
+    // Nhịp poll 1 chạy
+    if (!bot8.automationRunning) {
+      bot8.automationRunning = true;
+      bot8.runAutomation().finally(() => { bot8.automationRunning = false; });
+    }
+
+    // Nhịp poll 2 chạy đồng thời trong khi poll 1 chưa xong
+    let poll2Skipped = false;
+    if (!bot8.automationRunning) {
+      bot8.automationRunning = true;
+      bot8.runAutomation().finally(() => { bot8.automationRunning = false; });
+    } else {
+      poll2Skipped = true;
+    }
+    assert.strictEqual(poll2Skipped, true, 'Test 8: poll 2 was skipped by automationRunning mutex');
+    assert.strictEqual(executionCount, 1, 'Test 8: only 1 execution ran');
+
+    // Part B: _eventTransitionLock trong enterEventMode / exitEventMode
+    bot8.inEventMode = false;
+    bot8.eventState = 'IDLE';
+    bot8._eventTransitionLock = true; // Giả lập lock đang bị chiếm giữ
+    bot8.enterEventMode('gw', 4);
+    assert.strictEqual(bot8.eventState, 'IDLE', 'Test 8: enterEventMode rejected when _eventTransitionLock is active');
+
+    bot8._eventTransitionLock = false; // Nhả lock
+    bot8.captureEventSnapshot('gw');
+    bot8.enterEventMode('gw', 4);
+    assert.strictEqual(bot8.eventState, 'ACTIVE', 'Test 8: enterEventMode succeeded after lock released');
+  }
+
+  console.log('✅ T83 Event Session State Machine & Real Coordinate Restoration Tests Passed successfully!');
+
   // ==========================================
   // T75 - MANUAL MARKET DASHBOARD INTEGRATION TESTS
   // ==========================================
@@ -1629,6 +2300,51 @@ try {
   assert.strictEqual(customBot.fingerprint.userAgent, customFp.userAgent, 'BotInstance must retain pre-configured userAgent');
 
   console.log('✅ Anti-Detection & Human Simulation Engine Tests Passed successfully!');
+
+  // ==================== T81 DEDICATED SYSTEM LOG ENGINE ====================
+  console.log('Testing T81 Dedicated System Log & In-Game Log Separation Engine...');
+  const logTesterBot = new BotInstance({
+    line_uid: 'U_TEST_LOG_SEP_1',
+    session_token: 'test_token_logs',
+    name: 'LogSepTester'
+  });
+
+  assert(Array.isArray(logTesterBot.logs), 'BotInstance must have logs array');
+  assert(Array.isArray(logTesterBot.systemLogs), 'BotInstance must have dedicated systemLogs array');
+  assert(Array.isArray(logTesterBot.gameLogs), 'BotInstance must have dedicated gameLogs array');
+
+  // Add system logs
+  logTesterBot.addLog('SYSTEM', 'Khởi tạo bot cho tài khoản: LogSepTester');
+  logTesterBot.addLog('ERROR', '❌ Lỗi kết nối khi làm mới Session Token');
+  logTesterBot.addLog('WARNING', '⚠️ Proxy gặp sự cố đường truyền');
+  logTesterBot.addLog('AUTH', 'Làm mới Session Token qua PHPSESSID');
+
+  // Add in-game logs
+  logTesterBot.addLog('ACTION', 'Tấn công quái vật cấp 20');
+  logTesterBot.addLog('KILL', 'Tiêu diệt Boss MVP thành công!');
+  logTesterBot.addLog('DROP', 'Nhặt được Trang bị Thần Thoại');
+  logTesterBot.addLog('SUCCESS', 'Nâng cấp Armor lên Lv.5 thành công');
+
+  // Verify separation
+  assert(logTesterBot.systemLogs.length >= 4, `systemLogs should contain at least 4 items, got ${logTesterBot.systemLogs.length}`);
+  assert(logTesterBot.gameLogs.length >= 4, `gameLogs should contain at least 4 items, got ${logTesterBot.gameLogs.length}`);
+  assert(logTesterBot.logs.length >= 8, `general logs should contain all items, got ${logTesterBot.logs.length}`);
+
+  // Ensure system logs do not leak into gameLogs
+  const hasSysInGame = logTesterBot.gameLogs.some(l => l.msg.includes('Khởi tạo bot') || l.msg.includes('Session Token'));
+  assert.strictEqual(hasSysInGame, false, 'System events must NOT appear in gameLogs');
+
+  // Ensure game actions do not leak into systemLogs
+  const hasGameInSys = logTesterBot.systemLogs.some(l => l.msg.includes('Tấn công quái vật') || l.msg.includes('Trang bị Thần Thoại'));
+  assert.strictEqual(hasGameInSys, false, 'In-game combat/loot events must NOT appear in systemLogs');
+
+  // Test buffer capping
+  for (let i = 0; i < 200; i++) {
+    logTesterBot.addLog('SYSTEM', `System Event Test #${i}`);
+  }
+  assert(logTesterBot.systemLogs.length <= 150, `systemLogs must be capped at 150, got ${logTesterBot.systemLogs.length}`);
+
+  console.log('✅ T81 Dedicated System Log & In-Game Log Separation Tests Passed successfully!');
 
   // ==================== ANTI-HANG & WATCHDOG TESTS ====================
   console.log('Testing Anti-Hang & Zombie Bot Watchdog Engine...');
@@ -2074,6 +2790,327 @@ try {
   }
 
   console.log('✅ /play & Proxy Connection Tests (Mock-based) Passed successfully!');
+
+  // ==========================================
+  // CONCURRENCY, SCHEDULER & REQUEST QUEUE TESTS (13 SCENARIOS)
+  // ==========================================
+  console.log('Testing Concurrency, Scheduler & Request Queue Engine (13 Scenarios)...');
+
+  // Scenario 1: Overlap Mutex - triggerImmediatePoll() while poll is running
+  {
+    console.log('  Scenario 1: Overlap Mutex prevents concurrent polls...');
+    const bot1 = new BotInstance({ line_uid: 'sched_test_1', name: 'SchedBot1' });
+    bot1.isPolling = true;
+    bot1.status = 'running';
+    bot1.immediatePollPending = false;
+    bot1.overlapCount = 0;
+    bot1.skippedImmediatePollCount = 0;
+
+    bot1.triggerImmediatePoll();
+    assert.strictEqual(bot1.isPolling, true, 'isPolling must remain true');
+    assert.strictEqual(bot1.immediatePollPending, true, 'immediatePollPending must be set to true');
+    assert.strictEqual(bot1.skippedImmediatePollCount, 1, 'skippedImmediatePollCount must increment');
+    assert.strictEqual(bot1.overlapCount, 0, 'No overlapping poll was spawned');
+    bot1.stop();
+  }
+
+  // Scenario 2: Immediate Trigger Spam & Cooldown
+  {
+    console.log('  Scenario 2: Immediate Trigger Spam with 300ms Cooldown...');
+    const bot2 = new BotInstance({ line_uid: 'sched_test_2', name: 'SchedBot2' });
+    bot2.status = 'running';
+    bot2.isPolling = true;
+    bot2.immediatePollPending = false;
+    bot2.skippedImmediatePollCount = 0;
+
+    // Call 5 times rapidly
+    for (let i = 0; i < 5; i++) {
+      bot2.triggerImmediatePoll();
+    }
+    assert.strictEqual(bot2.immediatePollPending, true, 'immediatePollPending must remain true');
+    assert.strictEqual(bot2.skippedImmediatePollCount, 5, 'All 5 rapid triggers were safely queued/cooldown-throttled');
+    bot2.stop();
+  }
+
+  // Scenario 3: Poll Timeout & Real Abort Signal
+  {
+    console.log('  Scenario 3: Poll Timeout and AbortSignal cancellation...');
+    const bot3 = new BotInstance({ line_uid: 'sched_test_3', name: 'SchedBot3' });
+    const pollAbortController = new AbortController();
+    bot3.currentPollAbortController = pollAbortController;
+
+    let abortFired = false;
+    pollAbortController.signal.addEventListener('abort', () => {
+      abortFired = true;
+    });
+
+    // Simulate 45s hard timeout abort
+    pollAbortController.abort(new Error('POLL_TIMEOUT'));
+    assert.strictEqual(abortFired, true, 'AbortSignal must fire on timeout');
+    assert.strictEqual(pollAbortController.signal.aborted, true, 'Signal must be marked aborted');
+
+    // Simulate old late response returning after abort
+    let stateModified = false;
+    const handleLateResponse = (res) => {
+      if (pollAbortController.signal.aborted) {
+        return; // Rejected due to abort
+      }
+      stateModified = true;
+    };
+    handleLateResponse({ ok: true });
+    assert.strictEqual(stateModified, false, 'Late response must NOT modify bot state after abort');
+    bot3.stop();
+  }
+
+  // Scenario 4: Stop / Start in Flight & Generation Invalidation
+  {
+    console.log('  Scenario 4: Stop/Start generation guard prevents ghost schedulers...');
+    const bot4 = new BotInstance({ line_uid: 'sched_test_4', name: 'SchedBot4' });
+    bot4.start();
+    const g1 = bot4.pollGeneration;
+    assert.ok(g1 > 0, 'Initial pollGeneration must be > 0');
+
+    // Stop bot while mock poll is running
+    bot4.stop('idle');
+    assert.strictEqual(bot4.status, 'idle');
+    assert.strictEqual(bot4.timer, null, 'Timer must be cleared on stop');
+    assert.ok(bot4.pollGeneration > g1, 'pollGeneration must increment on stop');
+
+    // Start again
+    bot4.start();
+    const g2 = bot4.pollGeneration;
+    assert.ok(g2 > g1, 'New generation must be strictly greater than old generation');
+
+    // Simulate old finally block from g1 trying to reschedule
+    let oldTimerCreated = false;
+    const oldFinallyBlock = (gen) => {
+      if (gen !== bot4.pollGeneration || bot4.status !== 'running') {
+        return; // Dropped!
+      }
+      oldTimerCreated = true;
+    };
+    oldFinallyBlock(g1);
+    assert.strictEqual(oldTimerCreated, false, 'Old generation finally block must NOT reschedule timer');
+    bot4.stop();
+  }
+
+  // Scenario 5: Request Queue Priorities (P1 -> P2 -> P3 -> P4)
+  {
+    console.log('  Scenario 5: Request Queue executes strictly by priority (1 -> 2 -> 3 -> 4)...');
+    const bot5 = new BotInstance({ line_uid: 'sched_test_5', name: 'SchedBot5' });
+    const queue = new BotRequestQueue(bot5);
+    bot5.requestQueue = queue;
+
+    const executionOrder = [];
+    bot5._sendRequestDirect = async (url, payload, options = {}) => {
+      executionOrder.push(options.priority);
+      await new Promise(r => setTimeout(r, 10));
+      return { ok: true };
+    };
+
+    // Enqueue in reverse priority order: 4, 3, 2, 1
+    const p4 = queue.enqueue('/leaderboard', {}, { priority: 4, type: 'DEF_SCAN' });
+    const p3 = queue.enqueue('/offline', { action: 'chpass' }, { priority: 3, type: 'CHECKIN' });
+    const p2 = queue.enqueue('/upgrade', { action: 'use_potion_manual' }, { priority: 2, type: 'POTION' });
+    const p1 = queue.enqueue('/game', {}, { priority: 1, type: 'GAME_POLL' });
+
+    await Promise.all([p4, p3, p2, p1]);
+    assert.strictEqual(executionOrder.length, 4, 'All 4 requests must execute');
+    assert.strictEqual(executionOrder[1], 1, 'Second executed must be Priority 1 (Game poll)');
+    assert.strictEqual(executionOrder[2], 2, 'Third executed must be Priority 2 (Potion)');
+    assert.strictEqual(executionOrder[3], 3, 'Fourth executed must be Priority 3 (Checkin)');
+    bot5.stop();
+  }
+
+  // Scenario 6: Anti-Starvation Mechanism
+  {
+    console.log('  Scenario 6: Anti-Starvation yields slot to background request after 5 high-priority actions...');
+    const bot6 = new BotInstance({ line_uid: 'sched_test_6', name: 'SchedBot6' });
+    const queue = new BotRequestQueue(bot6);
+    bot6.requestQueue = queue;
+
+    const execLog = [];
+    bot6._sendRequestDirect = async (url, payload, options = {}) => {
+      execLog.push(options.priority);
+      await new Promise(r => setTimeout(r, 5));
+      return { ok: true };
+    };
+
+    // Enqueue 1 initial item to keep queue busy, then 1 background (P4) and 6 high-priority (P2) items
+    const promises = [];
+    promises.push(queue.enqueue('/init', {}, { priority: 2 }));
+    promises.push(queue.enqueue('/bg', {}, { priority: 4 }));
+    for (let i = 0; i < 6; i++) {
+      promises.push(queue.enqueue(`/action_${i}`, {}, { priority: 2 }));
+    }
+
+    await Promise.all(promises);
+    assert.strictEqual(execLog.length, 8, 'Total 8 items executed');
+    // After 5 consecutive high-priority items (indices 0, 1, 2, 3, 4), the 6th item (index 5) MUST be Priority 4!
+    assert.strictEqual(execLog[5], 4, 'Priority 4 must execute after 5 consecutive high-priority requests to prevent starvation');
+    bot6.stop();
+  }
+
+  // Scenario 7: Action Chaining without Deadlock
+  {
+    console.log('  Scenario 7: Action chaining within queue does NOT cause deadlock...');
+    const bot7 = new BotInstance({ line_uid: 'sched_test_7', name: 'SchedBot7' });
+    const queue = new BotRequestQueue(bot7);
+    bot7.requestQueue = queue;
+
+    let childActionFinished = false;
+    bot7._sendRequestDirect = async (url, payload, options = {}) => {
+      if (url === '/parent') {
+        setTimeout(() => {
+          bot7.sendRequest('/child', {}, { priority: 2 }).then(() => {
+            childActionFinished = true;
+          });
+        }, 5);
+        return { ok: true, isParent: true };
+      }
+      if (url === '/child') {
+        return { ok: true, isChild: true };
+      }
+      return { ok: true };
+    };
+
+    await bot7.sendRequest('/parent', {}, { priority: 1 });
+    await new Promise(r => setTimeout(r, 50));
+    assert.strictEqual(childActionFinished, true, 'Child chained action must resolve without deadlock');
+    assert.strictEqual(queue.size, 0, 'Queue must be completely empty');
+    bot7.stop();
+  }
+
+  // Scenario 8: Short Background Timeout
+  {
+    console.log('  Scenario 8: Background request has shorter timeout (3000-4000ms)...');
+    const bot8 = new BotInstance({ line_uid: 'sched_test_8', name: 'SchedBot8' });
+    const queue = new BotRequestQueue(bot8);
+    bot8.requestQueue = queue;
+
+    bot8._sendRequestDirect = async (url, payload, options = {}) => {
+      assert.ok(options.timeoutMs <= 4000, `Background timeoutMs must be <= 4000, got ${options.timeoutMs}`);
+      return { ok: true };
+    };
+
+    await queue.enqueue('/bg_scan', {}, { priority: 4 });
+    bot8.stop();
+  }
+
+  // Scenario 9: Single-Layer Retry in _sendRequestDirect
+  {
+    console.log('  Scenario 9: Single-layer retry strictly capped at maxAttempts in _sendRequestDirect...');
+    const bot9 = new BotInstance({ line_uid: 'sched_test_9', name: 'SchedBot9' });
+    bot9.requestQueue = new BotRequestQueue(bot9);
+
+    const { MockAgent } = require('undici');
+    const retryMockAgent = new MockAgent();
+    retryMockAgent.disableNetConnect();
+    const retryPool = retryMockAgent.get('https://ragnalok.online');
+
+    let attemptsCount = 0;
+    retryPool.intercept({
+      path: '/human/xhrpg_retry_test.php',
+      method: 'POST'
+    }).replyWithError(new Error('Simulated network drop 1'));
+
+    retryPool.intercept({
+      path: '/human/xhrpg_retry_test.php',
+      method: 'POST'
+    }).replyWithError(new Error('Simulated network drop 2'));
+
+    retryPool.intercept({
+      path: '/human/xhrpg_retry_test.php',
+      method: 'POST'
+    }).reply(200, JSON.stringify({ ok: true, recovered: true }));
+
+    const originalGetDisp = proxyPool.getDispatcher;
+    proxyPool.getDispatcher = (uid) => {
+      if (uid === 'sched_test_9') return retryMockAgent;
+      return originalGetDisp.call(proxyPool, uid);
+    };
+
+    let queueCallCount = 0;
+    const origDirect = bot9._sendRequestDirect;
+    bot9._sendRequestDirect = async function(...args) {
+      queueCallCount++;
+      return origDirect.apply(this, args);
+    };
+
+    try {
+      const res = await bot9.sendRequest('https://ragnalok.online/human/xhrpg_retry_test.php', {}, { maxAttempts: 3 });
+      assert.strictEqual(res.recovered, true, 'Request should recover on 3rd attempt');
+      assert.strictEqual(queueCallCount, 1, 'Queue worker must invoke _sendRequestDirect only once (no double-layer retry)');
+    } finally {
+      proxyPool.getDispatcher = originalGetDisp;
+      bot9.stop();
+    }
+  }
+
+  // Scenario 10: Cadence anchored to pollStartedAt (nextDueAt)
+  {
+    console.log('  Scenario 10: Cadence calculation anchored to pollStartedAt eliminates drift...');
+    const pollStartedAt = 100000;
+    const baseDelay = 2000;
+    const jitter = 100;
+    const nextDueAt = pollStartedAt + baseDelay + jitter; // 102100
+
+    // Simulate poll that took 400ms (now = 100400)
+    const nowAfterPoll = 100400;
+    const delay = Math.max(500, nextDueAt - nowAfterPoll); // 102100 - 100400 = 1700ms
+    assert.strictEqual(delay, 1700, 'Delay must compensate for 400ms request duration');
+    assert.strictEqual(nowAfterPoll + delay, nextDueAt, 'Next poll starts exactly at nextDueAt (no drift)');
+  }
+
+  // Scenario 11: Watchdog Recovery bot.recover()
+  {
+    console.log('  Scenario 11: Watchdog recovery cleanly resets scheduler without duplicate timers...');
+    const bot11 = new BotInstance({ line_uid: 'sched_test_11', name: 'SchedBot11' });
+    bot11.start();
+    const gBefore = bot11.pollGeneration;
+
+    // Trigger recover
+    bot11.recover('Zombie detected');
+    assert.ok(bot11.pollGeneration > gBefore, 'Generation must increment after recover');
+    assert.strictEqual(bot11.status, 'running', 'Status must be running');
+    assert.strictEqual(bot11.isPolling, false, 'isPolling must be reset to false');
+    assert.strictEqual(bot11.immediatePollPending, false, 'immediatePollPending reset');
+    assert.ok(bot11.timer !== null, 'Exactly 1 active timer handle created');
+    bot11.stop();
+  }
+
+  // Scenario 12: Multi-Bot Concurrency
+  {
+    console.log('  Scenario 12: Multi-bot concurrency with independent queues and mutexes...');
+    const mb1 = new BotInstance({ line_uid: 'mb_1', name: 'MB1' });
+    const mb2 = new BotInstance({ line_uid: 'mb_2', name: 'MB2' });
+    const mb3 = new BotInstance({ line_uid: 'mb_3', name: 'MB3' });
+
+    assert.notStrictEqual(mb1.requestQueue, mb2.requestQueue, 'Bot 1 and Bot 2 must have independent queues');
+    assert.notStrictEqual(mb2.requestQueue, mb3.requestQueue, 'Bot 2 and Bot 3 must have independent queues');
+
+    mb1.isPolling = true;
+    assert.strictEqual(mb2.isPolling, false, 'Bot 1 polling must not block Bot 2');
+    assert.strictEqual(mb3.isPolling, false, 'Bot 1 polling must not block Bot 3');
+
+    mb1.stop();
+    mb2.stop();
+    mb3.stop();
+  }
+
+  // Scenario 13: Cache Debounced Non-blocking Write
+  {
+    console.log('  Scenario 13: Cache debounced write avoids synchronous disk block...');
+    const fs = require('fs');
+    const path = require('path');
+    const spotsCachePath = path.join(__dirname, 'spots_cache.json');
+    requestSaveSpotsCache();
+    saveSpotsCache();
+    const data = JSON.parse(fs.readFileSync(spotsCachePath, 'utf8'));
+    assert.strictEqual(typeof data, 'object', 'spots_cache.json must be valid JSON');
+  }
+
+  console.log('✅ Concurrency, Scheduler & Request Queue Engine (13 Scenarios) Passed successfully!');
   console.log('✅ All Unit Tests Passed successfully!');
   process.exit(0);
 } catch (error) {

@@ -3,6 +3,51 @@
 > Work Breakdown Structure. Update task states immediately upon changes.
 > Statuses: todo | doing | blocked | review | done
 
+### [x] T83 - Tái Cấu Trúc Toàn Bộ Luồng Event Thành Session State Machine & Khôi Phục Tọa Độ Thật Trên Server
+- Description: Tái cấu trúc toàn bộ luồng tham gia Sự kiện (Guild War `gw`, Country War `cw`, Invasion `inv`) thành một Session State Machine hoàn chỉnh với snapshot bất biến lưu bền vững vào `accounts.json` TRƯỚC KHI di chuyển. Khôi phục bản đồ và tọa độ thực tế trên game server qua `xhrpg_game.php`, khôi phục sau khi bot restart, khóa mutex chống race condition cho `runAutomation`, `enterEventMode`, `exitEventMode`, cơ chế retry/timeout bảo vệ và bộ test 8 bài toàn diện.
+- Files related: `server.js`, `test.js`, `.agent/TASKS.md`, `.agent/CHANGELOG.md`, `.agent/DECISIONS.md`
+- Acceptance criteria:
+  - [x] `server.js`: Chụp snapshot đầy đủ (kind, map, x, y, explore_cx/cy, settings) TRƯỚC KHI gọi `joinGuildWar()`, `joinCountryWar()`, hoặc `warpToMap(2)`.
+  - [x] `server.js`: Lưu snapshot bền vững vào `accounts.json`. Khi restart: nếu event active thì khôi phục `ACTIVE`, nếu event kết thúc thì tiếp tục return; không xóa snapshot đến khi server xác nhận về đích.
+  - [x] `server.js`: Xây dựng State Machine rõ ràng: `IDLE`, `ENTERING`, `ACTIVE`, `EXITING`, `RETURNING`, `FAILED_RETRY`.
+  - [x] `server.js`: Khôi phục cả Map và Tọa độ thật trên server qua `xhrpg_game.php` (khoảng cách `dist <= 40m` hoặc timeout 4 phút), khôi phục toàn diện settings.
+  - [x] `server.js`: Không xóa snapshot sớm, giữ nguyên trong suốt quá trình `RETURNING`.
+  - [x] `server.js`: Mutex `automationRunning` cho `runAutomation()` và `_eventTransitionLock` cho `enterEventMode()`/`exitEventMode()`.
+  - [x] `server.js`: Cơ chế retry và timeout (3-5 phút), không đổi sang farm map mới khi đang return.
+  - [x] `test.js`: Bổ sung 8 bài test bắt buộc theo yêu cầu (Test 1 -> Test 8) + Regression test. `npm test` đạt 100% Passed.
+- Status: done
+
+---
+
+### [x] T82 - Tái Cấu Trúc Toàn Bộ Luồng Auto Boss Guild & Khôi Phục Tọa Độ Thực Tế Trên Server
+- Description: Tái cấu trúc toàn bộ luồng Auto Boss Guild / Guild Dungeon để sau khi tiêu diệt xong Boss, nhân vật quay lại đúng bản đồ và đúng tọa độ ban đầu trên game server (gửi lệnh di chuyển và kiểm tra khoảng cách xác nhận qua API game `xhrpg_game.php`, không chỉ gán tọa độ ảo ở local). Quản lý snapshot bất biến lưu vào `accounts.json`, khóa mọi automation cạnh tranh (Auto Map, Auto Zone, Leader Sync Map, MVP Cycle) trong giai đoạn khôi phục (`_guildDungeonRestoring`), khôi phục toàn diện settings (`explore_cx/cy`, `autoMap`, `autoZone`, `lock_zone_center`), bảo đảm tính độc lập cho Team Member, chống false-positive khi server lag (3 poll liên tiếp) và cung cấp 8 bộ test đầy đủ (Test A -> Test H).
+- Files related: `server.js`, `test.js`, `.agent/TASKS.md`, `.agent/CHANGELOG.md`, `.agent/DECISIONS.md`
+- Acceptance criteria:
+  - [x] `server.js`: Lưu snapshot chính xác duy nhất 1 lần, không đè khi lặp lại, lưu bền vững vào `accounts.json`, rollback nếu enter thất bại.
+  - [x] `server.js`: Quản lý state an toàn: `guildDungeonActive`, `_exitingGuildDungeon`, `_guildDungeonRestoring`, `_gdunRestoreStartedAt`, `gdunEmptyPolls`.
+  - [x] `server.js`: Xác nhận hết Boss chắc chắn (>=3 polls liên tiếp sau 3s) trước khi thoát.
+  - [x] `server.js`: Thoát dungeon -> warp map snapshot nếu cần -> gửi request di chuyển thật `traveling: 1, explore_cx, explore_cy` -> kiểm tra khoảng cách server `dist <= 40m` (hoặc timeout 35s) -> khôi phục đầy đủ settings -> giải phóng snapshot.
+  - [x] `server.js`: Khóa Auto Map, Auto Zone, Leader Sync Map trong khi `_guildDungeonRestoring === true`.
+  - [x] `server.js`: Team Member tự lưu snapshot riêng và tự khôi phục về tọa độ riêng, không bị giật theo Leader.
+  - [x] `test.js`: Bổ sung và cập nhật đầy đủ 8 nhóm test cases (Test A -> Test H). `npm test` đạt 100% Passed.
+- Status: done
+
+---
+
+### [x] T81 - Tách Biệt Thẻ Log & Bổ Sung Thẻ Giám Sát Hệ Thống Chuyên Biệt (Dedicated System Log & Monitoring Tab)
+- Description: Tách biệt hoàn toàn luồng Log Hệ Thống (Lỗi kết nối, Auth, Session Token, Proxy, Watchdog, Guard, Config) ra khỏi Log Hoạt Động In-Game (Chiến đấu, Quái diệt, Nhặt đồ, Farm, Nâng cấp) để người dùng dễ dàng theo dõi. Xây dựng thẻ tab mới `🖥️ Hệ Thống` trên Card bot và sub-tab hệ thống trong thẻ Log, bổ sung bộ lọc theo mức độ nghiêm trọng (Tất cả / Lỗi / Cảnh báo / Thông tin), bộ đếm lỗi trực quan, thanh trạng thái hạ tầng (Session/Token, Proxy/IP, Ping, Polling, Watchdog) và bảo đảm bộ nhớ đệm log lỗi không bị trôi/ghi đè bởi log quái game.
+- Files related: `server.js`, `public/app.js`, `public/app.css`, `test.js`
+- Acceptance criteria:
+  - [x] `server.js`: Mở rộng `BotInstance` với `systemLogs = []` (dung lượng 150) và `gameLogs = []`. Phân loại tự động trong `addLog(type, msg)`.
+  - [x] `server.js`: Cập nhật endpoint `GET /api/accounts/:line_uid/logs` trả về `systemLogs`, `gameLogs`, `logs`. Thêm endpoint `POST /api/accounts/:line_uid/logs/clear-system`.
+  - [x] `public/app.js`: Thêm nút tab `tab-btn-system-${acc.line_uid}` vào `card-tabs-nav` và tab-pane `pane-system-${acc.line_uid}` trong mỗi card bot.
+  - [x] `public/app.js`: Tạo giao diện Thẻ Hệ Thống gồm Vitals Banner (Session, Proxy, Watchdog, Polling), Filter Buttons (Tất cả, Lỗi ❌, Cảnh báo ⚠️, Hệ thống ℹ️), badge đếm số lỗi, Terminal Log riêng biệt `system-terminal-${acc.line_uid}`.
+  - [x] `public/app.js`: Tách sub-tab trong thẻ Log cũ thành `🎮 In-Game` (chỉ hiển thị log chiến đấu, farm) và `🖥️ Hệ Thống` (chuyển sang xem log hệ thống).
+  - [x] `test.js`: Bổ sung unit tests kiểm tra phân loại log `systemLogs` và `gameLogs`. Chạy `npm test` đạt 100%.
+- Status: done
+
+---
+
 ### [x] T80 - Hệ Thống Vân Tay Trình Duyệt Bền Vững & Chống Phát Hiện Bot (Browser Fingerprint Engine)
 - Description: Xây dựng engine sinh và quản lý vân tay trình duyệt (Browser Fingerprint) chân thực, độc lập và lưu trữ bền vững trong `accounts.json`. Đồng bộ hóa HTTP headers (User-Agent, sec-ch-ua, platform, language) cho backend bot poller và inject script ẩn danh (Stealth API spoofing cho `navigator`, `screen`, `WebGL`) khi mở Web Game Client (`/play`). Cung cấp API và giao diện Dashboard để xem chi tiết thông số và tạo mới/ngẫu nhiên vân tay với 1 click.
 - Files related: `server.js`, `public/app.js`, `public/index.html`, `test.js`, `accounts.json`

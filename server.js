@@ -647,10 +647,32 @@ function saveMapsCache() {
   } catch(e) {}
 }
 
+let spotsCacheDirty = false;
+let spotsCacheSaveTimeout = null;
+
 function saveSpotsCache() {
+  if (spotsCacheSaveTimeout) {
+    clearTimeout(spotsCacheSaveTimeout);
+    spotsCacheSaveTimeout = null;
+  }
+  spotsCacheDirty = false;
   try {
     fs.writeFileSync(SPOTS_CACHE_FILE, JSON.stringify(spotsCache, null, 2), 'utf8');
   } catch(e) {}
+}
+
+function requestSaveSpotsCache() {
+  spotsCacheDirty = true;
+  if (!spotsCacheSaveTimeout) {
+    spotsCacheSaveTimeout = setTimeout(() => {
+      spotsCacheSaveTimeout = null;
+      if (!spotsCacheDirty) return;
+      spotsCacheDirty = false;
+      fs.writeFile(SPOTS_CACHE_FILE, JSON.stringify(spotsCache, null, 2), 'utf8', (err) => {
+        if (err) console.error('Error saving spots cache asynchronously:', err);
+      });
+    }, 2000);
+  }
 }
 
 // Helper chuẩn hóa và trích xuất Session Token sạch sẽ từ raw input / URL / param
@@ -896,21 +918,29 @@ function hashPassword(password, salt) {
   return crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
 }
 
-// Load users
+// Load users (In-memory cache with fallback)
+let usersCache = null;
+
 function loadUsers() {
+  if (usersCache !== null) {
+    return usersCache;
+  }
   try {
     if (fs.existsSync(USERS_FILE)) {
       const data = fs.readFileSync(USERS_FILE, 'utf8');
-      return JSON.parse(data || '[]');
+      usersCache = JSON.parse(data || '[]');
+      return usersCache;
     }
   } catch (err) {
     console.error('Error reading users file:', err);
   }
-  return [];
+  usersCache = [];
+  return usersCache;
 }
 
 // Save users
 function saveUsers(users) {
+  usersCache = users;
   try {
     fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2), 'utf8');
   } catch (err) {
@@ -1733,6 +1763,217 @@ function logNormalActInterval(minMs = 90000, maxMs = 450000) {
   return Math.max(minMs, Math.min(maxMs, Math.round(val)));
 }
 
+// Helper kết hợp nhiều AbortSignal an toàn (hỗ trợ native AbortSignal.any và listener fallback)
+function combineAbortSignals(signals) {
+  const validSignals = (signals || []).filter(Boolean);
+  if (validSignals.length === 0) return null;
+  if (validSignals.length === 1) return validSignals[0];
+
+  for (const sig of validSignals) {
+    if (sig.aborted) {
+      return sig;
+    }
+  }
+
+  if (typeof AbortSignal.any === 'function') {
+    try {
+      return AbortSignal.any(validSignals);
+    } catch (e) {}
+  }
+
+  const controller = new AbortController();
+  const onAbort = (ev) => {
+    controller.abort(ev && ev.target ? ev.target.reason : (ev || 'Aborted'));
+  };
+  for (const sig of validSignals) {
+    if (sig.aborted) {
+      controller.abort(sig.reason);
+      return controller.signal;
+    }
+    sig.addEventListener('abort', onAbort, { once: true });
+  }
+  return controller.signal;
+}
+
+// 🛡️ Hàng đợi request đơn lẻ theo từng bot, phân bổ 4 cấp độ ưu tiên và chống đói request
+class BotRequestQueue {
+  constructor(bot, options = {}) {
+    this.bot = bot;
+    this.queue = [];
+    this.processing = false;
+    this.maxQueueSize = options.maxQueueSize || 40;
+    this.activeItem = null;
+    this.consecutiveHighPrioCount = 0;
+  }
+
+  get size() {
+    return this.queue.length;
+  }
+
+  enqueue(url, payload, options = {}) {
+    const priority = options.priority !== undefined ? Number(options.priority) : this._detectPriority(url, payload);
+    const dedupeKey = options.dedupeKey || null;
+    const type = options.type || this._detectType(url, payload);
+    const signal = options.signal || null;
+    const timeoutMs = options.timeoutMs || (priority === 4 ? 4000 : (url.includes('xhrpg_game.php') ? 8000 : 10000));
+    const ttlMs = options.ttlMs || (priority === 4 ? 20000 : 60000);
+
+    // Deduplication check: Nếu dedupeKey đã tồn tại trong hàng đợi chờ, trả về promise hiện tại
+    if (dedupeKey) {
+      const existing = this.queue.find(item => item.dedupeKey === dedupeKey);
+      if (existing) {
+        return existing.promise;
+      }
+    }
+
+    // Giới hạn độ dài hàng đợi & loại bỏ request background cũ nhất nếu đầy queue
+    if (this.queue.length >= this.maxQueueSize) {
+      let dropIdx = -1;
+      let highestPrioNum = -1;
+      for (let i = 0; i < this.queue.length; i++) {
+        if (this.queue[i].priority > highestPrioNum) {
+          highestPrioNum = this.queue[i].priority;
+          dropIdx = i;
+        }
+      }
+
+      if (dropIdx !== -1 && highestPrioNum >= 3) {
+        const dropped = this.queue.splice(dropIdx, 1)[0];
+        dropped.reject(new Error(`REQUEST_QUEUE_DROPPED: Queue size limit (${this.maxQueueSize}) exceeded`));
+      } else if (priority >= 3) {
+        return Promise.reject(new Error(`REQUEST_QUEUE_DROPPED: Queue full for background request`));
+      }
+    }
+
+    let itemResolve, itemReject;
+    const promise = new Promise((res, rej) => {
+      itemResolve = res;
+      itemReject = rej;
+    });
+
+    const item = {
+      url,
+      payload,
+      options: { ...options, priority, dedupeKey, type, timeoutMs },
+      priority,
+      dedupeKey,
+      type,
+      signal,
+      ttlMs,
+      enqueuedAt: Date.now(),
+      resolve: itemResolve,
+      reject: itemReject,
+      promise
+    };
+
+    // Sắp xếp hàng đợi theo Priority tăng dần (Priority 1 là ưu tiên cao nhất), tiếp theo là thời gian enqueue
+    let insertIdx = this.queue.length;
+    for (let i = 0; i < this.queue.length; i++) {
+      if (item.priority < this.queue[i].priority) {
+        insertIdx = i;
+        break;
+      }
+    }
+    this.queue.splice(insertIdx, 0, item);
+    this.bot.requestQueueDepth = this.queue.length;
+
+    this._processNext();
+    return promise;
+  }
+
+  _detectPriority(url, payload) {
+    if (url.includes('xhrpg_game.php')) return 1;
+    if (url.includes('xhrpg_warp.php') || (payload && (payload.action === 'use_potion_manual' || payload.action === 'warp'))) return 2;
+    if (url.includes('xhrpg_offline.php') || (payload && (payload.action === 'idlestat' || payload.action === 'chpass' || payload.action === 'check_session' || payload.action === 'refresh_token'))) return 3;
+    if (url.includes('xhrpg_leaderboard.php') || url.includes('xhrpg_cwar.php') || url.includes('xhrpg_droplog.php')) return 4;
+    return 2;
+  }
+
+  _detectType(url, payload) {
+    if (url.includes('xhrpg_game.php')) return 'GAME_POLL';
+    if (payload && payload.action === 'use_potion_manual') return 'POTION';
+    if (url.includes('xhrpg_warp.php')) return 'WARP';
+    if (url.includes('xhrpg_offline.php') && payload && payload.k === 'chpass') return 'CHECKIN';
+    if (url.includes('xhrpg_leaderboard.php')) return 'DEF_SCAN';
+    if (url.includes('xhrpg_cwar.php')) return 'WAR_LOG';
+    return 'ACTION';
+  }
+
+  async _processNext() {
+    if (this.processing) return;
+    this.processing = true;
+
+    try {
+      while (this.queue.length > 0) {
+        // Anti-starvation: Nếu đã xử lý liên tục >= 5 high priority items, nhường 1 slot cho background item
+        let itemIndex = 0;
+        if (this.consecutiveHighPrioCount >= 5) {
+          const bgIdx = this.queue.findIndex(it => it.priority >= 4);
+          if (bgIdx !== -1) {
+            itemIndex = bgIdx;
+            this.consecutiveHighPrioCount = 0;
+          }
+        }
+
+        const item = this.queue.splice(itemIndex, 1)[0];
+        this.bot.requestQueueDepth = this.queue.length;
+
+        if (item.priority <= 2) {
+          this.consecutiveHighPrioCount++;
+        } else {
+          this.consecutiveHighPrioCount = 0;
+        }
+
+        // Kiểm tra TTL của item trong hàng đợi
+        const age = Date.now() - item.enqueuedAt;
+        if (item.ttlMs && age > item.ttlMs) {
+          item.reject(new Error(`REQUEST_QUEUE_TTL_EXPIRED: Request ${item.type} expired after ${age}ms in queue`));
+          continue;
+        }
+
+        // Kiểm tra xem request có bị hủy bởi caller signal trong khi chờ hàng đợi
+        if (item.signal && item.signal.aborted) {
+          item.reject(item.signal.reason || new Error('Request aborted while in queue'));
+          continue;
+        }
+
+        // Kiểm tra xem bot có bị dừng trong khi request đang chờ
+        if (this.bot.botAbortController && this.bot.botAbortController.signal.aborted) {
+          item.reject(this.bot.botAbortController.signal.reason || new Error('Bot stopped while request was in queue'));
+          continue;
+        }
+
+        if (age > 200) {
+          this.bot.addLog('SYSTEM', `[REQUEST_QUEUE_WAIT] ${item.type} chờ trong queue ${age}ms (độ sâu còn lại: ${this.queue.length})`);
+        }
+
+        this.activeItem = item;
+        try {
+          // Thực thi trực tiếp qua _sendRequestDirect (không gọi lại queue)
+          const result = await this.bot._sendRequestDirect(item.url, item.payload, item.options);
+          item.resolve(result);
+        } catch (err) {
+          item.reject(err);
+        } finally {
+          this.activeItem = null;
+        }
+      }
+    } finally {
+      this.processing = false;
+    }
+  }
+
+  clear(reason) {
+    const error = reason || new Error('REQUEST_QUEUE_CLEARED: Bot stopped');
+    while (this.queue.length > 0) {
+      const item = this.queue.shift();
+      item.reject(error);
+    }
+    this.bot.requestQueueDepth = 0;
+    this.consecutiveHighPrioCount = 0;
+  }
+}
+
 // Background poller manager
 class BotInstance {
   constructor(account) {
@@ -1801,6 +2042,8 @@ class BotInstance {
 
     this.player = null;
     this.logs = [];
+    this.systemLogs = [];
+    this.gameLogs = [];
     this.lastUpdate = null;
     this.error = null;
     this.status = 'idle';
@@ -1823,7 +2066,10 @@ class BotInstance {
     this.gdunEnteredAt = 0;         // Timestamp khi vào Phụ Bản Guild (dùng cho timer-based auto-exit)
     this.gdunLastKillAt = 0;        // Timestamp khi hạ gục Boss Guild gần nhất
     this._exitingGuildDungeon = false; // Guard chống gọi exitGuildDungeon() liên tiếp
-    this.gdunSnapshot = null;       // Snapshot vị trí/cấu hình trước khi vào Guild Dungeon
+    this._exitingGuildDungeonLocked = false; // Mutex chống re-entrant
+    this._guildDungeonRestoring = false; // Trạng thái đang khôi phục bản đồ & tọa độ thật trên server
+    this._gdunRestoreStartedAt = 0;     // Timestamp bắt đầu tiến trình khôi phục
+    this.gdunSnapshot = (account && account.gdunSnapshot) ? account.gdunSnapshot : null; // Snapshot vị trí/cấu hình trước khi vào Guild Dungeon
     this.gdunCurrentTargetId = null; // ID mục tiêu hiện tại trong Guild Dungeon (chống đổi target liên tục)
     this.gdunTargetQueue = [];      // Queue mục tiêu ổn định trong Guild Dungeon
     this.isMvpCycling = false;
@@ -1862,20 +2108,43 @@ class BotInstance {
     this.marketBuyHistory = account.marketBuyHistory || [];
     this.offlineRewardsHistory = account.offlineRewardsHistory || [];
     this.eventWarHistory = [];
+    this.eventSnapshot = (account && account.eventSnapshot) ? account.eventSnapshot : null;
+    this.eventState = this.eventSnapshot ? 'RETURNING' : 'IDLE'; // 'IDLE' | 'ENTERING' | 'ACTIVE' | 'EXITING' | 'RETURNING' | 'FAILED_RETRY'
+    this._eventTransitionLock = false; // Mutex lock cho enter/exit event
+    this.automationRunning = false;   // Mutex lock cho runAutomation
+    this.eventReturnStartedAt = this.eventSnapshot ? Date.now() : 0;
+    this.eventReturnRetries = 0;
     this.inEventMode = false;
-    this.currentEventKind = null;
-    this.eventOriginalMap = null;
-    this.eventOriginalAutoMap = null;
-    this.eventOriginalAutoZone = null;
-    this.eventOriginalLockZoneCenter = null;
-    this.eventOriginalTargetZone = null;
-    this.isEventReturning = false;
-    this.eventReturnMapTarget = null;
+    this.currentEventKind = this.eventSnapshot ? (this.eventSnapshot.kind || null) : null;
+    this.eventOriginalMap = this.eventSnapshot ? this.eventSnapshot.map : null;
+    this.eventOriginalAutoMap = this.eventSnapshot ? this.eventSnapshot.autoMap : null;
+    this.eventOriginalAutoZone = this.eventSnapshot ? this.eventSnapshot.autoZone : null;
+    this.eventOriginalLockZoneCenter = this.eventSnapshot ? this.eventSnapshot.lock_zone_center : null;
+    this.eventOriginalTargetZone = this.eventSnapshot ? this.eventSnapshot.targetZone : null;
+    this.isEventReturning = !!this.eventSnapshot;
+    this.eventReturnMapTarget = this.eventSnapshot ? this.eventSnapshot.map : null;
     this.playerDefCache = {};
     this.lastInv = null;
     this.lastGw = null;
     this.lastCw = null;
     this.others = [];
+
+    // Concurrency, Scheduler & Telemetry
+    this.pollGeneration = 0;
+    this.botAbortController = null;
+    this.currentPollAbortController = null;
+    this.immediatePollPending = false;
+    this.lastImmediateTriggerAt = 0;
+    this.requestQueue = new BotRequestQueue(this);
+    this.pollStartedAt = null;
+    this.pollFinishedAt = null;
+    this.pollDuration = 0;
+    this.nextPollAt = null;
+    this.requestQueueDepth = 0;
+    this.overlapCount = 0;
+    this.timeoutCount = 0;
+    this.skippedImmediatePollCount = 0;
+
     this.addLog('SYSTEM', `Khởi tạo bot cho tài khoản: ${this.name}${this.phpsessid ? ' (🔑 Có Auto-Relogin PHPSESSID)' : ''}`);
   }
 
@@ -2199,14 +2468,65 @@ class BotInstance {
 
   addLog(type, msg) {
     const timestamp = new Date().toLocaleTimeString('vi-VN');
-    this.logs.push({
+    const typeStr = String(type || 'system').toLowerCase();
+    const translatedMsg = translateThaiText(msg);
+    const logItem = {
       time: timestamp,
-      type: type.toLowerCase(),
-      msg: translateThaiText(msg)
-    });
-    if (this.logs.length > 50) {
+      type: typeStr,
+      msg: translatedMsg
+    };
+
+    // 1. Lưu mảng logs tổng để đảm bảo tương thích ngược 100%
+    this.logs.push(logItem);
+    if (this.logs.length > 80) {
       this.logs.shift();
     }
+
+    // 2. Phân loại System Log vs Game Log
+    const upperType = String(type || '').toUpperCase();
+    const isSystemLog = (
+      upperType === 'SYSTEM' ||
+      upperType === 'ERROR' ||
+      upperType === 'WARN' ||
+      upperType === 'WARNING' ||
+      upperType === 'AUTH' ||
+      upperType === 'NETWORK' ||
+      upperType === 'WATCHDOG' ||
+      upperType === 'SECURITY' ||
+      translatedMsg.includes('[Watchdog]') ||
+      translatedMsg.includes('Session Token') ||
+      translatedMsg.includes('PHPSESSID') ||
+      translatedMsg.includes('Proxy') ||
+      translatedMsg.includes('kết nối') ||
+      translatedMsg.includes('Cập nhật cấu hình') ||
+      translatedMsg.includes('Vân tay') ||
+      translatedMsg.includes('vân tay') ||
+      translatedMsg.includes('Khởi tạo bot') ||
+      translatedMsg.includes('Client Game') ||
+      translatedMsg.includes('Đã dừng')
+    );
+
+    if (isSystemLog) {
+      if (!this.systemLogs) this.systemLogs = [];
+      this.systemLogs.push(logItem);
+      if (this.systemLogs.length > 150) {
+        this.systemLogs.shift();
+      }
+    } else {
+      if (!this.gameLogs) this.gameLogs = [];
+      this.gameLogs.push(logItem);
+      if (this.gameLogs.length > 100) {
+        this.gameLogs.shift();
+      }
+    }
+  }
+
+  addSystemLog(type, msg) {
+    this.addLog(type || 'SYSTEM', msg);
+  }
+
+  addGameLog(type, msg) {
+    this.addLog(type || 'ACTION', msg);
   }
 
   addLootLog(msg) {
@@ -2366,83 +2686,198 @@ class BotInstance {
     await this.warpToMap(targetMap);
   }
 
-  enterEventMode(kind, mapId) {
-    if (this.inEventMode) return;
-    this.inEventMode = true;
-    this.currentEventKind = kind;
-
-    // Save original states
-    let originalMap = 1;
-    if (this.settings.targetMap && Number(this.settings.targetMap) !== Number(mapId)) {
-      originalMap = Number(this.settings.targetMap);
-    } else if (this.player && Number(this.player.map) !== Number(mapId)) {
-      originalMap = Number(this.player.map);
-    } else if (this.settings.targetMap) {
-      originalMap = Number(this.settings.targetMap) === 4 ? 1 : Number(this.settings.targetMap);
-    }
-    this.eventOriginalMap = originalMap;
-    this.eventOriginalAutoMap = this.settings.autoMap;
-    this.eventOriginalAutoZone = this.settings.autoZone;
-    this.eventOriginalLockZoneCenter = this.settings.lock_zone_center;
-    this.eventOriginalTargetZone = this.settings.targetZone;
-
-    this.addLog('SYSTEM', `🚀 Kích hoạt Chế độ Event [${kind.toUpperCase()}]. Đã lưu vị trí bản đồ farm gốc (Map ${this.eventOriginalMap}).`);
-
-    // Override settings to keep bot in event map
-    this.settings.targetMap = mapId;
-    this.settings.autoMap = true;
-    this.settings.autoZone = false;
-    this.settings.lock_zone_center = false;
-    this.settings.targetZone = 0;
-
-    const currentAccounts = loadAccounts();
-    const index = currentAccounts.findIndex(acc => acc.line_uid === this.line_uid);
-    if (index !== -1) {
-      currentAccounts[index].settings = this.settings;
-      saveAccounts(currentAccounts);
+  // Lưu snapshot bền vững vào file accounts.json
+  _persistEventSnapshot() {
+    try {
+      const currentAccounts = loadAccounts();
+      const idx = currentAccounts.findIndex(acc => acc.line_uid === this.line_uid);
+      if (idx !== -1) {
+        if (this.eventSnapshot) {
+          currentAccounts[idx].eventSnapshot = this.eventSnapshot;
+        } else {
+          delete currentAccounts[idx].eventSnapshot;
+        }
+        saveAccounts(currentAccounts);
+      }
+    } catch (e) {
+      console.error('[EventSnapshot] Lỗi lưu snapshot bền vững:', e.message);
     }
   }
 
-  exitEventMode() {
-    if (!this.inEventMode) {
-      if (Number(this.settings.targetMap) === 4) {
-        this.settings.targetMap = 1;
-        this.addLog('SYSTEM', '🔄 [Cảnh báo] Phát hiện targetMap bị kẹt ở Map 4 trong khi không có sự kiện. Đã tự động reset về Map 1.');
-        const currentAccounts = loadAccounts();
-        const index = currentAccounts.findIndex(acc => acc.line_uid === this.line_uid);
-        if (index !== -1) {
-          currentAccounts[index].settings = this.settings;
-          saveAccounts(currentAccounts);
-        }
-      }
-      return;
+  // Chụp snapshot vị trí & cấu hình ban đầu TRƯỚC KHI chuyển map vào Event
+  captureEventSnapshot(kind = 'gw') {
+    if (this.eventSnapshot) {
+      return this.eventSnapshot; // Đã chụp trước đó, không ghi đè
     }
+
+    const curMap = (this.player && this.player.map != null && Number(this.player.map) !== 4 && Number(this.player.map) !== 2)
+      ? Number(this.player.map)
+      : (this.settings.targetMap && Number(this.settings.targetMap) !== 4 && Number(this.settings.targetMap) !== 2
+          ? Number(this.settings.targetMap)
+          : (this.player ? Number(this.player.map) : (parseInt(this.settings.targetMap) || 1)));
+
+    const curX = (this.player && this.player.x != null) ? this.player.x : (this.settings.explore_cx != null ? this.settings.explore_cx : 1125);
+    const curY = (this.player && this.player.y != null) ? this.player.y : (this.settings.explore_cy != null ? this.settings.explore_cy : 1125);
+    const expCx = (this.player && this.player.explore_cx != null) ? this.player.explore_cx : (this.settings.explore_cx != null ? this.settings.explore_cx : curX);
+    const expCy = (this.player && this.player.explore_cy != null) ? this.player.explore_cy : (this.settings.explore_cy != null ? this.settings.explore_cy : curY);
+
+    this.eventSnapshot = {
+      kind: kind,
+      map: curMap,
+      x: curX,
+      y: curY,
+      explore_cx: expCx,
+      explore_cy: expCy,
+      targetMap: (this.settings.targetMap && Number(this.settings.targetMap) !== 4 && Number(this.settings.targetMap) !== 2) ? Number(this.settings.targetMap) : curMap,
+      autoMap: this.settings.autoMap !== undefined ? this.settings.autoMap : true,
+      autoZone: this.settings.autoZone !== undefined ? this.settings.autoZone : false,
+      lock_zone_center: this.settings.lock_zone_center !== undefined ? this.settings.lock_zone_center : false,
+      targetZone: this.settings.targetZone !== undefined ? this.settings.targetZone : 0,
+      createdAt: Date.now()
+    };
+
+    this.eventOriginalMap = this.eventSnapshot.map;
+    this.eventOriginalAutoMap = this.eventSnapshot.autoMap;
+    this.eventOriginalAutoZone = this.eventSnapshot.autoZone;
+    this.eventOriginalLockZoneCenter = this.eventSnapshot.lock_zone_center;
+    this.eventOriginalTargetZone = this.eventSnapshot.targetZone;
+    this.eventState = 'ENTERING';
+
+    this._persistEventSnapshot();
+    this.addLog('SYSTEM', `📸 [Event Snapshot] Đã lưu snapshot vị trí ban đầu trước khi vào Event [${kind.toUpperCase()}]: Map ${this.eventSnapshot.map} tại [${this.eventSnapshot.x}, ${this.eventSnapshot.y}]`);
+    return this.eventSnapshot;
+  }
+
+  // Hoàn tất quá trình khôi phục bản đồ & tọa độ sau Event
+  _finalizeEventRestoration(isSuccess = true) {
+    const snap = this.eventSnapshot;
+    if (snap) {
+      if (snap.autoMap !== undefined) this.settings.autoMap = snap.autoMap;
+      if (snap.autoZone !== undefined) this.settings.autoZone = snap.autoZone;
+      if (snap.lock_zone_center !== undefined) this.settings.lock_zone_center = snap.lock_zone_center;
+      if (snap.targetZone !== undefined) this.settings.targetZone = snap.targetZone;
+      if (snap.targetMap !== undefined) this.settings.targetMap = snap.targetMap;
+      if (snap.explore_cx !== undefined) this.settings.explore_cx = snap.explore_cx;
+      if (snap.explore_cy !== undefined) this.settings.explore_cy = snap.explore_cy;
+
+      if (this.player) {
+        if (snap.map != null) this.player.map = snap.map;
+        this.player.explore_cx = snap.explore_cx != null ? snap.explore_cx : (this.player.x != null ? this.player.x : 1125);
+        this.player.explore_cy = snap.explore_cy != null ? snap.explore_cy : (this.player.y != null ? this.player.y : 1125);
+      }
+
+      const currentAccounts = loadAccounts();
+      const idx = currentAccounts.findIndex(acc => acc.line_uid === this.line_uid);
+      if (idx !== -1) {
+        currentAccounts[idx].settings = this.settings;
+        delete currentAccounts[idx].eventSnapshot;
+        saveAccounts(currentAccounts);
+      }
+    }
+
+    this.eventSnapshot = null;
+    this.eventState = 'IDLE';
     this.inEventMode = false;
-
-    const returnMap = this.eventOriginalMap || 1;
-    this.addLog('SYSTEM', `⏹️ Event kết thúc -> Thoát Chế độ Event, tự động quay về bản đồ farm gốc (Map ${returnMap}).`);
-
-    // Restore settings
-    this.settings.targetMap = returnMap;
-    this.settings.autoMap = this.eventOriginalAutoMap !== undefined ? this.eventOriginalAutoMap : true;
-    this.settings.autoZone = this.eventOriginalAutoZone !== undefined ? this.eventOriginalAutoZone : false;
-    this.settings.lock_zone_center = this.eventOriginalLockZoneCenter !== undefined ? this.eventOriginalLockZoneCenter : false;
-    this.settings.targetZone = this.eventOriginalTargetZone !== undefined ? this.eventOriginalTargetZone : 0;
-
-    this.isEventReturning = true;
-    this.eventReturnMapTarget = returnMap;
-
+    this.currentEventKind = null;
+    this.isEventReturning = false;
+    this.eventReturnMapTarget = null;
+    this.eventReturnStartedAt = 0;
+    this.eventReturnRetries = 0;
     this.eventOriginalMap = null;
     this.eventOriginalAutoMap = null;
     this.eventOriginalAutoZone = null;
     this.eventOriginalLockZoneCenter = null;
     this.eventOriginalTargetZone = null;
+    this._persistEventSnapshot();
+  }
 
-    const currentAccounts = loadAccounts();
-    const index = currentAccounts.findIndex(acc => acc.line_uid === this.line_uid);
-    if (index !== -1) {
-      currentAccounts[index].settings = this.settings;
-      saveAccounts(currentAccounts);
+  enterEventMode(kind, mapId) {
+    if (this._eventTransitionLock) return;
+    this._eventTransitionLock = true;
+    try {
+      if (this.inEventMode && this.eventState === 'ACTIVE') return;
+
+      // Đảm bảo snapshot đã được chụp TRƯỚC KHI vào event
+      if (!this.eventSnapshot) {
+        this.captureEventSnapshot(kind);
+      }
+
+      this.inEventMode = true;
+      this.currentEventKind = kind;
+      this.eventState = 'ACTIVE';
+
+      this.addLog('SYSTEM', `🚀 Kích hoạt Chế độ Event [${kind.toUpperCase()}]. Vị trí gốc bảo toàn: Map ${this.eventSnapshot ? this.eventSnapshot.map : 1}.`);
+
+      // Override settings to keep bot in event map
+      this.settings.targetMap = mapId;
+      this.settings.autoMap = true;
+      this.settings.autoZone = false;
+      this.settings.lock_zone_center = false;
+      this.settings.targetZone = 0;
+
+      const currentAccounts = loadAccounts();
+      const index = currentAccounts.findIndex(acc => acc.line_uid === this.line_uid);
+      if (index !== -1) {
+        currentAccounts[index].settings = this.settings;
+        saveAccounts(currentAccounts);
+      }
+    } finally {
+      this._eventTransitionLock = false;
+    }
+  }
+
+  exitEventMode() {
+    if (this._eventTransitionLock) return;
+    this._eventTransitionLock = true;
+    try {
+      if (!this.inEventMode && this.eventState === 'IDLE' && !this.eventSnapshot) {
+        if (Number(this.settings.targetMap) === 4) {
+          this.settings.targetMap = 1;
+          this.addLog('SYSTEM', '🔄 [Cảnh báo] Phát hiện targetMap bị kẹt ở Map 4 trong khi không có sự kiện. Đã tự động reset về Map 1.');
+          const currentAccounts = loadAccounts();
+          const index = currentAccounts.findIndex(acc => acc.line_uid === this.line_uid);
+          if (index !== -1) {
+            currentAccounts[index].settings = this.settings;
+            saveAccounts(currentAccounts);
+          }
+        }
+        return;
+      }
+
+      this.eventState = 'EXITING';
+      this.inEventMode = false;
+
+      const snap = this.eventSnapshot;
+      const returnMap = snap ? snap.map : (this.eventOriginalMap || 1);
+      const returnX = snap ? snap.x : 1125;
+      const returnY = snap ? snap.y : 1125;
+
+      this.addLog('SYSTEM', `⏹️ Event kết thúc -> Thoát Chế độ Event, bắt đầu quy trình khôi phục về bản đồ gốc Map ${returnMap} tại [${returnX}, ${returnY}].`);
+
+      // KHÔNG xóa snapshot! Giữ snapshot trong suốt quá trình RETURNING
+      this.eventState = 'RETURNING';
+      this.isEventReturning = true;
+      this.eventReturnMapTarget = returnMap;
+      this.eventReturnStartedAt = Date.now();
+      this.eventReturnRetries = 0;
+
+      // Cập nhật settings về giá trị gốc của snapshot
+      this.settings.targetMap = returnMap;
+      if (snap) {
+        if (snap.autoMap !== undefined) this.settings.autoMap = snap.autoMap;
+        if (snap.autoZone !== undefined) this.settings.autoZone = snap.autoZone;
+        if (snap.lock_zone_center !== undefined) this.settings.lock_zone_center = snap.lock_zone_center;
+        if (snap.targetZone !== undefined) this.settings.targetZone = snap.targetZone;
+      } else {
+        if (this.eventOriginalAutoMap !== null && this.eventOriginalAutoMap !== undefined) this.settings.autoMap = this.eventOriginalAutoMap;
+        if (this.eventOriginalAutoZone !== null && this.eventOriginalAutoZone !== undefined) this.settings.autoZone = this.eventOriginalAutoZone;
+        if (this.eventOriginalLockZoneCenter !== null && this.eventOriginalLockZoneCenter !== undefined) this.settings.lock_zone_center = this.eventOriginalLockZoneCenter;
+        if (this.eventOriginalTargetZone !== null && this.eventOriginalTargetZone !== undefined) this.settings.targetZone = this.eventOriginalTargetZone;
+      }
+
+      this.triggerImmediatePoll();
+    } finally {
+      this._eventTransitionLock = false;
     }
   }
 
@@ -2476,34 +2911,97 @@ class BotInstance {
     }
   }
 
+  // Lưu snapshot bền vững vào file accounts.json
+  _persistGdunSnapshot() {
+    try {
+      const currentAccounts = loadAccounts();
+      const idx = currentAccounts.findIndex(acc => acc.line_uid === this.line_uid);
+      if (idx !== -1) {
+        if (this.gdunSnapshot) {
+          currentAccounts[idx].gdunSnapshot = this.gdunSnapshot;
+        } else {
+          delete currentAccounts[idx].gdunSnapshot;
+        }
+        saveAccounts(currentAccounts);
+      }
+    } catch (e) {
+      console.error('[GdunSnapshot] Lỗi lưu snapshot bền vững:', e.message);
+    }
+  }
+
+  // Hoàn tất quá trình khôi phục bản đồ & tọa độ sau Guild Dungeon
+  _finalizeGdunRestoration(isSuccess = true) {
+    const snap = this.gdunSnapshot;
+    if (snap) {
+      if (snap.autoMap !== undefined) this.settings.autoMap = snap.autoMap;
+      if (snap.autoZone !== undefined) this.settings.autoZone = snap.autoZone;
+      if (snap.lock_zone_center !== undefined) this.settings.lock_zone_center = snap.lock_zone_center;
+      if (snap.targetZone !== undefined) this.settings.targetZone = snap.targetZone;
+      if (snap.targetMap !== undefined) this.settings.targetMap = snap.targetMap;
+      if (snap.explore_cx !== undefined) this.settings.explore_cx = snap.explore_cx;
+      if (snap.explore_cy !== undefined) this.settings.explore_cy = snap.explore_cy;
+
+      if (this.player) {
+        if (snap.map != null) this.player.map = snap.map;
+        this.player.explore_cx = snap.explore_cx != null ? snap.explore_cx : (this.player.x != null ? this.player.x : 1125);
+        this.player.explore_cy = snap.explore_cy != null ? snap.explore_cy : (this.player.y != null ? this.player.y : 1125);
+      }
+
+      const currentAccounts = loadAccounts();
+      const idx = currentAccounts.findIndex(acc => acc.line_uid === this.line_uid);
+      if (idx !== -1) {
+        currentAccounts[idx].settings = this.settings;
+        delete currentAccounts[idx].gdunSnapshot;
+        saveAccounts(currentAccounts);
+      }
+    }
+    this.gdunSnapshot = null;
+    this._guildDungeonRestoring = false;
+    this._gdunRestoreStartedAt = 0;
+    this._persistGdunSnapshot();
+  }
+
   async enterGuildDungeon(isTeam = false) {
+    // Nếu nhân vật đã ở trong Phụ Bản Guild (Map 12 hoặc gdun_in = 1), không gọi lại
+    if (this.guildDungeonActive || (this.player && (Number(this.player.map) === 12 || Number(this.player.gdun_in) === 1))) {
+      return true;
+    }
+
+    let createdTempSnapshot = false;
+
     // Snapshot vị trí, tọa độ explore, và các cấu hình map/zone trước khi vào Phụ Bản Guild
-    if (this.player && Number(this.player.map) !== 12 && Number(this.player.gdun_in) !== 1) {
-      this.gdunSnapshot = {
-        map: Number(this.player.map),
-        x: this.player.x != null ? this.player.x : 1125,
-        y: this.player.y != null ? this.player.y : 1125,
-        explore_cx: this.player.explore_cx != null ? this.player.explore_cx : (this.settings.explore_cx != null ? this.settings.explore_cx : 1125),
-        explore_cy: this.player.explore_cy != null ? this.player.explore_cy : (this.settings.explore_cy != null ? this.settings.explore_cy : 1125),
-        autoMap: this.settings.autoMap,
-        autoZone: this.settings.autoZone,
-        lock_zone_center: this.settings.lock_zone_center,
-        targetZone: this.settings.targetZone,
-        targetMap: this.settings.targetMap
-      };
-    } else if (!this.gdunSnapshot) {
-      this.gdunSnapshot = {
-        map: parseInt(this.settings.targetMap) || 1,
-        x: 1125,
-        y: 1125,
-        explore_cx: 1125,
-        explore_cy: 1125,
-        autoMap: this.settings.autoMap,
-        autoZone: this.settings.autoZone,
-        lock_zone_center: this.settings.lock_zone_center,
-        targetZone: this.settings.targetZone,
-        targetMap: this.settings.targetMap
-      };
+    // Chỉ chụp duy nhất 1 lần cho mỗi phiên dungeon, không ghi đè nếu snapshot đã tồn tại
+    if (!this.gdunSnapshot) {
+      if (this.player && Number(this.player.map) !== 12 && Number(this.player.gdun_in) !== 1) {
+        this.gdunSnapshot = {
+          map: Number(this.player.map),
+          x: this.player.x != null ? this.player.x : (this.settings.explore_cx != null ? this.settings.explore_cx : 1125),
+          y: this.player.y != null ? this.player.y : (this.settings.explore_cy != null ? this.settings.explore_cy : 1125),
+          explore_cx: this.player.explore_cx != null ? this.player.explore_cx : (this.settings.explore_cx != null ? this.settings.explore_cx : (this.player.x != null ? this.player.x : 1125)),
+          explore_cy: this.player.explore_cy != null ? this.player.explore_cy : (this.settings.explore_cy != null ? this.settings.explore_cy : (this.player.y != null ? this.player.y : 1125)),
+          autoMap: this.settings.autoMap,
+          autoZone: this.settings.autoZone,
+          lock_zone_center: this.settings.lock_zone_center,
+          targetZone: this.settings.targetZone,
+          targetMap: this.settings.targetMap
+        };
+      } else {
+        this.gdunSnapshot = {
+          map: parseInt(this.settings.targetMap) || 1,
+          x: this.settings.explore_cx != null ? this.settings.explore_cx : 1125,
+          y: this.settings.explore_cy != null ? this.settings.explore_cy : 1125,
+          explore_cx: this.settings.explore_cx != null ? this.settings.explore_cx : 1125,
+          explore_cy: this.settings.explore_cy != null ? this.settings.explore_cy : 1125,
+          autoMap: this.settings.autoMap,
+          autoZone: this.settings.autoZone,
+          lock_zone_center: this.settings.lock_zone_center,
+          targetZone: this.settings.targetZone,
+          targetMap: this.settings.targetMap
+        };
+      }
+      createdTempSnapshot = true;
+      this.addLog('SYSTEM', `📸 [Guild Dungeon] Đã lưu snapshot vị trí ban đầu: Map ${this.gdunSnapshot.map} tại [${this.gdunSnapshot.x}, ${this.gdunSnapshot.y}]`);
+      this._persistGdunSnapshot();
     }
 
     try {
@@ -2531,6 +3029,7 @@ class BotInstance {
         this.guildDungeonActive = true;
         this.guildDungeonIsTeam = !!isTeam;
         this.settings.guildDungeonIsTeam = !!isTeam;
+        this._guildDungeonRestoring = false;
         this.gdunCurrentTargetId = null;
         this.gdunTargetQueue = [];
         const currentAccounts = loadAccounts();
@@ -2543,25 +3042,39 @@ class BotInstance {
         this.gdunEnteredAt = Date.now(); // Bắt đầu bộ đếm thời gian auto-exit
         this.gdunLastKillAt = 0;         // Reset kill timestamp khi vào dungeon mới
         this._exitingGuildDungeon = false;
+        this._exitingGuildDungeonLocked = false;
         const modeTxt = isTeam ? 'Cả Team' : 'Đi 1 Mình (Solo)';
         this.addLog('SUCCESS', `🏰 [Guild Dungeon] Đã vào Phụ Bản Guild (Chế độ: ${modeTxt}) - Map ${this.player ? this.player.map : 12}! Tiến hành săn Boss...`);
         this.triggerImmediatePoll();
         return true;
       } else {
-        this.gdunSnapshot = null;
+        if (createdTempSnapshot) {
+          this.gdunSnapshot = null;
+          this._persistGdunSnapshot();
+        }
         this.addLog('WARNING', `🏰 [Guild Dungeon] Không thể vào Phụ Bản Guild: ${(res && res.error) || 'Lỗi không xác định'}`);
         return false;
       }
     } catch (e) {
-      this.gdunSnapshot = null;
+      if (createdTempSnapshot) {
+        this.gdunSnapshot = null;
+        this._persistGdunSnapshot();
+      }
       this.addLog('ERROR', `Lỗi vào Phụ Bản Guild: ${e.message}`);
       return false;
     }
   }
 
   async exitGuildDungeon() {
-    // Lưu giữ snapshot trước khi gửi request và cập nhật trạng thái phản hồi
+    if (this._exitingGuildDungeonLocked) {
+      return false;
+    }
+    this._exitingGuildDungeonLocked = true;
+    this._exitingGuildDungeon = true;
+
+    // Giữ lại snapshot để tiến hành khôi phục tọa độ thật trên server
     const snap = this.gdunSnapshot;
+    this.addLog('SYSTEM', '🚪 [Guild Dungeon] Đang gửi yêu cầu thoát Phụ Bản Guild lên server...');
     try {
       const res = await this.sendRequest('https://ragnalok.online/human/xhrpg_guild.php', {
         line_uid: this.line_uid,
@@ -2569,6 +3082,8 @@ class BotInstance {
         action: 'gdun_exit',
         lang: 'vi'
       });
+      this._exitingGuildDungeonLocked = false;
+
       if (res && res.ok) {
         if (res.player) {
           this.updatePlayerState(res.player);
@@ -2576,20 +3091,9 @@ class BotInstance {
         if (!this.player) this.player = {};
         this.player.gdun_in = 0;
 
-        // Khôi phục snapshot ưu tiên hàng đầu, fallback theo res.map/res.x/res.y
         const returnMap = (snap && snap.map) ? snap.map : ((res.player && res.player.map != null) ? Number(res.player.map) : ((res.map | 0) || parseInt(this.settings.targetMap) || 1));
         const returnX = (snap && snap.x != null) ? snap.x : ((res.player && res.player.x != null) ? res.player.x : ((res.x != null) ? res.x : 1125));
         const returnY = (snap && snap.y != null) ? snap.y : ((res.player && res.player.y != null) ? res.player.y : ((res.y != null) ? res.y : 1125));
-        const returnExploreCx = (snap && snap.explore_cx != null) ? snap.explore_cx : ((res.player && res.player.explore_cx != null) ? res.player.explore_cx : returnX);
-        const returnExploreCy = (snap && snap.explore_cy != null) ? snap.explore_cy : ((res.player && res.player.explore_cy != null) ? res.player.explore_cy : returnY);
-
-        if (snap) {
-          if (snap.autoMap !== undefined) this.settings.autoMap = snap.autoMap;
-          if (snap.autoZone !== undefined) this.settings.autoZone = snap.autoZone;
-          if (snap.lock_zone_center !== undefined) this.settings.lock_zone_center = snap.lock_zone_center;
-          if (snap.targetZone !== undefined) this.settings.targetZone = snap.targetZone;
-          if (snap.targetMap !== undefined) this.settings.targetMap = snap.targetMap;
-        }
 
         // Kiểm tra xem phản hồi từ server đã xác nhận nhân vật ở đúng returnMap chưa
         const serverConfirmedMap = (res.player && res.player.map != null)
@@ -2598,14 +3102,11 @@ class BotInstance {
 
         // Nếu server chưa xác nhận nhân vật đã ở returnMap, thực sự gửi lệnh warpToMap lên server
         if (serverConfirmedMap !== returnMap) {
+          this.addLog('SYSTEM', `🗺️ [Guild Dungeon] Server chưa ở Map ${returnMap} (đang ở Map ${serverConfirmedMap}). Đang gửi warpToMap(${returnMap})...`);
           await this.warpToMap(returnMap).catch(() => {});
+        } else {
+          this.addLog('SYSTEM', `🗺️ [Guild Dungeon] Server đã xác nhận ở Map ${returnMap}`);
         }
-
-        this.player.map = returnMap;
-        this.player.x = returnX;
-        this.player.y = returnY;
-        this.player.explore_cx = returnExploreCx;
-        this.player.explore_cy = returnExploreCy;
 
         this.spots = null;
         this.bosses = null;
@@ -2615,30 +3116,30 @@ class BotInstance {
         this.currentMvpBossInfo = null;
         this.gdunCurrentTargetId = null;
         this.gdunTargetQueue = [];
-        this.gdunSnapshot = null;
         this.settings.guildDungeonIsTeam = false;
-
-        const currentAccounts = loadAccounts();
-        const idx = currentAccounts.findIndex(acc => acc.line_uid === this.line_uid);
-        if (idx !== -1) {
-          currentAccounts[idx].settings = this.settings;
-          saveAccounts(currentAccounts);
-        }
         this.gdunEmptyPolls = 0;
         this.gdunEnteredAt = 0;
         this.gdunLastKillAt = 0;
         this._exitingGuildDungeon = false;
-        this.addLog('SUCCESS', `↩️ [Guild Dungeon] Đã hoàn thành/thoát khỏi Phụ Bản Guild (Khôi phục về Map ${returnMap} tại [${returnX}, ${returnY}])`);
+
+        // BẮT ĐẦU TIẾN TRÌNH KHÔI PHỤC BẢN ĐỒ & TỌA ĐỘ THẬT TRÊN SERVER
+        // Giữ nguyên gdunSnapshot cho đến khi server xác nhận vị trí gần đúng hoặc timeout
+        this._guildDungeonRestoring = true;
+        this._gdunRestoreStartedAt = Date.now();
+
+        this.addLog('SYSTEM', `⏳ [Guild Dungeon] Đã thoát Phụ Bản Guild. Bắt đầu khôi phục tọa độ thật trên Server về Map ${returnMap} tại [${returnX}, ${returnY}]...`);
         this.triggerImmediatePoll();
         return true;
       } else {
+        this._exitingGuildDungeonLocked = false;
         this._exitingGuildDungeon = false; // Cho phép thử lại nếu server từ chối
-        this.addLog('WARNING', `↩️ [Guild Dungeon] Không thể thoát Phụ Bản Guild: ${(res && res.error) || 'Lỗi không xác định'}`);
+        this.addLog('WARNING', `↩️ [Guild Dungeon] Không thể thoát Phụ Bản Guild: ${(res && res.error) || 'Lỗi không xác định'}. Snapshot vẫn được bảo toàn để thử lại.`);
         return false;
       }
     } catch (e) {
+      this._exitingGuildDungeonLocked = false;
       this._exitingGuildDungeon = false; // Cho phép thử lại nếu exception
-      this.addLog('ERROR', `Lỗi thoát Phụ Bản Guild: ${e.message}`);
+      this.addLog('ERROR', `Lỗi thoát Phụ Bản Guild: ${e.message}. Snapshot vẫn được bảo toàn để thử lại.`);
       return false;
     }
   }
@@ -2674,19 +3175,21 @@ class BotInstance {
   }
 
   async fetchWarLog() {
+    if (this._warLogFetching) return;
+    this._warLogFetching = true;
     try {
       const kind = this.currentEventKind; // 'gw' or 'cw'
       if (kind) {
         await this._fetchWarLogSingle(kind);
       } else {
-        // Fallback parallel fetch if event kind is unknown
-        await Promise.allSettled([
-          this._fetchWarLogSingle('gw'),
-          this._fetchWarLogSingle('cw')
-        ]);
+        // Chạy tuần tự thay vì Promise.allSettled để tránh request song song
+        await this._fetchWarLogSingle('gw');
+        await this._fetchWarLogSingle('cw');
       }
     } catch (e) {
       console.error(`Failed to fetch event war log for ${this.name}:`, e.message);
+    } finally {
+      this._warLogFetching = false;
     }
   }
 
@@ -2698,6 +3201,11 @@ class BotInstance {
         action: 'war_log',
         kind: kind,
         lang: 'vi'
+      }, {
+        priority: 4,
+        dedupeKey: `war_log_${kind}`,
+        type: 'WAR_LOG',
+        timeoutMs: 4000
       });
       if (res && res.ok && Array.isArray(res.feed)) {
         if (!this.eventWarHistory) this.eventWarHistory = [];
@@ -2732,7 +3240,7 @@ class BotInstance {
         }
       }
     } catch (e) {
-      // Silent catch for individual parallel attempts
+      // Silent catch for individual attempts
     }
   }
 
@@ -2751,7 +3259,7 @@ class BotInstance {
     const cached = this.playerDefCache[name];
     const now = Date.now();
 
-    // Avoid double fetching
+    // Tránh gửi lặp lại cùng mục tiêu
     if (cached && (cached.loading || (now - cached.ts < 30000))) {
       return;
     }
@@ -2759,7 +3267,12 @@ class BotInstance {
     this.playerDefCache[name] = { def: 999999, ts: now, loading: true };
 
     try {
-      const res = await this.sendRequest(`https://ragnalok.online/human/xhrpg_leaderboard.php?show=${uid}`, {});
+      const res = await this.sendRequest(`https://ragnalok.online/human/xhrpg_leaderboard.php?show=${uid}`, {}, {
+        priority: 4,
+        dedupeKey: `def_scan_${name}_${uid}`,
+        type: 'DEF_SCAN',
+        timeoutMs: 3000
+      });
       if (res && res.ok && res.def !== undefined) {
         this.playerDefCache[name] = {
           def: Number(res.def),
@@ -2777,7 +3290,19 @@ class BotInstance {
   }
 
   start() {
-    if (this.timer) return;
+    this.pollGeneration = (this.pollGeneration || 0) + 1;
+    const currentGen = this.pollGeneration;
+
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
+    if (!this.requestQueue) {
+      this.requestQueue = new BotRequestQueue(this);
+    }
+    this.botAbortController = new AbortController();
+    this.currentPollAbortController = null;
+    this.immediatePollPending = false;
     this.status = 'running';
     this.pollCount = 0;
     this.startTime = Date.now();
@@ -2785,9 +3310,13 @@ class BotInstance {
     this.addLog('SYSTEM', 'Bắt đầu hoạt động (đang kết nối...)');
 
     const runPoll = async () => {
-      if (this.status !== 'running') return;
+      this.timer = null; // Xóa timer handle ngay khi timer bắt đầu chạy
 
-      // Pause polling if client is active (heartbeat in last 12 seconds)
+      if (currentGen !== this.pollGeneration || this.status !== 'running') {
+        return;
+      }
+
+      // Tạm ngưng poll nếu phát hiện người dùng đang tương tác qua Client Game
       if (this.lastClientActive && (Date.now() - this.lastClientActive < 12000)) {
         if (!this.clientActivePaused) {
           this.clientActivePaused = true;
@@ -2805,135 +3334,187 @@ class BotInstance {
         this.addLog('SYSTEM', '🔌 Đã đóng Client Game. Tự động kích hoạt lại bot chạy ngầm...');
       }
 
+      // Mutex bảo vệ: Tuyệt đối không cho phép 2 nhịp pollGame() chạy song song
+      if (this.isPolling) {
+        this.overlapCount = (this.overlapCount || 0) + 1;
+        this.addLog('SYSTEM', `[POLL_OVERLAP_BLOCKED] Bot ${this.name} đã có poll đang chạy. Bỏ qua nhịp lặp.`);
+        return;
+      }
+
       this.isPolling = true;
-      this.lastPollStartedAt = Date.now();
+      this.pollStartedAt = Date.now();
+      this.lastPollStartedAt = this.pollStartedAt;
+      this.addLog('SYSTEM', `[POLL_START] Bắt đầu nhịp poll #${this.pollCount + 1}`);
+
+      this.currentPollAbortController = new AbortController();
+      const pollSignal = this.currentPollAbortController.signal;
+
+      // 🛡️ Hard Timeout 45s: Abort controller thật để ngắt socket và giải phóng poll
+      const POLL_HARD_TIMEOUT = 45000;
+      const hardTimeoutTimer = setTimeout(() => {
+        this.timeoutCount = (this.timeoutCount || 0) + 1;
+        this.addLog('WARNING', '[POLL_TIMEOUT] Poll bị treo quá 45s (mạng nghẽn/không phản hồi) — Đang ngắt kết nối và tự động phục hồi');
+        if (this.currentPollAbortController) {
+          this.currentPollAbortController.abort(new Error('POLL_TIMEOUT'));
+        }
+      }, POLL_HARD_TIMEOUT);
+
       try {
-        // 🛡️ Watchdog Timeout Cứng: Nếu pollGame bị nghẽn mạng/treo quá 45s, tự động ngắt để giải phóng vòng lặp
-        const POLL_HARD_TIMEOUT = 45000;
-        await Promise.race([
-          this.pollGame(),
-          new Promise((_, reject) => setTimeout(
-            () => reject(new Error('⏱️ Watchdog: Poll bị treo quá 45s (mạng nghẽn/không phản hồi) — Tự động phục hồi')),
-            POLL_HARD_TIMEOUT
-          ))
-        ]);
+        await this.pollGame(pollSignal);
         this.consecutiveErrors = 0;
         this.firstErrorAt = null;
         if (this.proxyId) {
           proxyPool.resetErrorCount(this.proxyId);
         }
       } catch (err) {
-        console.error(`Poll error for ${this.name}:`, err);
-        this.consecutiveErrors = (this.consecutiveErrors || 0) + 1;
-        if (!this.firstErrorAt) {
-          this.firstErrorAt = Date.now();
-        }
-        const elapsedTime = Date.now() - this.firstErrorAt;
-        const formattedErr = err.message || (err.cause ? `${err.cause.code || err.cause.message}` : 'Lỗi kết nối');
-        this.error = formattedErr;
-        const elapsedSec = Math.round(elapsedTime / 1000);
-        this.addLog('ERROR', `${formattedErr} (Lỗi liên tục ${elapsedSec}s/180s)`);
-
-        if (elapsedTime >= 180000) { // 3 minutes
-          const oldProxyId = this.proxyId;
-          const newAssigned = proxyPool.failoverAssignment(this.line_uid, oldProxyId);
-          if (newAssigned !== oldProxyId) {
-            this.proxyId = newAssigned;
-            this.consecutiveErrors = 0;
-            this.firstErrorAt = null;
-
-            // Save updated proxyId to accounts.json
-            const currentAccounts = loadAccounts();
-            const index = currentAccounts.findIndex(acc => acc.line_uid === this.line_uid);
-            if (index !== -1) {
-              currentAccounts[index].proxyId = newAssigned;
-              saveAccounts(currentAccounts);
-            }
-
-            const newProxyInfo = proxyPool.getBotProxyInfo(this.line_uid);
-            this.addLog('SYSTEM', `🔄 Proxy cũ gặp sự cố liên tiếp 3 phút. Đã tự động đổi sang cấu hình IP mới: ${newProxyInfo.label}`);
-
-            // Trigger proxy recovery check immediately if direct is overloaded
-            const counts = proxyPool._getCounts();
-            const directCount = counts['direct'] || 0;
-            const maxDirect = proxyPool._settings.maxBotsPerProxy || 10;
-            if (directCount > maxDirect) {
-              console.log(`[Proxy Failover] Direct count (${directCount}) exceeded max (${maxDirect}). Triggering instant proxy recovery check...`);
-              setTimeout(() => {
-                proxyPool.checkAndRecoverProxies().catch(e => console.error(e));
-              }, 1000);
-            }
+        if (err.message === 'POLL_TIMEOUT' || (pollSignal && pollSignal.aborted) || err.name === 'AbortError') {
+          this.timeoutCount = (this.timeoutCount || 0) + 1;
+          this.addLog('WARNING', '[POLL_TIMEOUT] Nhịp poll đã bị hủy do timeout.');
+        } else {
+          console.error(`Poll error for ${this.name}:`, err);
+          this.consecutiveErrors = (this.consecutiveErrors || 0) + 1;
+          if (!this.firstErrorAt) {
+            this.firstErrorAt = Date.now();
           }
-        }
+          const elapsedTime = Date.now() - this.firstErrorAt;
+          const formattedErr = err.message || (err.cause ? `${err.cause.code || err.cause.message}` : 'Lỗi kết nối');
+          this.error = formattedErr;
+          const elapsedSec = Math.round(elapsedTime / 1000);
+          this.addLog('ERROR', `${formattedErr} (Lỗi liên tục ${elapsedSec}s/180s)`);
 
-        // 🛡️ Fix C: Giới hạn lỗi liên tục 10 phút -> Tạm nghỉ 5 phút rồi tự động thử lại
-        if (elapsedTime >= 600000) {
-          this.addLog('WARNING', `⚠️ Gặp lỗi kết nối liên tục ${Math.round(elapsedTime / 1000)}s — Tự động tạm nghỉ 5 phút trước khi kết nối lại...`);
-          this.status = 'paused_error';
-          this.error = `Tạm dừng do lỗi kết nối liên tục ${Math.round(elapsedTime / 60000)} phút`;
-          if (this.timer) {
-            clearTimeout(this.timer);
-            this.timer = null;
-          }
-          this.isPolling = false;
-          setTimeout(() => {
-            if (this.status === 'paused_error') {
-              this.addLog('SYSTEM', '🔄 Hết thời gian chờ 5 phút — Tự động kích hoạt lại bot...');
+          if (elapsedTime >= 180000) { // 3 minutes
+            const oldProxyId = this.proxyId;
+            const newAssigned = proxyPool.failoverAssignment(this.line_uid, oldProxyId);
+            if (newAssigned !== oldProxyId) {
+              this.proxyId = newAssigned;
               this.consecutiveErrors = 0;
               this.firstErrorAt = null;
-              this.status = 'running';
-              this.start();
+
+              const currentAccounts = loadAccounts();
+              const index = currentAccounts.findIndex(acc => acc.line_uid === this.line_uid);
+              if (index !== -1) {
+                currentAccounts[index].proxyId = newAssigned;
+                saveAccounts(currentAccounts);
+              }
+
+              const newProxyInfo = proxyPool.getBotProxyInfo(this.line_uid);
+              this.addLog('SYSTEM', `🔄 Proxy cũ gặp sự cố liên tiếp 3 phút. Đã tự động đổi sang cấu hình IP mới: ${newProxyInfo.label}`);
+
+              const counts = proxyPool._getCounts();
+              const directCount = counts['direct'] || 0;
+              const maxDirect = proxyPool._settings.maxBotsPerProxy || 10;
+              if (directCount > maxDirect) {
+                setTimeout(() => {
+                  proxyPool.checkAndRecoverProxies().catch(e => console.error(e));
+                }, 1000);
+              }
             }
-          }, 300000);
-          return;
+          }
+
+          if (elapsedTime >= 600000) { // 10 minutes
+            this.addLog('WARNING', `⚠️ Gặp lỗi kết nối liên tục ${Math.round(elapsedTime / 1000)}s — Tự động tạm nghỉ 5 phút trước khi kết nối lại...`);
+            this.status = 'paused_error';
+            this.error = `Tạm dừng do lỗi kết nối liên tục ${Math.round(elapsedTime / 60000)} phút`;
+            if (this.timer) {
+              clearTimeout(this.timer);
+              this.timer = null;
+            }
+            this.isPolling = false;
+            setTimeout(() => {
+              if (this.status === 'paused_error') {
+                this.addLog('SYSTEM', '🔄 Hết thời gian chờ 5 phút — Tự động kích hoạt lại bot...');
+                this.consecutiveErrors = 0;
+                this.firstErrorAt = null;
+                this.status = 'running';
+                this.start();
+              }
+            }, 300000);
+            return;
+          }
         }
       } finally {
+        clearTimeout(hardTimeoutTimer);
+        this.currentPollAbortController = null;
         this.isPolling = false;
-        // Schedule next poll staggering
-        if (this.status === 'running') {
-          // If the user has edit permission or is admin, they can configure it per-bot; otherwise, enforce user-level pollInterval
-          let userPollInterval = 2000;
-          if (this.userIsAdmin || this.allowEditPollInterval) {
-            userPollInterval = this.settings.pollInterval !== undefined ? this.settings.pollInterval : (this.userPollInterval || 2000);
-          } else {
-            userPollInterval = this.userPollInterval || 2000;
-          }
-          const isSnipe = this.targetedMvp && this._bossSnipeActive;
-          const isPkEvent = this.inEventMode && (this.currentEventKind === 'gw' || this.currentEventKind === 'cw');
+        this.pollFinishedAt = Date.now();
+        this.pollDuration = this.pollFinishedAt - (this.pollStartedAt || this.pollFinishedAt);
+        this.addLog('SYSTEM', `[POLL_END] Kết thúc nhịp poll (${this.pollDuration}ms)`);
 
-          let baseDelay = userPollInterval;
-          if (isSnipe || isPkEvent) {
-            baseDelay = Math.min(baseDelay, 1200);
-          }
-
-          // Dynamic jitter range: ±100ms for <= 1100ms, ±120ms for <= 1500ms, ±150ms for slower
-          let jitterBound = 150;
-          if (baseDelay <= 1100) {
-            jitterBound = 100;
-          } else if (baseDelay <= 1500) {
-            jitterBound = 120;
-          }
-          // Asymmetric jitter: 70% positive human/network lag, 30% slight lead
-          const isPositiveSkew = Math.random() < 0.7;
-          const jitterMag = Math.floor(Math.random() * jitterBound);
-          const jitter = isPositiveSkew ? jitterMag : -Math.floor(jitterMag * 0.75);
-
-          this.timer = setTimeout(runPoll, Math.max(500, baseDelay + jitter));
+        // Kiểm tra generation: Nếu đã đổi thế hệ (stop/start/recover) thì dừng hoàn toàn
+        if (currentGen !== this.pollGeneration || this.status !== 'running') {
+          return;
         }
+
+        // Nếu có cờ immediate poll pending, thực thi ngay sau cooldown 300ms
+        if (this.immediatePollPending) {
+          this.immediatePollPending = false;
+          this.nextPollAt = Date.now() + 300;
+          this.timer = setTimeout(runPoll, 300);
+          return;
+        }
+
+        // Tính toán nhịp poll kế tiếp theo nextDueAt neo từ pollStartedAt để triệt tiêu drift chu kỳ
+        let userPollInterval = 2000;
+        if (this.userIsAdmin || this.allowEditPollInterval) {
+          userPollInterval = this.settings.pollInterval !== undefined ? this.settings.pollInterval : (this.userPollInterval || 2000);
+        } else {
+          userPollInterval = this.userPollInterval || 2000;
+        }
+        const isSnipe = this.targetedMvp && this._bossSnipeActive;
+        const isPkEvent = this.inEventMode && (this.currentEventKind === 'gw' || this.currentEventKind === 'cw');
+
+        let baseDelay = userPollInterval;
+        if (isSnipe || isPkEvent) {
+          baseDelay = Math.min(baseDelay, 1200);
+        }
+
+        let jitterBound = 150;
+        if (baseDelay <= 1100) {
+          jitterBound = 100;
+        } else if (baseDelay <= 1500) {
+          jitterBound = 120;
+        }
+        const isPositiveSkew = Math.random() < 0.7;
+        const jitterMag = Math.floor(Math.random() * jitterBound);
+        const jitter = isPositiveSkew ? jitterMag : -Math.floor(jitterMag * 0.75);
+
+        const nextDueAt = (this.pollStartedAt || Date.now()) + baseDelay + jitter;
+        const delay = Math.max(500, nextDueAt - Date.now());
+
+        this.nextPollAt = Date.now() + delay;
+        this.timer = setTimeout(runPoll, delay);
       }
     };
 
     this._runPoll = runPoll;
 
-    // Stagger startup
+    // Khởi động so le tránh dồn tải kết nối
     this.timer = setTimeout(runPoll, Math.random() * 1000);
   }
 
   stop(status = 'idle') {
+    this.pollGeneration = (this.pollGeneration || 0) + 1;
+    if (this.botAbortController) {
+      try {
+        this.botAbortController.abort(new Error('BOT_STOPPED'));
+      } catch (e) {}
+      this.botAbortController = null;
+    }
+    if (this.currentPollAbortController) {
+      try {
+        this.currentPollAbortController.abort(new Error('BOT_STOPPED'));
+      } catch (e) {}
+      this.currentPollAbortController = null;
+    }
     if (this.timer) {
       clearTimeout(this.timer);
       this.timer = null;
     }
+    if (this.requestQueue) {
+      this.requestQueue.clear(new Error('BOT_STOPPED'));
+    }
+    this.isPolling = false;
+    this.immediatePollPending = false;
     this._runPoll = null;
     this.status = status;
     if (status === 'idle') {
@@ -2941,33 +3522,113 @@ class BotInstance {
     }
   }
 
+  recover(reason = 'watchdog') {
+    this.pollGeneration = (this.pollGeneration || 0) + 1;
+    if (this.currentPollAbortController) {
+      try {
+        this.currentPollAbortController.abort(new Error('BOT_RECOVERING'));
+      } catch (e) {}
+      this.currentPollAbortController = null;
+    }
+    if (this.botAbortController) {
+      try {
+        this.botAbortController.abort(new Error('BOT_RECOVERING'));
+      } catch (e) {}
+      this.botAbortController = null;
+    }
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
+    if (this.requestQueue) {
+      this.requestQueue.clear(new Error('BOT_RECOVERING'));
+    }
+    this.isPolling = false;
+    this.immediatePollPending = false;
+    this._runPoll = null;
+    this.addLog('SYSTEM', `🔄 [Recovery] Khởi tạo lại scheduler và giải phóng nhịp cũ (Lý do: ${reason})`);
+    this.start();
+  }
+
   triggerImmediatePoll() {
-    if (this.status === 'running' && this._runPoll) {
-      if (this.timer) {
-        clearTimeout(this.timer);
-        this.timer = null;
-      }
+    if (this.status !== 'running') return;
+
+    // Cooldown tối thiểu 300ms chống busy loop
+    const now = Date.now();
+    if (this.lastImmediateTriggerAt && (now - this.lastImmediateTriggerAt < 300)) {
+      this.immediatePollPending = true;
+      this.skippedImmediatePollCount = (this.skippedImmediatePollCount || 0) + 1;
+      return;
+    }
+    this.lastImmediateTriggerAt = now;
+
+    // Nếu poll đang chạy, không tạo nhịp chồng; chỉ đánh dấu pending để xử lý sau khi nhịp hiện tại kết thúc
+    if (this.isPolling) {
+      this.immediatePollPending = true;
+      this.skippedImmediatePollCount = (this.skippedImmediatePollCount || 0) + 1;
+      this.addLog('SYSTEM', `[POLL_OVERLAP_BLOCKED] Poll đang chạy, ghi nhận immediatePollPending thay vì chạy song song`);
+      return;
+    }
+
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
+
+    if (this._runPoll) {
       this._runPoll().catch(err => console.error(`[${this.name}] Immediate poll error:`, err));
     }
   }
 
-  async sendRequest(url, payload) {
+  // API public: Đưa yêu cầu vào hàng đợi của bot
+  async sendRequest(url, payload, options = {}) {
+    if (!this.requestQueue) {
+      this.requestQueue = new BotRequestQueue(this);
+    }
+    return this.requestQueue.enqueue(url, payload, options);
+  }
+
+  // Thực thi HTTP fetch trực tiếp (chỉ được gọi bởi BotRequestQueue worker, không gọi ngược lại queue)
+  async _sendRequestDirect(url, payload, options = {}) {
     // T46: Mọi request hành động (nâng stats/gear/skill, warp, arena...) đều đánh dấu tương tác người dùng
     if (!url.includes('xhrpg_game.php')) {
       this.pendingActFlag = true;
     }
 
-    const maxAttempts = 3;
+    const maxAttempts = options.maxAttempts || 3;
+    const timeoutMs = options.timeoutMs || (options.priority === 4 ? 4000 : (url.includes('xhrpg_game.php') ? 8000 : 10000));
+    const callerSignal = options.signal || null;
     let lastError = null;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      // Kiểm tra xem bot hoặc caller đã bị abort trước khi thử
+      if (this.botAbortController && this.botAbortController.signal.aborted) {
+        throw (this.botAbortController.signal.reason || new Error('Bot stopped'));
+      }
+      if (callerSignal && callerSignal.aborted) {
+        throw (callerSignal.reason || new Error('Request aborted before attempt'));
+      }
+
       // Throttle requests: Đảm bảo khoảng cách tối thiểu giữa các request của cùng 1 bot để tránh lỗi "too_fast"
       // 900ms cho xhrpg_game.php (khớp server-side cooldown ~900ms), 600ms cho action requests
       const minInterval = url.includes('xhrpg_game.php') ? 900 : 600;
       const now = Date.now();
       const timeSinceLast = now - (this.lastRequestAt || 0);
       if (timeSinceLast < minInterval) {
-        await new Promise(r => setTimeout(r, minInterval - timeSinceLast));
+        const waitMs = minInterval - timeSinceLast;
+        await new Promise((resolve, reject) => {
+          const t = setTimeout(resolve, waitMs);
+          const stopSignal = this.botAbortController ? this.botAbortController.signal : null;
+          const cancelSig = combineAbortSignals([callerSignal, stopSignal]);
+          if (cancelSig) {
+            const onAbort = () => {
+              clearTimeout(t);
+              reject(cancelSig.reason || new Error('Aborted during throttle wait'));
+            };
+            if (cancelSig.aborted) onAbort();
+            else cancelSig.addEventListener('abort', onAbort, { once: true });
+          }
+        });
       }
       this.lastRequestAt = Date.now();
 
@@ -2990,9 +3651,17 @@ class BotInstance {
       }
 
       const searchParams = new URLSearchParams(payload);
-      const controller = new AbortController();
-      const timeoutMs = url.includes('xhrpg_game.php') ? 8000 : 10000;
-      const timeout = setTimeout(() => controller.abort(), timeoutMs); // 8-10s timeout chịu trễ mạng tốt hơn
+      const reqController = new AbortController();
+      const timeoutTimer = setTimeout(() => {
+        reqController.abort(new Error(`Timeout ${Math.round(timeoutMs / 1000)}s`));
+      }, timeoutMs);
+
+      // Kết hợp signal: reqController timeout + callerSignal (poll-level) + botAbortController (bot-level)
+      const combinedSignal = combineAbortSignals([
+        reqController.signal,
+        callerSignal,
+        this.botAbortController ? this.botAbortController.signal : null
+      ]);
 
       const reqStartTime = Date.now();
       try {
@@ -3001,7 +3670,7 @@ class BotInstance {
           headers: headers,
           body: searchParams.toString(),
           dispatcher: proxyPool.getDispatcher(this.line_uid),
-          signal: controller.signal
+          signal: combinedSignal
         });
 
         if (!response.ok) {
@@ -3014,10 +3683,8 @@ class BotInstance {
 
         try {
           const parsed = JSON.parse(text);
-          clearTimeout(timeout);
           return parsed;
         } catch (e) {
-          // If it returns HTML or Cloudflare challenge
           if (text.includes('cf-challenge') || text.includes('Cloudflare')) {
             throw new Error('Bị chặn bởi Cloudflare (Rate Limit/JS Challenge)');
           }
@@ -3025,8 +3692,20 @@ class BotInstance {
         }
       } catch (err) {
         let formattedErr = err;
-        if (err.name === 'AbortError') {
-          formattedErr = new Error(`Yêu cầu kết nối quá hạn (Timeout ${Math.round(timeoutMs/1000)}s)`);
+        const isBotAborted = this.botAbortController && this.botAbortController.signal.aborted;
+        const isCallerAborted = callerSignal && callerSignal.aborted;
+
+        if (err.name === 'AbortError' || combinedSignal.aborted) {
+          if (isBotAborted) {
+            this.addLog('SYSTEM', `[REQUEST_TIMEOUT] Request ${(options.type || 'UNKNOWN')} bị hủy do bot đã dừng`);
+            throw (this.botAbortController.signal.reason || new Error('Bot stopped'));
+          } else if (isCallerAborted) {
+            this.addLog('SYSTEM', `[REQUEST_TIMEOUT] Request ${(options.type || 'UNKNOWN')} bị hủy bởi tín hiệu poll timeout`);
+            throw (callerSignal.reason || new Error('Poll aborted'));
+          } else {
+            formattedErr = new Error(`Yêu cầu kết nối quá hạn (Timeout ${Math.round(timeoutMs / 1000)}s)`);
+            this.addLog('SYSTEM', `[REQUEST_TIMEOUT] Request ${(options.type || 'UNKNOWN')} quá hạn sau ${Math.round(timeoutMs / 1000)}s`);
+          }
         } else if (err.cause) {
           if (err.cause.code === 'ENOTFOUND') {
             const host = err.cause.hostname || 'ragnalok.online';
@@ -3042,13 +3721,30 @@ class BotInstance {
 
         lastError = formattedErr;
 
+        // Nếu bị hủy chủ động bởi bot hoặc caller, tuyệt đối không thử lại
+        if (isBotAborted || isCallerAborted) {
+          throw lastError;
+        }
+
+        // Quản lý retry tập trung duy nhất ở đây (tối đa maxAttempts lần tuần tự)
         if (attempt < maxAttempts) {
           const waitTime = attempt * 500;
           console.log(`[Request Retry] Bot "${this.name}" gặp lỗi "${formattedErr.message}" khi gọi ${url.substring(url.lastIndexOf('/'))}. Đang thử lại lần ${attempt + 1}/${maxAttempts} sau ${waitTime}ms...`);
-          await new Promise(resolve => setTimeout(resolve, waitTime));
+          await new Promise((resolve, reject) => {
+            const t = setTimeout(resolve, waitTime);
+            const cancelSig = combineAbortSignals([callerSignal, this.botAbortController ? this.botAbortController.signal : null]);
+            if (cancelSig) {
+              const onAbort = () => {
+                clearTimeout(t);
+                reject(cancelSig.reason || new Error('Aborted during retry wait'));
+              };
+              if (cancelSig.aborted) onAbort();
+              else cancelSig.addEventListener('abort', onAbort, { once: true });
+            }
+          });
         }
       } finally {
-        clearTimeout(timeout);
+        clearTimeout(timeoutTimer);
       }
     }
 
@@ -3099,28 +3795,31 @@ class BotInstance {
   }
 
   async sendCheckinGuardWithRetry(maxAttempts = 3) {
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      try {
-        const res = await this.sendRequest('https://ragnalok.online/human/xhrpg_offline.php', {
-          line_uid: this.line_uid,
-          session_token: this.session_token,
-          action: 'idlestat',
-          k: 'chpass',
-          rt: -1,
-          lang: 'vi'
-        });
-        if (res && (res.ok || typeof res.ci === 'number')) {
-          this.lastChpassSentAt = Date.now();
-          this.addLog('SYSTEM', `🖐️ [Check-in Guard] Xác nhận điểm danh tương tác thành công (chpass ok, đếm ngược: ${res.ci || 'N/A'}s)`);
-          return true;
-        }
-      } catch (err) {
-        if (attempt === maxAttempts) {
-          this.addLog('WARNING', `⚠️ [Check-in Guard] Gửi chpass thất bại sau ${maxAttempts} lần: ${err.message}`);
-        } else {
-          await new Promise(r => setTimeout(r, 1000 * attempt));
-        }
+    if (this._checkinGuardPending) return false;
+    this._checkinGuardPending = true;
+    try {
+      const res = await this.sendRequest('https://ragnalok.online/human/xhrpg_offline.php', {
+        line_uid: this.line_uid,
+        session_token: this.session_token,
+        action: 'idlestat',
+        k: 'chpass',
+        rt: -1,
+        lang: 'vi'
+      }, {
+        priority: 3,
+        dedupeKey: 'checkin_guard',
+        type: 'CHECKIN',
+        maxAttempts
+      });
+      if (res && (res.ok || typeof res.ci === 'number')) {
+        this.lastChpassSentAt = Date.now();
+        this.addLog('SYSTEM', `🖐️ [Check-in Guard] Xác nhận điểm danh tương tác thành công (chpass ok, đếm ngược: ${res.ci || 'N/A'}s)`);
+        return true;
       }
+    } catch (err) {
+      this.addLog('WARNING', `⚠️ [Check-in Guard] Gửi chpass thất bại sau ${maxAttempts} lần: ${err.message}`);
+    } finally {
+      this._checkinGuardPending = false;
     }
     return false;
   }
@@ -3342,7 +4041,7 @@ class BotInstance {
     }
   }
 
-  async pollGame() {
+  async pollGame(pollSignal = null) {
     // Check if system user account is expired
     const users = loadUsers();
     const owner = users.find(u => u.id === this.userId);
@@ -3356,6 +4055,36 @@ class BotInstance {
 
     this.pollCount++;
 
+    // ⚔️ Đồng bộ và khôi phục trạng thái Event Session sau khi Bot restart
+    if (this.eventSnapshot) {
+      const snap = this.eventSnapshot;
+      const currentEpoch = Math.floor(Date.now() / 1000);
+      const isGwActive = this.lastGw && (this.lastGw.st === 'open' || this.lastGw.st === 'fight') && (!this.lastGw.ends || this.lastGw.ends > currentEpoch);
+      const isCwActive = this.lastCw && (this.lastCw.st === 'open' || this.lastCw.st === 'fight') && (!this.lastCw.ends || this.lastCw.ends > currentEpoch);
+      const isInvActive = this.lastInv && (this.lastInv.st === 'pre' || this.lastInv.st === 'active') && (!this.lastInv.ends || this.lastInv.ends > currentEpoch);
+
+      const eventStillActive = (snap.kind === 'gw' && isGwActive) || (snap.kind === 'cw' && isCwActive) || (snap.kind === 'inv' && isInvActive);
+      const atEventMap = this.player && (
+        ((snap.kind === 'gw' || snap.kind === 'cw') && Number(this.player.map) === 4) ||
+        (snap.kind === 'inv' && Number(this.player.map) === 2)
+      );
+
+      if (eventStillActive && atEventMap && this.eventState !== 'ACTIVE') {
+        this.eventState = 'ACTIVE';
+        this.inEventMode = true;
+        this.currentEventKind = snap.kind;
+        this.isEventReturning = false;
+        this.addLog('SYSTEM', `🔄 [Event Recovery] Khôi phục trạng thái ACTIVE cho Event [${snap.kind.toUpperCase()}] sau restart.`);
+      } else if (!eventStillActive && this.eventState !== 'RETURNING' && this.eventState !== 'FAILED_RETRY') {
+        this.eventState = 'RETURNING';
+        this.inEventMode = false;
+        this.isEventReturning = true;
+        this.eventReturnMapTarget = snap.map;
+        this.eventReturnStartedAt = this.eventReturnStartedAt || Date.now();
+        this.addLog('SYSTEM', `🔄 [Event Recovery] Phát hiện Event [${snap.kind.toUpperCase()}] đã kết thúc sau restart. Bắt đầu quy trình quay về Map ${snap.map}.`);
+      }
+    }
+
     // 🏰 Kiểm tra Đồng bộ Guild Dungeon đối với Member hoặc Tự động Thoát khi hạ Boss xong
     if (this.player) {
       const isMem = this.settings.teamRole === 'member';
@@ -3364,7 +4093,7 @@ class BotInstance {
         ? Object.values(botInstances).find(b => b.userId === this.userId && b.settings.teamRole === 'leader' && (b.settings.teamId || 'none') === mTeamId)
         : null;
 
-      if (isMem && ldr && ldr.status === 'running' && ldr.player && this.settings.teamSynced === true) {
+      if (isMem && ldr && ldr.status === 'running' && ldr.player && this.settings.teamSynced === true && !this.inEventMode && this.eventState === 'IDLE' && !this.isEventReturning) {
         const isDifferentGuild = (() => {
           if (!this.player || !ldr.player) return false;
           if (this.player.gd && ldr.player.gd && this.player.gd !== ldr.player.gd) return true;
@@ -3374,10 +4103,10 @@ class BotInstance {
           return false;
         })();
 
-        if (ldr.guildDungeonActive && ldr.guildDungeonIsTeam && !this.guildDungeonActive && Number(this.player.gdun_in) !== 1 && Number(this.player.map) !== 12) {
+        if (ldr.guildDungeonActive && ldr.guildDungeonIsTeam && !this.guildDungeonActive && !this._guildDungeonRestoring && Number(this.player.gdun_in) !== 1 && Number(this.player.map) !== 12) {
           this.addLog('SYSTEM', `🏰 [Team Member] Đồng bộ vào Phụ Bản Guild theo Trưởng nhóm (${ldr.name})...`);
           await this.enterGuildDungeon(true);
-        } else if (!ldr.guildDungeonActive && !isDifferentGuild && (this.guildDungeonActive || Number(this.player.gdun_in) === 1 || Number(this.player.map) === 12)) {
+        } else if (!ldr.guildDungeonActive && !isDifferentGuild && (this.guildDungeonActive || Number(this.player.gdun_in) === 1 || Number(this.player.map) === 12) && !this._exitingGuildDungeon && !this._guildDungeonRestoring) {
           this.addLog('SYSTEM', `↩️ [Team Member] Đồng bộ thoát Phụ Bản Guild theo Trưởng nhóm (${ldr.name})...`);
           await this.exitGuildDungeon();
         }
@@ -3408,7 +4137,7 @@ class BotInstance {
       let activeTargetMapId;
       let shouldWarpCheck = false;
 
-      if (isMember && leader && leader.status === 'running' && leader.player && this.settings.teamSynced === true && this.settings.bossHuntMode && this.settings.bossHuntMode !== 'off' && leader.settings.bossHuntMode && leader.settings.bossHuntMode !== 'off' && !leader.guildDungeonActive && Number(leader.player.gdun_in) !== 1 && Number(leader.player.map) !== 12) {
+      if (isMember && leader && !this._guildDungeonRestoring && !this.inEventMode && this.eventState === 'IDLE' && !this.isEventReturning && leader.status === 'running' && leader.player && this.settings.teamSynced === true && this.settings.bossHuntMode && this.settings.bossHuntMode !== 'off' && leader.settings.bossHuntMode && leader.settings.bossHuntMode !== 'off' && !leader.guildDungeonActive && Number(leader.player.gdun_in) !== 1 && Number(leader.player.map) !== 12) {
         // Đồng bộ trạng thái Cycle và Map từ Leader trước
         this.isMvpCycling = leader.isMvpCycling;
         this.mvpCycleMapIndex = leader.mvpCycleMapIndex;
@@ -3429,7 +4158,7 @@ class BotInstance {
         shouldWarpCheck = (this.settings.autoMap || (this.settings.bossHuntMode && this.settings.bossHuntMode !== 'off') || this.isMvpCycling || isMvpReturning);
       }
 
-      if (shouldWarpCheck && !this.guildDungeonActive && !this.inEventMode && Number(this.player.gdun_in) !== 1 && Number(this.player.map) !== 12 && Number(this.player.map) !== Number(activeTargetMapId) && Number(this.player.map) !== 5) {
+      if (shouldWarpCheck && !this.guildDungeonActive && !this._guildDungeonRestoring && !this.inEventMode && this.eventState === 'IDLE' && !this.isEventReturning && Number(this.player.gdun_in) !== 1 && Number(this.player.map) !== 12 && Number(this.player.map) !== Number(activeTargetMapId) && Number(this.player.map) !== 5) {
         const targetMapId = activeTargetMapId;
         const mapDef = getMapDefs().find(m => m.id === targetMapId);
         if (mapDef && (this.player.lv || 1) >= mapDef.req) {
@@ -3445,17 +4174,21 @@ class BotInstance {
               const isCwActive = this.lastCw && (this.lastCw.st === 'open' || this.lastCw.st === 'fight') && (!this.lastCw.ends || this.lastCw.ends > currentEpoch);
 
               let ok = false;
-              if (isGwActive) {
-                ok = await this.joinGuildWar();
-              } else if (isCwActive) {
-                ok = await this.joinCountryWar();
+              const kind = isGwActive ? 'gw' : (isCwActive ? 'cw' : null);
+              if (kind) {
+                this.captureEventSnapshot(kind);
+                if (kind === 'gw') {
+                  ok = await this.joinGuildWar();
+                } else {
+                  ok = await this.joinCountryWar();
+                }
               } else {
                 this.addLog('WARNING', `⚠️ Sự kiện Bang/Quốc chiến không hoạt động hoặc đã kết thúc. Tự động thoát chế độ Event.`);
                 this.exitEventMode();
                 return;
               }
               if (ok) {
-                this.enterEventMode(isGwActive ? 'gw' : 'cw', 4);
+                this.enterEventMode(kind, 4);
                 return;
               }
             } else {
@@ -3491,7 +4224,7 @@ class BotInstance {
 
       if (currentMinute === 30 && currentSecond >= 5 && currentSecond <= 20 && this.lastGdunAutoEnterHour !== currentHour) {
         this.lastGdunAutoEnterHour = currentHour;
-        if (!this.guildDungeonActive && Number(this.player.gdun_in) !== 1 && Number(this.player.map) !== 12 && !this.inEventMode) {
+        if (!this.guildDungeonActive && !this._guildDungeonRestoring && Number(this.player.gdun_in) !== 1 && Number(this.player.map) !== 12 && !this.inEventMode) {
           this.addLog('SYSTEM', `⏰ [Auto Boss Guild] Đến phút thứ 30:05. Tự động kích hoạt cá nhân vào Phụ Bản Guild...`);
           await this.enterGuildDungeon(false); // Solo entry
         }
@@ -3532,9 +4265,146 @@ class BotInstance {
     this.targetedMvp = false;
     let lockPos = this.settings.lock_pos ? 1 : 0;
 
-    // 0. Auto Event PK Targeting (Priority 0 when in PK Event Mode)
+    // 0. -1 Guild Dungeon Restoration (Priority cao nhất: Đang khôi phục bản đồ & tọa độ thật trên server sau Guild Dungeon)
+    if (this._guildDungeonRestoring) {
+      const snap = this.gdunSnapshot;
+      if (!snap) {
+        this._guildDungeonRestoring = false;
+        this._gdunRestoreStartedAt = 0;
+      } else {
+        const restoreDuration = Date.now() - (this._gdunRestoreStartedAt || Date.now());
+        const isTimeout = (restoreDuration > 35000); // 35s timeout
+
+        const curMap = this.player ? Number(this.player.map) : null;
+        const targetMap = Number(snap.map);
+
+        if (curMap !== targetMap) {
+          if (isTimeout) {
+            this.addLog('WARNING', `⚠️ [Guild Dungeon] Quá thời gian chờ chuyển Map (Timeout 35s). Hiện tại Map ${curMap}, mục tiêu Map ${targetMap}. Dừng khôi phục.`);
+            this._finalizeGdunRestoration(false);
+          } else {
+            this.addLog('SYSTEM', `🏃 [Guild Dungeon] Đang warp về đúng Map snapshot ${targetMap} (Hiện tại: Map ${curMap})...`);
+            await this.warpToMap(targetMap).catch(() => {});
+          }
+        } else {
+          // Map đã khớp! Kiểm tra tọa độ X, Y trên server
+          const curX = this.player ? this.player.x : null;
+          const curY = this.player ? this.player.y : null;
+          const targetX = snap.x != null ? snap.x : 1125;
+          const targetY = snap.y != null ? snap.y : 1125;
+          const dist = (curX != null && curY != null)
+            ? Math.hypot(curX - targetX, curY - targetY)
+            : 9999;
+
+          if (dist <= 40) {
+            // Đã đến vị trí ban đầu trên server!
+            this.addLog('SUCCESS', `✅ [Guild Dungeon] Server đã xác nhận nhân vật về đúng vị trí ban đầu: Map ${targetMap} tại [${curX}, ${curY}] (Cách đích ${Math.round(dist)}m). Khôi phục hoàn tất!`);
+            exploreCx = snap.explore_cx != null ? snap.explore_cx : targetX;
+            exploreCy = snap.explore_cy != null ? snap.explore_cy : targetY;
+            traveling = 0;
+            lockPos = snap.lock_zone_center ? 1 : (this.settings.lock_pos ? 1 : 0);
+            this._finalizeGdunRestoration(true);
+          } else if (isTimeout) {
+            this.addLog('WARNING', `⚠️ [Guild Dungeon] Quá thời gian khôi phục tọa độ (Timeout 35s). Vị trí server hiện tại: Map ${curMap} tại [${curX}, ${curY}], cách đích [${targetX}, ${targetY}] ${Math.round(dist)}m. Kết thúc quá trình khôi phục.`);
+            exploreCx = curX != null ? curX : targetX;
+            exploreCy = curY != null ? curY : targetY;
+            traveling = 0;
+            lockPos = 0;
+            this._finalizeGdunRestoration(false);
+          } else {
+            // Đang gửi lệnh di chuyển về tọa độ đích trên server
+            traveling = 1;
+            lockPos = 0;
+            exploreCx = targetX;
+            exploreCy = targetY;
+            exploreRadius = 300;
+            if (this.pollCount % 3 === 0 || dist < 100) {
+              this.addLog('SYSTEM', `🏃 [Guild Dungeon] Đang di chuyển nhân vật về tọa độ ban đầu [${targetX}, ${targetY}] trên Map ${targetMap} (Hiện tại: [${curX}, ${curY}], cách ${Math.round(dist)}m)...`);
+            }
+          }
+        }
+      }
+    }
+
+    // 0. -0.5 Event Mode Restoration (Priority cao: Đang khôi phục bản đồ & tọa độ thật trên server sau Event)
+    const isEventRestoring = (this.eventState === 'RETURNING' || this.eventState === 'FAILED_RETRY' || (this.isEventReturning && this.eventSnapshot));
+    if (!this._guildDungeonRestoring && isEventRestoring) {
+      const snap = this.eventSnapshot;
+      if (!snap) {
+        this.eventState = 'IDLE';
+        this.isEventReturning = false;
+        this.eventReturnStartedAt = 0;
+      } else {
+        const restoreDuration = Date.now() - (this.eventReturnStartedAt || Date.now());
+        const isTimeout = (restoreDuration > 240000); // 4 phút timeout (3-5 phút theo spec)
+
+        const curMap = this.player ? Number(this.player.map) : null;
+        const targetMap = Number(snap.map);
+
+        if (curMap !== targetMap) {
+          if (isTimeout) {
+            this.addLog('WARNING', `⚠️ [Event Return] Quá thời gian chờ chuyển Map (Timeout 4 phút). Hiện tại Map ${curMap}, mục tiêu Map ${targetMap}. Dừng khôi phục.`);
+            this._finalizeEventRestoration(false);
+          } else {
+            this.addLog('SYSTEM', `🏃 [Event Return] Đang warp về đúng Map snapshot ${targetMap} (Hiện tại: Map ${curMap})...`);
+            try {
+              const ok = await this.warpToMap(targetMap);
+              if (!ok) {
+                this.eventState = 'FAILED_RETRY';
+                this.eventReturnRetries = (this.eventReturnRetries || 0) + 1;
+                this.addLog('WARNING', `⚠️ [Event Return] Di chuyển sang Map ${targetMap} thất bại (Lần thử: ${this.eventReturnRetries}). Sẽ thử lại ở nhịp poll sau.`);
+              } else {
+                this.eventState = 'RETURNING';
+              }
+            } catch (err) {
+              this.eventState = 'FAILED_RETRY';
+              this.eventReturnRetries = (this.eventReturnRetries || 0) + 1;
+              this.addLog('ERROR', `[Event Return] Lỗi warp sang Map ${targetMap}: ${err.message}. Sẽ thử lại ở nhịp poll sau.`);
+            }
+          }
+        } else {
+          // Map đã khớp! Kiểm tra tọa độ X, Y trên server
+          const curX = this.player ? this.player.x : null;
+          const curY = this.player ? this.player.y : null;
+          const targetX = snap.x != null ? snap.x : 1125;
+          const targetY = snap.y != null ? snap.y : 1125;
+          const dist = (curX != null && curY != null)
+            ? Math.hypot(curX - targetX, curY - targetY)
+            : 9999;
+
+          if (dist <= 40) {
+            // Đã đến vị trí ban đầu trên server!
+            this.addLog('SUCCESS', `✅ [Event Return] Server đã xác nhận nhân vật về đúng vị trí ban đầu: Map ${targetMap} tại [${curX}, ${curY}] (Cách đích ${Math.round(dist)}m). Khôi phục hoàn tất!`);
+            exploreCx = snap.explore_cx != null ? snap.explore_cx : targetX;
+            exploreCy = snap.explore_cy != null ? snap.explore_cy : targetY;
+            traveling = 0;
+            lockPos = snap.lock_zone_center ? 1 : (this.settings.lock_pos ? 1 : 0);
+            this._finalizeEventRestoration(true);
+          } else if (isTimeout) {
+            this.addLog('WARNING', `⚠️ [Event Return] Quá thời gian khôi phục tọa độ (Timeout 4 phút). Vị trí server hiện tại: Map ${curMap} tại [${curX}, ${curY}], cách đích [${targetX}, ${targetY}] ${Math.round(dist)}m. Kết thúc quá trình khôi phục.`);
+            exploreCx = curX != null ? curX : targetX;
+            exploreCy = curY != null ? curY : targetY;
+            traveling = 0;
+            lockPos = 0;
+            this._finalizeEventRestoration(false);
+          } else {
+            // Đang gửi lệnh di chuyển về tọa độ đích trên server
+            traveling = 1;
+            lockPos = 0;
+            exploreCx = targetX;
+            exploreCy = targetY;
+            exploreRadius = 300;
+            if (this.pollCount % 3 === 0 || dist < 100) {
+              this.addLog('SYSTEM', `🏃 [Event Return] Đang di chuyển nhân vật về tọa độ ban đầu [${targetX}, ${targetY}] trên Map ${targetMap} (Hiện tại: [${curX}, ${curY}], cách ${Math.round(dist)}m)...`);
+            }
+          }
+        }
+      }
+    }
+
+    // 0. Auto Event PK Targeting (Priority 0 khi trong Event PK và không trong tiến trình khôi phục vị trí)
     let targetedPk = false;
-    if (this.inEventMode && (this.currentEventKind === 'gw' || this.currentEventKind === 'cw')) {
+    if (!this._guildDungeonRestoring && !isEventRestoring && this.inEventMode && this.eventState === 'ACTIVE' && (this.currentEventKind === 'gw' || this.currentEventKind === 'cw')) {
       const alivePlayers = (this.others) ? this.others.filter(p => !p.is_dead) : [];
       if (alivePlayers.length > 0) {
         const px = this.player ? this.player.x : 0;
@@ -3607,7 +4477,7 @@ class BotInstance {
     }
 
     // 0. Auto World Tree Boss Event (Priority 0 when in Invasion Event Mode)
-    if (this.inEventMode && this.currentEventKind === 'inv') {
+    if (!this._guildDungeonRestoring && !isEventRestoring && this.inEventMode && this.eventState === 'ACTIVE' && this.currentEventKind === 'inv') {
       const px = this.player ? this.player.x : 1125;
       const py = this.player ? this.player.y : 1125;
       const dx = px - 1125;
@@ -3633,7 +4503,7 @@ class BotInstance {
     }
 
     // 0.5 Guild Dungeon Targeting (Chỉ nhắm và tấn công BOSS trong Phụ Bản Guild - không đánh quái thường)
-    if (this.guildDungeonActive) {
+    if (!this._guildDungeonRestoring && !isEventRestoring && this.guildDungeonActive) {
       const px = this.player ? this.player.x : 1125;
       const py = this.player ? this.player.y : 1125;
       const priority = this.getBossHuntPriority();
@@ -3800,8 +4670,7 @@ class BotInstance {
     // 1. Auto MVP Hunting (Priority 1)
     // isCorrectMvpMap is already defined above for isFull calculation
     const isHuntingEnabled = this.settings.bossHuntMode !== 'off';
-
-    if (isHuntingEnabled && isCorrectMvpMap && !this.guildDungeonActive && this.bosses && this.bosses.length > 0) {
+    if (!this._guildDungeonRestoring && !isEventRestoring && isHuntingEnabled && isCorrectMvpMap && !this.guildDungeonActive && this.bosses && this.bosses.length > 0) {
       const aliveBosses = this.bosses.filter(b => (b.hp === undefined || (b.hp || 0) > 0));
 
       if (aliveBosses.length > 0) {
@@ -3999,7 +4868,7 @@ class BotInstance {
 
     // 2. Auto Zone checking (Priority 2, only runs if no MVP is being targeted)
     const canRunAutoZone = !this.isMvpCycling || (this.player && Number(this.player.map) === Number(this.getCurrentMvpCycleMap()));
-    if (!this.targetedMvp && !this.guildDungeonActive && canRunAutoZone && this.settings.autoZone && this.spots) {
+    if (!this._guildDungeonRestoring && !isEventRestoring && !this.targetedMvp && !this.guildDungeonActive && canRunAutoZone && this.settings.autoZone && this.spots) {
       const spotsList = Object.values(this.spots);
       const targetIdx = parseInt(this.settings.targetZone) || 0;
       if (spotsList[targetIdx]) {
@@ -4068,15 +4937,20 @@ class BotInstance {
       bot: this.settings.bot ? 1 : 0,
       lock_pos: lockPos,
       explore_radius: exploreRadius,
-      explore_cx: (lockPos || traveling === 0) ? exploreCx : naturalCoordNoise(exploreCx, 18),
-      explore_cy: (lockPos || traveling === 0) ? exploreCy : naturalCoordNoise(exploreCy, 18),
+      explore_cx: (this._guildDungeonRestoring || isEventRestoring || lockPos || traveling === 0) ? exploreCx : naturalCoordNoise(exploreCx, 18),
+      explore_cy: (this._guildDungeonRestoring || isEventRestoring || lockPos || traveling === 0) ? exploreCy : naturalCoordNoise(exploreCy, 18),
       traveling: traveling,
       auto_potion_threshold: this.settings.auto_potion_threshold,
       have_static: (this.spots && this.mon_masters) ? 1 : 0,
       lang: 'vi'
     };
 
-    const d = await this.sendRequest('https://ragnalok.online/human/xhrpg_game.php', payload);
+    const d = await this.sendRequest('https://ragnalok.online/human/xhrpg_game.php', payload, {
+      priority: 1,
+      dedupeKey: 'poll',
+      type: 'GAME_POLL',
+      signal: pollSignal
+    });
 
     if (d.kicked) {
       if (this.phpsessid) {
@@ -4144,9 +5018,13 @@ class BotInstance {
       this.spots = d.spots;
       const currentMapId = (d.map != null) ? Number(d.map) : (d.player ? Number(d.player.map) : null);
       if (currentMapId) {
-        spotsCache[currentMapId] = d.spots;
-        saveSpotsCache();
-        processPassiveMapDiscovery(currentMapId, d.spots);
+        const oldSpotsStr = spotsCache[currentMapId] ? JSON.stringify(spotsCache[currentMapId]) : null;
+        const newSpotsStr = JSON.stringify(d.spots);
+        if (oldSpotsStr !== newSpotsStr) {
+          spotsCache[currentMapId] = d.spots;
+          requestSaveSpotsCache();
+          processPassiveMapDiscovery(currentMapId, d.spots);
+        }
       }
     }
 
@@ -4188,7 +5066,7 @@ class BotInstance {
     }
 
     // 🏰 Tự động thoát Phụ Bản Guild khi hết Boss (không cần đợi quái thường)
-    if (this.guildDungeonActive && !this._exitingGuildDungeon) {
+    if (this.guildDungeonActive && !this._exitingGuildDungeon && !this._guildDungeonRestoring) {
       const timeInDungeon = this.gdunEnteredAt ? (Date.now() - this.gdunEnteredAt) : 0;
       // Chỉ bắt đầu kiểm tra sau khi vào phụ bản ít nhất 3 giây để chờ server spawn boss
       if (timeInDungeon >= 3000 && this.bosses !== null) {
@@ -4196,11 +5074,11 @@ class BotInstance {
         const allBossesDead = (aliveBosses.length === 0);
 
         if (allBossesDead) {
-          // Đếm poll buffer nhỏ (2 poll) để tránh false-positive do server lag hoặc boss chưa kịp spawn
+          // Đếm poll buffer (3 poll liên tiếp) để tránh false-positive do server lag hoặc boss chưa kịp spawn
           this.gdunEmptyPolls = (this.gdunEmptyPolls || 0) + 1;
-          if (this.gdunEmptyPolls >= 2) {
+          if (this.gdunEmptyPolls >= 3) {
             this._exitingGuildDungeon = true;
-            this.addLog('SUCCESS', `🎉 [Guild Dungeon] Đã tiêu diệt hết Boss! Tự động thoát Phụ Bản về vị trí cũ.`);
+            this.addLog('SUCCESS', `🎉 [Guild Dungeon] Đã xác nhận tiêu diệt hết Boss (${this.gdunEmptyPolls} polls liên tiếp)! Bắt đầu thoát Phụ Bản và khôi phục vị trí...`);
             await this.exitGuildDungeon();
           }
         } else {
@@ -4216,7 +5094,7 @@ class BotInstance {
 
     // Auto-join event
     const shouldCheckEventJoin = (this.settings.autoEventJoinInv || this.settings.autoEventJoinGw || this.settings.autoEventJoinCw);
-    if (shouldCheckEventJoin && !this.inEventMode) {
+    if (shouldCheckEventJoin && !this.inEventMode && this.eventState === 'IDLE' && !this.isEventReturning) {
       const currentPlayer = d.player || this.player;
       if (currentPlayer && !currentPlayer.is_dead) {
         const playerLv = currentPlayer.lv || 1;
@@ -4228,6 +5106,7 @@ class BotInstance {
             const map2Def = getMapDefs().find(m => m.id === 2);
             const req2 = map2Def ? map2Def.req : 25;
             if (playerLv >= req2) {
+              this.captureEventSnapshot('inv');
               if (playerMap === 2) {
                 this.enterEventMode('inv', 2);
               } else {
@@ -4243,6 +5122,7 @@ class BotInstance {
             const map4Def = getMapDefs().find(m => m.id === 4);
             const req4 = map4Def ? map4Def.req : 20;
             if (playerLv >= req4) {
+              this.captureEventSnapshot('gw');
               if (playerMap === 4) {
                 this.enterEventMode('gw', 4);
               } else {
@@ -4258,6 +5138,7 @@ class BotInstance {
             const map4Def = getMapDefs().find(m => m.id === 4);
             const req4 = map4Def ? map4Def.req : 20;
             if (playerLv >= req4) {
+              this.captureEventSnapshot('cw');
               if (playerMap === 4) {
                 this.enterEventMode('cw', 4);
               } else {
@@ -4275,7 +5156,7 @@ class BotInstance {
     }
 
     // Auto-resume after event ends
-    if (this.inEventMode) {
+    if (this.inEventMode || this.eventState === 'ACTIVE') {
       if (this.currentEventKind === 'inv' && !isInvActive) {
         this.exitEventMode();
       } else if (this.currentEventKind === 'gw' && !isGwActive) {
@@ -4348,18 +5229,25 @@ class BotInstance {
         healReason = `HP dưới ${this.settings.eventPotionThreshold}% (Sự kiện)`;
       }
 
-      if (shouldActiveHeal) {
+      if (shouldActiveHeal && !this._urgentPotionPending) {
+        this._urgentPotionPending = true;
         this.addLog('HEAL', `💊 [Urgent Potion] ${healReason} -> Bơm máu khẩn cấp!`);
         this.sendRequest('https://ragnalok.online/human/xhrpg_upgrade.php', {
           line_uid: this.line_uid,
           session_token: this.session_token,
           action: 'use_potion_manual'
+        }, {
+          priority: 2,
+          dedupeKey: 'urgent_potion',
+          type: 'POTION'
         }).then(res => {
           if (res && res.ok && res.player) {
             this.updatePlayerState(res.player);
           }
         }).catch(e => {
           console.error(`[Urgent Potion Error] Failed to use potion:`, e.message);
+        }).finally(() => {
+          this._urgentPotionPending = false;
         });
       }
     }
@@ -4385,13 +5273,10 @@ class BotInstance {
       }
     }
 
-    // Check if we arrived back at the original map after event ends
-    if (this.isEventReturning && this.player) {
-      if (Number(this.player.map) === Number(this.eventReturnMapTarget)) {
-        this.isEventReturning = false;
-        this.eventReturnMapTarget = null;
-        this.addLog('SYSTEM', `🏠 [Auto Event] Đã quay lại bản đồ farm gốc thành công.`);
-      }
+    // Trạng thái đang khôi phục bản đồ & tọa độ Event được bảo toàn cho đến khi _finalizeEventRestoration hoàn tất
+    if (!this.eventSnapshot && this.eventState === 'IDLE') {
+      this.isEventReturning = false;
+      this.eventReturnMapTarget = null;
     }
 
     // 👥 Chỉ có Trưởng nhóm (Leader) hoặc bot chạy độc lập mới quản lý tiến độ chu kỳ xoay map
@@ -4527,12 +5412,24 @@ class BotInstance {
       }
     }
 
-    // Execute automation asynchronously without blocking main poll tick
-    this.runAutomation().catch(err => console.error('Automation error:', err));
+    // Execute automation asynchronously without blocking main poll tick, with mutex lock
+    if (!this.automationRunning) {
+      this.automationRunning = true;
+      (async () => {
+        try {
+          await this.runAutomation();
+        } catch (err) {
+          console.error('Automation error:', err);
+        } finally {
+          this.automationRunning = false;
+        }
+      })();
+    }
   }
 
   async runAutomation() {
     if (!this.player) return;
+    if (this._guildDungeonRestoring || this.eventState === 'RETURNING' || this.eventState === 'FAILED_RETRY' || this.isEventReturning) return;
 
     const isAtHome = (!this.isMvpCycling && Number(this.player.map) === 5 && (this.player.home_crops !== undefined || this.player.home_lv !== undefined));
 
@@ -4932,7 +5829,7 @@ class BotInstance {
         shouldWarpCheck = (this.settings.autoMap || (this.settings.bossHuntMode && this.settings.bossHuntMode !== 'off') || this.isMvpCycling || isMvpReturning);
       }
 
-      if (shouldWarpCheck && !this.guildDungeonActive && !this.inEventMode && Number(this.player.gdun_in) !== 1 && Number(this.player.map) !== 12 && Number(this.player.map) !== Number(activeTargetMapId)) {
+      if (shouldWarpCheck && !this.guildDungeonActive && !this._guildDungeonRestoring && !this.inEventMode && this.eventState === 'IDLE' && !this.isEventReturning && Number(this.player.gdun_in) !== 1 && Number(this.player.map) !== 12 && Number(this.player.map) !== Number(activeTargetMapId)) {
         const targetMapId = activeTargetMapId;
         const mapDef = getMapDefs().find(m => m.id === targetMapId);
         if (mapDef && (this.player.lv || 1) >= mapDef.req) {
@@ -4942,16 +5839,20 @@ class BotInstance {
             const isCwActive = this.lastCw && (this.lastCw.st === 'open' || this.lastCw.st === 'fight') && (!this.lastCw.ends || this.lastCw.ends > currentEpoch);
 
             let ok = false;
-            if (isGwActive) {
-              ok = await this.joinGuildWar();
-            } else if (isCwActive) {
-              ok = await this.joinCountryWar();
+            const kind = isGwActive ? 'gw' : (isCwActive ? 'cw' : null);
+            if (kind) {
+              this.captureEventSnapshot(kind);
+              if (kind === 'gw') {
+                ok = await this.joinGuildWar();
+              } else {
+                ok = await this.joinCountryWar();
+              }
             } else {
               this.addLog('WARNING', `⚠️ Sự kiện Bang/Quốc chiến đã kết thúc. Tự động thoát chế độ Event.`);
               this.exitEventMode();
             }
             if (ok) {
-              this.enterEventMode(isGwActive ? 'gw' : 'cw', 4);
+              this.enterEventMode(kind, 4);
             }
           } else {
             if (isMember && leader) {
@@ -5449,9 +6350,10 @@ function checkAndRecoverZombieBots() {
         console.error(`[Watchdog] 🚨 Zombie bot phát hiện: "${bot.name}" (${uid}) — im lặng ${Math.round(silentDuration / 1000)}s. Đang tự động khởi động lại...`);
         bot.addLog('WARNING', `🚨 Watchdog phát hiện bot bị treo im lặng ${Math.round(silentDuration / 1000)}s — Tự động khởi động lại poll loop`);
         try {
-          bot.stop('idle');
-        } catch (e) {}
-        bot.start();
+          bot.recover(`Watchdog phát hiện bot bị treo im lặng ${Math.round(silentDuration / 1000)}s`);
+        } catch (e) {
+          console.error(`[Watchdog Recovery Error] ${bot.name}:`, e.message);
+        }
         recoveredCount++;
       }
     }
@@ -6531,6 +7433,8 @@ app.get('/api/accounts', requireAuth, (req, res) => {
           lastGw: bot.lastGw || null,
           lastCw: bot.lastCw || null,
           inEventMode: bot.inEventMode || false,
+          eventState: bot.eventState || 'IDLE',
+          eventSnapshot: bot.eventSnapshot || null,
           tradeInvite: bot.tradeInvite || null,
           currentEventKind: bot.currentEventKind || null,
           guildDungeonActive: bot.guildDungeonActive || false,
@@ -6542,6 +7446,17 @@ app.get('/api/accounts', requireAuth, (req, res) => {
             woodPerMin: 0, stonePerMin: 0, ironPerMin: 0, copperPerMin: 0, herbPerMin: 0
           },
           spots: bot.spots || null,
+          pollTelemetry: {
+            pollStartedAt: bot.pollStartedAt || null,
+            pollFinishedAt: bot.pollFinishedAt || null,
+            pollDuration: bot.pollDuration || 0,
+            nextPollAt: bot.nextPollAt || null,
+            requestQueueDepth: bot.requestQueue ? bot.requestQueue.size : 0,
+            overlapCount: bot.overlapCount || 0,
+            timeoutCount: bot.timeoutCount || 0,
+            skippedImmediatePollCount: bot.skippedImmediatePollCount || 0,
+            pollGeneration: bot.pollGeneration || 0
+          },
           // Truyền danh sách bản đồ động từ cache xuống frontend (luôn dùng mới nhất)
           mapsList: getMapDefs(),
           // Spots cache của map hiện tại (để zone dropdown luôn có dữ liệu ngay cả khi bot chưa có spots mới)
@@ -7169,9 +8084,20 @@ app.get('/api/accounts/:line_uid/logs', requireAuth, (req, res) => {
   if (!checkAccountOwnership(req, res, bot)) return;
   res.json({
     logs: bot.logs,
+    systemLogs: bot.systemLogs || [],
+    gameLogs: bot.gameLogs || [],
     lootLogs: bot.lootLogs || [],
     mvpHuntLog: bot.mvpHuntLog || []
   });
+});
+
+// Clear system logs on-demand
+app.post('/api/accounts/:line_uid/logs/clear-system', requireAuth, (req, res) => {
+  const { line_uid } = req.params;
+  const bot = botInstances[line_uid];
+  if (!checkAccountOwnership(req, res, bot)) return;
+  bot.systemLogs = [];
+  res.json({ ok: true, message: 'Đã xóa log hệ thống' });
 });
 
 // Get offline rewards history
@@ -8375,6 +9301,19 @@ app.post('/api/accounts/:line_uid/action', requireAuth, async (req, res) => {
     }
     if (action === 'gdun_exit') {
       const ok = await bot.exitGuildDungeon();
+      const myTeamId = bot.settings.teamId || 'none';
+      if (myTeamId !== 'none' && bot.settings.teamRole === 'leader') {
+        const members = Object.values(botInstances).filter(b =>
+          b.userId === bot.userId &&
+          b.settings.teamRole === 'member' &&
+          (b.settings.teamId || 'none') === myTeamId &&
+          b.settings.teamSynced === true &&
+          b.status === 'running'
+        );
+        for (const mem of members) {
+          mem.exitGuildDungeon().catch(() => {});
+        }
+      }
       return res.json({ ok, msg: ok ? '↩️ Đã thoát khỏi Phụ Bản Guild' : 'Không thể thoát Phụ Bản Guild' });
     }
 
@@ -8411,6 +9350,7 @@ app.post('/api/accounts/:line_uid/action', requireAuth, async (req, res) => {
         // Trực tiếp kích hoạt Event Mode nếu người dùng nhấn vào thông báo
         const isInvActive = bot.lastInv && (bot.lastInv.st === 'pre' || bot.lastInv.st === 'active');
         if (targetMapNum === 2 && isInvActive) {
+          bot.captureEventSnapshot('inv');
           bot.enterEventMode('inv', 2);
         }
 
@@ -8476,6 +9416,10 @@ app.post('/api/accounts/:line_uid/action', requireAuth, async (req, res) => {
       payload.action = 'module_unequip';
       payload.weapon = (payload.weapon === 'sniper'||payload.weapon === 'knife'||payload.weapon === 'axe'||payload.weapon === 'robot'||payload.weapon === 'robot_gun'||payload.weapon === 'railgun'||payload.weapon === 'armor'||payload.weapon === 'house'||payload.weapon === 'turret') ? payload.weapon : 'pistol';
       payload.slot = payload.slot;
+    }
+
+    if (action === 'gwar_join' || action === 'cwar_join') {
+      bot.captureEventSnapshot(action === 'gwar_join' ? 'gw' : 'cw');
     }
 
     const response = await bot.sendRequest(url, payload);
@@ -9580,5 +10524,9 @@ module.exports = {
   fetchGameLoginHtml,
   fetchGameAsset,
   sanitizeSessionToken,
+  saveSpotsCache,
+  requestSaveSpotsCache,
+  BotRequestQueue,
+  combineAbortSignals,
   app
 };

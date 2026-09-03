@@ -2,6 +2,88 @@
 
 > Changelog of actual changes implemented.
 
+### 2026-09-03 - Tái Cấu Trúc Toàn Bộ Luồng Event Thành Session State Machine & Khôi Phục Tọa Độ Thật Trên Server (T83)
+
+- File đã đổi: [server.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [test.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/test.js), [.agent/TASKS.md](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/.agent/TASKS.md), [.agent/CHANGELOG.md](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/.agent/CHANGELOG.md), [.agent/DECISIONS.md](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/.agent/DECISIONS.md).
+- Đã làm:
+  - **Chụp snapshot TRƯỚC KHI di chuyển vào Event (`server.js`)**:
+    - Xây dựng phương thức `captureEventSnapshot(kind)` lưu giữ toàn bộ dữ liệu: `kind`, `map`, `x`, `y`, `explore_cx`, `explore_cy`, `targetMap`, `autoMap`, `autoZone`, `lock_zone_center`, `targetZone`, `createdAt`.
+    - Gọi `captureEventSnapshot` trước các lệnh `joinGuildWar()`, `joinCountryWar()`, và `warpToMap(2)` trong mọi luồng (Auto Join `pollGame`, Map routing sang Map 4, Dashboard Action API).
+    - Lưu snapshot bền vững vào `accounts.json` qua `_persistEventSnapshot()`.
+  - **Session State Machine cho Event (`server.js`)**:
+    - Quản lý trạng thái rõ ràng: `IDLE` -> `ENTERING` -> `ACTIVE` -> `EXITING` -> `RETURNING` -> `FAILED_RETRY`.
+    - Thêm lock `_eventTransitionLock` trong `enterEventMode()` và `exitEventMode()` chống xung đột.
+    - Cung cấp `eventState` và `eventSnapshot` trong response của `/api/accounts`.
+  - **Khôi phục Bản đồ và Tọa độ Thật trên Game Server qua `xhrpg_game.php` (`server.js`)**:
+    - Khi kết thúc event, bot chuyển sang `RETURNING` và warp về `snap.map` (không xóa snapshot sớm!).
+    - Gửi request di chuyển thật: `traveling: 1, explore_cx: snap.x, explore_cy: snap.y, lock_pos: 0, explore_radius: 300` (không cộng noise ngẫu nhiên).
+    - Đo khoảng cách `dist = Math.hypot(player.x - snap.x, player.y - snap.y) <= 40m` (hoặc timeout 4 phút).
+    - Chỉ khi server xác nhận vị trí mới gọi `_finalizeEventRestoration()`, khôi phục toàn diện cài đặt (`autoMap`, `autoZone`, `lock_zone_center`, `targetZone`, `targetMap`, `explore_cx/cy`), xóa snapshot và chuyển về `IDLE`.
+  - **Tự động Khôi phục sau khi Bot / Server Restart (`server.js`)**:
+    - Nạp `this.eventSnapshot` từ `accounts.json` trong constructor.
+    - Kiểm tra ở đầu `pollGame`: nếu event vẫn còn active và ở đúng map thì khôi phục `ACTIVE`; nếu event đã hết thì tiếp tục quy trình `RETURNING`. Không xóa snapshot cho tới khi về đích.
+  - **Khóa Mutex Chống Chạy Chồng Chéo (Race Conditions) (`server.js`)**:
+    - Thêm mutex `automationRunning` bọc `runAutomation()` trong `pollGame()`.
+    - Chặn `runAutomation()` khi bot đang ở trạng thái `RETURNING` hoặc `FAILED_RETRY`.
+    - Tạm khóa các automation cạnh tranh (Auto Map, Auto Zone, Leader Sync Map, MVP Targeting) trong khi `eventState !== 'IDLE'`.
+  - **Bộ kiểm thử Unit Tests 8 bài bắt buộc (`test.js`)**:
+    - Bổ sung trọn bộ Test 1 -> Test 8: Chụp snapshot Map 3 tại [450, 780] trước khi join; Quay lại đúng Map 3; Khôi phục X/Y và explore_cx/cy trên server; Warp retry thành công khi lỗi; Restart khi đang Event; Restart sau khi Event kết thúc; Invasion Map 2 không bị kẹt; Mutex concurrency guard cho automation & event lock.
+    - Chạy `npm test` đạt **100% Passed**.
+
+---
+
+### 2026-09-03 - Tái Cấu Trúc Toàn Bộ Luồng Auto Boss Guild & Khôi Phục Tọa Độ Thực Tế Trên Server (T82)
+
+- File đã đổi: [server.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [test.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/test.js), [.agent/TASKS.md](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/.agent/TASKS.md), [.agent/CHANGELOG.md](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/.agent/CHANGELOG.md), [.agent/DECISIONS.md](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/.agent/DECISIONS.md).
+- Đã làm:
+  - **Khởi tạo và quản lý Snapshot bất biến bền vững (`server.js`)**:
+    - Chụp snapshot vị trí trước khi vào Guild Dungeon duy nhất 1 lần (Map, X, Y, Explore CX/CY, AutoMap, AutoZone, Lock Zone Center, Target Zone, Target Map), không bị ghi đè khi gọi lặp.
+    - Bổ sung `_persistGdunSnapshot()` lưu bền vững `gdunSnapshot` vào `accounts.json` giúp bot không mất vị trí nếu khởi động lại tiến trình.
+    - Rollback snapshot an toàn nếu API `gdun_enter` trả lỗi từ server.
+  - **Quản lý trạng thái an toàn & Đồng bộ thoát liên hoàn (`server.js`)**:
+    - Quản lý các cờ: `guildDungeonActive`, `_exitingGuildDungeon`, `_exitingGuildDungeonLocked`, `_guildDungeonRestoring`, `_gdunRestoreStartedAt`.
+    - Bảo toàn snapshot khi `gdun_exit` gặp lỗi kết nối hoặc server từ chối, sẵn sàng thử lại ở nhịp poll sau.
+    - Đồng bộ lệnh thoát phụ bản tự động cho các thành viên đội khi Trưởng nhóm gửi yêu cầu thoát.
+  - **Khôi phục bản đồ và tọa độ thật trên Game Server qua `xhrpg_game.php` (`server.js`)**:
+    - Sau khi thoát khỏi phụ bản (Map 12), nếu server chưa ở đúng Map snapshot, bot tự động gửi lệnh `warpToMap(snap.map)`.
+    - Khi đã ở đúng Map, bot chuyển sang trạng thái `_guildDungeonRestoring = true`. Gửi payload di chuyển hợp lệ trong game: `traveling: 1`, `explore_cx: snap.x`, `explore_cy: snap.y`, `lock_pos: 0`, `explore_radius: 300` (loại bỏ độ lệch ngẫu nhiên noise để di chuyển thẳng về đích).
+    - Liên tục kiểm tra khoảng cách Euclidean giữa vị trí server phản hồi và snapshot (`dist = Math.hypot(player.x - snap.x, player.y - snap.y)`).
+    - Chỉ kết luận khôi phục thành công khi `dist <= 40m` (hoặc timeout 35s), sau đó mới gọi `_finalizeGdunRestoration()`, đặt lại `explore_cx/cy`, kích hoạt `lock_pos` nếu có cấu hình và xóa bỏ snapshot.
+  - **Khóa triệt để các xung đột tự động (Race Conditions) trong `pollGame()` (`server.js`)**:
+    - Trong giai đoạn `_guildDungeonRestoring === true`: Tạm khóa Auto Map, Auto Zone, Leader Sync Map, MVP Boss targeting và Event PK targeting.
+    - Thành viên tự lưu snapshot vị trí riêng và tự khôi phục về tọa độ của mình, không bị kéo giật theo vị trí của Trưởng nhóm.
+  - **Bộ đệm chống False-Positive khi phát hiện hết Boss (`server.js`)**:
+    - Yêu cầu tối thiểu 3 giây trong dungeon và xác nhận liên tiếp 3 nhịp poll rỗng boss (`gdunEmptyPolls >= 3`) mới thực hiện thoát phụ bản.
+  - **Kiểm thử Unit Tests toàn diện (`test.js`)**:
+    - Cập nhật test Guild Dungeon cũ phù hợp với cơ chế khôi phục tọa độ thật trên server.
+    - Bổ sung trọn vẹn 8 nhóm test cases (Test A -> Test H): Snapshot vị trí, Khôi phục Map từ Map 12, Khôi phục tọa độ thật qua poll di chuyển, Khôi phục settings, Chống false-positive 3 nhịp poll, Thoát thất bại bảo toàn snapshot, Team Member khôi phục độc lập với Leader, và Regression test. Chạy `npm test` đạt 100% Passed.
+
+---
+
+### 2026-09-03 - Tách Biệt Thẻ Log & Bổ Sung Thẻ Giám Sát Hệ Thống Chuyên Biệt (T81)
+
+- File đã đổi: [server.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [test.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/test.js), [public/app.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/public/app.js), [public/app.css](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/public/app.css), [.agent/TASKS.md](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/.agent/TASKS.md), [.agent/CHANGELOG.md](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/.agent/CHANGELOG.md), [.agent/DECISIONS.md](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/.agent/DECISIONS.md).
+- Đã làm:
+  - **Tách biệt bộ nhớ đệm Log phía Backend (`server.js`)**:
+    - Khởi tạo `this.systemLogs = []` (dung lượng 150 mục) và `this.gameLogs = []` (dung lượng 100 mục) trên `BotInstance`, song song với mảng `this.logs` tổng để bảo đảm tương thích ngược 100%.
+    - Cập nhật hàm `addLog(type, msg)` tự động phân loại: Các sự kiện Auth, Token refresh, Proxy, Lỗi mạng, Watchdog zombie, Cấu hình, Vân tay được đưa vào `systemLogs`; các sự kiện chiến đấu quái, diệt Boss, nhặt đồ, nâng cấp trang bị, nông trại đưa vào `gameLogs`.
+    - Cập nhật API `GET /api/accounts/:line_uid/logs` trả về cả `systemLogs` và `gameLogs`.
+    - Bổ sung API `POST /api/accounts/:line_uid/logs/clear-system` hỗ trợ người dùng dọn sạch log hệ thống trên giao diện.
+  - **Thẻ Tab Mới `🖥️ Hệ Thống` trên Bảng điều khiển (`public/app.js`)**:
+    - Thêm nút tab `tab-btn-system` vào thanh điều hướng tab `card-tabs-nav` của mỗi Bot Card.
+    - Xây dựng tab pane `pane-system` chuyên biệt giám sát sức khỏe bot:
+      - **Vitals Banner**: Trực quan hóa tức thì trạng thái Token & Auto-Relogin PHPSESSID, Proxy & Mạng, Nhịp Polling thực tế & Ping độ trễ, Vân tay thiết bị đang kích hoạt.
+      - **Filter Bar**: Bộ lọc 4 chế độ (`Tất cả`, `🚨 Lỗi`, `⚠️ Cảnh báo`, `ℹ️ Hệ thống`) kèm badge đếm số lỗi đỏ rực rỡ khi phát hiện sự cố.
+      - **System Terminal**: Màn hình console đen phong cách hacker, phân màu rõ rệt từng loại lỗi (`[ERROR]` đỏ, `[WARN]` vàng, `[SYSTEM]` xanh dương, `[SUCCESS]` xanh lá), cuộn mượt mà.
+  - **Tối ưu Thẻ `🎮 Log Game` (`public/app.js`)**:
+    - Đổi tên nhãn tab thành `🎮 Log Game`.
+    - Tách biệt sub-tab `🎮 In-Game` chỉ hiển thị thuần túy hoạt động trong game, không còn bị chen lấn hay gián đoạn bởi các dòng log lỗi token hay proxy.
+    - Thêm sub-tab `🖥️ Hệ Thống` ngay bên trong thẻ Log để chuyển đổi nhanh sang xem log hệ thống mà không cần đổi tab chính.
+  - **Kiểm thử Unit Tests (`test.js`)**:
+    - Bổ sung bộ test `T81 Dedicated System Log & In-Game Log Separation Engine` kiểm tra phân loại tự động, tính cô lập 2 chiều (không rò rỉ log hệ thống sang game và ngược lại) và cơ chế cap dung lượng buffer 150. Chạy `npm test` đạt 100% Passed.
+
+---
+
 ### 2026-09-03 - Hệ Thống Vân Tay Trình Duyệt Bền Vững & Chống Phát Hiện Bot (T80)
 
 - File đã đổi: [server.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [test.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/test.js), [public/app.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/public/app.js), [public/index.html](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/public/index.html), [accounts.json](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/accounts.json), [.agent/TASKS.md](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/.agent/TASKS.md), [.agent/CHANGELOG.md](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/.agent/CHANGELOG.md).

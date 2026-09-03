@@ -2,6 +2,82 @@
 
 > Captured architectural decisions and trade-offs.
 
+## 2026-09-03 - Tái Cấu Trúc Toàn Bộ Luồng Event Thành Session State Machine & Khôi Phục Tọa Độ Thật Trên Server (T83)
+
+- Bối cảnh:
+  - Trước đây, khi bot tham gia Sự kiện (Guild War `gw`, Country War `cw`, Invasion `inv`), các hành động `joinGuildWar()`, `joinCountryWar()`, hoặc `warpToMap(2)` được gọi TRƯỚC, dẫn đến `player.map` đã đổi sang Map 4 hoặc Map 2 khi `enterEventMode()` được gọi. Điều này làm mất bản đồ gốc và hoàn toàn không lưu tọa độ X/Y ban đầu.
+  - Snapshot chỉ lưu tạm trong RAM (`eventOriginalMap`), nếu bot restart giữa chừng sẽ mất dữ liệu và kẹt lại Map sự kiện.
+  - Khi event kết thúc, `exitEventMode()` chỉ đổi `targetMap` mà không gửi lệnh di chuyển đưa nhân vật về tọa độ thật trên server, đồng thời xóa snapshot quá sớm trước khi xác nhận về đích.
+  - `pollGame()` gọi `runAutomation().catch(...)` không await và không có mutex, gây nguy cơ race conditions khi có hai nhịp automation cùng chạy.
+- Quyết định:
+  1. **Chụp Snapshot TRƯỚC KHI Gửi Lệnh Tham Gia Event (`captureEventSnapshot`)**:
+     - Lưu đầy đủ: `kind`, `map`, `x`, `y`, `explore_cx`, `explore_cy`, `targetMap`, `autoMap`, `autoZone`, `lock_zone_center`, `targetZone`, `createdAt`.
+     - Chụp trước mọi lời gọi join/warp và lưu bền vững vào `accounts.json` qua `_persistEventSnapshot()`.
+  2. **Event Session State Machine**:
+     - Quản lý các trạng thái: `IDLE` -> `ENTERING` -> `ACTIVE` -> `EXITING` -> `RETURNING` -> `FAILED_RETRY`.
+     - Khi warp lỗi, chuyển sang `FAILED_RETRY` và giữ nguyên snapshot để retry ở nhịp poll tiếp theo.
+     - Khóa `_eventTransitionLock` đảm bảo `enterEventMode` và `exitEventMode` không bị gọi trùng lặp.
+  3. **Khôi phục Bản đồ và Tọa độ Thật trên Server qua `xhrpg_game.php`**:
+     - Warp về `snap.map`. Khi đã ở đúng map, gửi request di chuyển: `traveling: 1, explore_cx: snap.x, explore_cy: snap.y, lock_pos: 0, explore_radius: 300` không thêm noise ngẫu nhiên.
+     - Đo khoảng cách Euclidean mỗi tick. Chỉ khi `dist <= 40m` (hoặc timeout 4 phút) mới gọi `_finalizeEventRestoration()`, khôi phục toàn diện cài đặt và xóa snapshot.
+  4. **Tự động Khôi phục sau Restart**:
+     - Constructor nạp `account.eventSnapshot` từ `accounts.json`.
+     - Đầu nhịp poll: Nếu event vẫn active -> khôi phục `ACTIVE`; nếu event đã hết -> tự động tiếp tục quy trình `RETURNING`.
+  5. **Mutex Chống Chạy Chồng Chéo**:
+     - Thêm cờ mutex `automationRunning` bọc `runAutomation()` trong `pollGame()`.
+     - Khóa các automation farm, auto zone, leader sync khi đang ở trạng thái `RETURNING` hoặc `FAILED_RETRY`.
+- Kết quả:
+  - Giải quyết triệt để vấn đề mất map gốc, kẹt Map 2 / Map 4, không khôi phục tọa độ thật và race condition.
+  - Toàn bộ 8 bài unit test bắt buộc trong `test.js` và toàn bộ test suite dự án đạt 100% Passed.
+
+---
+
+## 2026-09-03 - Tái Cấu Trúc Toàn Bộ Luồng Auto Boss Guild & Khôi Phục Tọa Độ Thực Tế Trên Server (T82)
+
+- Bối cảnh:
+  - Trước đây, sau khi tiêu diệt xong Boss trong Phụ Bản Guild (Guild Dungeon - Map 12), hàm `exitGuildDungeon()` gọi `warpToMap(returnMap)`. Tuy nhiên, API `xhrpg_warp.php` chỉ chuyển đổi map và đưa nhân vật về điểm spawn mặc định của map (thường là 1125, 1125).
+  - Code cũ sau đó gán cứng `this.player.x = returnX; this.player.y = returnY;` ở local state. Điều này khiến Dashboard hiển thị tọa độ cũ, nhưng thực tế nhân vật trên server vẫn đứng tại điểm spawn hoặc bị kẹt.
+  - Ngoài ra, `settings.explore_cx` và `settings.explore_cy` không được khôi phục đầy đủ; các tính năng tự động khác (Auto Map, Auto Zone, Leader Sync, MVP Cycle) chạy song song và gây ra race condition kéo giật vị trí của bot; và danh sách Boss rỗng do lag mạng có thể gây false-positive thoát phụ bản sớm.
+- Quyết định:
+  1. **Khôi phục Tọa độ Thật trên Server qua Game Request Tick (`xhrpg_game.php`)**:
+     - Không gán tọa độ ảo ở local. Sau khi warp về đúng `snap.map`, kích hoạt trạng thái `_guildDungeonRestoring = true`.
+     - Trong nhịp `pollGame()`, gửi payload di chuyển hợp lệ trong game: `traveling: 1, explore_cx: snap.x, explore_cy: snap.y, lock_pos: 0, explore_radius: 300` không cộng thêm noise ngẫu nhiên để nhân vật bước thẳng về vị trí snapshot.
+     - Kiểm tra khoảng cách phản hồi từ server mỗi tick: `dist = Math.hypot(player.x - snap.x, player.y - snap.y)`.
+     - Khi `dist <= 40m` (hoặc timeout 35s), gọi `_finalizeGdunRestoration()`, chuyển `traveling = 0`, khôi phục settings ban đầu và giải phóng snapshot.
+  2. **Quản lý Snapshot Bất Biến & Bền Vững**:
+     - Chụp snapshot vị trí và cấu hình duy nhất 1 lần khi bắt đầu phiên phụ bản.
+     - Lưu trữ bền vững vào `accounts.json` qua `_persistGdunSnapshot()` để duy trì trạng thái kể cả khi bot restart. Rollback nếu request vào phụ bản thất bại.
+     - Khi thoát phụ bản lỗi, giữ nguyên snapshot và cờ trạng thái để tự động thử lại.
+  3. **Khóa Độc Quyền Trạng Thái trong Giai đoạn Khôi phục**:
+     - Khi `_guildDungeonRestoring === true`, khóa mọi automation cạnh tranh (Auto Map, Auto Zone, MVP Targeting, Event PK, Leader Map Sync).
+     - Đối với Team Member: Tự lưu snapshot riêng biệt và tự khôi phục về tọa độ ban đầu của mình, không bị giật theo Trưởng nhóm.
+  4. **Bộ đệm 3 Nhịp Poll Chống False-Positive**:
+     - Yêu cầu ở trong phụ bản tối thiểu 3 giây và phát hiện boss rỗng trong 3 nhịp poll liên tiếp (`gdunEmptyPolls >= 3`) mới thực hiện thoát phụ bản.
+- Kết quả:
+  - Nhân vật thực sự di chuyển và đứng đúng vị trí ban đầu trên game server.
+  - Vượt qua 100% các bài kiểm thử unit tests (Test A -> Test H) trong `test.js`.
+
+---
+
+## 2026-09-03 - Tách Biệt Thẻ Log & Bổ Sung Thẻ Giám Sát Hệ Thống Chuyên Biệt (T81)
+
+- Bối cảnh:
+  - Trước đây, `BotInstance` chỉ có duy nhất một mảng `this.logs` giới hạn 50 mục, dùng chung cho cả log hệ thống (lỗi kết nối, auth/session refresh, proxy switch, watchdog restart, cấu hình) và log in-game (quái diệt, nhận exp/vàng, nhặt đồ, nâng cấp, farm nông trại).
+  - Vì các hoạt động farm trong game sinh log liên tục với tần suất cao, các log lỗi hệ thống hoặc cảnh báo mạng quan trọng thường bị đẩy trôi (shift out) rất nhanh, khiến người dùng không thể chẩn đoán được nguyên nhân khi bot gặp sự cố.
+- Quyết định:
+  1. **Tách biệt bộ nhớ đệm Buffer phía Server**:
+     - Bổ sung `this.systemLogs` (lưu trữ 150 mục) chỉ dành riêng cho các sự kiện hạ tầng, lỗi và cảnh báo.
+     - Bổ sung `this.gameLogs` (lưu trữ 100 mục) chỉ dành cho các diễn biến chiến đấu, farm và sự kiện game.
+     - Duy trì `this.logs` tổng để bảo đảm tính tương thích ngược 100% với các API và unit test hiện hành.
+  2. **Tách biệt giao diện Dashboard**:
+     - Thêm tab chính `🖥️ Hệ Thống` trên mỗi Card bot: Hiển thị Vitals Banner hạ tầng (Session/Token, Proxy/IP, Ping, Polling, Vân tay) và Terminal chuyên biệt với bộ lọc đa mức (`Tất cả`, `Lỗi ❌`, `Cảnh báo ⚠️`, `Hệ thống ℹ️`) kèm badge đếm lỗi.
+     - Tối ưu tab `🎮 Log Game`: Sub-tab `🎮 In-Game` chỉ hiển thị diễn biến game mà không bị gián đoạn bởi các dòng log kỹ thuật; tích hợp sub-tab `🖥️ Hệ Thống` ngay bên trong để chuyển đổi nhanh khi cần.
+- Kết quả:
+  - Giúp người vận hành bot dễ dàng phân tách việc theo dõi tiến độ nhân vật và chẩn đoán sự cố mạng/auth.
+  - Vượt qua 100% các unit test tự động trong `test.js`.
+
+---
+
 ## 2026-09-03 - Hệ Thống Vân Tay Trình Duyệt Bền Vững & Chống Phát Hiện Bot (T80)
 
 - Bối cảnh:
