@@ -2114,6 +2114,9 @@ class BotInstance {
     this.automationRunning = false;   // Mutex lock cho runAutomation
     this.eventReturnStartedAt = this.eventSnapshot ? Date.now() : 0;
     this.eventReturnRetries = 0;
+    this.isEventCheckinOnly = false;
+    this.eventCheckinStartedAt = 0;
+    this.warCheckinCompletedKey = account.warCheckinCompletedKey || null;
     this.inEventMode = false;
     this.currentEventKind = this.eventSnapshot ? (this.eventSnapshot.kind || null) : null;
     this.eventOriginalMap = this.eventSnapshot ? this.eventSnapshot.map : null;
@@ -2368,6 +2371,7 @@ class BotInstance {
       autoEventJoinInv: false,
       autoEventJoinGw: false,
       autoEventJoinCw: false,
+      autoWarCheckin: false,
       eventPotionThreshold: 0,
       eventTargetMinDef: false,
       eventAttackRange: 300,
@@ -2704,6 +2708,30 @@ class BotInstance {
     }
   }
 
+  _getWarCheckinKey(kind) {
+    const eventData = kind === 'gw' ? this.lastGw : this.lastCw;
+    const eventId = eventData && (eventData.ends || eventData.start || eventData.starts);
+    if (eventId) return `${kind}:${eventId}`;
+    const now = new Date();
+    return `${kind}:${now.getFullYear()}-${now.getMonth()}-${now.getDate()}-${now.getHours()}`;
+  }
+
+  _isWarCheckinWindow(now = new Date()) {
+    return now.getMinutes() >= 35;
+  }
+
+  _rollbackWarCheckinEntry() {
+    if (!this.eventSnapshot || !this.eventSnapshot.checkinOnly) return;
+    this.eventSnapshot = null;
+    this.eventState = 'IDLE';
+    this.inEventMode = false;
+    this.currentEventKind = null;
+    this.isEventCheckinOnly = false;
+    this.eventCheckinStartedAt = 0;
+    this.isEventReturning = false;
+    this._persistEventSnapshot();
+  }
+
   // Chụp snapshot vị trí & cấu hình ban đầu TRƯỚC KHI chuyển map vào Event
   captureEventSnapshot(kind = 'gw') {
     if (this.eventSnapshot) {
@@ -2770,6 +2798,7 @@ class BotInstance {
       const idx = currentAccounts.findIndex(acc => acc.line_uid === this.line_uid);
       if (idx !== -1) {
         currentAccounts[idx].settings = this.settings;
+        if (snap.checkinOnly && snap.checkinKey) currentAccounts[idx].warCheckinCompletedKey = snap.checkinKey;
         delete currentAccounts[idx].eventSnapshot;
         saveAccounts(currentAccounts);
       }
@@ -2783,6 +2812,8 @@ class BotInstance {
     this.eventReturnMapTarget = null;
     this.eventReturnStartedAt = 0;
     this.eventReturnRetries = 0;
+    this.isEventCheckinOnly = false;
+    this.eventCheckinStartedAt = 0;
     this.eventOriginalMap = null;
     this.eventOriginalAutoMap = null;
     this.eventOriginalAutoZone = null;
@@ -2791,7 +2822,7 @@ class BotInstance {
     this._persistEventSnapshot();
   }
 
-  enterEventMode(kind, mapId) {
+  enterEventMode(kind, mapId, options = {}) {
     if (this._eventTransitionLock) return;
     this._eventTransitionLock = true;
     try {
@@ -2805,6 +2836,8 @@ class BotInstance {
       this.inEventMode = true;
       this.currentEventKind = kind;
       this.eventState = 'ACTIVE';
+      this.isEventCheckinOnly = options.checkinOnly === true;
+      this.eventCheckinStartedAt = this.isEventCheckinOnly ? Date.now() : 0;
 
       this.addLog('SYSTEM', `🚀 Kích hoạt Chế độ Event [${kind.toUpperCase()}]. Vị trí gốc bảo toàn: Map ${this.eventSnapshot ? this.eventSnapshot.map : 1}.`);
 
@@ -4404,7 +4437,7 @@ class BotInstance {
 
     // 0. Auto Event PK Targeting (Priority 0 khi trong Event PK và không trong tiến trình khôi phục vị trí)
     let targetedPk = false;
-    if (!this._guildDungeonRestoring && !isEventRestoring && this.inEventMode && this.eventState === 'ACTIVE' && (this.currentEventKind === 'gw' || this.currentEventKind === 'cw')) {
+    if (!this._guildDungeonRestoring && !isEventRestoring && !this.isEventCheckinOnly && this.inEventMode && this.eventState === 'ACTIVE' && (this.currentEventKind === 'gw' || this.currentEventKind === 'cw')) {
       const alivePlayers = (this.others) ? this.others.filter(p => !p.is_dead) : [];
       if (alivePlayers.length > 0) {
         const px = this.player ? this.player.x : 0;
@@ -5092,6 +5125,26 @@ class BotInstance {
     const isGwActive = this.lastGw && (this.lastGw.st === 'open' || this.lastGw.st === 'fight') && (!this.lastGw.ends || this.lastGw.ends > currentEpoch);
     const isCwActive = this.lastCw && (this.lastCw.st === 'open' || this.lastCw.st === 'fight') && (!this.lastCw.ends || this.lastCw.ends > currentEpoch);
 
+    // Tính năng riêng: chỉ vào GW/CW điểm danh từ phút 35, không thay đổi auto-join cũ.
+    if (this.settings.autoWarCheckin && !this.inEventMode && this.eventState === 'IDLE' && !this.isEventReturning && this._isWarCheckinWindow()) {
+      const currentPlayer = d.player || this.player;
+      const isAtHome = currentPlayer && !this.isMvpCycling && Number(currentPlayer.map) === 5 && (currentPlayer.home_crops !== undefined || currentPlayer.home_lv !== undefined);
+      const checkinKind = isGwActive ? 'gw' : (isCwActive ? 'cw' : null);
+      const checkinKey = checkinKind ? this._getWarCheckinKey(checkinKind) : null;
+      if (currentPlayer && !currentPlayer.is_dead && !isAtHome && checkinKind && checkinKey !== this.warCheckinCompletedKey) {
+        this.captureEventSnapshot(checkinKind);
+        this.eventSnapshot.checkinOnly = true;
+        this.eventSnapshot.checkinKey = checkinKey;
+        this._persistEventSnapshot();
+        const ok = checkinKind === 'gw' ? await this.joinGuildWar() : await this.joinCountryWar();
+        if (ok) {
+          this.enterEventMode(checkinKind, 4, { checkinOnly: true });
+          return;
+        }
+        this._rollbackWarCheckinEntry();
+      }
+    }
+
     // Auto-join event
     const shouldCheckEventJoin = (this.settings.autoEventJoinInv || this.settings.autoEventJoinGw || this.settings.autoEventJoinCw);
     if (shouldCheckEventJoin && !this.inEventMode && this.eventState === 'IDLE' && !this.isEventReturning) {
@@ -5157,6 +5210,11 @@ class BotInstance {
 
     // Auto-resume after event ends
     if (this.inEventMode || this.eventState === 'ACTIVE') {
+      if (this.isEventCheckinOnly && this.eventCheckinStartedAt && Date.now() - this.eventCheckinStartedAt >= 60 * 1000) {
+        this.addLog('SYSTEM', `⏱️ [${this.currentEventKind.toUpperCase()}] Đã điểm danh đủ 60 giây. Tự động thoát và quay lại vị trí train.`);
+        this.exitEventMode();
+        return;
+      }
       if (this.currentEventKind === 'inv' && !isInvActive) {
         this.exitEventMode();
       } else if (this.currentEventKind === 'gw' && !isGwActive) {
@@ -5429,6 +5487,7 @@ class BotInstance {
 
   async runAutomation() {
     if (!this.player) return;
+    if (this.isEventCheckinOnly) return;
     if (this._guildDungeonRestoring || this.eventState === 'RETURNING' || this.eventState === 'FAILED_RETRY' || this.isEventReturning) return;
 
     const isAtHome = (!this.isMvpCycling && Number(this.player.map) === 5 && (this.player.home_crops !== undefined || this.player.home_lv !== undefined));

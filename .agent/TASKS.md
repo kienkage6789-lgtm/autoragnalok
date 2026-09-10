@@ -3,6 +3,19 @@
 > Work Breakdown Structure. Update task states immediately upon changes.
 > Statuses: todo | doing | blocked | review | done
 
+### [x] T84 - Tính Năng Riêng: Check-in Guild/Country War Sau Phút 35
+- Mô tả: Bổ sung một tính năng độc lập với auto-join event hiện tại: từ phút 35, bot có thể vào Guild War/Country War để điểm danh khoảng 1 phút rồi tự động thoát và khôi phục đúng Map/tọa độ/cấu hình train trước đó. Không thay đổi hành vi auto-join GW/CW hiện tại.
+- File liên quan: `server.js`, `test.js`, `.agent/TASKS.md`, `.agent/DECISIONS.md`, `.agent/CHANGELOG.md`
+- Acceptance criteria:
+  - [x] Có toggle riêng, không dùng lại `autoEventJoinGw/autoEventJoinCw`.
+  - [x] GW/CW check-in chạy từ phút 35, giữ khoảng 60 giây, không tự PK.
+  - [x] Không vào lại cùng một lượt event sau khi đã điểm danh.
+  - [x] Khôi phục đúng vị trí train qua pipeline snapshot hiện tại.
+  - [x] Auto-join GW/CW hiện tại và Invasion không bị thay đổi.
+  - [x] Bổ sung test và `npm test` đạt 100%.
+- Phụ thuộc: T83
+- Trạng thái: done
+
 ### [x] T83 - Tái Cấu Trúc Toàn Bộ Luồng Event Thành Session State Machine & Khôi Phục Tọa Độ Thật Trên Server
 - Description: Tái cấu trúc toàn bộ luồng tham gia Sự kiện (Guild War `gw`, Country War `cw`, Invasion `inv`) thành một Session State Machine hoàn chỉnh với snapshot bất biến lưu bền vững vào `accounts.json` TRƯỚC KHI di chuyển. Khôi phục bản đồ và tọa độ thực tế trên game server qua `xhrpg_game.php`, khôi phục sau khi bot restart, khóa mutex chống race condition cho `runAutomation`, `enterEventMode`, `exitEventMode`, cơ chế retry/timeout bảo vệ và bộ test 8 bài toàn diện.
 - Files related: `server.js`, `test.js`, `.agent/TASKS.md`, `.agent/CHANGELOG.md`, `.agent/DECISIONS.md`

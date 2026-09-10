@@ -2131,6 +2131,32 @@ try {
   console.log('✅ T83 Event Session State Machine & Real Coordinate Restoration Tests Passed successfully!');
 
   // ==========================================
+  // T84 - INDEPENDENT GW/CW CHECK-IN TESTS
+  // ==========================================
+  console.log('Testing T84 independent Guild/Country War check-in...');
+  {
+    const checkinBot = new BotInstance({ line_uid: 't84_checkin', settings: {} });
+    assert.strictEqual(checkinBot.settings.autoWarCheckin, false, 'T84: independent check-in must default to off');
+    assert.strictEqual(checkinBot._isWarCheckinWindow(new Date(2026, 0, 1, 0, 34, 59)), false, 'T84: check-in is disabled before minute 35');
+    assert.strictEqual(checkinBot._isWarCheckinWindow(new Date(2026, 0, 1, 0, 35, 0)), true, 'T84: check-in is available from minute 35');
+    checkinBot.player = { map: 3, x: 500, y: 600, lv: 60 };
+    checkinBot.lastGw = { st: 'open', ends: 1900000000 };
+    checkinBot.captureEventSnapshot('gw');
+    checkinBot.eventSnapshot.checkinOnly = true;
+    checkinBot.eventSnapshot.checkinKey = checkinBot._getWarCheckinKey('gw');
+    checkinBot.enterEventMode('gw', 4, { checkinOnly: true });
+    assert.strictEqual(checkinBot.isEventCheckinOnly, true, 'T84: independent check-in must mark its own session');
+    checkinBot.eventCheckinStartedAt = Date.now() - 60000;
+    assert.ok(checkinBot.eventCheckinStartedAt <= Date.now() - 60000, 'T84: one-minute timer must be armed');
+    checkinBot.eventState = 'ENTERING';
+    checkinBot.inEventMode = false;
+    checkinBot._rollbackWarCheckinEntry();
+    assert.strictEqual(checkinBot.eventSnapshot, null, 'T84: failed independent check-in must rollback its snapshot');
+    assert.strictEqual(checkinBot.eventState, 'IDLE', 'T84: failed independent check-in must return to IDLE');
+  }
+  console.log('✅ T84 independent Guild/Country War check-in tests passed!');
+
+  // ==========================================
   // T75 - MANUAL MARKET DASHBOARD INTEGRATION TESTS
   // ==========================================
   console.log('Testing T75 Manual Market Format & Translations...');

@@ -2,6 +2,12 @@
 
 > Captured architectural decisions and trade-offs.
 
+## 2026-09-10 - Định Hướng Tách Riêng Tính Năng GW/CW Check-in
+
+- Tính năng mới phải có toggle/cấu hình riêng, không thay đổi `autoEventJoinGw` hoặc `autoEventJoinCw`.
+- Dùng lại pipeline snapshot/return hiện có để bảo toàn Map, tọa độ và cấu hình train.
+- Mặc định: bắt đầu xét từ phút 35, giữ trong event 60 giây, không chạy PK tự động.
+
 ## 2026-09-03 - Tái Cấu Trúc Toàn Bộ Luồng Event Thành Session State Machine & Khôi Phục Tọa Độ Thật Trên Server (T83)
 
 - Bối cảnh:

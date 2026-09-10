@@ -1626,6 +1626,14 @@ document.addEventListener('DOMContentLoaded', () => {
             <div class="settings-group">
               <div class="toggle-control" style="grid-column: span 2; margin-bottom: 6px; flex-direction: column; align-items: stretch; gap: 8px;">
                 <span class="toggle-label" style="font-weight: 600; font-size: 0.9rem; margin-bottom: 4px; display: block; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 4px;">🏆 Tự Động Tham Gia Sự Kiện</span>
+
+                <div style="display: flex; justify-content: space-between; align-items: center; margin: 4px 0 8px; padding: 7px 8px; border: 1px solid rgba(52, 211, 153, 0.25); border-radius: 7px; background: rgba(16, 185, 129, 0.06);">
+                  <span class="toggle-label" style="font-size: 0.82rem; color: #a7f3d0;">📝 Check-in GW/CW riêng (phút 35, 1 phút rồi về)</span>
+                  <label class="switch">
+                    <input type="checkbox" id="chk-auto-war-checkin-${acc.line_uid}" onchange="toggleSetting('${acc.line_uid}', 'autoWarCheckin')">
+                    <span class="slider"></span>
+                  </label>
+                </div>
                 
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px;">
                   <span class="toggle-label" style="font-size: 0.82rem; color: #d1d5db;">👾 Event Invasion (Quái xâm lăng - Map 2)</span>
@@ -2969,6 +2977,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Event settings checkboxes sync
+    const chkAutoWarCheckin = document.getElementById(`chk-auto-war-checkin-${acc.line_uid}`);
+    if (chkAutoWarCheckin && document.activeElement !== chkAutoWarCheckin) {
+      chkAutoWarCheckin.checked = acc.settings.autoWarCheckin === true;
+    }
     const chkAutoEventJoinInv = document.getElementById(`chk-auto-event-join-inv-${acc.line_uid}`);
     if (chkAutoEventJoinInv && document.activeElement !== chkAutoEventJoinInv) {
       chkAutoEventJoinInv.checked = acc.settings.autoEventJoinInv === true;

@@ -2,6 +2,14 @@
 
 > Changelog of actual changes implemented.
 
+### 2026-09-10 - Thêm Toggle Check-in GW/CW Độc Lập (T84)
+
+- File đã đổi: `server.js`, `public/app.js`, `test.js`, `.agent/TASKS.md`, `.agent/DECISIONS.md`.
+- Bổ sung toggle riêng **📝 Check-in GW/CW riêng (phút 35, 1 phút rồi về)** trong tab Event, mặc định tắt.
+- Khi bật: bot vào GW/CW từ phút 35, không chạy PK, giữ 60 giây, sau đó dùng pipeline snapshot/return để về đúng vị trí train.
+- Không thay đổi các toggle auto-join GW/CW/Invasion hiện tại.
+- Đã kiểm tra bằng `npm test`, `node --check public/app.js`, `git diff --check` -> đạt.
+
 ### 2026-09-03 - Tái Cấu Trúc Toàn Bộ Luồng Event Thành Session State Machine & Khôi Phục Tọa Độ Thật Trên Server (T83)
 
 - File đã đổi: [server.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/server.js), [test.js](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/test.js), [.agent/TASKS.md](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/.agent/TASKS.md), [.agent/CHANGELOG.md](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/.agent/CHANGELOG.md), [.agent/DECISIONS.md](file:///c:/Users/Admin/Desktop/autoR/autoragnalok/.agent/DECISIONS.md).
