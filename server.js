@@ -9376,24 +9376,81 @@ app.post('/api/accounts/:line_uid/action', requireAuth, async (req, res) => {
       return res.json({ ok, msg: ok ? '↩️ Đã thoát khỏi Phụ Bản Guild' : 'Không thể thoát Phụ Bản Guild' });
     }
 
-    let url = 'https://ragnalok.online/human/xhrpg_upgrade.php';
+    if (action === 'event_exit' || action === 'exit_event') {
+      bot.exitEventMode();
+      return res.json({ ok: true, msg: '↩️ Đã thoát chế độ Event! Bot đang quay lại vị trí farm.' });
+    }
+
+    if (action === 'war_checkin') {
+      const currentEpoch = Math.floor(Date.now() / 1000);
+      const isGwActive = bot.lastGw && (bot.lastGw.st === 'open' || bot.lastGw.st === 'fight') && (!bot.lastGw.ends || bot.lastGw.ends > currentEpoch);
+      const isCwActive = bot.lastCw && (bot.lastCw.st === 'open' || bot.lastCw.st === 'fight') && (!bot.lastCw.ends || bot.lastCw.ends > currentEpoch);
+      const kind = isGwActive ? 'gw' : (isCwActive ? 'cw' : (extra && extra.kind ? extra.kind : 'gw'));
+      const checkinKey = bot._getWarCheckinKey(kind);
+      bot.captureEventSnapshot(kind);
+      bot.eventSnapshot.checkinOnly = true;
+      bot.eventSnapshot.checkinKey = checkinKey;
+      bot._persistEventSnapshot();
+      const ok = kind === 'gw' ? await bot.joinGuildWar() : await bot.joinCountryWar();
+      if (ok) {
+        bot.enterEventMode(kind, 4, { checkinOnly: true });
+        return res.json({ ok: true, msg: `📝 Đã điểm danh ${kind === 'gw' ? 'Bang Chiến' : 'Quốc Chiến'} thành công! Bot sẽ tự thoát sau 1 phút.` });
+      } else {
+        bot._rollbackWarCheckinEntry();
+        return res.status(400).json({ ok: false, error: 'Không thể điểm danh (Chiến trường chưa mở hoặc không đủ điều kiện).' });
+      }
+    }
+
+    if (action === 'inv_join') {
+      bot.captureEventSnapshot('inv');
+      bot.enterEventMode('inv', 2);
+      const warpOk = await bot.warpToMap(2);
+      if (warpOk) {
+        return res.json({ ok: true, msg: '🌳 Đã di chuyển đến Map 2 (Bảo Vệ Cây Thế Giới)!' });
+      } else {
+        bot.exitEventMode();
+        return res.status(400).json({ ok: false, error: 'Không thể dịch chuyển đến Map 2.' });
+      }
+    }
+
     if (action === 'gwar_join') {
-      url = 'https://ragnalok.online/human/xhrpg_guild.php';
-      payload = {
-        line_uid: bot.line_uid,
-        session_token: bot.session_token,
-        action: 'gwar_join',
-        lang: 'vi'
-      };
-    } else if (action === 'cwar_join') {
-      url = 'https://ragnalok.online/human/xhrpg_cwar.php';
-      payload = {
-        line_uid: bot.line_uid,
-        session_token: bot.session_token,
-        action: 'cwar_join',
-        lang: 'vi'
-      };
-    } else if (action === 'warp') {
+      bot.captureEventSnapshot('gw');
+      const ok = await bot.joinGuildWar();
+      if (ok) {
+        bot.enterEventMode('gw', 4);
+        return res.json({ ok: true, msg: '⚔️ Vào chiến trường Bang Chiến thành công!' });
+      } else {
+        if (bot.eventSnapshot) {
+          delete bot.eventSnapshot;
+          bot.inEventMode = false;
+          bot.currentEventKind = null;
+          bot.eventState = 'IDLE';
+          bot._persistEventSnapshot();
+        }
+        return res.status(400).json({ ok: false, error: 'Không thể vào Bang Chiến (chưa mở hoặc không đủ điều kiện).' });
+      }
+    }
+
+    if (action === 'cwar_join') {
+      bot.captureEventSnapshot('cw');
+      const ok = await bot.joinCountryWar();
+      if (ok) {
+        bot.enterEventMode('cw', 4);
+        return res.json({ ok: true, msg: '👑 Vào chiến trường Quốc Chiến thành công!' });
+      } else {
+        if (bot.eventSnapshot) {
+          delete bot.eventSnapshot;
+          bot.inEventMode = false;
+          bot.currentEventKind = null;
+          bot.eventState = 'IDLE';
+          bot._persistEventSnapshot();
+        }
+        return res.status(400).json({ ok: false, error: 'Không thể vào Quốc Chiến (chưa mở hoặc cấp độ chưa đủ).' });
+      }
+    }
+
+    let url = 'https://ragnalok.online/human/xhrpg_upgrade.php';
+    if (action === 'warp') {
       url = 'https://ragnalok.online/human/xhrpg_warp.php';
       delete payload.action;
       if (param !== undefined) {
@@ -9477,21 +9534,7 @@ app.post('/api/accounts/:line_uid/action', requireAuth, async (req, res) => {
       payload.slot = payload.slot;
     }
 
-    if (action === 'gwar_join' || action === 'cwar_join') {
-      bot.captureEventSnapshot(action === 'gwar_join' ? 'gw' : 'cw');
-    }
-
     const response = await bot.sendRequest(url, payload);
-
-    // Fix: Đối với gwar_join và cwar_join, server game không trả về đối tượng player, mà chỉ trả về {ok: true, map: 4, x, y}
-    if (response && response.ok && (action === 'gwar_join' || action === 'cwar_join')) {
-      bot.enterEventMode(action === 'gwar_join' ? 'gw' : 'cw', 4);
-      if (bot.player) {
-        bot.player.map = 4;
-        if (response.x !== undefined) bot.player.x = response.x;
-        if (response.y !== undefined) bot.player.y = response.y;
-      }
-    }
 
     if (response && response.player) {
       bot.updatePlayerState(response.player);

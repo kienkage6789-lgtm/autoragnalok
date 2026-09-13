@@ -285,6 +285,21 @@ Chúng ta đã xây dựng thành công một hệ thống **Headless Bot Manage
 
 ---
 
+### II. Khắc Phục Lỗi & Nâng Cấp Toàn Diện Phím Chức Năng Thẻ Event (2026-09-13)
+*   **Sửa Lỗi Toggle Điểm Danh GW/CW (`autoWarCheckin`)**: Khắc phục lỗi lệch ID `chk-auto-war-checkin-${uid}` trong hàm `toggleSetting()` khiến checkbox không gửi request PUT lên server và tự động bật ngược về trạng thái cũ. Tích hợp cơ chế tự động chuyển đổi camelCase sang kebab-case để bảo vệ toàn diện các cấu hình toggle khác.
+*   **Sửa Lỗi Syntax JS Banner Sự Kiện**: Sửa thuộc tính inline `onmouseout="transparent"` thành `onmouseout="this.style.background='transparent'"` trên nút Tham Gia Sự Kiện, triệt tiêu lỗi `ReferenceError: transparent is not defined`.
+*   **Bổ Sung Cụm Phím Chức Năng Thao Tác Trực Tiếp Sự Kiện**: Tích hợp các nút điều khiển trực tiếp ngay trong thẻ Event:
+    *   **⚔️ Vào Bang Chiến** (`gwar_join` - Map 4).
+    *   **👑 Vào Quốc Chiến** (`cwar_join` - Map 4).
+    *   **🌳 Vào Cây Thế Giới** (`inv_join` - Map 2).
+    *   **📝 Điểm Danh Ngay** (`war_checkin` - Điểm danh nhận thưởng 1 phút rồi tự động quay về map farm).
+    *   **🚪 Thoát Event / Về Map Farm** (`event_exit` - Thoát chế độ Event khẩn cấp và khôi phục map/tọa độ train).
+    *   **Badge Trạng Thái Trực Tiếp (`event-live-status`)**: Tự động hiển thị khi bot đang ở trong sự kiện và làm nổi bật nút Thoát Event.
+*   **Tích Hợp Backend Actions**: Bổ sung xử lý an toàn cho các action `event_exit`, `war_checkin`, `inv_join`, `gwar_join`, `cwar_join` tại endpoint `POST /api/accounts/:line_uid/action` với cơ chế rollback snapshot khi tham gia thất bại.
+*   **Ổn Định Phím Lọc & Xóa Lịch Sử Chiến Trận**: Khởi tạo an toàn client cache `_warHistoryCache` khi click các phím lọc tab, đồng thời dọn sạch bảng 4 thẻ chỉ số thống kê khi nhấn Xóa lịch sử.
+
+---
+
 ## 🚀 2. Các hạng mục CHƯA HOÀN THÀNH (Roadmap / Future Upgrades)
 
 Để bảng điều khiển có đầy đủ tính năng chi tiết như trong game client chính thức, dưới đây là các hạng mục nâng cấp tiềm năng trong tương lai:

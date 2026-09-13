@@ -1696,6 +1696,21 @@ document.addEventListener('DOMContentLoaded', () => {
               </div>
             </div>
 
+            <!-- Section Phím Chức Năng Thao Tác Trực Tiếp Sự Kiện -->
+            <div style="margin-top: 10px; border-top: 1px dashed rgba(255,255,255,0.1); padding-top: 10px;">
+              <div style="font-size: 0.8rem; font-weight: 700; color: #38bdf8; margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between;">
+                <span>🎮 Phím Chức Năng Điều Khiển Sự Kiện</span>
+                <span id="event-live-status-${acc.line_uid}" style="display:none; font-size:0.65rem; background:rgba(56,189,248,0.2); color:#38bdf8; border:1px solid rgba(56,189,248,0.4); border-radius:4px; padding:1px 6px; font-weight:700;">📍 Trong Sự Kiện</span>
+              </div>
+              <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; margin-bottom: 6px;">
+                <button type="button" id="btn-event-gw-${acc.line_uid}" onclick="sendAccountAction('${acc.line_uid}', 'gwar_join')" style="background: linear-gradient(135deg, rgba(168,85,247,0.25), rgba(126,34,206,0.35)); border: 1px solid rgba(168,85,247,0.5); color: #e9d5ff; border-radius: 6px; padding: 6px 4px; font-size: 0.76rem; cursor: pointer; font-weight: 700; text-align: center; transition: all 0.2s;" title="Vào Đấu Trường Bang Chiến (Map 4)">⚔️ Vào Bang Chiến</button>
+                <button type="button" id="btn-event-cw-${acc.line_uid}" onclick="sendAccountAction('${acc.line_uid}', 'cwar_join')" style="background: linear-gradient(135deg, rgba(14,165,233,0.25), rgba(3,105,161,0.35)); border: 1px solid rgba(56,189,248,0.5); color: #7dd3fc; border-radius: 6px; padding: 6px 4px; font-size: 0.76rem; cursor: pointer; font-weight: 700; text-align: center; transition: all 0.2s;" title="Vào Đấu Trường Quốc Chiến (Map 4)">👑 Vào Quốc Chiến</button>
+                <button type="button" id="btn-event-inv-${acc.line_uid}" onclick="sendAccountAction('${acc.line_uid}', 'inv_join')" style="background: linear-gradient(135deg, rgba(239,68,68,0.2), rgba(185,28,28,0.3)); border: 1px solid rgba(248,113,113,0.5); color: #fca5a5; border-radius: 6px; padding: 6px 4px; font-size: 0.76rem; cursor: pointer; font-weight: 700; text-align: center; transition: all 0.2s;" title="Dịch chuyển sang Map 2 bảo vệ Cây Thế Giới">🌳 Vào Cây Thế Giới</button>
+                <button type="button" id="btn-event-checkin-${acc.line_uid}" onclick="sendAccountAction('${acc.line_uid}', 'war_checkin')" style="background: linear-gradient(135deg, rgba(16,185,129,0.2), rgba(5,150,105,0.3)); border: 1px solid rgba(52,211,153,0.5); color: #a7f3d0; border-radius: 6px; padding: 6px 4px; font-size: 0.76rem; cursor: pointer; font-weight: 700; text-align: center; transition: all 0.2s;" title="Vào chiến trường điểm danh 1 phút rồi tự động quay lại map train">📝 Điểm Danh Ngay</button>
+              </div>
+              <button type="button" id="btn-event-exit-${acc.line_uid}" onclick="sendAccountAction('${acc.line_uid}', 'event_exit')" style="display: none; width: 100%; background: linear-gradient(135deg, rgba(239,68,68,0.3), rgba(185,28,28,0.45)); border: 1.5px solid rgba(248,113,113,0.6); color: #fecaca; border-radius: 6px; padding: 7px 8px; font-size: 0.8rem; cursor: pointer; font-weight: 800; text-align: center; transition: all 0.2s;" title="Thoát chế độ Event ngay lập tức và đưa bot quay lại Map Farm">🚪 Thoát Event / Về Map Farm</button>
+            </div>
+
             <div style="margin-top: 12px; border-top: 1px dashed rgba(255,255,255,0.08); padding-top: 8px;">
               <div style="font-size: 0.78rem; font-weight: 700; color: #fbbf24; margin-bottom: 6px;">📅 Lịch Trình Sự Kiện Hàng Ngày</div>
               <div style="font-size: 0.72rem; color: #94a3b8; display: flex; flex-direction: column; gap: 4px; line-height: 1.45;">
@@ -3007,6 +3022,25 @@ document.addEventListener('DOMContentLoaded', () => {
       selEventRange.value = acc.settings.eventAttackRange !== undefined ? String(acc.settings.eventAttackRange) : '300';
     }
 
+    // Event live status & manual action buttons sync
+    const eventLiveStatus = document.getElementById(`event-live-status-${acc.line_uid}`);
+    const btnEventExit = document.getElementById(`btn-event-exit-${acc.line_uid}`);
+    const isCurrentlyInEvent = acc.inEventMode || (acc.player && (Number(acc.player.map) === 4 || (Number(acc.player.map) === 2 && acc.lastInv && (acc.lastInv.st === 'pre' || acc.lastInv.st === 'active'))));
+
+    if (eventLiveStatus) {
+      if (isCurrentlyInEvent) {
+        eventLiveStatus.style.display = 'inline-block';
+        const eventKindStr = acc.currentEventKind === 'gw' ? 'Bang Chiến (M4)' : (acc.currentEventKind === 'cw' ? 'Quốc Chiến (M4)' : (acc.currentEventKind === 'inv' ? 'Cây Thế Giới (M2)' : 'Map ' + (acc.player ? acc.player.map : 4)));
+        eventLiveStatus.innerHTML = `📍 Trong Sự Kiện: ${eventKindStr}`;
+      } else {
+        eventLiveStatus.style.display = 'none';
+      }
+    }
+
+    if (btnEventExit) {
+      btnEventExit.style.display = isCurrentlyInEvent ? 'block' : 'none';
+    }
+
     // MVP Boss settings sync
     const selBossHuntPriority = document.getElementById(`sel-boss-hunt-priority-${acc.line_uid}`);
     if (selBossHuntPriority && document.activeElement !== selBossHuntPriority) {
@@ -3280,7 +3314,7 @@ document.addEventListener('DOMContentLoaded', () => {
           buttonHtml = `
             <button type="button" onclick="joinEventDirectly('${acc.line_uid}', '${joinAction}')" 
               style="margin-top: 5px; font-size: 0.72rem; font-weight: 800; padding: 4px 10px; border-radius: 6px; border: 1px solid ${bannerColor}; background: transparent; color: ${bannerColor}; cursor: pointer; transition: all 0.2s; outline: none;"
-              onmouseover="this.style.background='rgba(255,255,255,0.08)'" onmouseout="transparent">
+              onmouseover="this.style.background='rgba(255,255,255,0.08)'" onmouseout="this.style.background='transparent'">
               🏜️ Tham Gia Event
             </button>
           `;
@@ -5810,8 +5844,12 @@ document.addEventListener('DOMContentLoaded', () => {
   window.clearEventWarHistory = async function(uid) {
     if (!confirm('Bạn có chắc chắn muốn xóa lịch sử chiến trận của tài khoản này không?')) return;
     const listContainer = document.getElementById(`event-history-list-${uid}`);
+    const statsContainer = document.getElementById(`event-war-stats-${uid}`);
     if (listContainer) {
       listContainer.innerHTML = `<div style="text-align: center; color: #64748b; padding: 20px 0;">⏳ Đang xóa...</div>`;
+    }
+    if (statsContainer) {
+      statsContainer.innerHTML = '';
     }
 
     try {
@@ -5836,7 +5874,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Switch tabs
   window.switchWarHistoryTab = function(uid, tab) {
-    if (!window._warHistoryCache || !window._warHistoryCache[uid]) return;
+    window._warHistoryCache = window._warHistoryCache || {};
+    window._warHistoryCache[uid] = window._warHistoryCache[uid] || { history: [], currentTab: tab, playerName: '' };
     window._warHistoryCache[uid].currentTab = tab;
     
     // Update active tab class styling
@@ -6315,11 +6354,20 @@ document.addEventListener('DOMContentLoaded', () => {
       idKey = 'auto-event-join-gw';
     } else if (settingKey === 'autoEventJoinCw') {
       idKey = 'auto-event-join-cw';
+    } else if (settingKey === 'autoWarCheckin') {
+      idKey = 'auto-war-checkin';
     }
     
     let chk = document.getElementById(`chk-${idKey}-${uid}`);
     if (!chk) {
+      const kebab = settingKey.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase();
+      chk = document.getElementById(`chk-${kebab}-${uid}`);
+    }
+    if (!chk) {
       chk = document.getElementById(`chk-${settingKey.toLowerCase()}-${uid}`);
+    }
+    if (!chk) {
+      chk = document.getElementById(`chk-${settingKey}-${uid}`);
     }
     if (!chk) return;
     

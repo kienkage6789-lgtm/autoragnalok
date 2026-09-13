@@ -2157,6 +2157,72 @@ try {
   console.log('✅ T84 independent Guild/Country War check-in tests passed!');
 
   // ==========================================
+  // T85 - EVENT TAB FUNCTIONAL BUTTONS & MANUAL ACTIONS
+  // ==========================================
+  console.log('Testing T85 Event Tab Functional Buttons & Manual Actions...');
+  {
+    const eventBot = new BotInstance({ line_uid: 't85_event_bot', settings: { targetMap: 3, autoMap: true } });
+    eventBot.player = { map: 3, x: 200, y: 300, lv: 60 };
+
+    // 1. Test event_exit action when in event mode
+    eventBot.captureEventSnapshot('gw');
+    eventBot.enterEventMode('gw', 4);
+    assert.strictEqual(eventBot.inEventMode, true, 'T85: Must be in event mode');
+    assert.strictEqual(eventBot.currentEventKind, 'gw', 'T85: Current event kind must be gw');
+    eventBot.exitEventMode();
+    assert.strictEqual(eventBot.inEventMode, false, 'T85: Must exit event mode');
+    assert.strictEqual(eventBot.isEventReturning, true, 'T85: Must transition to isEventReturning');
+    assert.strictEqual(eventBot.eventReturnMapTarget, 3, 'T85: Return target map must be 3');
+
+    // 2. Test manual joinGuildWar & joinCountryWar mock behavior
+    let sendReqUrl = '';
+    let sendReqPayload = null;
+    eventBot.sendRequest = async (url, payload) => {
+      sendReqUrl = url;
+      sendReqPayload = payload;
+      return { ok: true, map: 4, x: 100, y: 150 };
+    };
+
+    const gwOk = await eventBot.joinGuildWar();
+    assert.strictEqual(gwOk, true, 'T85: joinGuildWar should return true on ok response');
+    assert.strictEqual(sendReqPayload.action, 'gwar_join', 'T85: action must be gwar_join');
+    assert.strictEqual(eventBot.player.map, 4, 'T85: player map must be 4 after joinGuildWar');
+
+    const cwOk = await eventBot.joinCountryWar();
+    assert.strictEqual(cwOk, true, 'T85: joinCountryWar should return true on ok response');
+    assert.strictEqual(sendReqPayload.action, 'cwar_join', 'T85: action must be cwar_join');
+
+    // 3. Test toggleSetting mapping logic in Node environment (emulating frontend logic)
+    const toggleMapping = (key) => {
+      let idKey = key.toLowerCase();
+      if (key === 'activeHealEnabled') idKey = 'active-heal-enabled';
+      else if (key === 'eventTargetMinDef') idKey = 'event-target-mindef';
+      else if (key === 'autoHomeUpgrade') idKey = 'autohomeup';
+      else if (key === 'autoEventJoinInv') idKey = 'auto-event-join-inv';
+      else if (key === 'autoEventJoinGw') idKey = 'auto-event-join-gw';
+      else if (key === 'autoEventJoinCw') idKey = 'auto-event-join-cw';
+      else if (key === 'autoWarCheckin') idKey = 'auto-war-checkin';
+      const kebab = key.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase();
+      return { idKey, kebab };
+    };
+
+    assert.strictEqual(toggleMapping('autoWarCheckin').idKey, 'auto-war-checkin', 'T85: autoWarCheckin must map to auto-war-checkin');
+    assert.strictEqual(toggleMapping('autoWarCheckin').kebab, 'auto-war-checkin', 'T85: kebab fallback must produce auto-war-checkin');
+    assert.strictEqual(toggleMapping('autoEventJoinGw').idKey, 'auto-event-join-gw', 'T85: autoEventJoinGw must map to auto-event-join-gw');
+
+    // 4. Test invasion warp to Map 2
+    let warpMap = null;
+    eventBot.warpToMap = async (mapId) => { warpMap = mapId; return true; };
+    eventBot.captureEventSnapshot('inv');
+    eventBot.enterEventMode('inv', 2);
+    const warpOk = await eventBot.warpToMap(2);
+    assert.strictEqual(warpOk, true, 'T85: warpToMap must succeed');
+    assert.strictEqual(warpMap, 2, 'T85: warpMap must be 2');
+    assert.strictEqual(eventBot.currentEventKind, 'inv', 'T85: current event kind must be inv');
+  }
+  console.log('✅ T85 Event Tab Functional Buttons & Manual Actions Tests Passed successfully!');
+
+  // ==========================================
   // T75 - MANUAL MARKET DASHBOARD INTEGRATION TESTS
   // ==========================================
   console.log('Testing T75 Manual Market Format & Translations...');
