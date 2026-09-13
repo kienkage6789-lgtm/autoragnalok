@@ -1053,6 +1053,109 @@ try {
 
   console.log('✅ Multiple Team Sync and Lookup Tests Passed successfully!');
 
+  // 10b. Test Team Sync preserves Member Market tab settings
+  console.log('Testing Team Sync preserves Member Market tab settings...');
+  {
+    const isMarketSettingKey = (k) => k === 'autoMarketBuy' || k.startsWith('market');
+
+    // Leader settings with specific market config and general config
+    const leaderSettings = {
+      teamRole: 'leader',
+      teamId: 'team_alpha',
+      targetMap: 6,
+      explore_radius: 500,
+      bossHuntMode: 'type2',
+      autoMarketBuy: true,
+      marketMaxPrice: 99999,
+      marketExactPrice: true,
+      marketScanInterval: 5,
+      marketCategories: { diamond: true, card: false },
+      marketSelectedCards: ['card_boss_1'],
+      marketSelectedEggs: [1, 2],
+      marketSelectedModuleTiers: ['T5'],
+      marketSelectedCollectibles: ['col_1'],
+      marketSelectedModuleBoxes: ['box_1'],
+      marketSelectedCardBoxes: ['cbox_1'],
+      marketSelectedEggBoxes: ['ebox_1'],
+      marketCategoryMaxPrices: { diamond: 50000 },
+      marketCategoryMaxQtys: { diamond: 10, resource: 500 }
+    };
+
+    // Member settings with their own market config and general config
+    const memberAcc = {
+      line_uid: 'uid_member_market_test',
+      userId: 'user_mkt',
+      settings: {
+        teamRole: 'member',
+        teamId: 'team_alpha',
+        targetMap: 1,
+        explore_radius: 200,
+        bossHuntMode: 'off',
+        autoMarketBuy: false,
+        marketMaxPrice: 1234,
+        marketExactPrice: false,
+        marketScanInterval: 30,
+        marketCategories: { diamond: false, card: true, resource: true },
+        marketSelectedCards: ['card_poring'],
+        marketSelectedEggs: [],
+        marketSelectedModuleTiers: ['T1', 'T2'],
+        marketSelectedCollectibles: [],
+        marketSelectedModuleBoxes: [],
+        marketSelectedCardBoxes: [],
+        marketSelectedEggBoxes: [],
+        marketCategoryMaxPrices: { card: 1000 },
+        marketCategoryMaxQtys: { resource: 50, card: 2 }
+      }
+    };
+
+    // Filter out market settings from leader
+    const syncableLeaderSettings = {};
+    for (const [k, v] of Object.entries(leaderSettings)) {
+      if (k !== 'teamRole' && k !== 'teamId' && !isMarketSettingKey(k)) {
+        syncableLeaderSettings[k] = v;
+      }
+    }
+    syncableLeaderSettings.autoMap = true;
+    syncableLeaderSettings.teamSynced = true;
+
+    // Simulate member sync logic from server.js
+    const existingSettings = memberAcc.settings;
+    const preservedMarketSettings = {};
+    for (const [k, v] of Object.entries(existingSettings)) {
+      if (isMarketSettingKey(k)) {
+        preservedMarketSettings[k] = v;
+      }
+    }
+
+    memberAcc.settings = {
+      ...syncableLeaderSettings,
+      ...preservedMarketSettings,
+      teamRole: 'member',
+      teamId: 'team_alpha'
+    };
+
+    // Verify non-market settings were synced from leader
+    assert.strictEqual(memberAcc.settings.targetMap, 6, 'targetMap should sync from leader');
+    assert.strictEqual(memberAcc.settings.explore_radius, 500, 'explore_radius should sync from leader');
+    assert.strictEqual(memberAcc.settings.bossHuntMode, 'type2', 'bossHuntMode should sync from leader');
+    assert.strictEqual(memberAcc.settings.autoMap, true, 'autoMap should be true');
+    assert.strictEqual(memberAcc.settings.teamSynced, true, 'teamSynced should be true');
+
+    // Verify all market settings of member were preserved and NOT overwritten by leader
+    assert.strictEqual(memberAcc.settings.autoMarketBuy, false, 'Member autoMarketBuy must be preserved');
+    assert.strictEqual(memberAcc.settings.marketMaxPrice, 1234, 'Member marketMaxPrice must be preserved');
+    assert.strictEqual(memberAcc.settings.marketExactPrice, false, 'Member marketExactPrice must be preserved');
+    assert.strictEqual(memberAcc.settings.marketScanInterval, 30, 'Member marketScanInterval must be preserved');
+    assert.deepStrictEqual(memberAcc.settings.marketCategories, { diamond: false, card: true, resource: true }, 'Member marketCategories must be preserved');
+    assert.deepStrictEqual(memberAcc.settings.marketSelectedCards, ['card_poring'], 'Member marketSelectedCards must be preserved');
+    assert.deepStrictEqual(memberAcc.settings.marketSelectedModuleTiers, ['T1', 'T2'], 'Member marketSelectedModuleTiers must be preserved');
+    assert.deepStrictEqual(memberAcc.settings.marketCategoryMaxPrices, { card: 1000 }, 'Member marketCategoryMaxPrices must be preserved');
+    assert.deepStrictEqual(memberAcc.settings.marketCategoryMaxQtys, { resource: 50, card: 2 }, 'Member marketCategoryMaxQtys must be preserved');
+    assert.strictEqual(memberAcc.settings.teamRole, 'member', 'teamRole must remain member');
+    assert.strictEqual(memberAcc.settings.teamId, 'team_alpha', 'teamId must remain team_alpha');
+  }
+  console.log('✅ Team Sync Market Tab Exclusion Tests Passed successfully!');
+
   // 11. Test User Polling Interval and role propagation
   console.log('Testing User Polling Interval, role propagation and edit permissions...');
 

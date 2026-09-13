@@ -3,6 +3,17 @@
 > Work Breakdown Structure. Update task states immediately upon changes.
 > Statuses: todo | doing | blocked | review | done
 
+### [x] T85 - Không Đồng Bộ Cài Đặt Tab Chợ Khi Đồng Bộ Team
+- Mô tả: Chỉnh sửa chức năng đồng bộ cài đặt Team (`/api/team/sync`): chỉ đồng bộ các thiết lập chung, bản đồ, chiến đấu, săn boss từ Leader sang Member, loại trừ và giữ nguyên hoàn toàn các cài đặt ở tab Chợ (Auto Market Buy, bộ lọc 9 loại, giá mua tối đa, chu kỳ quét, số lượng mua,...) của từng thành viên.
+- File liên quan: `server.js`, `public/app.js`, `test.js`, `.agent/TASKS.md`, `.agent/CHANGELOG.md`
+- Acceptance criteria:
+  - [x] `server.js`: Khi Leader đồng bộ cài đặt (`/api/team/sync`), lọc bỏ các trường thuộc tab Chợ (`autoMarketBuy`, `market*`) khỏi danh sách cài đặt sao chép.
+  - [x] `server.js`: Giữ nguyên toàn bộ giá trị cấu hình Chợ hiện có của từng Member (`acc.settings` / `botInst.settings`).
+  - [x] `public/app.js`: Cập nhật thông báo xác nhận và tooltip nút "Đồng bộ cài đặt Team" nêu rõ giữ nguyên cấu hình Chợ.
+  - [x] `test.js`: Bổ sung test kiểm thử đảm bảo cài đặt tab Chợ của thành viên không bị ghi đè sau khi đồng bộ Team.
+  - [x] `npm test` đạt 100% Passed.
+- Trạng thái: done
+
 ### [x] T84 - Tính Năng Riêng: Check-in Guild/Country War Sau Phút 35
 - Mô tả: Bổ sung một tính năng độc lập với auto-join event hiện tại: từ phút 35, bot có thể vào Guild War/Country War để điểm danh khoảng 1 phút rồi tự động thoát và khôi phục đúng Map/tọa độ/cấu hình train trước đó. Không thay đổi hành vi auto-join GW/CW hiện tại.
 - File liên quan: `server.js`, `test.js`, `.agent/TASKS.md`, `.agent/DECISIONS.md`, `.agent/CHANGELOG.md`

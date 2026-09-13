@@ -1951,7 +1951,7 @@ document.addEventListener('DOMContentLoaded', () => {
               </select>
             </div>
             <div style="grid-column: span 2; margin-top: 4px; display: flex; justify-content: flex-end;">
-              <button type="button" id="btn-sync-team-${acc.line_uid}" onclick="syncTeamSetup('${acc.line_uid}')" style="display: none; background: rgba(16,185,129,0.2); border: 1px solid rgba(16,185,129,0.4); color: #34d399; border-radius: 6px; padding: 5px 12px; font-size: 0.82rem; cursor: pointer; font-weight: 600; white-space: nowrap; transition: all 0.2s;" onmouseover="this.style.background='rgba(16,185,129,0.3)'" onmouseout="this.style.background='rgba(16,185,129,0.2)'">🔄 Đồng bộ cài đặt Team</button>
+              <button type="button" id="btn-sync-team-${acc.line_uid}" onclick="syncTeamSetup('${acc.line_uid}')" title="Đồng bộ cấu hình của Leader sang các thành viên cùng Team (không đồng bộ cài đặt tab Chợ)" style="display: none; background: rgba(16,185,129,0.2); border: 1px solid rgba(16,185,129,0.4); color: #34d399; border-radius: 6px; padding: 5px 12px; font-size: 0.82rem; cursor: pointer; font-weight: 600; white-space: nowrap; transition: all 0.2s;" onmouseover="this.style.background='rgba(16,185,129,0.3)'" onmouseout="this.style.background='rgba(16,185,129,0.2)'">🔄 Đồng bộ cài đặt Team</button>
             </div>
           </div>
 
@@ -7863,7 +7863,7 @@ async function saveNewAccountOrder(container) {
 
 // Sync Leader settings to all Members
 window.syncTeamSetup = async function(uid) {
-  if (!confirm('Bạn có chắc chắn muốn đồng bộ thiết lập của Leader này cho tất cả thành viên trong Team không?')) return;
+  if (!confirm('Bạn có chắc chắn muốn đồng bộ thiết lập của Leader này cho tất cả thành viên trong Team không? (Cài đặt ở tab Chợ của các thành viên sẽ được giữ nguyên)')) return;
   
   try {
     const res = await fetch('/api/team/sync', {

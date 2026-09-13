@@ -8054,24 +8054,43 @@ app.post('/api/team/sync', requireAuth, (req, res) => {
     currentAccounts[leaderAccIdx].settings = leaderBot.settings;
   }
 
+  // Lọc bỏ toàn bộ cài đặt thuộc tab Chợ (Auto Market Buy) để không đè lên cấu hình của thành viên
+  const isMarketSettingKey = (k) => k === 'autoMarketBuy' || k.startsWith('market');
+  const syncableLeaderSettings = {};
+  for (const [k, v] of Object.entries(leaderSettings)) {
+    if (!isMarketSettingKey(k)) {
+      syncableLeaderSettings[k] = v;
+    }
+  }
+
   currentAccounts.forEach(acc => {
     if (acc.userId === leaderBot.userId && acc.line_uid !== leaderBot.line_uid) {
       const isMemberOfSameTeam = acc.settings &&
                                  acc.settings.teamRole === 'member' &&
                                  (acc.settings.teamId || 'none') === leaderTeamId;
       if (isMemberOfSameTeam) {
-        // Copy settings
+        // Giữ nguyên toàn bộ cấu hình ở tab Chợ của thành viên
+        const botInst = botInstances[acc.line_uid];
+        const existingSettings = (botInst && botInst.settings) ? botInst.settings : (acc.settings || {});
+        const preservedMarketSettings = {};
+        for (const [k, v] of Object.entries(existingSettings)) {
+          if (isMarketSettingKey(k)) {
+            preservedMarketSettings[k] = v;
+          }
+        }
+
+        // Copy settings từ Leader trong khi giữ nguyên vai trò, teamId và cấu hình Chợ riêng của thành viên
         acc.settings = {
-          ...leaderSettings,
+          ...syncableLeaderSettings,
+          ...preservedMarketSettings,
           teamRole: 'member', // preserve member role
           teamId: leaderTeamId // preserve team membership
         };
 
         // Sync in-memory botInstance too
-        const botInst = botInstances[acc.line_uid];
         if (botInst) {
           botInst.settings = { ...acc.settings };
-          botInst.addLog('SYSTEM', `📥 [Team] Nhận cấu hình đồng bộ từ Trưởng nhóm: ${leaderBot.name}`);
+          botInst.addLog('SYSTEM', `📥 [Team] Nhận cấu hình đồng bộ từ Trưởng nhóm: ${leaderBot.name} (giữ nguyên cấu hình Chợ)`);
         }
         syncCount++;
       }
@@ -8082,7 +8101,7 @@ app.post('/api/team/sync', requireAuth, (req, res) => {
     saveAccounts(currentAccounts);
   }
 
-  res.json({ ok: true, msg: `Đồng bộ cấu hình thành công cho ${syncCount} thành viên trong Team!` });
+  res.json({ ok: true, msg: `Đồng bộ cấu hình thành công cho ${syncCount} thành viên trong Team! (Giữ nguyên cài đặt Chợ)` });
 });
 
 // Reorder accounts

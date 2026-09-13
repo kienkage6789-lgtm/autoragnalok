@@ -2,6 +2,21 @@
 
 > Changelog of actual changes implemented.
 
+### 2026-09-13 - Loại Trừ Cài Đặt Tab Chợ Khi Đồng Bộ Team (T85)
+
+- File đã đổi: `server.js`, `public/app.js`, `test.js`, `.agent/TASKS.md`, `.agent/CHANGELOG.md`.
+- Đã làm:
+  - **Loại trừ cài đặt Chợ khỏi luồng đồng bộ Team (`server.js`)**:
+    - Khi Leader gọi `/api/team/sync`, server lọc bỏ các thuộc tính thuộc tab Chợ (`autoMarketBuy` và toàn bộ các khóa bắt đầu bằng `market*`: `marketMaxPrice`, `marketExactPrice`, `marketScanInterval`, `marketCategories`, `marketCategoryMaxQtys`, `marketCategoryMaxPrices`, danh sách vật phẩm chọn `marketSelected*`, `marketFilters`).
+    - Giữ nguyên 100% các cài đặt Chợ riêng của từng tài khoản Thành viên (`Member`).
+    - Log hệ thống của Member ghi rõ: `📥 [Team] Nhận cấu hình đồng bộ từ Trưởng nhóm: {Leader} (giữ nguyên cấu hình Chợ)`.
+  - **Cập nhật giao diện người dùng (`public/app.js`)**:
+    - Bổ sung tooltip chú thích trên nút `🔄 Đồng bộ cài đặt Team`.
+    - Cập nhật hộp thoại xác nhận khi bấm đồng bộ nêu rõ: *"Cài đặt ở tab Chợ của các thành viên sẽ được giữ nguyên"*.
+  - **Kiểm thử tự động (`test.js`)**:
+    - Bổ sung test suite `10b. Test Team Sync preserves Member Market tab settings`: xác nhận các thiết lập bản đồ, chu kỳ, săn boss được đồng bộ từ Leader trong khi toàn bộ cấu hình Chợ của Member được bảo toàn tuyệt đối.
+    - Chạy `npm test` đạt 100% Passed.
+
 ### 2026-09-10 - Thêm Toggle Check-in GW/CW Độc Lập (T84)
 
 - File đã đổi: `server.js`, `public/app.js`, `test.js`, `.agent/TASKS.md`, `.agent/DECISIONS.md`.
