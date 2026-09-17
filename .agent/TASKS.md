@@ -3,6 +3,7 @@
 > Work Breakdown Structure. Update task states immediately upon changes.
 > Statuses: todo | doing | blocked | review | done
 
+<<<<<<< HEAD
 ### [x] T85 - Không Đồng Bộ Cài Đặt Tab Chợ Khi Đồng Bộ Team
 - Mô tả: Chỉnh sửa chức năng đồng bộ cài đặt Team (`/api/team/sync`): chỉ đồng bộ các thiết lập chung, bản đồ, chiến đấu, săn boss từ Leader sang Member, loại trừ và giữ nguyên hoàn toàn các cài đặt ở tab Chợ (Auto Market Buy, bộ lọc 9 loại, giá mua tối đa, chu kỳ quét, số lượng mua,...) của từng thành viên.
 - File liên quan: `server.js`, `public/app.js`, `test.js`, `.agent/TASKS.md`, `.agent/CHANGELOG.md`
@@ -14,6 +15,61 @@
   - [x] `npm test` đạt 100% Passed.
 - Trạng thái: done
 
+=======
+### [x] T88 - Hardening T84: Queue Check-in GW/CW và kiểm tra level trước khi join
+- Mô tả: Sửa luồng check-in riêng để xử lý tuần tự GW rồi CW khi cả hai cùng active, giữ một snapshot vị trí gốc trong toàn bộ phiên, retry join có giới hạn và không tạo snapshot khi thiếu level.
+- File liên quan: `server.js`, `test.js`, `.agent/TASKS.md`, `.agent/DECISIONS.md`, `.agent/CHANGELOG.md`
+- Acceptance criteria:
+  - [x] GW/CW active đồng thời được xếp hàng, mỗi event chỉ điểm danh một lần và không lặp vô hạn.
+  - [x] Snapshot map/tọa độ/cấu hình gốc được giữ đến khi event cuối cùng restore xong.
+  - [x] Join fail retry hữu hạn, rollback/suppress cùng lượt thất bại và không spam lại.
+  - [x] Thiếu level log rõ, không tạo `checkinOnly`/snapshot và không gọi join.
+  - [x] Auto-join GW/CW cũ, Invasion và flow không bật toggle không đổi.
+  - [x] Có test tích hợp `pollGame()` cho success 60 giây/exit/restore, GW+CW, fail/retry, thiếu level và regression.
+- Phụ thuộc: T84
+- Trạng thái: done
+
+### [x] T87 - Fix Team Member MVP Transit Retry/Skip Không Spam Warp
+- Mô tả: Sửa lỗi Member gọi lại `warpToMap()` ở mọi nhịp poll khi warp tới map MVP thất bại, do routing Member không dùng bộ đếm transit 3-6-8. Member vẫn lấy target/cycle từ Leader nhưng tự quản lý retry và đánh dấu skip target lỗi để chờ Leader chuyển map.
+- File liên quan: `server.js`, `test.js`, `.agent/TASKS.md`, `.agent/DECISIONS.md`, `.agent/CHANGELOG.md`
+- Acceptance criteria:
+  - [x] Member chỉ warp ở nhịp bắt đầu, retry nhịp 3 và 6; không gọi warp ở các nhịp trung gian.
+  - [x] Sau nhịp 8 thất bại, Member ghi log skip và không spam lại cùng target ở các poll tiếp theo.
+  - [x] Khi Leader chuyển sang target map mới hoặc Member tới được target, trạng thái transit được reset và Member tiếp tục follow Leader.
+  - [x] Guild Dungeon/Event và routing Leader hiện tại không bị thay đổi.
+  - [x] Có test tích hợp `pollGame()` cho warp fail/retry/skip/follow và chạy các kiểm tra bắt buộc.
+- Phụ thuộc: T86
+- Trạng thái: done
+
+---
+
+### [x] T86 - Sửa Chữa & Nâng Cấp Toàn Diện Luồng Tự Động Săn Boss MVP Theo Danh Sách Map
+- Mô tả: Sửa chức năng "Tự động săn Boss MVP theo danh sách Map". Khắc phục tình trạng chỉ chạy trong phút 00–02 đầu giờ hoặc bật toggle nhưng chưa có map thì im lặng không chạy. Bổ sung tùy chọn kích hoạt theo lịch đầu giờ (`schedule`) hoặc chạy ngay khi bật (`immediate`). Đồng bộ 2 chiều `bossHuntEnabled` ↔ `bossHuntMode: 'type2'`, `bossHuntMaps` ↔ `mvpTargetMaps`. Tuân thủ đúng thứ tự map người dùng chọn, tự động bỏ qua map thiếu level, tự động retry & skip khi warp thất bại (sau 16s), hoàn thành chu kỳ quay về map farm gốc an toàn. Đồng bộ trạng thái từ Leader sang Member. Bổ sung log chi tiết cho từng giai đoạn và cảnh báo trực quan trên UI.
+- File liên quan: `server.js`, `public/app.js`, `test.js`, `accounts.json`, `.agent/TASKS.md`, `.agent/DECISIONS.md`, `.agent/CHANGELOG.md`
+- Acceptance criteria:
+  - [x] Đọc và rà soát code thật trong `server.js` (`triggerMvpCycle`, `updateMvpCycleStatus`, scheduler `pollGame`, `getBossHuntMaps`, API `force_mvp_hunt`) và `public/app.js`.
+  - [x] Cảnh báo rõ ràng "Chưa cấu hình danh sách bản đồ săn Boss" khi bật săn Boss mà chưa có map (không âm thầm đứng im).
+  - [x] UI hiển thị trạng thái thiếu map (banner cảnh báo đỏ và placeholder viền đỏ trong container chọn map).
+  - [x] Cho phép người dùng chọn cách kích hoạt: theo lịch đầu giờ (`schedule`) hoặc chạy ngay sau khi bật toggle (`immediate`), giữ nguyên nút "Kích hoạt đi săn ngay".
+  - [x] Đồng bộ 2 chiều `bossHuntEnabled` ↔ `bossHuntMode: 'type2'` và `bossHuntMaps` ↔ `mvpTargetMaps`.
+  - [x] Chu kỳ đi đúng thứ tự Map người dùng đã chọn.
+  - [x] Map không đủ level được tự động bỏ qua kèm log cảnh báo và chuyển sang map kế tiếp.
+  - [x] Khi warp thất bại, tự động retry tại nhịp 3, 6 và bỏ qua map sau 8 nhịp (~16s) để tránh kẹt chu kỳ.
+  - [x] Khi hoàn thành danh sách, tự động warp quay về map farm gốc và khôi phục cài đặt.
+  - [x] Đồng bộ đầy đủ chu kỳ từ Leader sang Team Member (`teamSynced: true`), Member tự kế thừa danh sách map của Leader nếu chưa cài riêng.
+  - [x] Bổ sung log trạng thái cho mọi giai đoạn: bật săn boss, bắt đầu chu kỳ, đang di chuyển tới map nào, đã tải danh sách boss, map không có boss, bỏ qua map thiếu level, warp thất bại, hoàn thành chu kỳ.
+  - [x] Triệt tiêu request warp trùng: gom toàn bộ định tuyến bản đồ về hàm duy nhất `checkAndRouteMap()`, loại bỏ hoàn toàn khối map routing trong `runAutomation()`, và `return` sớm ngay khi `checkAndRouteMap()` xử lý warp.
+  - [x] Single-Warp Invariant per pollGame cycle: bảo đảm trong 1 nhịp poll không bao giờ phát sinh quá 1 lần gọi `warpToMap()`, bất kể warp diễn ra nhanh hay chậm, thông qua cơ chế phân quyền giữa `checkAndRouteMap()` (chỉ warp nhịp khởi động) và `updateMvpCycleStatus()` (quản lý độc quyền các nhịp transit retry 3, 6, 8 và next map).
+  - [x] Nâng cấp Test 11: Kiểm tra đồng thời mutex `_isWarping` và spy/mock `bot.warpToMap` chạy qua 8 kịch bản `pollGame()` thực tế (AutoMap sai, AutoMap đúng, MVP bắt đầu, MVP transit tick 2, MVP retry tick 3, MVP hunting trên map, MVP clear chuyển map, Member sync theo Leader).
+  - [x] Bảo vệ tuyệt đối `accounts.json` khi chạy Unit Tests / API Endpoints: bổ sung `setCustomAccountStorage()` cho phép test API với in-memory fixture storage độc lập, không thực hiện disk I/O hay làm bẩn file `accounts.json` thực tế.
+  - [x] Cấu hình sẵn `bossHuntMaps: [2, 3]` và `mvpTargetMaps: "2,3"` trong `accounts.json` cho tài khoản hiện tại.
+  - [x] `node --check server.js`, `node --check public/app.js`, `node --check test.js` và `npm test` Passed 100%.
+- Phụ thuộc: T84
+- Trạng thái: done
+
+---
+
+>>>>>>> 1d9a7b1 (fix event vv)
 ### [x] T84 - Tính Năng Riêng: Check-in Guild/Country War Sau Phút 35
 - Mô tả: Bổ sung một tính năng độc lập với auto-join event hiện tại: từ phút 35, bot có thể vào Guild War/Country War để điểm danh khoảng 1 phút rồi tự động thoát và khôi phục đúng Map/tọa độ/cấu hình train trước đó. Không thay đổi hành vi auto-join GW/CW hiện tại.
 - File liên quan: `server.js`, `test.js`, `.agent/TASKS.md`, `.agent/DECISIONS.md`, `.agent/CHANGELOG.md`

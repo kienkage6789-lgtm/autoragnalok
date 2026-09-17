@@ -29,7 +29,11 @@ const {
   saveSpotsCache,
   requestSaveSpotsCache,
   BotRequestQueue,
-  combineAbortSignals
+  combineAbortSignals,
+  getMapDefs,
+  userSessions,
+  setCustomAccountStorage,
+  app
 } = require('./server');
 
 console.log('🧪 Running Unit Tests...');
@@ -366,6 +370,7 @@ try {
       eventBot.settings.lock_zone_center = false;
       eventBot.settings.targetZone = 0;
     }
+
   }
 
   assert.strictEqual(eventBot.settings.autoZone, true, 'autoZone must NOT be reset to false when map changes during event return');
@@ -2259,6 +2264,145 @@ try {
   }
   console.log('✅ T84 independent Guild/Country War check-in tests passed!');
 
+  // T84 integration coverage: real pollGame() flow, GW -> CW queue, restore, retry/fail, level guard and auto-join regression.
+  {
+    const t84Accounts = [];
+    setCustomAccountStorage({
+      loadAccounts: () => JSON.parse(JSON.stringify(t84Accounts)),
+      saveAccounts: accounts => {
+        t84Accounts.length = 0;
+        t84Accounts.push(...JSON.parse(JSON.stringify(accounts)));
+      }
+    });
+    const addT84Account = line_uid => t84Accounts.push({ line_uid, name: line_uid, userId: 'usr_admin', settings: {} });
+    const createWarPollBot = (line_uid, settings = {}) => {
+      addT84Account(line_uid);
+      const bot = new BotInstance({ line_uid, settings: { targetMap: 3, autoMap: false, ...settings } });
+      bot.player = { map: 3, x: 500, y: 600, lv: 60 };
+      bot._isWarCheckinWindow = () => true;
+      return bot;
+    };
+
+    try {
+      console.log('  Testing T84 integration: pollGame GW+CW queue, 60s exit and coordinate restore...');
+      const queueBot = createWarPollBot('t84_queue_bot', { autoWarCheckin: true });
+      const joinCalls = [];
+      queueBot.sendRequest = async (url) => {
+        if (url.includes('xhrpg_game.php')) {
+          const onOriginalMap = queueBot.eventState === 'RETURNING' || !queueBot.inEventMode;
+          return {
+            ok: true,
+            player: onOriginalMap
+              ? { ...queueBot.player, map: queueBot.eventState === 'RETURNING' ? 3 : queueBot.player.map, x: 500, y: 600, lv: 60 }
+              : { ...queueBot.player, map: 4, x: 100, y: 100, lv: 60 },
+            gw: { st: 'open', ends: Math.floor(Date.now() / 1000) + 1800 },
+            cw: { st: 'open', ends: Math.floor(Date.now() / 1000) + 1800 },
+            monsters: [], bosses: [], spots: {}
+          };
+        }
+        if (url.includes('xhrpg_guild.php')) {
+          joinCalls.push('gw');
+          return { ok: true, player: { map: 4, x: 100, y: 100, lv: 60 } };
+        }
+        if (url.includes('xhrpg_cwar.php')) {
+          joinCalls.push('cw');
+          return { ok: true, player: { map: 4, x: 100, y: 100, lv: 60 } };
+        }
+        return { ok: true };
+      };
+
+      await queueBot.pollGame();
+      assert.deepStrictEqual(joinCalls, ['gw'], 'pollGame must join GW first when GW and CW are both active');
+      assert.strictEqual(queueBot.isEventCheckinOnly, true);
+      const originalSnapshot = queueBot.eventSnapshot;
+      assert.strictEqual(originalSnapshot.map, 3);
+      assert.strictEqual(originalSnapshot.x, 500);
+      assert.strictEqual(originalSnapshot.y, 600);
+
+      queueBot.eventCheckinStartedAt = Date.now() - 60001;
+      await queueBot.pollGame();
+      assert.strictEqual(queueBot.eventState, 'RETURNING', '60-second check-in must transition to RETURNING');
+      assert.strictEqual(queueBot.eventSnapshot, originalSnapshot, 'snapshot must survive the first event return');
+
+      await queueBot.pollGame();
+      await queueBot.pollGame();
+      assert.deepStrictEqual(joinCalls, ['gw', 'cw'], 'queue must continue with CW after restoring the original position');
+      assert.strictEqual(queueBot.currentEventKind, 'cw');
+      assert.strictEqual(queueBot.eventSnapshot.map, 3);
+      assert.strictEqual(queueBot.eventSnapshot.x, 500);
+      assert.strictEqual(queueBot.eventSnapshot.y, 600);
+
+      queueBot.eventCheckinStartedAt = Date.now() - 60001;
+      await queueBot.pollGame();
+      await queueBot.pollGame();
+      await queueBot.pollGame();
+      assert.strictEqual(queueBot.eventSnapshot, null, 'snapshot must be cleared only after the whole GW/CW session returns');
+      assert.strictEqual(queueBot.player.map, 3);
+      assert.strictEqual(queueBot.player.x, 500);
+      assert.strictEqual(queueBot.player.y, 600);
+      assert.strictEqual(queueBot.warCheckinCompletedKeys.gw.startsWith('gw:'), true);
+      assert.strictEqual(queueBot.warCheckinCompletedKeys.cw.startsWith('cw:'), true);
+
+      console.log('  Testing T84 integration: bounded join retry and rollback after repeated failure...');
+      const failBot = createWarPollBot('t84_fail_bot', { autoWarCheckin: true });
+      let failJoinCount = 0;
+      const stableFailEventEnd = Math.floor(Date.now() / 1000) + 1800;
+      failBot.sendRequest = async (url) => {
+        if (url.includes('xhrpg_game.php')) {
+          return { ok: true, player: { ...failBot.player }, gw: { st: 'open', ends: stableFailEventEnd }, cw: null, monsters: [], bosses: [], spots: {} };
+        }
+        if (url.includes('xhrpg_guild.php')) {
+          failJoinCount++;
+          return { ok: false, error: 'join rejected' };
+        }
+        return { ok: true };
+      };
+      await failBot.pollGame();
+      for (let i = 0; i < 2; i++) {
+        failBot.eventSnapshot.warCheckinSession.retryAt = 0;
+        await failBot.pollGame();
+      }
+      assert.strictEqual(failJoinCount, 3, 'join failure must retry only up to three attempts');
+      assert.strictEqual(failBot.eventSnapshot, null, 'failed check-in must roll back without leaving a stuck snapshot');
+      await failBot.pollGame();
+      assert.strictEqual(failJoinCount, 3, 'failed check-in must not retry forever');
+      const restartedFailBot = new BotInstance({ line_uid: 't84_fail_bot', settings: { autoWarCheckin: true } });
+      assert.strictEqual(restartedFailBot.warCheckinSuppressedKeys.gw, `gw:${stableFailEventEnd}`, 'suppressed event key must survive bot restart');
+
+      console.log('  Testing T84 integration: insufficient level guard creates no snapshot and no join call...');
+      const lowLevelBot = createWarPollBot('t84_low_level_bot', { autoWarCheckin: true });
+      lowLevelBot.player.lv = 10;
+      let lowLevelJoinCount = 0;
+      lowLevelBot.sendRequest = async (url) => {
+        if (url.includes('xhrpg_game.php')) {
+          return { ok: true, player: { ...lowLevelBot.player }, gw: { st: 'open', ends: Math.floor(Date.now() / 1000) + 1800 }, cw: null, monsters: [], bosses: [], spots: {} };
+        }
+        if (url.includes('xhrpg_guild.php')) lowLevelJoinCount++;
+        return { ok: true };
+      };
+      await lowLevelBot.pollGame();
+      assert.strictEqual(lowLevelBot.eventSnapshot, null, 'under-level check-in must not create a snapshot');
+      assert.strictEqual(lowLevelJoinCount, 0, 'under-level check-in must not call join');
+      assert.ok(lowLevelBot.logs.some(log => log.msg.includes('chưa đủ yêu cầu')), 'under-level check-in must log the level requirement');
+
+      console.log('  Testing T84 regression: legacy auto-join still enters a normal non-checkin session...');
+      const legacyBot = createWarPollBot('t84_legacy_join_bot', { autoEventJoinGw: true, autoWarCheckin: false });
+      legacyBot.sendRequest = async (url) => {
+        if (url.includes('xhrpg_game.php')) {
+          return { ok: true, player: { ...legacyBot.player }, gw: { st: 'open', ends: Math.floor(Date.now() / 1000) + 1800 }, cw: null, monsters: [], bosses: [], spots: {} };
+        }
+        if (url.includes('xhrpg_guild.php')) return { ok: true, player: { map: 4, x: 100, y: 100, lv: 60 } };
+        return { ok: true };
+      };
+      await legacyBot.pollGame();
+      assert.strictEqual(legacyBot.inEventMode, true, 'legacy auto-join GW must still enter event mode');
+      assert.strictEqual(legacyBot.isEventCheckinOnly, false, 'legacy auto-join must not be converted into checkinOnly');
+    } finally {
+      setCustomAccountStorage(null);
+    }
+  }
+  console.log('✅ T84 integration and regression tests passed!');
+
   // ==========================================
   // T85 - EVENT TAB FUNCTIONAL BUTTONS & MANUAL ACTIONS
   // ==========================================
@@ -3304,6 +3448,624 @@ try {
     const data = JSON.parse(fs.readFileSync(spotsCachePath, 'utf8'));
     assert.strictEqual(typeof data, 'object', 'spots_cache.json must be valid JSON');
   }
+
+  // ==========================================
+  // T86: Auto Hunt MVP Boss by Map List Engine
+  // ==========================================
+  console.log('Testing T86 Auto Hunt MVP Boss by Map List Engine...');
+
+  // Test 1: Bật săn Boss nhưng chưa có Map -> cảnh báo rõ ràng, không âm thầm chạy
+  {
+    console.log('  Testing Test 1: Enable boss hunt without maps logs warning and prevents cycling...');
+    const bot1 = new BotInstance({ line_uid: 't86_bot_1', settings: { bossHuntEnabled: false, bossHuntMaps: [] } });
+    bot1.updateSettings({ bossHuntEnabled: true });
+    assert.strictEqual(bot1.settings.bossHuntEnabled, true, 'bossHuntEnabled must be true');
+    assert.strictEqual(bot1.settings.bossHuntMode, 'type2', 'bossHuntMode must be type2 when bossHuntEnabled is true');
+    assert.strictEqual(bot1.isMvpCycling, false, 'Bot must NOT cycle when maps list is empty');
+    const warningLog = bot1.logs.find(l => l.msg.includes('Chưa cấu hình danh sách bản đồ săn Boss'));
+    assert.ok(warningLog, 'Must emit warning log when enabled without maps');
+
+    // triggerMvpCycle directly must also warn and abort
+    bot1.logs = [];
+    bot1.triggerMvpCycle(false);
+    assert.strictEqual(bot1.isMvpCycling, false, 'triggerMvpCycle(false) must not start cycling without maps');
+    assert.ok(bot1.logs.some(l => l.msg.includes('Chưa cấu hình danh sách bản đồ săn Boss')), 'triggerMvpCycle(false) must log warning');
+
+    bot1.logs = [];
+    bot1.triggerMvpCycle(true);
+    assert.strictEqual(bot1.isMvpCycling, false, 'triggerMvpCycle(true) must not start cycling without maps');
+    assert.ok(bot1.logs.some(l => l.msg.includes('Chưa cấu hình danh sách bản đồ săn Boss')), 'triggerMvpCycle(true) must log warning');
+  }
+
+  // Test 2: Đồng bộ 2 chiều bossHuntEnabled <-> bossHuntMode và bossHuntMaps <-> mvpTargetMaps
+  {
+    console.log('  Testing Test 2: Bidirectional synchronization for maps and hunt mode...');
+    const bot2 = new BotInstance({ line_uid: 't86_bot_2', settings: { bossHuntMaps: [4, 2, 8], bossHuntEnabled: false } });
+    assert.strictEqual(bot2.settings.mvpTargetMaps, '4,2,8', 'mvpTargetMaps must match bossHuntMaps string');
+    assert.deepStrictEqual(bot2.getBossHuntMaps(), [4, 2, 8], 'getBossHuntMaps must preserve order [4, 2, 8]');
+
+    bot2.updateSettings({ bossHuntEnabled: true });
+    assert.strictEqual(bot2.settings.bossHuntMode, 'type2', 'bossHuntMode must be type2');
+
+    // Update via mvpTargetMaps string
+    bot2.updateSettings({ mvpTargetMaps: '3, 1, 6' });
+    assert.deepStrictEqual(bot2.settings.bossHuntMaps, [3, 1, 6], 'bossHuntMaps must be updated from string');
+    assert.deepStrictEqual(bot2.getBossHuntMaps(), [3, 1, 6], 'getBossHuntMaps must return [3, 1, 6]');
+
+    // Update via bossHuntMaps array
+    bot2.updateSettings({ bossHuntMaps: [7, 5] });
+    assert.strictEqual(bot2.settings.mvpTargetMaps, '7,5', 'mvpTargetMaps must be updated from array');
+    assert.deepStrictEqual(bot2.getBossHuntMaps(), [7, 5], 'getBossHuntMaps must return [7, 5]');
+
+    // Turn off
+    bot2.updateSettings({ bossHuntEnabled: false });
+    assert.strictEqual(bot2.settings.bossHuntMode, 'off', 'bossHuntMode must turn off');
+    assert.strictEqual(bot2.settings.bossHuntEnabled, false, 'bossHuntEnabled must be false');
+  }
+
+  // Test 3: Kích hoạt: immediate vs schedule
+  {
+    console.log('  Testing Test 3: Trigger modes (immediate vs schedule)...');
+    // Immediate mode: should trigger right away when toggle is turned on
+    const botImm = new BotInstance({ line_uid: 't86_bot_imm', settings: { bossHuntMaps: [2, 3], bossHuntTrigger: 'immediate', bossHuntEnabled: false, targetMap: 1 } });
+    botImm.player = { map: 1, lv: 50 };
+    botImm.updateSettings({ bossHuntEnabled: true });
+    assert.strictEqual(botImm.isMvpCycling, true, 'Immediate mode must start cycling immediately upon toggle');
+    assert.strictEqual(botImm.mvpCycleMapIndex, 0, 'Cycle must start at map index 0');
+    assert.strictEqual(botImm.mvpCycleOriginalMap, 1, 'Original farm map must be preserved');
+
+    // Schedule mode: should NOT trigger immediately upon toggle
+    const botSched = new BotInstance({ line_uid: 't86_bot_sched', settings: { bossHuntMaps: [2, 3], bossHuntTrigger: 'schedule', bossHuntEnabled: false, targetMap: 1 } });
+    botSched.player = { map: 1, lv: 50 };
+    botSched.updateSettings({ bossHuntEnabled: true });
+    assert.strictEqual(botSched.isMvpCycling, false, 'Schedule mode must NOT start cycling immediately upon toggle');
+  }
+
+  // Test 4: Chạy Force Hunt (Kích hoạt đi săn ngay) & End-to-End API endpoint
+  {
+    console.log('  Testing Test 4: Force Hunt trigger and End-to-End API verification...');
+    const botForce = new BotInstance({ line_uid: 't86_bot_force', settings: { bossHuntMaps: [3, 2], bossHuntEnabled: true, targetMap: 1 } });
+    botForce.player = { map: 1, lv: 50 };
+    botForce.triggerMvpCycle(true);
+    assert.strictEqual(botForce.isMvpCycling, true, 'Force Hunt must start cycling');
+    assert.strictEqual(botForce.mvpCycleMapIndex, 0, 'Must start at index 0');
+
+    // Re-triggering while cycling must reset cleanly
+    botForce.mvpCycleMapIndex = 1;
+    botForce.triggerMvpCycle(true);
+    assert.strictEqual(botForce.isMvpCycling, true, 'Cycle must still be active');
+    assert.strictEqual(botForce.mvpCycleMapIndex, 0, 'Index must be reset to 0');
+
+    // End-to-End API testing for force_mvp_hunt endpoint with isolated in-memory fixture storage
+    const fs = require('fs');
+    const path = require('path');
+    const accountsFilePath = path.join(__dirname, 'accounts.json');
+    const originalAccountsFileContent = fs.readFileSync(accountsFilePath, 'utf8');
+
+    let fixtureAccountsDb = [
+      { line_uid: 't86_api_with_maps', name: 'Fixture Bot With Maps', settings: { bossHuntMaps: [2, 3], bossHuntEnabled: false, targetMap: 1 } },
+      { line_uid: 't86_api_no_maps', name: 'Fixture Bot No Maps', settings: { bossHuntMaps: [], bossHuntEnabled: false, targetMap: 1 } }
+    ];
+    setCustomAccountStorage({
+      loadAccounts: () => JSON.parse(JSON.stringify(fixtureAccountsDb)),
+      saveAccounts: (accs) => {
+        fixtureAccountsDb = JSON.parse(JSON.stringify(accs));
+      }
+    });
+
+    const http = require('http');
+    const server = app.listen(0);
+    const port = server.address().port;
+    const testToken = 'test_token_force_hunt_' + Date.now();
+    userSessions[testToken] = { userId: 'usr_admin', expiresAt: Date.now() + 3600000 };
+
+    const makeApiRequest = (reqPath, payload) => {
+      return new Promise((resolve, reject) => {
+        const req = http.request({
+          host: '127.0.0.1',
+          port: port,
+          path: reqPath,
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${testToken}`,
+            'Connection': 'close'
+          },
+          agent: false
+        }, (res) => {
+          let data = '';
+          res.on('data', chunk => data += chunk);
+          res.on('end', () => {
+            let json = null;
+            try { json = JSON.parse(data); } catch (e) {}
+            resolve({ status: res.statusCode, json });
+          });
+        });
+        req.on('error', reject);
+        req.write(JSON.stringify(payload));
+        req.end();
+      });
+    };
+
+    try {
+      // 4A: API call without maps -> HTTP 400 with clear warning
+      const botApiNoMaps = new BotInstance({ line_uid: 't86_api_no_maps', userId: 'usr_admin', settings: { bossHuntMaps: [], bossHuntEnabled: false } });
+      botInstances['t86_api_no_maps'] = botApiNoMaps;
+      const resNoMaps = await makeApiRequest('/api/accounts/t86_api_no_maps/action', { action: 'force_mvp_hunt' });
+      assert.strictEqual(resNoMaps.status, 400, 'API must return HTTP 400 when activating hunt without maps');
+      assert.strictEqual(resNoMaps.json.ok, false);
+      assert.ok(resNoMaps.json.error.includes('Chưa cấu hình danh sách bản đồ săn Boss'), 'API error message must indicate missing maps');
+      assert.ok(botApiNoMaps.logs.some(l => l.msg.includes('Chưa cấu hình danh sách bản đồ săn Boss')), 'Bot must log warning about missing maps');
+
+      // 4B: API call with valid maps -> HTTP 200 and triggers hunt cycle
+      const botApiWithMaps = new BotInstance({ line_uid: 't86_api_with_maps', userId: 'usr_admin', settings: { bossHuntMaps: [2, 3], bossHuntEnabled: false, targetMap: 1 } });
+      botApiWithMaps.player = { map: 1, lv: 50 };
+      botInstances['t86_api_with_maps'] = botApiWithMaps;
+      const resWithMaps = await makeApiRequest('/api/accounts/t86_api_with_maps/action', { action: 'force_mvp_hunt' });
+      assert.strictEqual(resWithMaps.status, 200, 'API must return HTTP 200 when activating hunt with valid maps');
+      assert.strictEqual(resWithMaps.json.ok, true);
+      assert.strictEqual(botApiWithMaps.settings.bossHuntEnabled, true, 'bossHuntEnabled must be set to true');
+      assert.strictEqual(botApiWithMaps.settings.bossHuntMode, 'type2', 'bossHuntMode must be set to type2');
+      assert.strictEqual(botApiWithMaps.isMvpCycling, true, 'isMvpCycling must be triggered by force_mvp_hunt API');
+
+      // Verify in-memory fixture storage was modified without modifying accounts.json
+      const updatedFixture = fixtureAccountsDb.find(a => a.line_uid === 't86_api_with_maps');
+      assert.ok(updatedFixture && updatedFixture.settings.bossHuntEnabled === true, 'Fixture in-memory storage must be updated');
+
+      delete botInstances['t86_api_no_maps'];
+      delete botInstances['t86_api_with_maps'];
+    } finally {
+      setCustomAccountStorage(null);
+      const afterTestAccountsContent = fs.readFileSync(accountsFilePath, 'utf8');
+      assert.strictEqual(afterTestAccountsContent, originalAccountsFileContent, 'accounts.json on disk must remain completely untouched by API tests');
+
+      delete userSessions[testToken];
+      if (typeof server.closeAllConnections === 'function') {
+        server.closeAllConnections();
+      }
+      await new Promise(r => server.close(r));
+    }
+  }
+
+  // Test 5: Scheduler tự kích hoạt đầu giờ (phút 00–02) qua pollGame()
+  {
+    console.log('  Testing Test 5: Scheduler hour check behavior via pollGame()...');
+    const botSchedCheck = new BotInstance({ line_uid: 't86_sched_check', userId: 'usr_admin', settings: { bossHuntEnabled: true, bossHuntMaps: [2, 3], bossHuntTrigger: 'schedule' } });
+    botSchedCheck.player = { map: 1, lv: 50 };
+    botSchedCheck.sendRequest = async () => ({ ok: true, player: { map: 1, lv: 50 } });
+    botSchedCheck.warpToMap = async () => true;
+
+    // Mock Date so that getMinutes() returns 1 (inside minute 00-02 window)
+    const RealDate = global.Date;
+    class MockDate extends RealDate {
+      getMinutes() { return 1; }
+      getHours() { return 10; }
+      getSeconds() { return 0; }
+    }
+    global.Date = MockDate;
+
+    try {
+      assert.strictEqual(botSchedCheck.isMvpCycling, false, 'Before pollGame, isMvpCycling must be false');
+      await botSchedCheck.pollGame();
+      assert.strictEqual(botSchedCheck.isMvpCycling, true, 'pollGame() must trigger MVP cycle at minute 01 of the hour');
+      assert.strictEqual(botSchedCheck.mvpCycleMapIndex, 0, 'Must start at index 0');
+
+      // Test scheduler with empty maps: must warn, not crash or start cycling
+      const botSchedNoMaps = new BotInstance({ line_uid: 't86_sched_no_maps', userId: 'usr_admin', settings: { bossHuntEnabled: true, bossHuntMaps: [], bossHuntTrigger: 'schedule' } });
+      botSchedNoMaps.player = { map: 1, lv: 50 };
+      botSchedNoMaps.sendRequest = async () => ({ ok: true, player: { map: 1, lv: 50 } });
+      await botSchedNoMaps.pollGame();
+      assert.strictEqual(botSchedNoMaps.isMvpCycling, false, 'pollGame() must NOT start cycling when maps list is empty');
+      assert.ok(botSchedNoMaps.logs.some(l => l.msg.includes('Chưa cấu hình danh sách bản đồ săn Boss')), 'pollGame() must log warning when maps empty');
+    } finally {
+      global.Date = RealDate;
+    }
+  }
+
+  // Test 6: Bỏ qua Map thiếu level và tiếp tục thứ tự
+  {
+    console.log('  Testing Test 6: Skip maps with insufficient level in user order...');
+    const allDefs = getMapDefs();
+    const highReqDef = allDefs.find(m => m.req >= 50) || { id: 8, req: 60, name: 'High Lv Map' };
+    const lowReqDef = allDefs.find(m => m.req <= 10 && m.id !== highReqDef.id) || { id: 1, req: 1, name: 'Low Lv Map' };
+
+    const lvBot = new BotInstance({ line_uid: 't86_lv_bot', settings: { bossHuntMaps: [highReqDef.id, lowReqDef.id], bossHuntMode: 'type2' } });
+    lvBot.player = { map: lowReqDef.id, lv: 5 }; // Player Lv.5, cannot enter highReqDef
+    lvBot.triggerMvpCycle(true);
+    assert.strictEqual(lvBot.isMvpCycling, true);
+    assert.strictEqual(lvBot.mvpCycleMapIndex, 0);
+
+    // Run updateMvpCycleStatus: it should skip highReqDef in the while loop and advance to lowReqDef
+    await lvBot.updateMvpCycleStatus();
+    assert.strictEqual(lvBot.mvpCycleMapIndex, 1, 'Must skip underlevel map and advance to map index 1');
+    assert.ok(lvBot.logs.some(l => l.msg.includes(`Bỏ qua Map ${highReqDef.id}`) && l.msg.includes('thiếu level')), 'Must log warning for skipped underlevel map');
+  }
+
+  // Test 7: Warp thất bại tự động retry và bỏ qua sau 16s (8 nhịp poll)
+  {
+    console.log('  Testing Test 7: Warp failure transit timeout and auto-skip...');
+    const warpBot = new BotInstance({ line_uid: 't86_warp_bot', settings: { bossHuntMaps: [2, 3], bossHuntMode: 'type2' } });
+    warpBot.player = { map: 1, lv: 50 };
+    warpBot.triggerMvpCycle(true);
+    assert.strictEqual(warpBot.isMvpCycling, true);
+    assert.strictEqual(warpBot.mvpCycleMapIndex, 0);
+
+    // Mock warpToMap to fail (player stays at map 1)
+    warpBot.warpToMap = async () => false;
+
+    // First 7 transit polls
+    for (let i = 1; i <= 7; i++) {
+      await warpBot.updateMvpCycleStatus();
+      assert.strictEqual(warpBot.mvpTransitCount, i, `Transit count must be ${i}`);
+      assert.strictEqual(warpBot.mvpCycleMapIndex, 0, 'Must still attempt map index 0');
+    }
+
+    // 8th poll: timeout triggers auto-skip to next map (index 1)
+    await warpBot.updateMvpCycleStatus();
+    assert.strictEqual(warpBot.mvpCycleMapIndex, 1, 'Must auto-skip to map index 1 after 8 failed polls');
+    assert.ok(warpBot.logs.some(l => l.msg.includes('Warp thất bại') || l.msg.includes('thất bại sau 16s')), 'Must log warning about warp failure and skip');
+  }
+
+  // Test 8: Hoàn thành chu kỳ và quay về Map gốc
+  {
+    console.log('  Testing Test 8: Cycle completion and return to original farm map...');
+    const cycleBot = new BotInstance({ line_uid: 't86_cycle_bot', settings: { targetMap: 3, autoMap: true, bossHuntMaps: [2], bossHuntMode: 'type2' } });
+    cycleBot.player = { map: 3, lv: 50 };
+    cycleBot.triggerMvpCycle(true);
+    assert.strictEqual(cycleBot.mvpCycleOriginalMap, 3, 'Original map must be recorded as 3');
+
+    // Simulate arriving at Map 2 with all bosses cleared
+    cycleBot.player.map = 2;
+    cycleBot.bosses = [];
+    cycleBot.mvpConfirmClearCount = 3;
+    cycleBot.mvpCycleStats.mapStartTs = Date.now() - 5000; // stayed > 3s
+
+    let returnTargetMap = null;
+    cycleBot.warpToMap = async (mapId) => {
+      returnTargetMap = mapId;
+      cycleBot.player.map = mapId;
+      return true;
+    };
+
+    await cycleBot.updateMvpCycleStatus();
+    assert.strictEqual(cycleBot.isMvpCycling, false, 'Cycle must finish after clearing all maps');
+    assert.strictEqual(returnTargetMap, 3, 'Must warp back to original farm map (3)');
+    assert.ok(cycleBot.logs.some(l => l.msg.includes('Hoàn thành chu kỳ săn Boss')), 'Must log cycle completion');
+  }
+
+  // Test 9: Đồng bộ Team Member theo Leader trong luồng pollGame() thật
+  {
+    console.log('  Testing Test 9: Team Member state synchronization from Leader in pollGame()...');
+    const ldr = new BotInstance({ line_uid: 't86_ldr', userId: 'user_t86', settings: { teamRole: 'leader', teamId: 'alpha', bossHuntEnabled: true, bossHuntMaps: [2, 3], bossHuntMode: 'type2' } });
+    const mem = new BotInstance({ line_uid: 't86_mem', userId: 'user_t86', settings: { teamRole: 'member', teamId: 'alpha', teamSynced: true, bossHuntEnabled: true, bossHuntMode: 'type2', targetMap: 1 } });
+    botInstances['t86_ldr'] = ldr;
+    botInstances['t86_mem'] = mem;
+
+    ldr.status = 'running';
+    ldr.player = { map: 1, lv: 50 };
+    mem.status = 'running';
+    mem.player = { map: 1, lv: 50 };
+    mem.sendRequest = async () => ({ ok: true, player: { map: 1, lv: 50 } });
+    mem.warpToMap = async () => true;
+
+    // Leader starts MVP cycle
+    ldr.triggerMvpCycle(true);
+    assert.strictEqual(ldr.isMvpCycling, true);
+    assert.strictEqual(mem.isMvpCycling, false, 'Member must not be cycling before poll');
+
+    // Run pollGame() on member without ANY manual property assignment
+    await mem.pollGame();
+
+    assert.strictEqual(mem.isMvpCycling, true, 'Member pollGame must automatically sync isMvpCycling from Leader');
+    assert.strictEqual(mem.mvpCycleMapIndex, ldr.mvpCycleMapIndex, 'Member pollGame must automatically sync mvpCycleMapIndex from Leader');
+    assert.strictEqual(mem.getCurrentMvpCycleMap(), ldr.getCurrentMvpCycleMap(), 'Member must follow current cycle map of Leader');
+
+    delete botInstances['t86_ldr'];
+    delete botInstances['t86_mem'];
+  }
+
+  // Test 10: Không phá vỡ autoMap, autoZone, Guild Dungeon và Event State Machine
+  {
+    console.log('  Testing Test 10: Non-regression for autoMap, autoZone, Guild Dungeon & Event State Machine...');
+    const safeBot = new BotInstance({ line_uid: 't86_safe_bot', settings: { bossHuntEnabled: true, bossHuntMode: 'type2', bossHuntMaps: [2] } });
+    safeBot.player = { map: 1, lv: 50, gdun_in: 0 };
+    safeBot.triggerMvpCycle(true);
+
+    // Guild dungeon active: MVP cycle must pause
+    safeBot.guildDungeonActive = true;
+    safeBot.player.map = 12;
+    const oldIndex = safeBot.mvpCycleMapIndex;
+    await safeBot.updateMvpCycleStatus();
+    assert.strictEqual(safeBot.mvpCycleMapIndex, oldIndex, 'Must pause when in Guild Dungeon');
+    safeBot.guildDungeonActive = false;
+
+    // Event mode active: must not overwrite event
+    safeBot.inEventMode = true;
+    safeBot.eventState = 'ACTIVE';
+    safeBot.player.map = 4;
+    await safeBot.updateMvpCycleStatus();
+    assert.strictEqual(safeBot.inEventMode, true, 'Event mode must remain ACTIVE');
+  }
+
+  // Test 11: Chống gọi Warp trùng lặp, xung đột đồng thời (_isWarping lock) & Single-Warp Invariant trong toàn bộ chu kỳ pollGame()
+  {
+    console.log('  Testing Test 11: Duplicate warp prevention, _isWarping lock & Single-Warp Invariant per pollGame cycle...');
+
+    // 11A. Concurrency Mutex Lock Verification (_isWarping)
+    const botWarpLock = new BotInstance({ line_uid: 't86_warp_lock', settings: { bossHuntMaps: [2, 3] } });
+    botWarpLock.player = { map: 1, lv: 50 };
+
+    let releaseWarp;
+    const warpPromise = new Promise(resolve => { releaseWarp = resolve; });
+    botWarpLock.sendRequest = async () => {
+      await warpPromise;
+      return { ok: true, player: { map: 2 } };
+    };
+
+    // First warp initiated (async, in flight)
+    const warp1 = botWarpLock.warpToMap(2);
+
+    // Second warp called while first warp is still in flight
+    const warp2 = await botWarpLock.warpToMap(3);
+    assert.strictEqual(warp2, false, 'Second concurrent warp must immediately be rejected with false');
+    assert.ok(botWarpLock.logs.some(l => l.msg.includes('Warp in progress') || l.msg.includes('trùng lặp')), 'Must log warning about warp in progress');
+
+    // Complete first warp
+    releaseWarp();
+    const result1 = await warp1;
+    assert.strictEqual(result1, true, 'First warp should complete successfully');
+    assert.strictEqual(botWarpLock._isWarping, false, '_isWarping lock must be released');
+
+    // 11B. End-to-End Single-Warp Invariant per pollGame cycle across all operational scenarios
+    const setupTestBot = (opts = {}) => {
+      const b = new BotInstance({
+        line_uid: 't86_single_warp_' + Math.random().toString(36).substring(2, 8),
+        userId: 'usr_admin',
+        settings: {
+          autoMap: false,
+          bossHuntEnabled: false,
+          bossHuntMode: 'off',
+          bossHuntMaps: [2, 3],
+          targetMap: 1,
+          teamRole: 'solo',
+          ...opts.settings
+        }
+      });
+      b.player = { map: 1, lv: 50, hp: 100, maxhp: 100, gdun_in: 0, ...opts.player };
+      b.sendRequest = async () => ({ ok: true, player: { ...b.player } });
+      b.sendGameKeepalive = async () => true;
+      return b;
+    };
+
+    // Scenario 1: AutoMap mismatch -> Exactly 1 warp call during pollGame(), poll ends early
+    {
+      const bot = setupTestBot({ settings: { autoMap: true, targetMap: 3 }, player: { map: 1, lv: 50 } });
+      let warpCalls = [];
+      bot.warpToMap = async (targetMap) => {
+        warpCalls.push(targetMap);
+        bot.player.map = targetMap;
+        return true;
+      };
+      await bot.pollGame();
+      assert.strictEqual(warpCalls.length, 1, 'AutoMap mismatch: Must emit exactly 1 warp call during pollGame');
+      assert.strictEqual(warpCalls[0], 3, 'Must warp to targetMap 3');
+    }
+
+    // Scenario 2: AutoMap matched -> Exactly 0 warp calls during pollGame()
+    {
+      const bot = setupTestBot({ settings: { autoMap: true, targetMap: 3 }, player: { map: 3, lv: 50 } });
+      let warpCalls = [];
+      bot.warpToMap = async (targetMap) => {
+        warpCalls.push(targetMap);
+        return true;
+      };
+      await bot.pollGame();
+      assert.strictEqual(warpCalls.length, 0, 'AutoMap matched: Must emit 0 warp calls during pollGame');
+    }
+
+    // Scenario 3: Săn Boss MVP Cycle initiation tick -> Exactly 1 warp call to Map 2
+    {
+      const bot = setupTestBot({
+        settings: { bossHuntEnabled: true, bossHuntMode: 'type2', bossHuntMaps: [2, 3], targetMap: 1 },
+        player: { map: 1, lv: 50 }
+      });
+      bot.triggerMvpCycle(true);
+      assert.strictEqual(bot.mvpTransitCount, 0, 'Initial transit count before poll is 0');
+
+      let warpCalls = [];
+      bot.warpToMap = async (targetMap) => {
+        warpCalls.push(targetMap);
+        return true;
+      };
+      await bot.pollGame();
+      assert.strictEqual(warpCalls.length, 1, 'MVP Cycle initiation: Must emit exactly 1 warp call during pollGame');
+      assert.strictEqual(warpCalls[0], 2, 'Must warp to first cycle map (Map 2)');
+      assert.strictEqual(bot.mvpTransitCount, 1, 'Transit count must advance to 1');
+    }
+
+    // Scenario 4: Săn Boss MVP Cycle intermediate transit tick (tick 2, still at map 1) -> Exactly 0 warp calls (no duplicate)
+    {
+      const bot = setupTestBot({
+        settings: { bossHuntEnabled: true, bossHuntMode: 'type2', bossHuntMaps: [2, 3], targetMap: 1 },
+        player: { map: 1, lv: 50 }
+      });
+      bot.isMvpCycling = true;
+      bot.mvpCycleMapIndex = 0;
+      bot.mvpTransitCount = 1;
+
+      let warpCalls = [];
+      bot.warpToMap = async (targetMap) => {
+        warpCalls.push(targetMap);
+        return true;
+      };
+      await bot.pollGame();
+      assert.strictEqual(warpCalls.length, 0, 'MVP Cycle transit tick 2: Must emit 0 warp calls (no duplicate warp)');
+      assert.strictEqual(bot.mvpTransitCount, 2, 'Transit count increments to 2');
+    }
+
+    // Scenario 5: Săn Boss MVP Cycle transit retry tick (tick 3, still at map 1) -> Exactly 1 retry warp call
+    {
+      const bot = setupTestBot({
+        settings: { bossHuntEnabled: true, bossHuntMode: 'type2', bossHuntMaps: [2, 3], targetMap: 1 },
+        player: { map: 1, lv: 50 }
+      });
+      bot.isMvpCycling = true;
+      bot.mvpCycleMapIndex = 0;
+      bot.mvpTransitCount = 2; // Before pollGame runs, updateMvpCycleStatus increments it to 3 and triggers retry
+
+      let warpCalls = [];
+      bot.warpToMap = async (targetMap) => {
+        warpCalls.push(targetMap);
+        return true;
+      };
+      await bot.pollGame();
+      assert.strictEqual(warpCalls.length, 1, 'MVP Cycle transit retry tick 3: Must emit exactly 1 retry warp call');
+      assert.strictEqual(warpCalls[0], 2, 'Retry warp must target Map 2');
+      assert.strictEqual(bot.mvpTransitCount, 3, 'Transit count increments to 3');
+    }
+
+    // Scenario 6: Săn Boss MVP Cycle on map with active boss -> Exactly 0 warp calls
+    {
+      const bot = setupTestBot({
+        settings: { bossHuntEnabled: true, bossHuntMode: 'type2', bossHuntMaps: [2, 3], targetMap: 1 },
+        player: { map: 2, lv: 50 }
+      });
+      bot.isMvpCycling = true;
+      bot.mvpCycleMapIndex = 0;
+      bot.bosses = [{ id: 101, name: 'Golden Thief Bug', hp: 1000, x: 15, y: 15 }];
+
+      let warpCalls = [];
+      bot.warpToMap = async (targetMap) => {
+        warpCalls.push(targetMap);
+        return true;
+      };
+      await bot.pollGame();
+      assert.strictEqual(warpCalls.length, 0, 'Active boss on map: Must emit 0 warp calls');
+    }
+
+    // Scenario 7: Săn Boss MVP Cycle map clear -> Transitions to Map 3: Exactly 1 warp call
+    {
+      const bot = setupTestBot({
+        settings: { bossHuntEnabled: true, bossHuntMode: 'type2', bossHuntMaps: [2, 3], targetMap: 1 },
+        player: { map: 2, lv: 50 }
+      });
+      bot.isMvpCycling = true;
+      bot.mvpCycleMapIndex = 0;
+      bot.bosses = [];
+      bot.mvpConfirmClearCount = 2; // updateMvpCycleStatus will increment to 3 and trigger map transition
+      bot.mvpCycleStats = { mapStartTs: Date.now() - 5000, bossKilledInMap: 1 };
+
+      let warpCalls = [];
+      bot.warpToMap = async (targetMap) => {
+        warpCalls.push(targetMap);
+        return true;
+      };
+      await bot.pollGame();
+      assert.strictEqual(warpCalls.length, 1, 'Map clear transition: Must emit exactly 1 warp call to next map');
+      assert.strictEqual(warpCalls[0], 3, 'Must warp to next map in list (Map 3)');
+      assert.strictEqual(bot.mvpCycleMapIndex, 1, 'Map index must increment to 1');
+    }
+
+    // Scenario 8: Team Member sync with Leader (Leader on Map 3, Member on Map 1) -> Exactly 1 warp call
+    {
+      const ldr = setupTestBot({
+        settings: { teamRole: 'leader', teamId: 'team_single_warp', bossHuntEnabled: true, bossHuntMode: 'type2' },
+        player: { map: 3, lv: 50 }
+      });
+      ldr.status = 'running';
+      const mem = setupTestBot({
+        settings: { teamRole: 'member', teamId: 'team_single_warp', teamSynced: true, bossHuntEnabled: true, bossHuntMode: 'type2' },
+        player: { map: 1, lv: 50 }
+      });
+      mem.status = 'running';
+      botInstances[ldr.line_uid] = ldr;
+      botInstances[mem.line_uid] = mem;
+
+      try {
+        let memWarpCalls = [];
+        mem.warpToMap = async (targetMap) => {
+          memWarpCalls.push(targetMap);
+          mem.player.map = targetMap;
+          return true;
+        };
+        await mem.pollGame();
+        assert.strictEqual(memWarpCalls.length, 1, 'Member sync: Must emit exactly 1 warp call during pollGame');
+        assert.strictEqual(memWarpCalls[0], 3, 'Member must warp to Leader map (Map 3)');
+      } finally {
+        delete botInstances[ldr.line_uid];
+        delete botInstances[mem.line_uid];
+      }
+    }
+
+    // Test 12: Team Member warp fail-safe — retry 3/6, skip at 8, then follow a new Leader target
+    {
+      console.log('  Testing Test 12: Team Member retry/skip without warp spam, then follow Leader...');
+      const leader = new BotInstance({
+        line_uid: 't86_member_retry_leader',
+        userId: 'user_t86_member_retry',
+        settings: {
+          teamRole: 'leader',
+          teamId: 'member_retry_team',
+          bossHuntEnabled: true,
+          bossHuntMode: 'type2',
+          bossHuntMaps: [2, 3]
+        }
+      });
+      const member = new BotInstance({
+        line_uid: 't86_member_retry_member',
+        userId: 'user_t86_member_retry',
+        settings: {
+          teamRole: 'member',
+          teamId: 'member_retry_team',
+          teamSynced: true,
+          bossHuntEnabled: true,
+          bossHuntMode: 'type2',
+          bossHuntMaps: []
+        }
+      });
+
+      leader.status = 'running';
+      leader.isMvpCycling = true;
+      leader.mvpCycleMapIndex = 0;
+      leader.player = { map: 2, lv: 50, gdun_in: 0 };
+      member.status = 'running';
+      member.player = { map: 1, lv: 50, gdun_in: 0 };
+      member.sendRequest = async () => ({ ok: true, player: { ...member.player } });
+      member.sendGameKeepalive = async () => true;
+      member.runAutomation = async () => {};
+
+      const memberWarpCalls = [];
+      member.warpToMap = async targetMap => {
+        memberWarpCalls.push(targetMap);
+        return false; // server rejects warp; Member must not spam every poll
+      };
+
+      botInstances[leader.line_uid] = leader;
+      botInstances[member.line_uid] = member;
+      try {
+        for (let i = 0; i < 8; i++) await member.pollGame();
+
+        assert.deepStrictEqual(memberWarpCalls, [2, 2, 2], 'Member must warp only at attempts 1, 3 and 6');
+        assert.strictEqual(member.mvpMemberTransitCount, 8, 'Member transit counter must reach the skip threshold');
+        assert.strictEqual(member.mvpMemberSkippedTargetMap, 2, 'Member must mark failed Leader target as skipped');
+
+        await member.pollGame();
+        assert.strictEqual(memberWarpCalls.length, 3, 'Member must not spam warp after skipping unchanged target');
+
+        leader.mvpCycleMapIndex = 1;
+        leader.player.map = 3;
+        await member.pollGame();
+        assert.strictEqual(memberWarpCalls.length, 4, 'Member must resume routing when Leader changes target');
+        assert.strictEqual(memberWarpCalls[3], 3, 'Member must follow Leader to the new cycle map');
+        assert.strictEqual(member.mvpMemberTransitTargetMap, 3, 'Member transit state must reset to new Leader target');
+      } finally {
+        delete botInstances[leader.line_uid];
+        delete botInstances[member.line_uid];
+      }
+    }
+  }
+
+  console.log('✅ T86 Auto Hunt MVP Boss by Map List Engine Tests Passed successfully!');
 
   console.log('✅ Concurrency, Scheduler & Request Queue Engine (13 Scenarios) Passed successfully!');
   console.log('✅ All Unit Tests Passed successfully!');

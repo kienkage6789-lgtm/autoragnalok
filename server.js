@@ -982,9 +982,17 @@ let botInstances = {};
 // In-memory cache for accounts to prevent blocking I/O on multiple reads
 let accountsCache = null;
 let saveAccountsTimeout = null;
+let customAccountStorage = null;
+
+function setCustomAccountStorage(storage) {
+  customAccountStorage = storage;
+}
 
 // Load accounts
 function loadAccounts() {
+  if (customAccountStorage && typeof customAccountStorage.loadAccounts === 'function') {
+    return customAccountStorage.loadAccounts();
+  }
   if (accountsCache !== null) {
     return accountsCache;
   }
@@ -1003,6 +1011,9 @@ function loadAccounts() {
 
 // Save accounts (Debounced Async Write with In-memory Cache)
 function saveAccounts(accounts) {
+  if (customAccountStorage && typeof customAccountStorage.saveAccounts === 'function') {
+    return customAccountStorage.saveAccounts(accounts);
+  }
   accountsCache = accounts;
 
   if (saveAccountsTimeout) {
@@ -1022,6 +1033,8 @@ function saveAccounts(accounts) {
 // Flush accounts cache to disk on shutdown to prevent data loss
 function flushAccountsToDisk() {
   if (accountsCache !== null && saveAccountsTimeout !== null) {
+    clearTimeout(saveAccountsTimeout);
+    saveAccountsTimeout = null;
     try {
       console.log('[Shutdown] Flushing accounts cache to disk...');
       fs.writeFileSync(ACCOUNTS_FILE, JSON.stringify(accountsCache, null, 2), 'utf8');
@@ -2007,20 +2020,28 @@ class BotInstance {
     // Migration & Aliasing for bossHuntEnabled <-> bossHuntMode
     if (userSettings.bossHuntEnabled !== undefined) {
       this.settings.bossHuntEnabled = userSettings.bossHuntEnabled === true;
-      if (this.settings.bossHuntMode === undefined || this.settings.bossHuntMode === 'off') {
-        if (this.settings.bossHuntEnabled) {
-          this.settings.bossHuntMode = 'type2';
-        }
+      if (this.settings.bossHuntEnabled) {
+        this.settings.bossHuntMode = 'type2';
+      } else {
+        this.settings.bossHuntMode = 'off';
       }
-    }
-    if (this.settings.bossHuntMode === undefined) {
+    } else if (userSettings.bossHuntMode !== undefined) {
+      this.settings.bossHuntMode = userSettings.bossHuntMode;
+      this.settings.bossHuntEnabled = (this.settings.bossHuntMode !== 'off');
+    } else if (this.settings.bossHuntMode === undefined) {
       if (this.settings.autoMVP) {
         this.settings.bossHuntMode = this.settings.autoMvpCycle !== false ? 'type2' : 'type1';
       } else {
         this.settings.bossHuntMode = 'off';
       }
+      this.settings.bossHuntEnabled = (this.settings.bossHuntMode !== 'off');
+    } else {
+      this.settings.bossHuntEnabled = (this.settings.bossHuntMode !== 'off');
     }
-    this.settings.bossHuntEnabled = (this.settings.bossHuntMode !== 'off');
+
+    if (this.settings.bossHuntTrigger === undefined) {
+      this.settings.bossHuntTrigger = userSettings.bossHuntTrigger || 'schedule';
+    }
 
     // Migration & Aliasing for bossHuntPriority <-> mvpPriorityMode
     if (userSettings.bossHuntPriority !== undefined) {
@@ -2038,6 +2059,9 @@ class BotInstance {
     } else if (userSettings.mvpTargetMaps !== undefined) {
       this.settings.mvpTargetMaps = String(userSettings.mvpTargetMaps);
       this.settings.bossHuntMaps = this.settings.mvpTargetMaps.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+    } else {
+      this.settings.bossHuntMaps = this.settings.bossHuntMaps || [];
+      this.settings.mvpTargetMaps = this.settings.bossHuntMaps.join(',');
     }
 
     this.player = null;
@@ -2078,6 +2102,12 @@ class BotInstance {
     this.mvpConfirmClearCount = 0; // Số polls liên tiếp xác nhận map đã sạch boss
     this.mvpCycleOriginalMap = null;
     this.mvpCycleOriginalAutoMap = null;
+    // Member follow-state: updateMvpCycleStatus() chỉ chạy trên Leader/solo,
+    // nên Member phải tự quản lý transit retry/skip trong checkAndRouteMap().
+    this.mvpMemberTransitTargetMap = null;
+    this.mvpMemberTransitCount = 0;
+    this.mvpMemberSkippedTargetMap = null;
+    this.mvpMemberTransitCycle = null;
     this.lastMvpCycleCheckHour = -1;
     this.lastGdunAutoEnterHour = -1;
     this.lootLogs = [];
@@ -2114,9 +2144,22 @@ class BotInstance {
     this.automationRunning = false;   // Mutex lock cho runAutomation
     this.eventReturnStartedAt = this.eventSnapshot ? Date.now() : 0;
     this.eventReturnRetries = 0;
-    this.isEventCheckinOnly = false;
-    this.eventCheckinStartedAt = 0;
+    this.isEventCheckinOnly = !!(this.eventSnapshot && this.eventSnapshot.checkinOnly);
+    this.eventCheckinStartedAt = this.isEventCheckinOnly
+      ? (this.eventSnapshot.checkinStartedAt || this.eventSnapshot.createdAt || Date.now())
+      : 0;
     this.warCheckinCompletedKey = account.warCheckinCompletedKey || null;
+    this.warCheckinCompletedKeys = (account.warCheckinCompletedKeys && typeof account.warCheckinCompletedKeys === 'object')
+      ? { ...account.warCheckinCompletedKeys }
+      : {};
+    this.warCheckinSuppressedKeys = (account.warCheckinSuppressedKeys && typeof account.warCheckinSuppressedKeys === 'object')
+      ? { ...account.warCheckinSuppressedKeys }
+      : {};
+    if (this.warCheckinCompletedKey) {
+      const [completedKind] = String(this.warCheckinCompletedKey).split(':');
+      if (completedKind) this.warCheckinCompletedKeys[completedKind] = this.warCheckinCompletedKey;
+    }
+    this.warCheckinLevelLoggedKeys = {};
     this.inEventMode = false;
     this.currentEventKind = this.eventSnapshot ? (this.eventSnapshot.kind || null) : null;
     this.eventOriginalMap = this.eventSnapshot ? this.eventSnapshot.map : null;
@@ -2318,6 +2361,7 @@ class BotInstance {
       offlineTargetZones: [],
       bossHuntMode: 'off', // 'off' | 'type1' | 'type2'
       bossHuntEnabled: false,
+      bossHuntTrigger: 'schedule', // 'schedule' | 'immediate'
       bossHuntPriority: 'distance', // 'distance' | 'hp_asc' | 'level_asc' | 'level_desc'
       bossHuntMaps: [],
       currentMvpMapIndex: 0,
@@ -2385,7 +2429,17 @@ class BotInstance {
       return this.settings.bossHuntMaps.map(m => parseInt(m)).filter(n => !isNaN(n));
     }
     if (this.settings.mvpTargetMaps) {
-      return String(this.settings.mvpTargetMaps).split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+      const parsed = String(this.settings.mvpTargetMaps).split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+      if (parsed.length > 0) return parsed;
+    }
+    if (this.settings.teamRole === 'member' && this.settings.teamSynced === true) {
+      const myTeamId = this.settings.teamId || 'none';
+      if (myTeamId !== 'none') {
+        const leader = Object.values(botInstances).find(b => b.userId === this.userId && b.settings.teamRole === 'leader' && (b.settings.teamId || 'none') === myTeamId);
+        if (leader && leader !== this) {
+          return leader.getBossHuntMaps();
+        }
+      }
     }
     return [];
   }
@@ -2397,6 +2451,7 @@ class BotInstance {
 
   updateSettings(newSettings) {
     const oldBossHuntMode = this.settings.bossHuntMode;
+    const oldBossHuntEnabled = this.settings.bossHuntEnabled;
 
     // Đồng bộ 2 chiều bossHuntPriority <-> mvpPriorityMode
     if (newSettings.bossHuntPriority !== undefined) {
@@ -2421,21 +2476,54 @@ class BotInstance {
 
     // Đồng bộ 2 chiều bossHuntEnabled <-> bossHuntMode
     if (newSettings.bossHuntEnabled !== undefined) {
-      if (newSettings.bossHuntEnabled && (this.settings.bossHuntMode === 'off' || newSettings.bossHuntMode === 'off')) {
+      if (newSettings.bossHuntEnabled) {
         newSettings.bossHuntMode = 'type2';
-      } else if (!newSettings.bossHuntEnabled) {
+        newSettings.bossHuntEnabled = true;
+      } else {
         newSettings.bossHuntMode = 'off';
+        newSettings.bossHuntEnabled = false;
       }
     } else if (newSettings.bossHuntMode !== undefined) {
-      newSettings.bossHuntEnabled = (newSettings.bossHuntMode !== 'off');
+      if (newSettings.bossHuntMode === 'type2') {
+        newSettings.bossHuntEnabled = true;
+      } else if (newSettings.bossHuntMode === 'off') {
+        newSettings.bossHuntEnabled = false;
+      } else {
+        newSettings.bossHuntEnabled = true;
+      }
     }
 
     this.settings = { ...this.settings, ...newSettings };
     this.addLog('SYSTEM', 'Cập nhật cấu hình bot thành công');
 
+    const isEnablingBossHunt = (newSettings.bossHuntEnabled === true && !oldBossHuntEnabled) ||
+                               (newSettings.bossHuntMode === 'type2' && oldBossHuntMode !== 'type2');
+
+    if (this.settings.bossHuntEnabled) {
+      const maps = this.getBossHuntMaps();
+      if (isEnablingBossHunt) {
+        if (maps.length === 0) {
+          this.addLog('WARNING', `⚠️ Chưa cấu hình danh sách bản đồ săn Boss.`);
+        } else {
+          const triggerMode = this.settings.bossHuntTrigger || 'schedule';
+          const triggerText = triggerMode === 'immediate' ? 'Chạy ngay sau khi bật toggle' : 'Tự động theo lịch đầu giờ (00–02)';
+          this.addLog('SYSTEM', `👿 [Auto Boss] Đã bật chế độ tự động săn Boss MVP (Danh sách Map: ${maps.join(', ')} | Kích hoạt: ${triggerText}).`);
+          if (triggerMode === 'immediate' && this.settings.teamRole !== 'member' && !this.isMvpCycling) {
+            this.triggerMvpCycle(true);
+          }
+        }
+      } else if (newSettings.bossHuntTrigger === 'immediate' && this.settings.teamRole !== 'member' && !this.isMvpCycling) {
+        if (maps.length === 0) {
+          this.addLog('WARNING', `⚠️ Chưa cấu hình danh sách bản đồ săn Boss.`);
+        } else {
+          this.triggerMvpCycle(true);
+        }
+      }
+    }
+
     // Nếu đang trong chu kỳ săn boss mà bị tắt hoặc đổi sang chế độ khác Loại 2, hoặc xóa/đổi danh sách map
     if (this.isMvpCycling) {
-      const turnedOffOrChanged = (newSettings.bossHuntMode !== undefined && newSettings.bossHuntMode !== 'type2' && oldBossHuntMode === 'type2');
+      const turnedOffOrChanged = (newSettings.bossHuntMode !== undefined && newSettings.bossHuntMode !== 'type2' && oldBossHuntMode === 'type2') || (newSettings.bossHuntEnabled === false && oldBossHuntEnabled);
 
       let mapsCleared = false;
       if (newSettings.bossHuntMaps !== undefined || newSettings.mvpTargetMaps !== undefined) {
@@ -2449,6 +2537,7 @@ class BotInstance {
         this.isMvpCycling = false;
         this.mvpCycleMapIndex = 0;
         this.mvpCycleMapStayCount = 0;
+        this.mvpTransitCount = 0;
         this.mvpConfirmClearCount = 0;
         this.bosses = null;
         this._bossNameCache = {};
@@ -2463,6 +2552,7 @@ class BotInstance {
         if (this.mvpCycleOriginalMap !== null) {
           const returnMap = this.mvpCycleOriginalMap;
           this.addLog('SYSTEM', `⏹️ [Auto Boss] Cấu hình thay đổi -> Hủy chu kỳ săn Boss xoay vòng, tự động quay về Map farm gốc (Map ${returnMap}).`);
+          this.warpToMap(returnMap);
         } else {
           this.addLog('SYSTEM', `⏹️ [Auto Boss] Cấu hình thay đổi -> Hủy chu kỳ săn Boss xoay vòng.`);
         }
@@ -2648,6 +2738,11 @@ class BotInstance {
   async warpToMap(mapId) {
     const targetMapId = parseInt(mapId);
     if (isNaN(targetMapId)) return false;
+    if (this._isWarping) {
+      this.addLog('WARNING', `⚠️ Đang trong quá trình di chuyển bản đồ (Warp in progress), bỏ qua yêu cầu trùng lặp tới Map ${targetMapId}.`);
+      return false;
+    }
+    this._isWarping = true;
     try {
       const res = await this.sendRequest('https://ragnalok.online/human/xhrpg_warp.php', {
         line_uid: this.line_uid,
@@ -2671,17 +2766,16 @@ class BotInstance {
     } catch (e) {
       this.addLog('ERROR', `Lỗi di chuyển bản đồ ${targetMapId}: ${e.message}`);
       return false;
+    } finally {
+      this._isWarping = false;
     }
   }
 
   // Rotate to next MVP map in the configured list
   async warpToNextMvpMap() {
-    const mapIds = (this.settings.mvpTargetMaps || '')
-      .split(',')
-      .map(s => parseInt(s.trim()))
-      .filter(Number.isInteger);
+    const mapIds = this.getBossHuntMaps();
     if (!mapIds.length) {
-      this.addLog('WARNING', '⚠️ Chưa cấu hình danh sách Map Săn Boss.');
+      this.addLog('WARNING', '⚠️ Chưa cấu hình danh sách bản đồ săn Boss.');
       return;
     }
     this.settings.currentMvpMapIndex = ((this.settings.currentMvpMapIndex || 0) + 1) % mapIds.length;
@@ -2720,8 +2814,187 @@ class BotInstance {
     return now.getMinutes() >= 35;
   }
 
+  _getWarCheckinRequirement(kind) {
+    const map4Def = getMapDefs().find(m => m.id === 4);
+    return map4Def ? map4Def.req : 20;
+  }
+
+  _isWarCheckinCompleted(kind, key) {
+    return this.warCheckinCompletedKeys[kind] === key || this.warCheckinCompletedKey === key || this.warCheckinSuppressedKeys[kind] === key;
+  }
+
+  _suppressWarCheckin(kind, key) {
+    if (!kind || !key) return;
+    this.warCheckinSuppressedKeys[kind] = key;
+    try {
+      const currentAccounts = loadAccounts();
+      const idx = currentAccounts.findIndex(acc => acc.line_uid === this.line_uid);
+      if (idx !== -1) {
+        currentAccounts[idx].warCheckinSuppressedKeys = { ...this.warCheckinSuppressedKeys };
+        saveAccounts(currentAccounts);
+      }
+    } catch (e) {
+      this.addLog('WARNING', `⚠️ Không thể lưu trạng thái bỏ qua Check-in ${kind.toUpperCase()}: ${e.message}`);
+    }
+  }
+
+  _markWarCheckinCompleted(kind, key) {
+    if (!kind || !key) return;
+    this.warCheckinCompletedKeys[kind] = key;
+    this.warCheckinCompletedKey = key;
+    try {
+      const currentAccounts = loadAccounts();
+      const idx = currentAccounts.findIndex(acc => acc.line_uid === this.line_uid);
+      if (idx !== -1) {
+        currentAccounts[idx].warCheckinCompletedKey = key;
+        currentAccounts[idx].warCheckinCompletedKeys = { ...this.warCheckinCompletedKeys };
+        saveAccounts(currentAccounts);
+      }
+    } catch (e) {
+      this.addLog('WARNING', `⚠️ Không thể lưu trạng thái đã điểm danh ${kind.toUpperCase()}: ${e.message}`);
+    }
+  }
+
+  _getActiveWarCheckinKinds() {
+    const currentEpoch = Math.floor(Date.now() / 1000);
+    const isActive = event => event && (event.st === 'open' || event.st === 'fight') && (!event.ends || event.ends > currentEpoch);
+    return [
+      isActive(this.lastGw) ? 'gw' : null,
+      isActive(this.lastCw) ? 'cw' : null
+    ].filter(Boolean);
+  }
+
+  _resetEventRuntimeAfterReturn() {
+    this.eventState = 'IDLE';
+    this.inEventMode = false;
+    this.currentEventKind = null;
+    this.isEventReturning = false;
+    this.eventReturnMapTarget = null;
+    this.eventReturnStartedAt = 0;
+    this.eventReturnRetries = 0;
+    this.isEventCheckinOnly = false;
+    this.eventCheckinStartedAt = 0;
+    this.eventOriginalMap = null;
+    this.eventOriginalAutoMap = null;
+    this.eventOriginalAutoZone = null;
+    this.eventOriginalLockZoneCenter = null;
+    this.eventOriginalTargetZone = null;
+  }
+
+  async _beginNextWarCheckin() {
+    const session = this.eventSnapshot && this.eventSnapshot.warCheckinSession;
+    if (!session || this.inEventMode || this.isEventReturning || this.eventState !== 'IDLE') return false;
+    if (session.retryAt && Date.now() < session.retryAt) return false;
+
+    while (Array.isArray(session.pending) && session.pending.length > 0) {
+      const kind = session.pending[0];
+      const key = session.keys && session.keys[kind];
+      const activeKinds = this._getActiveWarCheckinKinds();
+      const playerLv = this.player && (this.player.lv || 1);
+      const requiredLv = this._getWarCheckinRequirement(kind);
+
+      if (!activeKinds.includes(kind)) {
+        session.pending.shift();
+        continue;
+      }
+      if (!this.player || this.player.is_dead || playerLv < requiredLv) {
+        session.pending.shift();
+        if (playerLv < requiredLv && !this.warCheckinLevelLoggedKeys[key]) {
+          this.warCheckinLevelLoggedKeys[key] = true;
+          this.addLog('WARNING', `⚠️ [Check-in ${kind.toUpperCase()}] Không thể điểm danh: Cấp độ nhân vật (Lv.${playerLv}) chưa đủ yêu cầu (Lv.${requiredLv}+). Không tạo phiên/snapshot mới.`);
+        }
+        continue;
+      }
+
+      session.active = kind;
+      session.attempts = session.attempts || {};
+      session.attempts[kind] = (session.attempts[kind] || 0) + 1;
+      session.retryAt = 0;
+      this.eventSnapshot.kind = kind;
+      this.eventSnapshot.checkinOnly = true;
+      this.eventSnapshot.checkinKey = key;
+      this.eventState = 'ENTERING';
+      this._persistEventSnapshot();
+
+      const ok = kind === 'gw' ? await this.joinGuildWar() : await this.joinCountryWar();
+      if (ok) {
+        this.enterEventMode(kind, 4, { checkinOnly: true });
+        return true;
+      }
+
+      const attempts = session.attempts[kind];
+      if (attempts < 3 && activeKinds.includes(kind)) {
+        session.retryAt = Date.now() + 5000;
+        this.eventState = 'IDLE';
+        this._persistEventSnapshot();
+        this.addLog('WARNING', `⚠️ [Check-in ${kind.toUpperCase()}] Join thất bại (lần ${attempts}/3). Sẽ thử lại sau 5 giây.`);
+        return false;
+      }
+
+      this.addLog('WARNING', `⚠️ [Check-in ${kind.toUpperCase()}] Bỏ qua sau ${attempts} lần join thất bại; tiếp tục event kế tiếp nếu có.`);
+      this._suppressWarCheckin(kind, key);
+      session.pending.shift();
+      session.active = null;
+      session.retryAt = 0;
+    }
+
+    this._finishWarCheckinSession();
+    return false;
+  }
+
+  _finishWarCheckinSession(markActiveCompleted = true) {
+    const snap = this.eventSnapshot;
+    const session = snap && snap.warCheckinSession;
+    if (markActiveCompleted && session && session.active && session.keys && session.keys[session.active]) {
+      this._markWarCheckinCompleted(session.active, session.keys[session.active]);
+    }
+    if (snap) {
+      try {
+        const currentAccounts = loadAccounts();
+        const idx = currentAccounts.findIndex(acc => acc.line_uid === this.line_uid);
+        if (idx !== -1) {
+          delete currentAccounts[idx].eventSnapshot;
+          currentAccounts[idx].warCheckinCompletedKeys = { ...this.warCheckinCompletedKeys };
+          saveAccounts(currentAccounts);
+        }
+      } catch (e) {}
+    }
+    this.eventSnapshot = null;
+    this._resetEventRuntimeAfterReturn();
+    this._persistEventSnapshot();
+  }
+
+  async _startWarCheckinSession(kinds) {
+    const uniqueKinds = [...new Set(kinds)].filter(kind => kind === 'gw' || kind === 'cw');
+    if (!uniqueKinds.length || this.eventSnapshot) return false;
+    const keys = Object.fromEntries(uniqueKinds.map(kind => [kind, this._getWarCheckinKey(kind)]));
+    const pending = uniqueKinds.filter(kind => !this._isWarCheckinCompleted(kind, keys[kind]));
+    if (!pending.length) return false;
+
+    this.captureEventSnapshot(pending[0]);
+    this.eventSnapshot.checkinOnly = true;
+    this.eventSnapshot.checkinKey = keys[pending[0]];
+    this.eventSnapshot.warCheckinSession = {
+      pending,
+      active: null,
+      keys,
+      attempts: {},
+      retryAt: 0,
+      startedAt: Date.now()
+    };
+    // Snapshot capture marks a generic Event as ENTERING; the check-in queue
+    // owns the transition and must begin from an idle state.
+    this.eventState = 'IDLE';
+    this._persistEventSnapshot();
+    return this._beginNextWarCheckin();
+  }
+
   _rollbackWarCheckinEntry() {
     if (!this.eventSnapshot || !this.eventSnapshot.checkinOnly) return;
+    if (this.eventSnapshot.warCheckinSession) {
+      this._finishWarCheckinSession(false);
+      return;
+    }
     this.eventSnapshot = null;
     this.eventState = 'IDLE';
     this.inEventMode = false;
@@ -2779,6 +3052,10 @@ class BotInstance {
   // Hoàn tất quá trình khôi phục bản đồ & tọa độ sau Event
   _finalizeEventRestoration(isSuccess = true) {
     const snap = this.eventSnapshot;
+    const warSession = snap && snap.warCheckinSession;
+    const activeWarKind = warSession && warSession.active;
+    const hasNextWarCheckins = !!(warSession && Array.isArray(warSession.pending) && warSession.pending.some(kind => kind !== activeWarKind));
+    const shouldContinueWarCheckin = hasNextWarCheckins && isSuccess;
     if (snap) {
       if (snap.autoMap !== undefined) this.settings.autoMap = snap.autoMap;
       if (snap.autoZone !== undefined) this.settings.autoZone = snap.autoZone;
@@ -2798,27 +3075,39 @@ class BotInstance {
       const idx = currentAccounts.findIndex(acc => acc.line_uid === this.line_uid);
       if (idx !== -1) {
         currentAccounts[idx].settings = this.settings;
-        if (snap.checkinOnly && snap.checkinKey) currentAccounts[idx].warCheckinCompletedKey = snap.checkinKey;
-        delete currentAccounts[idx].eventSnapshot;
+        if (snap.checkinOnly && snap.checkinKey) {
+          this._markWarCheckinCompleted(snap.kind, snap.checkinKey);
+          currentAccounts[idx].warCheckinCompletedKey = snap.checkinKey;
+        }
+        if (shouldContinueWarCheckin) {
+          currentAccounts[idx].eventSnapshot = snap;
+          currentAccounts[idx].warCheckinCompletedKeys = { ...this.warCheckinCompletedKeys };
+        } else {
+          delete currentAccounts[idx].eventSnapshot;
+        }
         saveAccounts(currentAccounts);
       }
     }
 
+    if (shouldContinueWarCheckin) {
+      const completedKind = warSession.active;
+      if (completedKind && warSession.keys && warSession.keys[completedKind]) {
+        this._markWarCheckinCompleted(completedKind, warSession.keys[completedKind]);
+      }
+      warSession.pending = warSession.pending.filter(kind => kind !== completedKind);
+      warSession.active = null;
+      this._resetEventRuntimeAfterReturn();
+      this.eventSnapshot = snap;
+      this.eventSnapshot.kind = warSession.pending[0] || null;
+      this.eventSnapshot.checkinKey = warSession.pending[0] ? warSession.keys[warSession.pending[0]] : null;
+      this.eventSnapshot.checkinOnly = true;
+      this._persistEventSnapshot();
+      this._beginNextWarCheckin().catch(err => this.addLog('ERROR', `Lỗi tiếp tục hàng đợi Check-in GW/CW: ${err.message}`));
+      return;
+    }
+
     this.eventSnapshot = null;
-    this.eventState = 'IDLE';
-    this.inEventMode = false;
-    this.currentEventKind = null;
-    this.isEventReturning = false;
-    this.eventReturnMapTarget = null;
-    this.eventReturnStartedAt = 0;
-    this.eventReturnRetries = 0;
-    this.isEventCheckinOnly = false;
-    this.eventCheckinStartedAt = 0;
-    this.eventOriginalMap = null;
-    this.eventOriginalAutoMap = null;
-    this.eventOriginalAutoZone = null;
-    this.eventOriginalLockZoneCenter = null;
-    this.eventOriginalTargetZone = null;
+    this._resetEventRuntimeAfterReturn();
     this._persistEventSnapshot();
   }
 
@@ -2838,6 +3127,10 @@ class BotInstance {
       this.eventState = 'ACTIVE';
       this.isEventCheckinOnly = options.checkinOnly === true;
       this.eventCheckinStartedAt = this.isEventCheckinOnly ? Date.now() : 0;
+      if (this.eventSnapshot && this.isEventCheckinOnly) {
+        this.eventSnapshot.checkinStartedAt = this.eventCheckinStartedAt;
+        this._persistEventSnapshot();
+      }
 
       this.addLog('SYSTEM', `🚀 Kích hoạt Chế độ Event [${kind.toUpperCase()}]. Vị trí gốc bảo toàn: Map ${this.eventSnapshot ? this.eventSnapshot.map : 1}.`);
 
@@ -3866,9 +4159,7 @@ class BotInstance {
   triggerMvpCycle(forced = false) {
     const maps = this.getBossHuntMaps();
     if (maps.length === 0) {
-      if (forced) {
-        this.addLog('WARNING', `⚠️ Chưa cấu hình danh sách bản đồ săn Boss.`);
-      }
+      this.addLog('WARNING', `⚠️ Chưa cấu hình danh sách bản đồ săn Boss.`);
       return;
     }
 
@@ -3881,10 +4172,10 @@ class BotInstance {
       }
     }
 
-    // Ghi nhớ bản đồ farm gốc (Ưu tiên player.map hiện tại nếu không ở Nông trại, fallback theo settings.targetMap hoặc 1)
+    // Ghi nhớ bản đồ farm gốc (Ưu tiên player.map hiện tại nếu không ở Nông trại/Event/Guild Dungeon, fallback theo settings.targetMap hoặc 1)
     const currentMapNum = this.player ? Number(this.player.map) : null;
     const configuredTargetMap = parseInt(this.settings.targetMap);
-    const farmMap = (currentMapNum && currentMapNum !== 5) ? currentMapNum : (configuredTargetMap || 1);
+    const farmMap = (currentMapNum && currentMapNum !== 5 && currentMapNum !== 4 && currentMapNum !== 11 && currentMapNum !== 12) ? currentMapNum : (configuredTargetMap || 1);
 
     this.mvpCycleOriginalMap = farmMap;
     this.mvpCycleOriginalAutoMap = this.settings.autoMap;
@@ -3893,7 +4184,9 @@ class BotInstance {
     this.isMvpCycling = true;
     this.mvpCycleMapIndex = 0;
     this.mvpCycleMapStayCount = 0;
+    this.mvpTransitCount = 0;
     this.mvpConfirmClearCount = 0;
+    this._loggedMvpMapBosses = null;
     this.bosses = null; // Ép tải danh sách boss trên map mới ngay lập tức
     this.mvpCycleStats = {
       cycleStartTs: nowTs,
@@ -3920,6 +4213,9 @@ class BotInstance {
     const maps = this.getBossHuntMaps();
 
     if (maps.length === 0 || this.settings.bossHuntMode !== 'type2') {
+      if (maps.length === 0 && this.settings.bossHuntEnabled) {
+        this.addLog('WARNING', `⚠️ Chưa cấu hình danh sách bản đồ săn Boss.`);
+      }
       this.isMvpCycling = false;
       return;
     }
@@ -3934,35 +4230,51 @@ class BotInstance {
       return;
     }
 
-    const activeTargetMapId = maps[this.mvpCycleMapIndex];
-    const currentMap = Number(this.player.map);
-
-    // 2. Kiểm tra cấp độ nhân vật đối với bản đồ mục tiêu
-    const mapDef = getMapDefs().find(m => m.id === activeTargetMapId);
-    if (mapDef && (this.player.lv || 1) < mapDef.req) {
-      this.addLog('WARNING', `⚠️ [Auto Boss] Cấp độ nhân vật (Lv.${this.player.lv || 1}) không đủ yêu cầu của Map ${activeTargetMapId} (${mapDef.name}, Yêu cầu Lv.${mapDef.req}+). Tự động bỏ qua.`);
-      this.addMvpLog('map_skip_level', { mapId: activeTargetMapId, reqLv: mapDef.req, playerLv: this.player.lv || 1 });
-
-      this.mvpCycleMapIndex++;
-      this.mvpCycleMapStayCount = 0;
-      this.mvpConfirmClearCount = 0;
-      this.bosses = null;
-      if (this.mvpCycleMapIndex < maps.length) {
-        await this.warpToMap(maps[this.mvpCycleMapIndex]);
-      } else {
-        this.isMvpCycling = false;
-        this.mvpCycleMapIndex = 0;
-        const returnMap = this.mvpCycleOriginalMap || (parseInt(this.settings.targetMap) || 1);
-        await this.warpToMap(returnMap);
+    // 2. Bỏ qua các bản đồ không đủ level bằng vòng lặp
+    while (this.mvpCycleMapIndex < maps.length) {
+      const targetMapCandidate = maps[this.mvpCycleMapIndex];
+      const def = getMapDefs().find(m => m.id === targetMapCandidate);
+      if (def && (this.player.lv || 1) < def.req) {
+        this.addLog('WARNING', `⚠️ [Auto Boss] Bỏ qua Map ${targetMapCandidate} (${def.name}) vì thiếu level (Cần Lv.${def.req}+, hiện tại Lv.${this.player.lv || 1}).`);
+        this.addMvpLog('map_skip_level', { mapId: targetMapCandidate, reqLv: def.req, playerLv: this.player.lv || 1 });
+        this.mvpCycleMapIndex++;
+        this.mvpCycleMapStayCount = 0;
+        this.mvpTransitCount = 0;
+        this.mvpConfirmClearCount = 0;
+        this.bosses = null;
+        this._loggedMvpMapBosses = null;
+        continue;
       }
+      break;
+    }
+
+    if (this.mvpCycleMapIndex >= maps.length) {
+      this.isMvpCycling = false;
+      this.mvpCycleMapIndex = 0;
+      const returnMap = this.mvpCycleOriginalMap || (parseInt(this.settings.targetMap) || 1);
+      this.addLog('SYSTEM', `✅ [Auto Boss] Đã hoàn thành chu kỳ săn Boss (các map còn lại không đủ level) -> Quay về Map farm gốc (Map ${returnMap}).`);
+      await this.warpToMap(returnMap);
       return;
     }
 
-    // 4. Nếu chưa đến được map mục tiêu sau 8 nhịp poll (~16 giây), tự động bỏ qua để tránh dính deadlock
+    const activeTargetMapId = maps[this.mvpCycleMapIndex];
+    const currentMap = Number(this.player.map);
+
+    // 3. Nếu chưa đến được map mục tiêu sau 8 nhịp poll (~16 giây), tự động bỏ qua để tránh dính deadlock
     if (currentMap !== activeTargetMapId) {
       this.mvpTransitCount = (this.mvpTransitCount || 0) + 1;
+      const mapDef = getMapDefs().find(m => m.id === activeTargetMapId);
+      const mapName = mapDef ? mapDef.name : `Map ${activeTargetMapId}`;
+
+      if (this.mvpTransitCount === 1) {
+        this.addLog('SYSTEM', `🗺️ [Auto Boss] Đang di chuyển tới Map ${activeTargetMapId} (${mapName})...`);
+      } else if (this.mvpTransitCount === 3 || this.mvpTransitCount === 6) {
+        this.addLog('SYSTEM', `🔄 [Auto Boss] Thử lại di chuyển tới Map ${activeTargetMapId} (${mapName})...`);
+        await this.warpToMap(activeTargetMapId);
+      }
+
       if (this.mvpTransitCount >= 8) {
-        this.addLog('WARNING', `⚠️ [Auto Boss] Không thể di chuyển sang Map ${activeTargetMapId} sau 16s. Tự động bỏ qua map này.`);
+        this.addLog('WARNING', `⚠️ [Auto Boss] Di chuyển sang Map ${activeTargetMapId} thất bại sau 16s (Warp thất bại). Tự động bỏ qua map này.`);
         this.addMvpLog('map_skip_warp_failed', { mapId: activeTargetMapId });
 
         this.mvpCycleMapIndex++;
@@ -3970,6 +4282,7 @@ class BotInstance {
         this.mvpTransitCount = 0;
         this.mvpConfirmClearCount = 0;
         this.bosses = null;
+        this._loggedMvpMapBosses = null;
         if (this.mvpCycleMapIndex < maps.length) {
           await this.warpToMap(maps[this.mvpCycleMapIndex]);
         } else {
@@ -4074,6 +4387,158 @@ class BotInstance {
     }
   }
 
+  // 🗺️ Unified Map Routing Engine (Single Source of Truth cho toàn bộ luồng di chuyển map)
+  async checkAndRouteMap() {
+    if (!this.player) return false;
+
+    // 1. Kiểm tra trạng thái loại trừ tuyệt đối: Phụ bản Guild & Sự kiện Event
+    if (this.guildDungeonActive || this._guildDungeonRestoring || this.inEventMode || this.eventState !== 'IDLE' || this.isEventReturning) {
+      return false;
+    }
+    if (Number(this.player.gdun_in) === 1 || Number(this.player.map) === 12) {
+      return false;
+    }
+
+    // 2. Nếu đang ở Nông trại (Map 5): để hệ thống Farm quản lý, không can thiệp
+    if (Number(this.player.map) === 5) {
+      return false;
+    }
+
+    const isMember = this.settings.teamRole === 'member';
+    const myTeamId = this.settings.teamId || 'none';
+    const leader = (isMember && myTeamId !== 'none')
+      ? Object.values(botInstances).find(b => b.userId === this.userId && b.settings.teamRole === 'leader' && (b.settings.teamId || 'none') === myTeamId)
+      : null;
+
+    let activeTargetMapId = null;
+    let shouldWarpCheck = false;
+
+    const isLeaderHuntActive = leader && (leader.settings.bossHuntEnabled || (leader.settings.bossHuntMode && leader.settings.bossHuntMode !== 'off'));
+    const isMyHuntActive = (this.settings.bossHuntEnabled || (this.settings.bossHuntMode && this.settings.bossHuntMode !== 'off'));
+
+    if (isMember && leader && leader.status === 'running' && leader.player && this.settings.teamSynced === true) {
+      if (isMyHuntActive && isLeaderHuntActive && !leader.guildDungeonActive && Number(leader.player.gdun_in) !== 1 && Number(leader.player.map) !== 12) {
+        // Đồng bộ trạng thái MVP Cycle từ Leader
+        this.isMvpCycling = leader.isMvpCycling;
+        this.mvpCycleMapIndex = leader.mvpCycleMapIndex;
+        this.mvpCycleOriginalMap = leader.mvpCycleOriginalMap;
+        activeTargetMapId = leader.isMvpCycling
+          ? leader.getCurrentMvpCycleMap()
+          : (leader.player ? Number(leader.player.map) : (parseInt(leader.settings.targetMap) || 1));
+      } else if (!leader.guildDungeonActive && Number(leader.player.gdun_in) !== 1 && Number(leader.player.map) !== 12) {
+        // Đồng bộ map thường theo Leader
+        activeTargetMapId = leader.player ? Number(leader.player.map) : (parseInt(leader.settings.targetMap) || 1);
+      }
+
+      // Member không chạy updateMvpCycleStatus(), vì vậy không được warp lại ở
+      // mọi poll. Theo cùng nhịp với Leader/solo: lần đầu, retry ở nhịp 3 và 6,
+      // sau nhịp 8 đánh dấu target đã bỏ qua cho tới khi Leader đổi map.
+      if (activeTargetMapId !== null) {
+        const memberTargetMap = Number(activeTargetMapId);
+        const leaderCycle = leader.isMvpCycling === true;
+        // A Leader may restart a cycle at the same map index. Use the cycle
+        // start timestamp as identity so a previous Member skip is not kept.
+        const leaderCycleId = leaderCycle
+          ? (leader.mvpCycleStats && leader.mvpCycleStats.cycleStartTs) || 0
+          : 0;
+        const targetChanged = this.mvpMemberTransitTargetMap !== memberTargetMap || this.mvpMemberTransitCycle !== leaderCycleId;
+
+        if (targetChanged) {
+          this.mvpMemberTransitTargetMap = memberTargetMap;
+          this.mvpMemberTransitCycle = leaderCycleId;
+          this.mvpMemberTransitCount = 0;
+          this.mvpMemberSkippedTargetMap = null;
+        }
+
+        if (Number(this.player.map) === memberTargetMap) {
+          this.mvpMemberTransitCount = 0;
+          this.mvpMemberSkippedTargetMap = null;
+        } else if (this.mvpMemberSkippedTargetMap !== memberTargetMap) {
+          this.mvpMemberTransitCount++;
+          if (this.mvpMemberTransitCount >= 8) {
+            this.mvpMemberSkippedTargetMap = memberTargetMap;
+            this.addLog('WARNING', `⚠️ [Team Member] Warp tới Map ${memberTargetMap} thất bại sau 16s. Tạm bỏ qua map này và chờ Trưởng nhóm chuyển map.`);
+          } else {
+            shouldWarpCheck = this.mvpMemberTransitCount === 1 || this.mvpMemberTransitCount === 3 || this.mvpMemberTransitCount === 6;
+          }
+        }
+      }
+    } else {
+      // Leader hoặc Bot độc lập
+      if (this.isMvpCycling) {
+        // Khi đang trong chu kỳ săn Boss MVP:
+        // Nếu khác map mục tiêu:
+        activeTargetMapId = this.getCurrentMvpCycleMap();
+        if (Number(this.player.map) !== Number(activeTargetMapId)) {
+          // Chỉ gọi warp ở nhịp đầu tiên (mvpTransitCount === 0 hoặc chưa có).
+          // Các nhịp transit tiếp theo (nhịp 3, 6 retry hoặc nhịp 8 timeout) được quản lý độc quyền bởi updateMvpCycleStatus().
+          // Nhờ vậy, tuyệt đối không bao giờ phát sinh 2 request warp trong cùng một nhịp poll!
+          if (!this.mvpTransitCount || this.mvpTransitCount === 0) {
+            this.mvpTransitCount = 1;
+            shouldWarpCheck = true;
+          }
+        }
+      } else if (this.mvpCycleOriginalMap !== null) {
+        // Quay về map farm gốc sau khi hoàn thành chu kỳ săn boss
+        activeTargetMapId = Number(this.mvpCycleOriginalMap);
+        shouldWarpCheck = true;
+      } else if (this.settings.autoMap) {
+        // Auto map thường
+        activeTargetMapId = parseInt(this.settings.targetMap) || 1;
+        shouldWarpCheck = true;
+      }
+    }
+
+    if (shouldWarpCheck && activeTargetMapId && Number(this.player.map) !== Number(activeTargetMapId)) {
+      const targetMapId = activeTargetMapId;
+      const mapDef = getMapDefs().find(m => m.id === targetMapId);
+      if (mapDef && (this.player.lv || 1) >= mapDef.req) {
+        if (isMember && leader) {
+          this.addLog('SYSTEM', `👥 [Team Member] Đồng bộ di chuyển theo Trưởng nhóm (${leader.name}) sang Map ${targetMapId}`);
+        } else if (this.isMvpCycling) {
+          this.addLog('SYSTEM', `🚀 [Auto Boss] Bắt đầu di chuyển tới Map mục tiêu: Map ${targetMapId} (${mapDef.name})...`);
+        } else {
+          this.addLog('SYSTEM', `🗺️ [Tự động] Phát hiện sai bản đồ (Đang ở: Map ${this.player.map}, Cần đi: Map ${targetMapId}). Tiến hành di chuyển...`);
+        }
+
+        try {
+          if (targetMapId === 4) {
+            const currentEpoch = Math.floor(Date.now() / 1000);
+            const isGwActive = this.lastGw && (this.lastGw.st === 'open' || this.lastGw.st === 'fight') && (!this.lastGw.ends || this.lastGw.ends > currentEpoch);
+            const isCwActive = this.lastCw && (this.lastCw.st === 'open' || this.lastCw.st === 'fight') && (!this.lastCw.ends || this.lastCw.ends > currentEpoch);
+
+            let ok = false;
+            const kind = isGwActive ? 'gw' : (isCwActive ? 'cw' : null);
+            if (kind) {
+              this.captureEventSnapshot(kind);
+              if (kind === 'gw') {
+                ok = await this.joinGuildWar();
+              } else {
+                ok = await this.joinCountryWar();
+              }
+            } else {
+              this.addLog('WARNING', `⚠️ Sự kiện Bang/Quốc chiến không hoạt động hoặc đã kết thúc. Tự động thoát chế độ Event.`);
+              this.exitEventMode();
+              return true;
+            }
+            if (ok) {
+              this.enterEventMode(kind, 4);
+              return true;
+            }
+          } else {
+            await this.warpToMap(targetMapId);
+            return true;
+          }
+        } catch (e) {
+          this.addLog('ERROR', `Lỗi di chuyển bản đồ: ${e.message}`);
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
   async pollGame(pollSignal = null) {
     // Check if system user account is expired
     const users = loadUsers();
@@ -4102,10 +4567,14 @@ class BotInstance {
         (snap.kind === 'inv' && Number(this.player.map) === 2)
       );
 
-      if (eventStillActive && atEventMap && this.eventState !== 'ACTIVE') {
+      if (eventStillActive && atEventMap && this.eventState !== 'ACTIVE' && !this.isEventReturning && this.eventState !== 'RETURNING' && this.eventState !== 'FAILED_RETRY') {
         this.eventState = 'ACTIVE';
         this.inEventMode = true;
         this.currentEventKind = snap.kind;
+        this.isEventCheckinOnly = snap.checkinOnly === true;
+        this.eventCheckinStartedAt = this.isEventCheckinOnly
+          ? (snap.checkinStartedAt || snap.createdAt || Date.now())
+          : 0;
         this.isEventReturning = false;
         this.addLog('SYSTEM', `🔄 [Event Recovery] Khôi phục trạng thái ACTIVE cho Event [${snap.kind.toUpperCase()}] sau restart.`);
       } else if (!eventStillActive && this.eventState !== 'RETURNING' && this.eventState !== 'FAILED_RETRY') {
@@ -4159,92 +4628,31 @@ class BotInstance {
       }
     }
 
-    // 🗺️ Định tuyến bản đồ khẩn cấp (Map Routing) & Đồng bộ Trưởng nhóm (Leader)
-    if (this.player) {
-      const isMember = this.settings.teamRole === 'member';
-      const myTeamId = this.settings.teamId || 'none';
-      const leader = (isMember && myTeamId !== 'none')
-        ? Object.values(botInstances).find(b => b.userId === this.userId && b.settings.teamRole === 'leader' && (b.settings.teamId || 'none') === myTeamId)
-        : null;
-
-      let activeTargetMapId;
-      let shouldWarpCheck = false;
-
-      if (isMember && leader && !this._guildDungeonRestoring && !this.inEventMode && this.eventState === 'IDLE' && !this.isEventReturning && leader.status === 'running' && leader.player && this.settings.teamSynced === true && this.settings.bossHuntMode && this.settings.bossHuntMode !== 'off' && leader.settings.bossHuntMode && leader.settings.bossHuntMode !== 'off' && !leader.guildDungeonActive && Number(leader.player.gdun_in) !== 1 && Number(leader.player.map) !== 12) {
-        // Đồng bộ trạng thái Cycle và Map từ Leader trước
-        this.isMvpCycling = leader.isMvpCycling;
-        this.mvpCycleMapIndex = leader.mvpCycleMapIndex;
-        this.mvpCycleOriginalMap = leader.mvpCycleOriginalMap;
-
-        // Ưu tiên bản đồ chu kỳ hiện tại của Leader, nếu không có thì theo bản đồ hiện tại của Leader
-        activeTargetMapId = leader.isMvpCycling
-          ? leader.getCurrentMvpCycleMap()
-          : (leader.player ? Number(leader.player.map) : (parseInt(leader.settings.targetMap) || 1));
-
-        shouldWarpCheck = true; // Thành viên luôn đồng bộ theo Leader khi Leader đang hoạt động
-      } else {
-        const isMvpReturning = (!this.isMvpCycling && this.mvpCycleOriginalMap !== null);
-        activeTargetMapId = this.isMvpCycling
-          ? this.getCurrentMvpCycleMap()
-          : (isMvpReturning ? Number(this.mvpCycleOriginalMap) : (parseInt(this.settings.targetMap) || 1));
-
-        shouldWarpCheck = (this.settings.autoMap || (this.settings.bossHuntMode && this.settings.bossHuntMode !== 'off') || this.isMvpCycling || isMvpReturning);
-      }
-
-      if (shouldWarpCheck && !this.guildDungeonActive && !this._guildDungeonRestoring && !this.inEventMode && this.eventState === 'IDLE' && !this.isEventReturning && Number(this.player.gdun_in) !== 1 && Number(this.player.map) !== 12 && Number(this.player.map) !== Number(activeTargetMapId) && Number(this.player.map) !== 5) {
-        const targetMapId = activeTargetMapId;
-        const mapDef = getMapDefs().find(m => m.id === targetMapId);
-        if (mapDef && (this.player.lv || 1) >= mapDef.req) {
-          if (isMember && leader) {
-            this.addLog('SYSTEM', `👥 [Team Member] Đồng bộ di chuyển theo Trưởng nhóm (${leader.name}) sang Map ${targetMapId}`);
-          } else {
-            this.addLog('SYSTEM', `🗺️ [Tự động] Phát hiện sai bản đồ (Đang ở: Map ${this.player.map}, Cần đi: Map ${targetMapId}). Tiến hành di chuyển...`);
-          }
-          try {
-            if (targetMapId === 4) {
-              const currentEpoch = Math.floor(Date.now() / 1000);
-              const isGwActive = this.lastGw && (this.lastGw.st === 'open' || this.lastGw.st === 'fight') && (!this.lastGw.ends || this.lastGw.ends > currentEpoch);
-              const isCwActive = this.lastCw && (this.lastCw.st === 'open' || this.lastCw.st === 'fight') && (!this.lastCw.ends || this.lastCw.ends > currentEpoch);
-
-              let ok = false;
-              const kind = isGwActive ? 'gw' : (isCwActive ? 'cw' : null);
-              if (kind) {
-                this.captureEventSnapshot(kind);
-                if (kind === 'gw') {
-                  ok = await this.joinGuildWar();
-                } else {
-                  ok = await this.joinCountryWar();
-                }
-              } else {
-                this.addLog('WARNING', `⚠️ Sự kiện Bang/Quốc chiến không hoạt động hoặc đã kết thúc. Tự động thoát chế độ Event.`);
-                this.exitEventMode();
-                return;
-              }
-              if (ok) {
-                this.enterEventMode(kind, 4);
-                return;
-              }
-            } else {
-              await this.warpToMap(targetMapId);
-              // Warp thành công, kết thúc sớm nhịp poll hiện tại để nhịp tiếp theo chạy trên map mới
-              return;
-            }
-          } catch (e) {
-            this.addLog('ERROR', `Lỗi di chuyển bản đồ khẩn cấp: ${e.message}`);
-          }
-        }
-      }
+    // 🗺️ Định tuyến bản đồ tập trung duy nhất (Single Source of Truth)
+    const didRouteMap = await this.checkAndRouteMap();
+    if (didRouteMap) {
+      // Warp đã được xử lý, kết thúc sớm nhịp poll hiện tại để nhịp tiếp theo chạy trên map mới
+      return;
     }
 
     // ⏰ Check scheduled MVP Boss Hunting Cycle (Round hours only, first 3 minutes of the hour)
     const nowTime = new Date();
     const currentHour = nowTime.getHours();
     const currentMinute = nowTime.getMinutes();
-    if (this.settings.bossHuntMode === 'type2' && this.settings.mvpTargetMaps && this.settings.teamRole !== 'member') {
-      if (currentMinute <= 2 && this.lastMvpCycleCheckHour !== currentHour) {
-        this.lastMvpCycleCheckHour = currentHour;
-        this.addLog('SYSTEM', `⏰ [Auto Boss] Đến giờ tròn (${currentHour}:00). Tự động kích hoạt chu kỳ săn Boss xoay vòng map...`);
-        this.triggerMvpCycle();
+    const isHuntEnabled = (this.settings.bossHuntEnabled === true) || (this.settings.bossHuntMode === 'type2');
+    if (isHuntEnabled && this.settings.teamRole !== 'member') {
+      const maps = this.getBossHuntMaps();
+      if (maps.length === 0) {
+        if (currentMinute <= 2 && this.lastMvpCycleCheckHour !== currentHour) {
+          this.lastMvpCycleCheckHour = currentHour;
+          this.addLog('WARNING', `⚠️ Chưa cấu hình danh sách bản đồ săn Boss.`);
+        }
+      } else if (this.settings.bossHuntTrigger !== 'immediate') {
+        if (currentMinute <= 2 && this.lastMvpCycleCheckHour !== currentHour) {
+          this.lastMvpCycleCheckHour = currentHour;
+          this.addLog('SYSTEM', `⏰ [Auto Boss] Đến giờ tròn (${currentHour}:00). Tự động kích hoạt chu kỳ săn Boss xoay vòng map...`);
+          this.triggerMvpCycle();
+        }
       }
     }
 
@@ -5129,19 +5537,26 @@ class BotInstance {
     if (this.settings.autoWarCheckin && !this.inEventMode && this.eventState === 'IDLE' && !this.isEventReturning && this._isWarCheckinWindow()) {
       const currentPlayer = d.player || this.player;
       const isAtHome = currentPlayer && !this.isMvpCycling && Number(currentPlayer.map) === 5 && (currentPlayer.home_crops !== undefined || currentPlayer.home_lv !== undefined);
-      const checkinKind = isGwActive ? 'gw' : (isCwActive ? 'cw' : null);
-      const checkinKey = checkinKind ? this._getWarCheckinKey(checkinKind) : null;
-      if (currentPlayer && !currentPlayer.is_dead && !isAtHome && checkinKind && checkinKey !== this.warCheckinCompletedKey) {
-        this.captureEventSnapshot(checkinKind);
-        this.eventSnapshot.checkinOnly = true;
-        this.eventSnapshot.checkinKey = checkinKey;
-        this._persistEventSnapshot();
-        const ok = checkinKind === 'gw' ? await this.joinGuildWar() : await this.joinCountryWar();
-        if (ok) {
-          this.enterEventMode(checkinKind, 4, { checkinOnly: true });
-          return;
+      const activeKinds = this._getActiveWarCheckinKinds();
+      if (this.eventSnapshot && this.eventSnapshot.warCheckinSession) {
+        await this._beginNextWarCheckin();
+        return;
+      }
+      const eligibleKinds = activeKinds.filter(kind => {
+        const key = this._getWarCheckinKey(kind);
+        const requiredLv = this._getWarCheckinRequirement(kind);
+        if (!currentPlayer || currentPlayer.is_dead || isAtHome || (currentPlayer.lv || 1) < requiredLv) {
+          if (currentPlayer && (currentPlayer.lv || 1) < requiredLv && !this.warCheckinLevelLoggedKeys[key]) {
+            this.warCheckinLevelLoggedKeys[key] = true;
+            this.addLog('WARNING', `⚠️ [Check-in ${kind.toUpperCase()}] Không thể điểm danh: Cấp độ nhân vật (Lv.${currentPlayer.lv || 1}) chưa đủ yêu cầu (Lv.${requiredLv}+). Không tạo phiên/snapshot.`);
+          }
+          return false;
         }
-        this._rollbackWarCheckinEntry();
+        return !this._isWarCheckinCompleted(kind, key);
+      });
+      if (eligibleKinds.length > 0) {
+        await this._startWarCheckinSession(eligibleKinds);
+        return;
       }
     }
 
@@ -5865,64 +6280,8 @@ class BotInstance {
         return;
       }
 
-      // Di chuyển bản đồ mục tiêu thường hoặc bản đồ săn Boss xoay vòng
-      const isMember = this.settings.teamRole === 'member';
-      const myTeamId = this.settings.teamId || 'none';
-      const leader = (isMember && myTeamId !== 'none')
-        ? Object.values(botInstances).find(b => b.userId === this.userId && b.settings.teamRole === 'leader' && (b.settings.teamId || 'none') === myTeamId)
-        : null;
-
-      const isMvpReturning = (!this.isMvpCycling && this.mvpCycleOriginalMap !== null);
-      let activeTargetMapId;
-      let shouldWarpCheck = false;
-
-      if (isMember && leader && leader.status === 'running' && leader.player && this.settings.teamSynced === true && this.settings.bossHuntMode && this.settings.bossHuntMode !== 'off' && leader.settings.bossHuntMode && leader.settings.bossHuntMode !== 'off' && !leader.guildDungeonActive && Number(leader.player.gdun_in) !== 1 && Number(leader.player.map) !== 12) {
-        activeTargetMapId = leader.isMvpCycling
-          ? leader.getCurrentMvpCycleMap()
-          : (leader.player ? Number(leader.player.map) : (parseInt(leader.settings.targetMap) || 1));
-        shouldWarpCheck = true;
-      } else {
-        activeTargetMapId = this.isMvpCycling
-          ? this.getCurrentMvpCycleMap()
-          : (isMvpReturning ? Number(this.mvpCycleOriginalMap) : (parseInt(this.settings.targetMap) || 1));
-        shouldWarpCheck = (this.settings.autoMap || (this.settings.bossHuntMode && this.settings.bossHuntMode !== 'off') || this.isMvpCycling || isMvpReturning);
-      }
-
-      if (shouldWarpCheck && !this.guildDungeonActive && !this._guildDungeonRestoring && !this.inEventMode && this.eventState === 'IDLE' && !this.isEventReturning && Number(this.player.gdun_in) !== 1 && Number(this.player.map) !== 12 && Number(this.player.map) !== Number(activeTargetMapId)) {
-        const targetMapId = activeTargetMapId;
-        const mapDef = getMapDefs().find(m => m.id === targetMapId);
-        if (mapDef && (this.player.lv || 1) >= mapDef.req) {
-          if (targetMapId === 4) {
-            const currentEpoch = Math.floor(Date.now() / 1000);
-            const isGwActive = this.lastGw && (this.lastGw.st === 'open' || this.lastGw.st === 'fight') && (!this.lastGw.ends || this.lastGw.ends > currentEpoch);
-            const isCwActive = this.lastCw && (this.lastCw.st === 'open' || this.lastCw.st === 'fight') && (!this.lastCw.ends || this.lastCw.ends > currentEpoch);
-
-            let ok = false;
-            const kind = isGwActive ? 'gw' : (isCwActive ? 'cw' : null);
-            if (kind) {
-              this.captureEventSnapshot(kind);
-              if (kind === 'gw') {
-                ok = await this.joinGuildWar();
-              } else {
-                ok = await this.joinCountryWar();
-              }
-            } else {
-              this.addLog('WARNING', `⚠️ Sự kiện Bang/Quốc chiến đã kết thúc. Tự động thoát chế độ Event.`);
-              this.exitEventMode();
-            }
-            if (ok) {
-              this.enterEventMode(kind, 4);
-            }
-          } else {
-            if (isMember && leader) {
-              this.addLog('SYSTEM', `👥 [Team Member] Đồng bộ di chuyển theo Trưởng nhóm (${leader.name}) sang Map ${targetMapId}`);
-            } else {
-              this.addLog('SYSTEM', `🗺️ [Tự động] Di chuyển sang bản đồ: ${mapDef.name}`);
-            }
-            await this.warpToMap(targetMapId);
-          }
-        }
-      }
+      // Lưu ý: Định tuyến bản đồ mục tiêu thường hoặc bản đồ săn Boss xoay vòng đã được tập trung xử lý tại đầu nhịp poll (dòng 4250+).
+      // Khối trùng lặp tại đây được lược bỏ để triệt tiêu hoàn toàn nguy cơ phát sinh request warp kép trong cùng một nhịp poll.
     }
 
     // 7. Auto Arena Mode (Chỉ chạy khi không ở Nông trại)
@@ -9292,12 +9651,24 @@ app.post('/api/accounts/:line_uid/action', requireAuth, async (req, res) => {
       });
       const currentAccounts = loadAccounts();
 
+      const callerMaps = bot.getBossHuntMaps();
+      if (callerMaps.length === 0) {
+        bot.addLog('WARNING', `⚠️ Chưa cấu hình danh sách bản đồ săn Boss.`);
+        return res.status(400).json({ ok: false, error: 'Chưa cấu hình danh sách bản đồ săn Boss. Vui lòng thêm bản đồ trước khi kích hoạt!' });
+      }
+
       for (const targetBot of targetBots) {
-        targetBot.updateSettings({ bossHuntMode: 'type2' });
+        targetBot.updateSettings({ bossHuntMode: 'type2', bossHuntEnabled: true });
 
         const index = currentAccounts.findIndex(acc => acc.line_uid === targetBot.line_uid);
         if (index !== -1) {
           currentAccounts[index].settings = targetBot.settings;
+        }
+
+        const tMaps = targetBot.getBossHuntMaps();
+        if (tMaps.length === 0) {
+          targetBot.addLog('WARNING', `⚠️ Chưa cấu hình danh sách bản đồ săn Boss.`);
+          continue;
         }
 
         // Chỉ gọi triggerMvpCycle cho trưởng nhóm hoặc bot chạy độc lập
@@ -9405,17 +9776,20 @@ app.post('/api/accounts/:line_uid/action', requireAuth, async (req, res) => {
       const isGwActive = bot.lastGw && (bot.lastGw.st === 'open' || bot.lastGw.st === 'fight') && (!bot.lastGw.ends || bot.lastGw.ends > currentEpoch);
       const isCwActive = bot.lastCw && (bot.lastCw.st === 'open' || bot.lastCw.st === 'fight') && (!bot.lastCw.ends || bot.lastCw.ends > currentEpoch);
       const kind = isGwActive ? 'gw' : (isCwActive ? 'cw' : (extra && extra.kind ? extra.kind : 'gw'));
-      const checkinKey = bot._getWarCheckinKey(kind);
-      bot.captureEventSnapshot(kind);
-      bot.eventSnapshot.checkinOnly = true;
-      bot.eventSnapshot.checkinKey = checkinKey;
-      bot._persistEventSnapshot();
-      const ok = kind === 'gw' ? await bot.joinGuildWar() : await bot.joinCountryWar();
-      if (ok) {
-        bot.enterEventMode(kind, 4, { checkinOnly: true });
+      const requiredLv = bot._getWarCheckinRequirement(kind);
+      const playerLv = bot.player && (bot.player.lv || 1);
+      if (!bot.player || playerLv < requiredLv) {
+        bot.addLog('WARNING', `⚠️ [Check-in ${kind.toUpperCase()}] Không thể điểm danh: Cấp độ nhân vật (Lv.${playerLv || 1}) chưa đủ yêu cầu (Lv.${requiredLv}+). Không tạo phiên/snapshot.`);
+        return res.status(400).json({ ok: false, error: `Cấp độ chưa đủ để điểm danh ${kind.toUpperCase()} (cần Lv.${requiredLv}+).` });
+      }
+      if (bot.eventSnapshot || bot.inEventMode || bot.eventState !== 'IDLE') {
+        return res.status(409).json({ ok: false, error: 'Bot đang ở một phiên Event khác hoặc đang khôi phục vị trí.' });
+      }
+      const ok = await bot._startWarCheckinSession([kind]);
+      if (ok && bot.inEventMode) {
         return res.json({ ok: true, msg: `📝 Đã điểm danh ${kind === 'gw' ? 'Bang Chiến' : 'Quốc Chiến'} thành công! Bot sẽ tự thoát sau 1 phút.` });
       } else {
-        bot._rollbackWarCheckinEntry();
+        if (bot.eventSnapshot && !bot.inEventMode) bot._rollbackWarCheckinEntry();
         return res.status(400).json({ ok: false, error: 'Không thể điểm danh (Chiến trường chưa mở hoặc không đủ điều kiện).' });
       }
     }
@@ -10649,5 +11023,11 @@ module.exports = {
   requestSaveSpotsCache,
   BotRequestQueue,
   combineAbortSignals,
+  getMapDefs,
+  userSessions,
+  loadAccounts,
+  saveAccounts,
+  flushAccountsToDisk,
+  setCustomAccountStorage,
   app
 };

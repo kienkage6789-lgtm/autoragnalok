@@ -2,6 +2,7 @@
 
 > Changelog of actual changes implemented.
 
+<<<<<<< HEAD
 ### 2026-09-13 - Loại Trừ Cài Đặt Tab Chợ Khi Đồng Bộ Team (T85)
 
 - File đã đổi: `server.js`, `public/app.js`, `test.js`, `.agent/TASKS.md`, `.agent/CHANGELOG.md`.
@@ -16,6 +17,71 @@
   - **Kiểm thử tự động (`test.js`)**:
     - Bổ sung test suite `10b. Test Team Sync preserves Member Market tab settings`: xác nhận các thiết lập bản đồ, chu kỳ, săn boss được đồng bộ từ Leader trong khi toàn bộ cấu hình Chợ của Member được bảo toàn tuyệt đối.
     - Chạy `npm test` đạt 100% Passed.
+=======
+### 2026-09-17 - T88: Hardening Check-in GW/CW riêng
+
+- File đã đổi: `server.js`, `test.js`, `.agent/TASKS.md`, `.agent/DECISIONS.md`.
+- `autoWarCheckin` nay tạo queue `GW -> CW` khi cả hai event cùng active từ phút 35; mỗi event dùng key riêng để không điểm danh lặp trong cùng lượt.
+- Giữ snapshot Map/tọa độ/cấu hình train gốc qua toàn bộ queue; chỉ hoàn tất/xóa snapshot sau khi event cuối đã restore về đúng vị trí server.
+- Bổ sung kiểm tra level trước khi tạo snapshot hoặc gọi join, log WARNING rõ khi thiếu level; join fail retry tối đa 3 lần rồi suppress lượt đó để không lặp vô hạn.
+- Bổ sung test tích hợp `pollGame()` mô phỏng join thành công, giữ 60 giây, exit/restore, GW+CW queue, join fail, thiếu level và regression auto-join cũ.
+
+### 2026-09-17 - T87: Chặn Team Member spam warp khi MVP transit thất bại
+
+- File đã đổi: `server.js`, `test.js`, `.agent/TASKS.md`, `.agent/DECISIONS.md`, `.agent/CHANGELOG.md`.
+- Đã làm:
+  - Team Member follow Leader bằng bộ đếm transit riêng: warp ở nhịp 1, retry ở nhịp 3 và 6, sau nhịp 8 ghi nhận skip target và không gửi lại warp khi Leader chưa chuyển map.
+  - Reset state transit khi Member tới target hoặc Leader đổi target; nhận diện cycle mới bằng `mvpCycleStats.cycleStartTs`, kể cả khi cycle mới bắt đầu lại cùng map.
+  - Bổ sung test tích hợp gọi `pollGame()` 8 nhịp với warp thất bại, kiểm tra đúng 3 lần gọi `[1, 3, 6]`, skip nhịp 8, không spam ở nhịp 9 và follow target mới của Leader.
+
+---
+
+### 2026-09-17 - Tái Cấu Trúc & Nâng Cấp Toàn Diện Luồng Tự Động Săn Boss MVP Theo Danh Sách Map (T86)
+
+- File đã đổi: `server.js`, `public/app.js`, `test.js`, `.agent/TASKS.md`, `.agent/DECISIONS.md`, `.agent/CHANGELOG.md`.
+- Đã làm:
+  - **Đồng bộ hóa 2 chiều Settings & Map List (`server.js`)**:
+    - Chuẩn hóa đồng bộ 2 chiều: `bossHuntEnabled: true` <-> `bossHuntMode: 'type2'`, tắt toggle <-> `bossHuntMode: 'off'`.
+    - Đồng bộ mảng `bossHuntMaps` và chuỗi `mvpTargetMaps` ở constructor, `updateSettings()` và `force_mvp_hunt`.
+    - `getBossHuntMaps()`: đảm bảo giữ đúng thứ tự mảng map của người dùng; hỗ trợ fallback kế thừa map từ Leader cho Member có `teamSynced: true`.
+  - **Cơ chế kích hoạt kép (`bossHuntTrigger`) (`server.js`, `public/app.js`)**:
+    - Bổ sung setting `bossHuntTrigger`: `'schedule'` (chạy đầu mỗi giờ 00–02) hoặc `'immediate'` (kích hoạt ngay khi bật toggle).
+    - Trong `updateSettings()`: nếu bật toggle khi `bossHuntTrigger === 'immediate'`, tự động gọi `triggerMvpCycle(true)` ngay lập tức nếu đã có map.
+    - Giữ nguyên endpoint `force_mvp_hunt` cho nút "Kích hoạt đi săn ngay"; bổ sung validation trả lỗi HTTP 400 và ghi log WARNING nếu chưa cấu hình map.
+  - **Cảnh báo thiếu map & UI trực quan (`server.js`, `public/app.js`)**:
+    - Backend ghi log WARNING `⚠️ Chưa cấu hình danh sách bản đồ săn Boss.` khi bật toggle, khi scheduler kích hoạt hoặc khi gọi API Force Hunt mà chưa có map (không còn âm thầm đứng im).
+    - UI: Container `boss-hunt-maps-container` hiển thị hộp cảnh báo màu đỏ nét đứt khi bật săn boss mà chưa có map.
+    - UI: Banner `boss-hunt-banner` hiển thị trạng thái cảnh báo màu đỏ với badge `Thiếu Map` và hướng dẫn nhấp `+ Thêm Map`.
+    - UI: Bổ sung dropdown chọn cách kích hoạt `⏱️ Cách kích hoạt chu kỳ` (`schedule` vs `immediate`).
+  - **Bỏ qua Map thiếu level & cơ chế chống kẹt Warp (`server.js`)**:
+    - Trong `updateMvpCycleStatus()`: duyệt vòng lặp `while` kiểm tra level yêu cầu của map (`req > player.lv`), tự động bỏ qua và ghi log cảnh báo chi tiết, chuyển sang map tiếp theo hợp lệ.
+    - Xử lý trạng thái di chuyển: ghi log khi bắt đầu warp tới map mới; tự động retry warp ở nhịp thứ 3 (~6s) và nhịp 6 (~12s); nếu sau 8 nhịp (~16s) vẫn không tới đích (warp fail), ghi log WARNING và tự động bỏ qua map để tiếp tục chu kỳ.
+  - **Bảo toàn Map farm gốc & đồng bộ Team Member (`server.js`)**:
+    - `triggerMvpCycle()`: lưu giữ an toàn `mvpCycleOriginalMap` từ `targetMap` hoặc vị trí hiện tại (loại trừ các map đặc biệt 4, 5, 11, 12).
+    - Khi hết danh sách map, chu kỳ hoàn thành: tự động warp đưa bot quay về `mvpCycleOriginalMap` và ghi log `cycle_done`.
+    - Đồng bộ `isMvpCycling`, `mvpCycleMapIndex`, `mvpCycleOriginalMap` từ Leader sang Member trong cả 2 nhánh xử lý map routing của `pollGame()`.
+  - **Hệ thống Log trạng thái giai đoạn (`server.js`)**:
+    - Đã bật săn Boss, bắt đầu chu kỳ, đang di chuyển tới Map X, đã tải danh sách Boss (kèm số lượng hoặc thông báo không có boss), bỏ qua Map vì thiếu level, warp thất bại sau 16s, hoàn thành chu kỳ.
+  - **Triệt tiêu hoàn toàn request warp trùng & Single Source of Truth (`server.js`)**:
+    - Gom 100% logic định tuyến map vào một hàm duy nhất `checkAndRouteMap()` tại đầu `pollGame()`.
+    - Loại bỏ hoàn toàn khối map routing trùng lặp trong `runAutomation()`.
+    - Khi `checkAndRouteMap()` thực hiện di chuyển bản đồ, nó trả về `true` và `pollGame()` kết thúc sớm (`return;`) ngay trong nhịp đó.
+    - Phân quyền độc quyền: `checkAndRouteMap()` chỉ warp ở nhịp đầu khởi động transit (`mvpTransitCount === 0`); các nhịp retry 3, 6 và timeout 8 do `updateMvpCycleStatus()` quản lý độc quyền.
+    - Bảo đảm **Single-Warp Invariant**: Trong mỗi nhịp `pollGame()`, số lần gọi `warpToMap()` luôn `<= 1`, kể cả khi request warp kết thúc tức thì.
+    - Khôi phục nguyên vẹn hàm `updateMvpCycleStatus()`.
+    - Bổ sung cờ mutex `this._isWarping` trong `warpToMap()`: tự động từ chối các request warp trùng lặp khi đang có lệnh di chuyển in-flight.
+    - Thêm `clearTimeout(saveAccountsTimeout)` trong `flushAccountsToDisk()` giúp giải phóng timer sạch sẽ khi tiến trình shutdown.
+  - **Cấu hình sẵn danh sách map mẫu trong `accounts.json`**:
+    - Bổ sung `bossHuntMaps: [2, 3]`, `mvpTargetMaps: "2,3"`, `bossHuntTrigger: "schedule"` cho tài khoản quản trị hiện tại, giúp người dùng bật toggle là có sẵn map để săn ngay.
+  - **Nâng cấp toàn diện bộ kiểm thử End-to-End (`test.js`)**:
+    - Test 4: Bổ sung kiểm thử API endpoint `POST /api/accounts/:line_uid/action` (`force_mvp_hunt`) với in-memory fixture storage độc lập qua `setCustomAccountStorage()`. Bảo đảm `accounts.json` thật trên đĩa không bị thay đổi trong suốt quá trình test.
+    - Test 5: Kiểm thử scheduler chạy thực tế bằng `await pollGame()` (kích hoạt chu kỳ ở phút 01; ghi log cảnh báo khi thiếu map).
+    - Test 9: Kiểm thử đồng bộ Team Member theo Leader chạy thực tế bằng `await mem.pollGame()`.
+    - Test 11: Mở rộng kiểm thử toàn diện: vừa kiểm tra mutex `_isWarping`, vừa spy trên `bot.warpToMap` chạy qua 8 kịch bản `pollGame()` thực tế (AutoMap sai, AutoMap đúng, MVP bắt đầu, MVP transit tick 2, MVP retry tick 3, MVP hunting trên map, MVP clear chuyển map, Member sync theo Leader). Chứng minh số lần warp trong 1 nhịp pollGame luôn `<= 1`.
+  - Đã kiểm tra bằng `node --check server.js`, `node --check public/app.js`, `node --check test.js`, `git diff --check`, `npm test` -> 100% Passed.
+
+---
+>>>>>>> 1d9a7b1 (fix event vv)
 
 ### 2026-09-10 - Thêm Toggle Check-in GW/CW Độc Lập (T84)
 

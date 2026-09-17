@@ -1987,6 +1987,14 @@ document.addEventListener('DOMContentLoaded', () => {
                   <span class="slider"></span>
                 </label>
               </div>
+
+              <div class="input-control" style="margin-top: 4px;">
+                <label for="sel-boss-hunt-trigger-${acc.line_uid}">⏱️ Cách kích hoạt chu kỳ</label>
+                <select id="sel-boss-hunt-trigger-${acc.line_uid}" onchange="updateStringSetting('${acc.line_uid}', 'bossHuntTrigger')" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; padding: 6px; font-family: inherit; font-size: 0.85rem; outline: none; margin-top:2px; width: 100%;">
+                  <option value="schedule">⏰ Tự động theo lịch đầu giờ (00–02)</option>
+                  <option value="immediate">⚡ Chạy ngay sau khi bật toggle</option>
+                </select>
+              </div>
               
               <div class="toggle-control" style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px;">
                 <span class="toggle-label">🏟️ Auto Đấu Trường</span>
@@ -3042,6 +3050,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // MVP Boss settings sync
+    const selBossHuntTrigger = document.getElementById(`sel-boss-hunt-trigger-${acc.line_uid}`);
+    if (selBossHuntTrigger && document.activeElement !== selBossHuntTrigger) {
+      selBossHuntTrigger.value = acc.settings.bossHuntTrigger || 'schedule';
+    }
+
     const selBossHuntPriority = document.getElementById(`sel-boss-hunt-priority-${acc.line_uid}`);
     if (selBossHuntPriority && document.activeElement !== selBossHuntPriority) {
       selBossHuntPriority.value = acc.settings.bossHuntPriority || 'distance';
@@ -3051,7 +3064,11 @@ document.addEventListener('DOMContentLoaded', () => {
     if (mapsContainer) {
       const selectedMaps = acc.settings.bossHuntMaps || [];
       if (selectedMaps.length === 0) {
-        mapsContainer.innerHTML = `<span style="font-size: 0.75rem; color: #64748b; font-style: italic; display: block; text-align: center; width: 100%; margin: 6px 0;">Chưa chọn bản đồ nào. Nhấp "+ Thêm Map" để chọn.</span>`;
+        if (acc.settings.bossHuntEnabled === true) {
+          mapsContainer.innerHTML = `<div style="font-size: 0.75rem; color: #fca5a5; background: rgba(239, 68, 68, 0.1); border: 1px dashed rgba(239, 68, 68, 0.3); border-radius: 4px; padding: 6px; text-align: center; width: 100%;">⚠️ Chưa cấu hình danh sách bản đồ săn Boss. Hãy nhấp <b>"+ Thêm Map"</b> để thiết lập!</div>`;
+        } else {
+          mapsContainer.innerHTML = `<span style="font-size: 0.75rem; color: #64748b; font-style: italic; display: block; text-align: center; width: 100%; margin: 6px 0;">Chưa chọn bản đồ nào. Nhấp "+ Thêm Map" để chọn.</span>`;
+        }
       } else {
         mapsContainer.innerHTML = selectedMaps.map((mapId, index) => {
           const mapDef = (window.cachedMapsList || []).find(m => m.id === mapId);
@@ -3376,18 +3393,34 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
           `;
         } else if (acc.settings.bossHuntEnabled === true) {
-          // Chờ chu kỳ tiếp theo
-          banner.className = "boss-hunt-banner idle";
-          banner.style.display = 'block';
-          banner.style.background = 'rgba(99, 102, 241, 0.08)';
-          banner.style.border = '1px solid rgba(99, 102, 241, 0.2)';
-          banner.style.color = '#a5b4fc';
-          banner.innerHTML = `
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-              <span>🗺️ <b>Tự động Săn Boss:</b> Chờ chu kỳ săn tiếp theo — Map ${p.map || '--'}</span>
-              <span style="font-size: 0.65rem;">⏳ Chờ chu kỳ</span>
-            </div>
-          `;
+          const selectedMaps = acc.settings.bossHuntMaps || [];
+          if (selectedMaps.length === 0) {
+            banner.className = "boss-hunt-banner warning";
+            banner.style.display = 'block';
+            banner.style.background = 'rgba(239, 68, 68, 0.15)';
+            banner.style.border = '1px solid rgba(239, 68, 68, 0.4)';
+            banner.style.color = '#fca5a5';
+            banner.innerHTML = `
+              <div style="display: flex; justify-content: space-between; align-items: center; font-weight: 600;">
+                <span>⚠️ <b>Cảnh báo:</b> Chưa cấu hình danh sách bản đồ săn Boss! (Nhấp "+ Thêm Map")</span>
+                <span style="font-size: 0.65rem; color: #f87171; background: rgba(239, 68, 68, 0.2); padding: 2px 6px; border-radius: 4px;">Thiếu Map</span>
+              </div>
+            `;
+          } else {
+            const triggerMode = acc.settings.bossHuntTrigger || 'schedule';
+            const triggerInfo = triggerMode === 'immediate' ? 'Chạy ngay sau khi bật toggle' : 'Đầu mỗi giờ (00–02)';
+            banner.className = "boss-hunt-banner idle";
+            banner.style.display = 'block';
+            banner.style.background = 'rgba(99, 102, 241, 0.08)';
+            banner.style.border = '1px solid rgba(99, 102, 241, 0.2)';
+            banner.style.color = '#a5b4fc';
+            banner.innerHTML = `
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span>🗺️ <b>Tự động Săn Boss:</b> Chờ chu kỳ tiếp theo (${triggerInfo}) — Map ${p.map || '--'}</span>
+                <span style="font-size: 0.65rem;">⏳ Chờ chu kỳ</span>
+              </div>
+            `;
+          }
         }
       } else {
         banner.style.display = 'none';

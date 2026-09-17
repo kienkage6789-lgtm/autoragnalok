@@ -2,6 +2,71 @@
 
 > Captured architectural decisions and trade-offs.
 
+## 2026-09-17 - T88: Queue Check-in GW/CW và bảo toàn snapshot xuyên suốt phiên
+
+- `autoWarCheckin` dùng session riêng với thứ tự ổn định `gw -> cw`; chỉ các event đang active, đủ level và chưa hoàn tất lượt mới được đưa vào queue.
+- Một `eventSnapshot` duy nhất giữ Map, tọa độ và cấu hình train gốc trong cả phiên. Sau khi restore xong event hiện tại, chỉ đánh dấu key của event đó và tiếp tục event kế tiếp; chỉ xóa snapshot sau event cuối.
+- Join thất bại được retry tối đa 3 lần, có thời gian chờ 5 giây và suppress theo event key sau khi hết retry để tránh vòng lặp vô hạn. Join fail thủ công rollback snapshot.
+- Kiểm tra level diễn ra trước `captureEventSnapshot()`/join; thiếu level chỉ ghi WARNING rõ ràng và không tạo state check-in.
+- Bảo toàn các nhánh `autoEventJoinGw`, `autoEventJoinCw`, `autoEventJoinInv` bằng cách chỉ thay đổi nhánh `autoWarCheckin` và thêm regression test.
+
+## 2026-09-17 - Tách bộ đếm transit MVP riêng cho Team Member (T87)
+
+- Bối cảnh: `checkAndRouteMap()` chạy trước phần tải payload của `pollGame()`. Member không được chạy `updateMvpCycleStatus()` vì hàm này còn quyết định tiến độ săn Boss dựa trên danh sách Boss cục bộ; nếu gọi trực tiếp sẽ có nguy cơ Member tự lệch chu kỳ của Leader. Bản vá cũ vì thế đã bổ sung retry/skip ngay tại routing Member nhưng cần bảo vệ cả trường hợp Leader khởi động lại cùng target map.
+- Quyết định:
+  - Giữ Leader là nguồn sự thật cho `isMvpCycling`, `mvpCycleMapIndex` và target map.
+  - Member dùng state transit riêng (`mvpMemberTransitCount`, target map và target đã skip), chỉ warp ở nhịp 1, retry nhịp 3/6, và sau nhịp 8 đánh dấu target lỗi để im lặng chờ Leader chuyển map.
+  - Nhận diện cycle Leader bằng `mvpCycleStats.cycleStartTs` thay vì chỉ bằng boolean `isMvpCycling`, để một cycle mới tại cùng map không bị dính skip của cycle trước.
+  - Không thay đổi bộ đếm/luồng `updateMvpCycleStatus()` của Leader/solo hoặc các guard Guild Dungeon/Event.
+- Đánh đổi: Nếu Member không vào được một map nhưng Leader vẫn ở map đó, Member sẽ tạm bỏ qua việc warp tới map ấy cho đến khi Leader đổi target; đây là chủ ý để tránh spam request và giữ quyền quyết định chu kỳ ở Leader.
+
+---
+
+## 2026-09-17 - Tái Cấu Trúc & Nâng Cấp Toàn Diện Luồng Tự Động Săn Boss MVP Theo Danh Sách Map (T86)
+
+- Bối cảnh:
+  - Tính năng "Tự động Săn Boss MVP" trước đây chỉ tự kích hoạt trong phút 00–02 đầu giờ trong `pollGame()`.
+  - Khi người dùng bật toggle `bossHuntEnabled` nhưng chưa cấu hình bản đồ săn boss (`bossHuntMaps`), bot âm thầm không chạy, không có log cảnh báo và UI không hiển thị trạng thái thiếu cấu hình.
+  - Có sự không nhất quán giữa `bossHuntEnabled`, `bossHuntMode` ('off' | 'type1' | 'type2') và giữa `bossHuntMaps` (mảng số) với `mvpTargetMaps` (chuỗi ngăn cách dấu phẩy).
+  - Khi map kế tiếp yêu cầu level cao hơn level hiện tại của nhân vật, chu kỳ bị kẹt cố warp liên tục mà không tự bỏ qua.
+  - Khi warp thất bại (kết nối lag, server từ chối), bot kẹt ở map hiện tại mà không có cơ chế retry và skip map sau timeout.
+  - Team Member bật săn boss theo Leader không tự đồng bộ được danh sách map nếu Member chưa tự chọn map riêng.
+- Quyết định kiến trúc:
+  1. **Đồng Bộ Hai Chiều & Chặt Chẽ Giữa Cờ Tính Năng**:
+     - `bossHuntEnabled: true` <-> `bossHuntMode: 'type2'`. Khi tắt toggle (`bossHuntEnabled: false`) <-> `bossHuntMode: 'off'`.
+     - `bossHuntMaps` (mảng ID bản đồ) <-> `mvpTargetMaps` (chuỗi dạng "2,3,5"). Mọi điểm đọc danh sách đều chuẩn hóa qua `getBossHuntMaps()`.
+     - Team Member có `teamSynced: true` nếu chưa cấu hình `bossHuntMaps` riêng sẽ tự động fallback kế thừa danh sách map của Leader trong `getBossHuntMaps()`.
+  2. **Cơ Chế Kích Hoạt Kép (`bossHuntTrigger`)**:
+     - Bổ sung setting `bossHuntTrigger`: `'schedule'` (chạy đầu mỗi giờ 00–02) hoặc `'immediate'` (chạy ngay lập tức khi bật toggle hoặc khi lưu cấu hình).
+     - Giữ nguyên endpoint và nút bấm **Kích hoạt đi săn ngay** (`force_mvp_hunt`), đồng thời bổ sung kiểm tra: nếu danh sách map rỗng sẽ trả về lỗi HTTP 400 kèm cảnh báo rõ ràng thay vì im lặng.
+  3. **Cảnh Báo Thiếu Cấu Hình Trực Quan & Tức Thì**:
+     - Khi bật toggle hoặc đến lịch kích hoạt mà danh sách map rỗng: Ghi log WARNING `⚠️ Chưa cấu hình danh sách bản đồ săn Boss.` (không âm thầm đứng im).
+     - Giao diện Dashboard hiển thị banner cảnh báo màu đỏ với badge `Thiếu Map` và hộp placeholder viền đỏ hướng dẫn nhấp `+ Thêm Map`.
+  4. **Thuật Toán Bỏ Qua Map Thiếu Level & Chống Kẹt Warp**:
+     - Trong `updateMvpCycleStatus()`: Sử dụng vòng lặp `while` duyệt qua các map tiếp theo; nếu nhân vật không đủ level yêu cầu của map (`req > player.lv`), tự động ghi log cảnh báo bỏ qua và tiến tới map kế tiếp trong danh sách.
+     - Transit & Warp Fail-Safe: Theo dõi nhịp di chuyển `mvpTransitCount`. Tự động retry gọi `warpToMap()` tại nhịp 3 (~6s) và nhịp 6 (~12s). Nếu sau 8 nhịp (~16s) vẫn không chuyển sang được map mục tiêu, ghi log cảnh báo warp thất bại và tự động chuyển sang map tiếp theo (hoặc hoàn tất chu kỳ).
+  5. **Bảo Toàn Map Farm Gốc & Khôi Phục Sau Khi Hoàn Thành**:
+     - `triggerMvpCycle` ghi nhớ `mvpCycleOriginalMap` từ `targetMap` hoặc vị trí hiện tại (loại trừ các map đặc biệt 4, 5, 11, 12).
+     - Khi duyệt xong toàn bộ danh sách map, chu kỳ kết thúc thành công: bot tự động warp quay về `mvpCycleOriginalMap` và ghi log `cycle_done`.
+  6. **Đầy Đủ Hệ Thống Log Giai Đoạn**:
+     - Bổ sung log chuyên biệt cho: Đã bật săn Boss, Bắt đầu chu kỳ, Đang di chuyển tới Map X, Đã tải danh sách Boss (kèm số lượng hoặc thông báo sạch boss), Bỏ qua Map vì thiếu level, Warp thất bại, Hoàn thành chu kỳ.
+  7. **Triệt Tiêu Request Warp Trùng & Gom Toàn Bộ Về Hàm Duy Nhất `checkAndRouteMap()`**:
+     - Phát hiện nguyên nhân gốc rễ của luồng warp kép: trong thiết kế cũ, cả `pollGame()` và `runAutomation()` đều chứa khối mã định tuyến bản đồ độc lập. Thêm vào đó, khi `isMvpCycling === true`, `updateMvpCycleStatus()` cũng quản lý transit và gọi `warpToMap()`. Cờ `_isWarping` chỉ chặn khi hai request chồng chéo thời gian; nếu request đầu hoàn thành nhanh, request thứ hai vẫn được gửi tiếp.
+     - Quyết định kiến trúc:
+       a. Gom 100% logic định tuyến vào một hàm duy nhất `checkAndRouteMap()`, đặt làm Single Source of Truth ở đầu `pollGame()`.
+       b. Loại bỏ hoàn toàn khối routing thứ hai trong `runAutomation()`.
+       c. Khi `checkAndRouteMap()` kích hoạt warp, nó lập tức trả về `true` và `pollGame()` thực hiện `return;` ngay, không cho phép bất kỳ logic nào bên dưới chạy tiếp trong nhịp poll đó.
+       d. Phân quyền rõ ràng khi `isMvpCycling === true`: `checkAndRouteMap()` chỉ khởi động warp ở nhịp đầu tiên (`!mvpTransitCount`). Các nhịp transit tiếp theo (nhịp 3, 6 retry, nhịp 8 timeout và chuyển map) do `updateMvpCycleStatus()` quản lý độc quyền.
+       e. Thiết lập **Single-Warp Invariant**: Trong bất kỳ nhịp `pollGame()` nào, số lần gọi `warpToMap()` tối đa chỉ là 1.
+  8. **Cách Ly Tuyệt Đối Dữ Liệu `accounts.json` Khi Test API (`setCustomAccountStorage`)**:
+     - Khi chạy Unit Test gọi API endpoint `force_mvp_hunt`, hàm nội bộ `loadAccounts()` và `saveAccounts()` trong `server.js` có thể ghi đè dữ liệu tài khoản thật trên đĩa.
+     - Quyết định: Cung cấp API `setCustomAccountStorage({ loadAccounts, saveAccounts })` trong `server.js`. Khi chạy test API, test runner inject một In-Memory Fixture Storage riêng biệt. API hoạt động 100% trên RAM mà không thực hiện bất kỳ thao tác I/O nào lên `accounts.json` thật trên đĩa. Test kiểm tra snapshot sha/content của `accounts.json` trước và sau test để bảo đảm dữ liệu trên đĩa hoàn toàn bất biến.
+  9. **Xác Nhận Thiết Kế Kích Hoạt Scheduler**:
+     - Thiết kế chế độ `schedule`: Bot chỉ tự động kích hoạt chu kỳ săn Boss vào phút 00–02 đầu mỗi giờ tròn. Do đó khi bật ở phút 10 (hoặc bất kỳ phút nào > 02), bot sẽ chờ đến đầu giờ tiếp theo — đây là hành vi chuẩn theo đúng định nghĩa của scheduler.
+     - Nếu người dùng muốn chu kỳ chạy ngay lập tức mà không phải chờ đầu giờ, họ có thể chọn chế độ `immediate` (`bossHuntTrigger: 'immediate'`) hoặc bấm nút "Kích hoạt đi săn ngay" trên Dashboard.
+
+---
+
 ## 2026-09-10 - Định Hướng Tách Riêng Tính Năng GW/CW Check-in
 
 - Tính năng mới phải có toggle/cấu hình riêng, không thay đổi `autoEventJoinGw` hoặc `autoEventJoinCw`.
