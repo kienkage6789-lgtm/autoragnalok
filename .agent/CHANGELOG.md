@@ -2,6 +2,11 @@
 
 > Changelog of actual changes implemented.
 
+### 2026-09-19 - Sửa test persistence suppression Check-in T84
+
+- `test.js`: test restart T84 nay đọc lại account `t84_fail_bot` từ custom in-memory storage sau khi join fail bị suppress, xác nhận key đã persist rồi mới khởi tạo `BotInstance` mới.
+- Không thay đổi `_suppressWarCheckin()` hoặc queue GW→CW vì code production đã ghi/lấy đúng state khi constructor nhận đầy đủ account record.
+
 <<<<<<< HEAD
 ### 2026-09-13 - Loại Trừ Cài Đặt Tab Chợ Khi Đồng Bộ Team (T85)
 
@@ -1823,3 +1828,16 @@
   - **Triển khai In-memory Cache & Debounced Write**: Lưu mảng accounts vào RAM cache để phục vụ cho hơn 25 nơi đọc file `accounts.json` liên tục. Thay đổi `saveAccounts` thành ghi file bất đồng bộ (`fs.writeFile`) có debounce 1.5 giây, giải phóng hoàn toàn Event Loop của Node.js khỏi nghẽn I/O đồng bộ. Đăng ký hooks `SIGINT`, `SIGTERM`, `exit` để flush dữ liệu cache xuống đĩa khi tắt server nhằm chống mất mát dữ liệu.
   - **Cơ chế Auto-Retry trong `sendRequest`**: Tích hợp cơ chế tự động thử lại tối đa 3 lần cho mỗi HTTP request của bot game khi gặp các lỗi mạng chập chờn (`ECONNRESET`, `ETIMEDOUT`, dữ liệu không hợp lệ). Khoảng cách giữa các lần thử lại tăng dần (attempt * 500ms). Giảm timeout của request từ 10s xuống 5s để giải phóng socket treo nhanh hơn.
 - Đã test bằng: Chạy bộ unit test tự động `node test.js` -> Tất cả các test đều PASS thành công.
+
+## 2026-09-21 - T90 Battle Royale & Guild Flag War
+
+- `server.js`: đọc/lưu payload `br`/`fw`, thêm state active/ended handling, join wrappers đúng `xhrpg_brwar.php`/`brwar_join` và `xhrpg_fwar.php`/`fwar_join`, API state/action routes, proxy event interception và lifecycle return/recovery.
+- `public/app.js`: thêm toggle auto-join, nút join thủ công, live banner cho `pre/open/fight`, và lịch Battle Royale/Guild Flag War.
+- `test.js`: thêm regression contract/lifecycle tests; GW/CW check-in queue vẫn chỉ giới hạn GW/CW.
+- Đã test: `node --check server.js`, `node --check public/app.js`, `node --check test.js`, `git diff --check`, `npm test` — đạt.
+## 2026-09-21 - T91 Check-in riêng BR/FW theo cửa sổ lịch
+
+- `server.js`: mở rộng queue Check-in riêng từ GW/CW sang BR/FW; dùng cửa sổ BR 22:35–22:50 và FW 20:10–20:20, vẫn kiểm tra payload active/`ends`, retry/queue/snapshot/restore và stay 60 giây hiện có.
+- `public/app.js`: đổi nhãn và tooltip nút Check-in để hiển thị rõ phạm vi GW/CW/BR/FW theo giờ event.
+- `test.js`: thêm kiểm thử boundary time window, queue BR→FW, snapshot giữ qua event trung gian, restore cuối và UI scope.
+- Đã test: `node --check server.js`, `node --check public/app.js`, `node --check test.js`, `git diff --check`, `npm test` — đạt.

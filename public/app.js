@@ -1628,7 +1628,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <span class="toggle-label" style="font-weight: 600; font-size: 0.9rem; margin-bottom: 4px; display: block; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 4px;">🏆 Tự Động Tham Gia Sự Kiện</span>
 
                 <div style="display: flex; justify-content: space-between; align-items: center; margin: 4px 0 8px; padding: 7px 8px; border: 1px solid rgba(52, 211, 153, 0.25); border-radius: 7px; background: rgba(16, 185, 129, 0.06);">
-                  <span class="toggle-label" style="font-size: 0.82rem; color: #a7f3d0;">📝 Check-in GW/CW riêng (phút 35, 1 phút rồi về)</span>
+                  <span class="toggle-label" style="font-size: 0.82rem; color: #a7f3d0;">📝 Check-in riêng GW/CW/BR/FW (theo giờ event, 1 phút rồi về)</span>
                   <label class="switch">
                     <input type="checkbox" id="chk-auto-war-checkin-${acc.line_uid}" onchange="toggleSetting('${acc.line_uid}', 'autoWarCheckin')">
                     <span class="slider"></span>
@@ -1655,6 +1655,22 @@ document.addEventListener('DOMContentLoaded', () => {
                   <span class="toggle-label" style="font-size: 0.82rem; color: #d1d5db;">👑 Event Quốc Chiến (Country War - Map 4)</span>
                   <label class="switch">
                     <input type="checkbox" id="chk-auto-event-join-cw-${acc.line_uid}" onchange="toggleSetting('${acc.line_uid}', 'autoEventJoinCw')">
+                    <span class="slider"></span>
+                  </label>
+                </div>
+
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px;">
+                  <span class="toggle-label" style="font-size: 0.82rem; color: #fed7aa;">🏴‍☠️ Battle Royale (Map 4)</span>
+                  <label class="switch">
+                    <input type="checkbox" id="chk-auto-event-join-br-${acc.line_uid}" onchange="toggleSetting('${acc.line_uid}', 'autoEventJoinBr')">
+                    <span class="slider"></span>
+                  </label>
+                </div>
+
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px;">
+                  <span class="toggle-label" style="font-size: 0.82rem; color: #bbf7d0;">🏕️ Guild Flag War (Map 4)</span>
+                  <label class="switch">
+                    <input type="checkbox" id="chk-auto-event-join-fw-${acc.line_uid}" onchange="toggleSetting('${acc.line_uid}', 'autoEventJoinFw')">
                     <span class="slider"></span>
                   </label>
                 </div>
@@ -1705,8 +1721,10 @@ document.addEventListener('DOMContentLoaded', () => {
               <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; margin-bottom: 6px;">
                 <button type="button" id="btn-event-gw-${acc.line_uid}" onclick="sendAccountAction('${acc.line_uid}', 'gwar_join')" style="background: linear-gradient(135deg, rgba(168,85,247,0.25), rgba(126,34,206,0.35)); border: 1px solid rgba(168,85,247,0.5); color: #e9d5ff; border-radius: 6px; padding: 6px 4px; font-size: 0.76rem; cursor: pointer; font-weight: 700; text-align: center; transition: all 0.2s;" title="Vào Đấu Trường Bang Chiến (Map 4)">⚔️ Vào Bang Chiến</button>
                 <button type="button" id="btn-event-cw-${acc.line_uid}" onclick="sendAccountAction('${acc.line_uid}', 'cwar_join')" style="background: linear-gradient(135deg, rgba(14,165,233,0.25), rgba(3,105,161,0.35)); border: 1px solid rgba(56,189,248,0.5); color: #7dd3fc; border-radius: 6px; padding: 6px 4px; font-size: 0.76rem; cursor: pointer; font-weight: 700; text-align: center; transition: all 0.2s;" title="Vào Đấu Trường Quốc Chiến (Map 4)">👑 Vào Quốc Chiến</button>
+                <button type="button" id="btn-event-br-${acc.line_uid}" onclick="sendAccountAction('${acc.line_uid}', 'brwar_join')" style="background: linear-gradient(135deg, rgba(249,115,22,0.25), rgba(194,65,12,0.35)); border: 1px solid rgba(251,146,60,0.5); color: #fed7aa; border-radius: 6px; padding: 6px 4px; font-size: 0.76rem; cursor: pointer; font-weight: 700; text-align: center; transition: all 0.2s;" title="Vào Battle Royale (Map 4)">🏴‍☠️ Battle Royale</button>
+                <button type="button" id="btn-event-fw-${acc.line_uid}" onclick="sendAccountAction('${acc.line_uid}', 'fwar_join')" style="background: linear-gradient(135deg, rgba(34,197,94,0.22), rgba(21,128,61,0.35)); border: 1px solid rgba(74,222,128,0.5); color: #bbf7d0; border-radius: 6px; padding: 6px 4px; font-size: 0.76rem; cursor: pointer; font-weight: 700; text-align: center;" title="Vào Guild Flag War (Map 4)">🏕️ Guild Flag War</button>
                 <button type="button" id="btn-event-inv-${acc.line_uid}" onclick="sendAccountAction('${acc.line_uid}', 'inv_join')" style="background: linear-gradient(135deg, rgba(239,68,68,0.2), rgba(185,28,28,0.3)); border: 1px solid rgba(248,113,113,0.5); color: #fca5a5; border-radius: 6px; padding: 6px 4px; font-size: 0.76rem; cursor: pointer; font-weight: 700; text-align: center; transition: all 0.2s;" title="Dịch chuyển sang Map 2 bảo vệ Cây Thế Giới">🌳 Vào Cây Thế Giới</button>
-                <button type="button" id="btn-event-checkin-${acc.line_uid}" onclick="sendAccountAction('${acc.line_uid}', 'war_checkin')" style="background: linear-gradient(135deg, rgba(16,185,129,0.2), rgba(5,150,105,0.3)); border: 1px solid rgba(52,211,153,0.5); color: #a7f3d0; border-radius: 6px; padding: 6px 4px; font-size: 0.76rem; cursor: pointer; font-weight: 700; text-align: center; transition: all 0.2s;" title="Vào chiến trường điểm danh 1 phút rồi tự động quay lại map train">📝 Điểm Danh Ngay</button>
+                <button type="button" id="btn-event-checkin-${acc.line_uid}" onclick="sendAccountAction('${acc.line_uid}', 'war_checkin')" style="background: linear-gradient(135deg, rgba(16,185,129,0.2), rgba(5,150,105,0.3)); border: 1px solid rgba(52,211,153,0.5); color: #a7f3d0; border-radius: 6px; padding: 6px 4px; font-size: 0.76rem; cursor: pointer; font-weight: 700; text-align: center; transition: all 0.2s;" title="Điểm danh GW/CW/BR/FW trong đúng cửa sổ event, giữ 1 phút rồi tự động quay lại map train">📝 Điểm Danh Ngay</button>
               </div>
               <button type="button" id="btn-event-exit-${acc.line_uid}" onclick="sendAccountAction('${acc.line_uid}', 'event_exit')" style="display: none; width: 100%; background: linear-gradient(135deg, rgba(239,68,68,0.3), rgba(185,28,28,0.45)); border: 1.5px solid rgba(248,113,113,0.6); color: #fecaca; border-radius: 6px; padding: 7px 8px; font-size: 0.8rem; cursor: pointer; font-weight: 800; text-align: center; transition: all 0.2s;" title="Thoát chế độ Event ngay lập tức và đưa bot quay lại Map Farm">🚪 Thoát Event / Về Map Farm</button>
             </div>
@@ -1715,8 +1733,10 @@ document.addEventListener('DOMContentLoaded', () => {
               <div style="font-size: 0.78rem; font-weight: 700; color: #fbbf24; margin-bottom: 6px;">📅 Lịch Trình Sự Kiện Hàng Ngày</div>
               <div style="font-size: 0.72rem; color: #94a3b8; display: flex; flex-direction: column; gap: 4px; line-height: 1.45;">
                 <div>🌳 <b>19:30</b> - Bảo vệ Cây Thế Giới (Map 2)</div>
-                <div>🚩 <b>20:30</b> - Bang Chiến / Guild Flag War (Map 4)</div>
+                <div>🚩 <b>20:30</b> - Bang Chiến / Guild War (Map 4)</div>
                 <div>🌍 <b>21:30</b> - Quốc Chiến / Country Flag War (Map 4)</div>
+                <div>🏴‍☠️ <b>22:30</b> - Battle Royale (Map 4)</div>
+                <div>🏕️ <b>20:05</b> - Guild Flag War (Map 4)</div>
               </div>
             </div>
           </div>
@@ -3016,6 +3036,14 @@ document.addEventListener('DOMContentLoaded', () => {
     if (chkAutoEventJoinCw && document.activeElement !== chkAutoEventJoinCw) {
       chkAutoEventJoinCw.checked = acc.settings.autoEventJoinCw === true;
     }
+    const chkAutoEventJoinBr = document.getElementById(`chk-auto-event-join-br-${acc.line_uid}`);
+    if (chkAutoEventJoinBr && document.activeElement !== chkAutoEventJoinBr) {
+      chkAutoEventJoinBr.checked = acc.settings.autoEventJoinBr === true;
+    }
+    const chkAutoEventJoinFw = document.getElementById(`chk-auto-event-join-fw-${acc.line_uid}`);
+    if (chkAutoEventJoinFw && document.activeElement !== chkAutoEventJoinFw) {
+      chkAutoEventJoinFw.checked = acc.settings.autoEventJoinFw === true;
+    }
 
     const selEventPotion = document.getElementById(`sel-event-potion-threshold-${acc.line_uid}`);
     if (selEventPotion && document.activeElement !== selEventPotion) {
@@ -3283,7 +3311,23 @@ document.addEventListener('DOMContentLoaded', () => {
       let bannerBorder = '1px solid rgba(245, 158, 11, 0.3)';
       let bannerColor = '#fde68a';
 
-      if (acc.lastGw && (acc.lastGw.st === 'open' || acc.lastGw.st === 'fight')) {
+      if (acc.lastFw && (acc.lastFw.st === 'pre' || acc.lastFw.st === 'open' || acc.lastFw.st === 'fight')) {
+        activeEvent = acc.lastFw;
+        eventTitle = `🏕️ Guild Flag War: ${acc.lastFw.st === 'pre' ? 'Sắp Mở' : (acc.lastFw.st === 'open' ? 'Phòng Chờ' : 'Đang Chiến Đấu')}`;
+        eventMapId = 4;
+        joinAction = 'fwar_join';
+        bannerBg = 'rgba(34, 197, 94, 0.15)';
+        bannerBorder = '1px solid rgba(34, 197, 94, 0.3)';
+        bannerColor = '#bbf7d0';
+      } else if (acc.lastBr && (acc.lastBr.st === 'pre' || acc.lastBr.st === 'open' || acc.lastBr.st === 'fight')) {
+        activeEvent = acc.lastBr;
+        eventTitle = `🏴‍☠️ Battle Royale: ${acc.lastBr.st === 'pre' ? 'Sắp Mở' : (acc.lastBr.st === 'open' ? 'Phòng Chờ' : 'Đang Chiến Đấu')}`;
+        eventMapId = 4;
+        joinAction = 'brwar_join';
+        bannerBg = 'rgba(249, 115, 22, 0.15)';
+        bannerBorder = '1px solid rgba(249, 115, 22, 0.3)';
+        bannerColor = '#fed7aa';
+      } else if (acc.lastGw && (acc.lastGw.st === 'open' || acc.lastGw.st === 'fight')) {
         activeEvent = acc.lastGw;
         eventTitle = `🚩 Guild Flag War: ${acc.lastGw.st === 'open' ? 'Phòng Chờ' : 'Đang Chiến Đấu'}`;
         eventMapId = 4;
@@ -6387,6 +6431,10 @@ document.addEventListener('DOMContentLoaded', () => {
       idKey = 'auto-event-join-gw';
     } else if (settingKey === 'autoEventJoinCw') {
       idKey = 'auto-event-join-cw';
+    } else if (settingKey === 'autoEventJoinBr') {
+      idKey = 'auto-event-join-br';
+    } else if (settingKey === 'autoEventJoinFw') {
+      idKey = 'auto-event-join-fw';
     } else if (settingKey === 'autoWarCheckin') {
       idKey = 'auto-war-checkin';
     }

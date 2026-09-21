@@ -3,6 +3,32 @@
 > Work Breakdown Structure. Update task states immediately upon changes.
 > Statuses: todo | doing | blocked | review | done
 
+### [x] T90 - Tích hợp Battle Royale và Guild Flag War
+- Mô tả: Bổ sung backend, lifecycle Event, API và giao diện cho Battle Royale (`br`) và Guild Flag War (`fw`) theo đúng payload/endpoints trong `xhrpg_canvas.js`, không ảnh hưởng inv/GW/CW hoặc check-in GW/CW độc lập.
+- File liên quan: `server.js`, `public/app.js`, `test.js`, `.agent/TASKS.md`, `.agent/DECISIONS.md`, `.agent/CHANGELOG.md`
+- Acceptance criteria:
+  - [x] Backend đọc/lưu `br` và `fw` với các trạng thái `pre/open/fight/ended`, expose API và route join/exit lifecycle.
+  - [x] Join đúng `xhrpg_brwar.php`/`brwar_join` và `xhrpg_fwar.php`/`fwar_join`; snapshot/return không phá inv/GW/CW.
+  - [x] Có toggle auto-join, nút join thủ công, banner live và lịch BR/FW trên Event tab.
+  - [x] GW/CW check-in độc lập vẫn chỉ xử lý GW/CW và queue cũ không đổi.
+  - [x] Bổ sung regression/integration tests cho parse, join, auto-join, ended/return và API/UI contract.
+  - [x] `node --check server.js`, `node --check public/app.js`, `node --check test.js`, `npm test`, `git diff --check` đạt.
+- Phụ thuộc: không
+- Trạng thái: done
+
+### [x] T91 - Mở rộng Check-in riêng cho BR/FW theo cửa sổ lịch
+- Mô tả: Mở rộng queue Check-in riêng đang dùng cho GW/CW sang Battle Royale và Guild Flag War, dùng cửa sổ thời gian đúng lịch từng event và giữ nguyên snapshot/restore khoảng 60 giây.
+- File liên quan: `server.js`, `public/app.js`, `test.js`, `.agent/TASKS.md`, `.agent/DECISIONS.md`, `.agent/CHANGELOG.md`
+- Acceptance criteria:
+  - [x] Queue nhận đủ `gw`, `cw`, `br`, `fw`; không join trùng và không làm đổi semantics GW/CW.
+  - [x] GW/CW giữ cửa sổ cũ từ phút 35; BR dùng 22:35–22:50; FW dùng 20:10–20:20 theo lịch `xhrpg_canvas.js`.
+  - [x] Snapshot, stay khoảng 60 giây, exit và restore hoạt động cho BR/FW; event hết/timeout vẫn dọn queue an toàn.
+  - [x] UI hiển thị rõ toggle Check-in riêng áp dụng cho GW/CW/BR/FW.
+  - [x] Có test window, queue, contract join, snapshot/restore và UI/settings.
+  - [x] `node --check server.js`, `node --check public/app.js`, `node --check test.js`, `npm test`, `git diff --check` đạt.
+- Phụ thuộc: T90
+- Trạng thái: done
+
 <<<<<<< HEAD
 ### [x] T85 - Không Đồng Bộ Cài Đặt Tab Chợ Khi Đồng Bộ Team
 - Mô tả: Chỉnh sửa chức năng đồng bộ cài đặt Team (`/api/team/sync`): chỉ đồng bộ các thiết lập chung, bản đồ, chiến đấu, săn boss từ Leader sang Member, loại trừ và giữ nguyên hoàn toàn các cài đặt ở tab Chợ (Auto Market Buy, bộ lọc 9 loại, giá mua tối đa, chu kỳ quét, số lượng mua,...) của từng thành viên.

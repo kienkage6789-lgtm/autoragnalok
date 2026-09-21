@@ -474,6 +474,7 @@
 ---
 
 
+
 ## 2026-07-29 - Ghi nhận Vấn đề Trứng Thú Cưng (Pet Eggs) chưa giải quyết xong (Pending Issue T48)
 
 - Bối cảnh: Người dùng ghi nhận tính năng danh sách Trứng Thú Cưng (Pet Eggs) trong kho chưa hiển thị/chưa giải quyết xong trên giao diện Dashboard.
@@ -805,3 +806,13 @@
 
 
 
+## 2026-09-21 - T90 Event contracts cho Battle Royale và Guild Flag War
+
+- Dùng `xhrpg_brwar.php` + `action: 'brwar_join'` cho Battle Royale và `xhrpg_fwar.php` + `action: 'fwar_join'` cho Guild Flag War, theo đúng `_brJoin()`/`_fwJoin()` trong `xhrpg_canvas.js`.
+- Xem `br`/`fw` là hai event session độc lập nhưng dùng chung Event snapshot/state machine hiện tại; map vào sân lấy từ response (fallback Map 4), không tự phát minh endpoint exit riêng.
+- Chỉ `gw`/`cw` tham gia queue check-in phút 35; BR/FW chỉ dùng auto-join/event lifecycle thường để không thay đổi semantics check-in hiện hữu.
+## 2026-09-21 - T91 Check-in riêng theo cửa sổ từng event
+
+- Giữ `autoWarCheckin` là một toggle chung để tương thích cấu hình cũ, nhưng mở rộng queue từ `gw/cw` thành `gw/cw/br/fw` và đổi nhãn UI để hiển thị đúng phạm vi.
+- GW/CW tiếp tục dùng semantics cũ: cho phép check-in từ phút 35 khi payload còn active. BR dùng cửa sổ 22:35–22:50; FW dùng 20:10–20:20 theo `WT.brFight/brEnd` và `WT.fwFight/fwEnd` trong `xhrpg_canvas.js`.
+- Payload `ends` vẫn là điều kiện chặn cuối cùng; cửa sổ lịch chỉ cho phép bắt đầu đúng thời điểm, tránh FW bị check-in sau 20:20 nếu feed trễ.

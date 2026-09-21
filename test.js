@@ -2366,7 +2366,17 @@ try {
       assert.strictEqual(failBot.eventSnapshot, null, 'failed check-in must roll back without leaving a stuck snapshot');
       await failBot.pollGame();
       assert.strictEqual(failJoinCount, 3, 'failed check-in must not retry forever');
-      const restartedFailBot = new BotInstance({ line_uid: 't84_fail_bot', settings: { autoWarCheckin: true } });
+      const persistedFailAccount = t84Accounts.find(acc => acc.line_uid === 't84_fail_bot');
+      assert.ok(persistedFailAccount, 'failed check-in account must remain in custom storage fixture');
+      assert.strictEqual(
+        persistedFailAccount.warCheckinSuppressedKeys.gw,
+        `gw:${stableFailEventEnd}`,
+        'suppressed event key must be persisted in the account fixture'
+      );
+      const restartedFailBot = new BotInstance({
+        ...JSON.parse(JSON.stringify(persistedFailAccount)),
+        settings: { ...(persistedFailAccount.settings || {}), autoWarCheckin: true }
+      });
       assert.strictEqual(restartedFailBot.warCheckinSuppressedKeys.gw, `gw:${stableFailEventEnd}`, 'suppressed event key must survive bot restart');
 
       console.log('  Testing T84 integration: insufficient level guard creates no snapshot and no join call...');
@@ -4063,6 +4073,89 @@ try {
         delete botInstances[member.line_uid];
       }
     }
+  }
+
+  // T91: BR/FW independent check-in windows, queue ordering and snapshot restore.
+  {
+    console.log('  Testing Test 16: BR/FW check-in windows and queue restore...');
+    const fs = require('fs');
+    const checkinBot = new BotInstance({ line_uid: 't91_checkin_br_fw', settings: { autoWarCheckin: true } });
+    assert.strictEqual(checkinBot._isWarCheckinWindow('fw', new Date(2026, 0, 1, 20, 9, 59)), false, 'Test 16: FW check-in must stay closed before 20:10');
+    assert.strictEqual(checkinBot._isWarCheckinWindow('fw', new Date(2026, 0, 1, 20, 10, 0)), true, 'Test 16: FW check-in must open at 20:10');
+    assert.strictEqual(checkinBot._isWarCheckinWindow('fw', new Date(2026, 0, 1, 20, 19, 59)), true, 'Test 16: FW check-in must remain open before 20:20');
+    assert.strictEqual(checkinBot._isWarCheckinWindow('fw', new Date(2026, 0, 1, 20, 20, 0)), false, 'Test 16: FW check-in must close at 20:20');
+    assert.strictEqual(checkinBot._isWarCheckinWindow('br', new Date(2026, 0, 1, 22, 34, 59)), false, 'Test 16: BR check-in must stay closed before 22:35');
+    assert.strictEqual(checkinBot._isWarCheckinWindow('br', new Date(2026, 0, 1, 22, 35, 0)), true, 'Test 16: BR check-in must open at 22:35');
+    assert.strictEqual(checkinBot._isWarCheckinWindow('br', new Date(2026, 0, 1, 22, 50, 0)), false, 'Test 16: BR check-in must close at 22:50');
+    assert.strictEqual(checkinBot._isWarCheckinWindow(new Date(2026, 0, 1, 0, 34, 59)), false, 'Test 16: GW/CW legacy window must remain closed before minute 35');
+    assert.strictEqual(checkinBot._isWarCheckinWindow(new Date(2026, 0, 1, 0, 35, 0)), true, 'Test 16: GW/CW legacy window must remain open from minute 35');
+
+    checkinBot.player = { map: 3, x: 500, y: 600, lv: 60 };
+    checkinBot._isWarCheckinEligible = kind => kind === 'br' || kind === 'fw';
+    const eligibleKinds = checkinBot._getActiveWarCheckinKinds();
+    assert.deepStrictEqual(eligibleKinds, ['br', 'fw'], 'Test 16: active check-in queue must include BR and FW');
+    const joinedKinds = [];
+    checkinBot.joinBattleRoyale = async () => { joinedKinds.push('br'); checkinBot.player.map = 4; return true; };
+    checkinBot.joinGuildFlagWar = async () => { joinedKinds.push('fw'); checkinBot.player.map = 4; return true; };
+
+    const started = await checkinBot._startWarCheckinSession(['br', 'fw']);
+    assert.strictEqual(started, true, 'Test 16: BR/FW check-in session must start');
+    assert.deepStrictEqual(joinedKinds, ['br'], 'Test 16: queue must join BR first without duplicating it');
+    assert.strictEqual(checkinBot.isEventCheckinOnly, true, 'Test 16: BR check-in must use checkin-only lifecycle');
+    const originalSnapshot = checkinBot.eventSnapshot;
+    checkinBot.exitEventMode();
+    checkinBot._finalizeEventRestoration(true);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepStrictEqual(joinedKinds, ['br', 'fw'], 'Test 16: queue must continue to FW after BR restore');
+    assert.strictEqual(checkinBot.eventSnapshot, originalSnapshot, 'Test 16: snapshot must survive between BR and FW');
+    checkinBot.exitEventMode();
+    checkinBot._finalizeEventRestoration(true);
+    assert.strictEqual(checkinBot.eventSnapshot, null, 'Test 16: snapshot must clear after final FW restore');
+    assert.strictEqual(checkinBot.eventState, 'IDLE', 'Test 16: queue must return to IDLE after final restore');
+
+    const appJs = fs.readFileSync('public/app.js', 'utf8');
+    assert.ok(appJs.includes('Check-in riêng GW/CW/BR/FW'), 'Test 16: UI must show BR/FW check-in scope');
+  }
+
+  // T90: Battle Royale and Guild Flag War use the exact client contracts and
+  // participate in the normal event lifecycle without entering GW/CW check-in.
+  {
+    console.log('  Testing Test 15: Battle Royale / Guild Flag War contracts...');
+    const fs = require('fs');
+    const canvas = fs.readFileSync('xhrpg_canvas.js', 'utf8');
+    const appJs = fs.readFileSync('public/app.js', 'utf8');
+    assert.ok(canvas.includes("xhrpg_brwar.php") && canvas.includes("action: 'brwar_join'"), 'Test 15: BR contract must match xhrpg_canvas.js');
+    assert.ok(canvas.includes("xhrpg_fwar.php") && canvas.includes("action: 'fwar_join'"), 'Test 15: FW contract must match xhrpg_canvas.js');
+    assert.ok(appJs.includes('autoEventJoinBr') && appJs.includes('autoEventJoinFw'), 'Test 15: Event UI must expose BR/FW toggles');
+    assert.ok(appJs.includes("'brwar_join'") && appJs.includes("'fwar_join'"), 'Test 15: Event UI must expose BR/FW join actions');
+
+    const bot = new BotInstance({ line_uid: 't90_event_contracts', settings: { targetMap: 3, autoMap: true } });
+    bot.player = { map: 3, x: 300, y: 400, lv: 60 };
+    const calls = [];
+    bot.sendRequest = async (url, payload) => {
+      calls.push({ url, payload });
+      return { ok: true, player: { ...bot.player, map: 4, x: 1125, y: 1125 } };
+    };
+    assert.strictEqual(bot._isEventPayloadActive('br', { st: 'pre', ends: Math.floor(Date.now() / 1000) + 60 }), false, 'Test 15: BR pre is not join-active');
+    assert.strictEqual(bot._isEventPayloadActive('br', { st: 'open', ends: Math.floor(Date.now() / 1000) + 60 }), true, 'Test 15: BR open is active');
+    assert.strictEqual(bot._isEventPayloadActive('fw', { st: 'fight', ends: Math.floor(Date.now() / 1000) + 60 }), true, 'Test 15: FW fight is active');
+    assert.strictEqual(bot._isEventPayloadActive('fw', { st: 'ended', ends: Math.floor(Date.now() / 1000) + 60 }), false, 'Test 15: FW ended is inactive');
+
+    bot.captureEventSnapshot('br');
+    assert.strictEqual(await bot.joinBattleRoyale(), true, 'Test 15: BR join must succeed');
+    bot.enterEventMode('br', 4);
+    assert.strictEqual(bot.currentEventKind, 'br', 'Test 15: BR event lifecycle must become active');
+    bot.exitEventMode();
+    assert.strictEqual(bot.eventState, 'RETURNING', 'Test 15: BR exit must enter returning state');
+    bot.eventSnapshot = null;
+    bot._resetEventRuntimeAfterReturn();
+
+    bot.player = { map: 3, x: 300, y: 400, lv: 60 };
+    bot.captureEventSnapshot('fw');
+    assert.strictEqual(await bot.joinGuildFlagWar(), true, 'Test 15: FW join must succeed');
+    assert.strictEqual(calls.some(c => c.url.includes('xhrpg_brwar.php') && c.payload.action === 'brwar_join'), true, 'Test 15: BR endpoint/action must be exact');
+    assert.strictEqual(calls.some(c => c.url.includes('xhrpg_fwar.php') && c.payload.action === 'fwar_join'), true, 'Test 15: FW endpoint/action must be exact');
+    assert.deepStrictEqual(bot._getActiveWarCheckinKinds(), [], 'Test 15: BR/FW must not enter independent GW/CW check-in queue');
   }
 
   console.log('✅ T86 Auto Hunt MVP Boss by Map List Engine Tests Passed successfully!');

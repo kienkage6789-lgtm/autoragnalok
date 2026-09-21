@@ -1898,7 +1898,7 @@ class BotRequestQueue {
     if (url.includes('xhrpg_game.php')) return 1;
     if (url.includes('xhrpg_warp.php') || (payload && (payload.action === 'use_potion_manual' || payload.action === 'warp'))) return 2;
     if (url.includes('xhrpg_offline.php') || (payload && (payload.action === 'idlestat' || payload.action === 'chpass' || payload.action === 'check_session' || payload.action === 'refresh_token'))) return 3;
-    if (url.includes('xhrpg_leaderboard.php') || url.includes('xhrpg_cwar.php') || url.includes('xhrpg_droplog.php')) return 4;
+    if (url.includes('xhrpg_leaderboard.php') || url.includes('xhrpg_cwar.php') || url.includes('xhrpg_brwar.php') || url.includes('xhrpg_fwar.php') || url.includes('xhrpg_droplog.php')) return 4;
     return 2;
   }
 
@@ -1908,7 +1908,7 @@ class BotRequestQueue {
     if (url.includes('xhrpg_warp.php')) return 'WARP';
     if (url.includes('xhrpg_offline.php') && payload && payload.k === 'chpass') return 'CHECKIN';
     if (url.includes('xhrpg_leaderboard.php')) return 'DEF_SCAN';
-    if (url.includes('xhrpg_cwar.php')) return 'WAR_LOG';
+    if (url.includes('xhrpg_cwar.php') || url.includes('xhrpg_brwar.php') || url.includes('xhrpg_fwar.php')) return 'WAR_LOG';
     return 'ACTION';
   }
 
@@ -2173,6 +2173,8 @@ class BotInstance {
     this.lastInv = null;
     this.lastGw = null;
     this.lastCw = null;
+    this.lastBr = null;
+    this.lastFw = null;
     this.others = [];
 
     // Concurrency, Scheduler & Telemetry
@@ -2332,6 +2334,7 @@ class BotInstance {
         }
       }
     }
+
   }
 
   getDefaultSettings() {
@@ -2415,6 +2418,8 @@ class BotInstance {
       autoEventJoinInv: false,
       autoEventJoinGw: false,
       autoEventJoinCw: false,
+      autoEventJoinBr: false,
+      autoEventJoinFw: false,
       autoWarCheckin: false,
       eventPotionThreshold: 0,
       eventTargetMinDef: false,
@@ -2803,15 +2808,45 @@ class BotInstance {
   }
 
   _getWarCheckinKey(kind) {
-    const eventData = kind === 'gw' ? this.lastGw : this.lastCw;
+    const eventData = this._getEventPayload(kind);
     const eventId = eventData && (eventData.ends || eventData.start || eventData.starts);
     if (eventId) return `${kind}:${eventId}`;
     const now = new Date();
     return `${kind}:${now.getFullYear()}-${now.getMonth()}-${now.getDate()}-${now.getHours()}`;
   }
 
-  _isWarCheckinWindow(now = new Date()) {
-    return now.getMinutes() >= 35;
+  _getEventPayload(kind) {
+    return ({ inv: this.lastInv, gw: this.lastGw, cw: this.lastCw, br: this.lastBr, fw: this.lastFw })[kind] || null;
+  }
+
+  _isEventPayloadActive(kind, event = this._getEventPayload(kind)) {
+    const activeStates = kind === 'inv' ? ['pre', 'active'] : ['open', 'fight'];
+    const currentEpoch = Math.floor(Date.now() / 1000);
+    return !!(event && activeStates.includes(event.st) && (!event.ends || event.ends > currentEpoch));
+  }
+
+  _isWarCheckinWindow(kind, now = new Date()) {
+    if (kind instanceof Date) {
+      now = kind;
+      kind = 'gw';
+    }
+    // Backward-compatible GW/CW behavior: the old feature becomes eligible
+    // from minute 35 and still relies on the live payload's end timestamp.
+    if (kind !== 'br' && kind !== 'fw') return now.getMinutes() >= 35;
+
+    const windows = {
+      br: { hour: 22, startMinute: 35, endMinute: 50 },
+      fw: { hour: 20, startMinute: 10, endMinute: 20 }
+    };
+    const window = windows[kind];
+    const minuteOfDay = now.getHours() * 60 + now.getMinutes();
+    const start = window.hour * 60 + window.startMinute;
+    const end = window.hour * 60 + window.endMinute;
+    return minuteOfDay >= start && minuteOfDay < end;
+  }
+
+  _isWarCheckinEligible(kind, now = new Date()) {
+    return this._isEventPayloadActive(kind) && this._isWarCheckinWindow(kind, now);
   }
 
   _getWarCheckinRequirement(kind) {
@@ -2856,12 +2891,8 @@ class BotInstance {
   }
 
   _getActiveWarCheckinKinds() {
-    const currentEpoch = Math.floor(Date.now() / 1000);
-    const isActive = event => event && (event.st === 'open' || event.st === 'fight') && (!event.ends || event.ends > currentEpoch);
-    return [
-      isActive(this.lastGw) ? 'gw' : null,
-      isActive(this.lastCw) ? 'cw' : null
-    ].filter(Boolean);
+    const now = new Date();
+    return ['gw', 'cw', 'br', 'fw'].filter(kind => this._isWarCheckinEligible(kind, now));
   }
 
   _resetEventRuntimeAfterReturn() {
@@ -2916,7 +2947,11 @@ class BotInstance {
       this.eventState = 'ENTERING';
       this._persistEventSnapshot();
 
-      const ok = kind === 'gw' ? await this.joinGuildWar() : await this.joinCountryWar();
+      let ok = false;
+      if (kind === 'gw') ok = await this.joinGuildWar();
+      else if (kind === 'cw') ok = await this.joinCountryWar();
+      else if (kind === 'br') ok = await this.joinBattleRoyale();
+      else if (kind === 'fw') ok = await this.joinGuildFlagWar();
       if (ok) {
         this.enterEventMode(kind, 4, { checkinOnly: true });
         return true;
@@ -2965,7 +3000,7 @@ class BotInstance {
   }
 
   async _startWarCheckinSession(kinds) {
-    const uniqueKinds = [...new Set(kinds)].filter(kind => kind === 'gw' || kind === 'cw');
+    const uniqueKinds = [...new Set(kinds)].filter(kind => ['gw', 'cw', 'br', 'fw'].includes(kind));
     if (!uniqueKinds.length || this.eventSnapshot) return false;
     const keys = Object.fromEntries(uniqueKinds.map(kind => [kind, this._getWarCheckinKey(kind)]));
     const pending = uniqueKinds.filter(kind => !this._isWarCheckinCompleted(kind, keys[kind]));
@@ -3496,6 +3531,62 @@ class BotInstance {
       }
     } catch (e) {
       this.addLog('ERROR', `Lỗi vào National War: ${e.message}`);
+      return false;
+    }
+  }
+
+  async joinBattleRoyale() {
+    try {
+      const res = await this.sendRequest('https://ragnalok.online/human/xhrpg_brwar.php', {
+        line_uid: this.line_uid,
+        session_token: this.session_token,
+        action: 'brwar_join',
+        lang: 'vi'
+      });
+      if (res && res.ok) {
+        if (res.player) this.updatePlayerState(res.player);
+        else if (this.player) {
+          this.player.map = Number(res.map || 4);
+          if (res.x !== undefined) this.player.x = res.x;
+          if (res.y !== undefined) this.player.y = res.y;
+        }
+        this.spots = null;
+        this.bosses = null;
+        this.addLog('SUCCESS', '🏴‍☠️ [Battle Royale] Vào chiến trường thành công');
+        return true;
+      }
+      this.addLog('WARNING', `🏴‍☠️ [Battle Royale] Không thể vào chiến trường: ${(res && res.error) || 'Lỗi không xác định'}`);
+      return false;
+    } catch (e) {
+      this.addLog('ERROR', `Lỗi vào Battle Royale: ${e.message}`);
+      return false;
+    }
+  }
+
+  async joinGuildFlagWar() {
+    try {
+      const res = await this.sendRequest('https://ragnalok.online/human/xhrpg_fwar.php', {
+        line_uid: this.line_uid,
+        session_token: this.session_token,
+        action: 'fwar_join',
+        lang: 'vi'
+      });
+      if (res && res.ok) {
+        if (res.player) this.updatePlayerState(res.player);
+        else if (this.player) {
+          this.player.map = Number(res.map || 4);
+          if (res.x !== undefined) this.player.x = res.x;
+          if (res.y !== undefined) this.player.y = res.y;
+        }
+        this.spots = null;
+        this.bosses = null;
+        this.addLog('SUCCESS', '🏕️ [Guild Flag War] Vào chiến trường thành công');
+        return true;
+      }
+      this.addLog('WARNING', `🏕️ [Guild Flag War] Không thể vào chiến trường: ${(res && res.error) || 'Lỗi không xác định'}`);
+      return false;
+    } catch (e) {
+      this.addLog('ERROR', `Lỗi vào Guild Flag War: ${e.message}`);
       return false;
     }
   }
@@ -4504,20 +4595,26 @@ class BotInstance {
         try {
           if (targetMapId === 4) {
             const currentEpoch = Math.floor(Date.now() / 1000);
-            const isGwActive = this.lastGw && (this.lastGw.st === 'open' || this.lastGw.st === 'fight') && (!this.lastGw.ends || this.lastGw.ends > currentEpoch);
-            const isCwActive = this.lastCw && (this.lastCw.st === 'open' || this.lastCw.st === 'fight') && (!this.lastCw.ends || this.lastCw.ends > currentEpoch);
+            const isGwActive = this._isEventPayloadActive('gw');
+            const isCwActive = this._isEventPayloadActive('cw');
+            const isBrActive = this._isEventPayloadActive('br');
+            const isFwActive = this._isEventPayloadActive('fw');
 
             let ok = false;
-            const kind = isGwActive ? 'gw' : (isCwActive ? 'cw' : null);
+            const kind = isGwActive ? 'gw' : (isCwActive ? 'cw' : (isBrActive ? 'br' : (isFwActive ? 'fw' : null)));
             if (kind) {
               this.captureEventSnapshot(kind);
               if (kind === 'gw') {
                 ok = await this.joinGuildWar();
-              } else {
+              } else if (kind === 'cw') {
                 ok = await this.joinCountryWar();
+              } else if (kind === 'br') {
+                ok = await this.joinBattleRoyale();
+              } else {
+                ok = await this.joinGuildFlagWar();
               }
             } else {
-              this.addLog('WARNING', `⚠️ Sự kiện Bang/Quốc chiến không hoạt động hoặc đã kết thúc. Tự động thoát chế độ Event.`);
+              this.addLog('WARNING', `⚠️ Sự kiện không hoạt động hoặc đã kết thúc. Tự động thoát chế độ Event.`);
               this.exitEventMode();
               return true;
             }
@@ -4557,13 +4654,15 @@ class BotInstance {
     if (this.eventSnapshot) {
       const snap = this.eventSnapshot;
       const currentEpoch = Math.floor(Date.now() / 1000);
-      const isGwActive = this.lastGw && (this.lastGw.st === 'open' || this.lastGw.st === 'fight') && (!this.lastGw.ends || this.lastGw.ends > currentEpoch);
-      const isCwActive = this.lastCw && (this.lastCw.st === 'open' || this.lastCw.st === 'fight') && (!this.lastCw.ends || this.lastCw.ends > currentEpoch);
+      const isGwActive = this._isEventPayloadActive('gw');
+      const isCwActive = this._isEventPayloadActive('cw');
+      const isBrActive = this._isEventPayloadActive('br');
+      const isFwActive = this._isEventPayloadActive('fw');
       const isInvActive = this.lastInv && (this.lastInv.st === 'pre' || this.lastInv.st === 'active') && (!this.lastInv.ends || this.lastInv.ends > currentEpoch);
 
-      const eventStillActive = (snap.kind === 'gw' && isGwActive) || (snap.kind === 'cw' && isCwActive) || (snap.kind === 'inv' && isInvActive);
+      const eventStillActive = (snap.kind === 'gw' && isGwActive) || (snap.kind === 'cw' && isCwActive) || (snap.kind === 'br' && isBrActive) || (snap.kind === 'fw' && isFwActive) || (snap.kind === 'inv' && isInvActive);
       const atEventMap = this.player && (
-        ((snap.kind === 'gw' || snap.kind === 'cw') && Number(this.player.map) === 4) ||
+        ((snap.kind === 'gw' || snap.kind === 'cw' || snap.kind === 'br' || snap.kind === 'fw') && Number(this.player.map) === 4) ||
         (snap.kind === 'inv' && Number(this.player.map) === 2)
       );
 
@@ -5505,6 +5604,16 @@ class BotInstance {
     } else if (isFull) {
       this.lastCw = null;
     }
+    if (d.br !== undefined) {
+      this.lastBr = d.br;
+    } else if (isFull) {
+      this.lastBr = null;
+    }
+    if (d.fw !== undefined) {
+      this.lastFw = d.fw;
+    } else if (isFull) {
+      this.lastFw = null;
+    }
 
     // 🏰 Tự động thoát Phụ Bản Guild khi hết Boss (không cần đợi quái thường)
     if (this.guildDungeonActive && !this._exitingGuildDungeon && !this._guildDungeonRestoring) {
@@ -5528,16 +5637,20 @@ class BotInstance {
       }
     }
 
-    const currentEpoch = Math.floor(Date.now() / 1000);
-    const isInvActive = this.lastInv && (this.lastInv.st === 'pre' || this.lastInv.st === 'active') && (!this.lastInv.ends || this.lastInv.ends > currentEpoch);
-    const isGwActive = this.lastGw && (this.lastGw.st === 'open' || this.lastGw.st === 'fight') && (!this.lastGw.ends || this.lastGw.ends > currentEpoch);
-    const isCwActive = this.lastCw && (this.lastCw.st === 'open' || this.lastCw.st === 'fight') && (!this.lastCw.ends || this.lastCw.ends > currentEpoch);
+    const isInvActive = this._isEventPayloadActive('inv');
+    const isGwActive = this._isEventPayloadActive('gw');
+    const isCwActive = this._isEventPayloadActive('cw');
+    const isBrActive = this._isEventPayloadActive('br');
+    const isFwActive = this._isEventPayloadActive('fw');
 
-    // Tính năng riêng: chỉ vào GW/CW điểm danh từ phút 35, không thay đổi auto-join cũ.
-    if (this.settings.autoWarCheckin && !this.inEventMode && this.eventState === 'IDLE' && !this.isEventReturning && this._isWarCheckinWindow()) {
+    // Check-in riêng theo cửa sổ từng event; GW/CW giữ semantics phút 35,
+    // còn BR/FW dùng lịch fight/end riêng để không join sau khi event kết thúc.
+    const activeCheckinKinds = this._getActiveWarCheckinKinds();
+    const hasPendingCheckinSession = !!(this.eventSnapshot && this.eventSnapshot.warCheckinSession);
+    if (this.settings.autoWarCheckin && !this.inEventMode && this.eventState === 'IDLE' && !this.isEventReturning && (activeCheckinKinds.length > 0 || hasPendingCheckinSession)) {
       const currentPlayer = d.player || this.player;
       const isAtHome = currentPlayer && !this.isMvpCycling && Number(currentPlayer.map) === 5 && (currentPlayer.home_crops !== undefined || currentPlayer.home_lv !== undefined);
-      const activeKinds = this._getActiveWarCheckinKinds();
+      const activeKinds = activeCheckinKinds;
       if (this.eventSnapshot && this.eventSnapshot.warCheckinSession) {
         await this._beginNextWarCheckin();
         return;
@@ -5561,7 +5674,7 @@ class BotInstance {
     }
 
     // Auto-join event
-    const shouldCheckEventJoin = (this.settings.autoEventJoinInv || this.settings.autoEventJoinGw || this.settings.autoEventJoinCw);
+    const shouldCheckEventJoin = (this.settings.autoEventJoinInv || this.settings.autoEventJoinGw || this.settings.autoEventJoinCw || this.settings.autoEventJoinBr || this.settings.autoEventJoinFw);
     if (shouldCheckEventJoin && !this.inEventMode && this.eventState === 'IDLE' && !this.isEventReturning) {
       const currentPlayer = d.player || this.player;
       if (currentPlayer && !currentPlayer.is_dead) {
@@ -5618,6 +5731,26 @@ class BotInstance {
             } else if (this.pollCount % 30 === 0) {
               this.addLog('WARNING', `⚠️ [Auto Event] Không thể tham gia Country War: Cấp độ nhân vật (Lv.${playerLv}) chưa đủ yêu cầu (Lv.${req4}+)`);
             }
+          } else if (isBrActive && this.settings.autoEventJoinBr) {
+            const map4Def = getMapDefs().find(m => m.id === 4);
+            const req4 = map4Def ? map4Def.req : 20;
+            if (playerLv >= req4) {
+              this.captureEventSnapshot('br');
+              const ok = playerMap === 4 ? true : await this.joinBattleRoyale();
+              if (ok) this.enterEventMode('br', 4);
+            } else if (this.pollCount % 30 === 0) {
+              this.addLog('WARNING', `⚠️ [Auto Event] Không thể tham gia Battle Royale: Cấp độ nhân vật (Lv.${playerLv}) chưa đủ yêu cầu (Lv.${req4}+)`);
+            }
+          } else if (isFwActive && this.settings.autoEventJoinFw) {
+            const map4Def = getMapDefs().find(m => m.id === 4);
+            const req4 = map4Def ? map4Def.req : 20;
+            if (playerLv >= req4) {
+              this.captureEventSnapshot('fw');
+              const ok = playerMap === 4 ? true : await this.joinGuildFlagWar();
+              if (ok) this.enterEventMode('fw', 4);
+            } else if (this.pollCount % 30 === 0) {
+              this.addLog('WARNING', `⚠️ [Auto Event] Không thể tham gia Guild Flag War: Cấp độ nhân vật (Lv.${playerLv}) chưa đủ yêu cầu (Lv.${req4}+)`);
+            }
           }
         }
       }
@@ -5635,6 +5768,10 @@ class BotInstance {
       } else if (this.currentEventKind === 'gw' && !isGwActive) {
         this.exitEventMode();
       } else if (this.currentEventKind === 'cw' && !isCwActive) {
+        this.exitEventMode();
+      } else if (this.currentEventKind === 'br' && !isBrActive) {
+        this.exitEventMode();
+      } else if (this.currentEventKind === 'fw' && !isFwActive) {
         this.exitEventMode();
       }
     }
@@ -5907,10 +6044,11 @@ class BotInstance {
 
     const isAtHome = (!this.isMvpCycling && Number(this.player.map) === 5 && (this.player.home_crops !== undefined || this.player.home_lv !== undefined));
 
-    const currentEpoch = Math.floor(Date.now() / 1000);
-    const isInvActive = this.lastInv && (this.lastInv.st === 'pre' || this.lastInv.st === 'active') && (!this.lastInv.ends || this.lastInv.ends > currentEpoch);
-    const isGwActive = this.lastGw && (this.lastGw.st === 'open' || this.lastGw.st === 'fight') && (!this.lastGw.ends || this.lastGw.ends > currentEpoch);
-    const isCwActive = this.lastCw && (this.lastCw.st === 'open' || this.lastCw.st === 'fight') && (!this.lastCw.ends || this.lastCw.ends > currentEpoch);
+    const isInvActive = this._isEventPayloadActive('inv');
+    const isGwActive = this._isEventPayloadActive('gw');
+    const isCwActive = this._isEventPayloadActive('cw');
+    const isBrActive = this._isEventPayloadActive('br');
+    const isFwActive = this._isEventPayloadActive('fw');
 
     let isEventActive = false;
     if (this.player) {
@@ -5924,6 +6062,14 @@ class BotInstance {
         const req4 = map4Def ? map4Def.req : 20;
         if (playerLv >= req4) isEventActive = true;
       } else if (isCwActive && this.settings.autoEventJoinCw) {
+        const map4Def = getMapDefs().find(m => m.id === 4);
+        const req4 = map4Def ? map4Def.req : 20;
+        if (playerLv >= req4) isEventActive = true;
+      } else if (isBrActive && this.settings.autoEventJoinBr) {
+        const map4Def = getMapDefs().find(m => m.id === 4);
+        const req4 = map4Def ? map4Def.req : 20;
+        if (playerLv >= req4) isEventActive = true;
+      } else if (isFwActive && this.settings.autoEventJoinFw) {
         const map4Def = getMapDefs().find(m => m.id === 4);
         const req4 = map4Def ? map4Def.req : 20;
         if (playerLv >= req4) isEventActive = true;
@@ -7850,6 +7996,8 @@ app.get('/api/accounts', requireAuth, (req, res) => {
           lastInv: bot.lastInv || null,
           lastGw: bot.lastGw || null,
           lastCw: bot.lastCw || null,
+          lastBr: bot.lastBr || null,
+          lastFw: bot.lastFw || null,
           inEventMode: bot.inEventMode || false,
           eventState: bot.eventState || 'IDLE',
           eventSnapshot: bot.eventSnapshot || null,
@@ -9385,6 +9533,13 @@ app.get('/api/accounts/:line_uid/status', requireAuth, (req, res) => {
   res.json({
     status: bot.status,
     player: bot.player,
+    lastInv: bot.lastInv || null,
+    lastGw: bot.lastGw || null,
+    lastCw: bot.lastCw || null,
+    lastBr: bot.lastBr || null,
+    lastFw: bot.lastFw || null,
+    currentEventKind: bot.currentEventKind || null,
+    eventState: bot.eventState || 'IDLE',
     error: bot.error,
     lastUpdate: bot.lastUpdate
   });
@@ -9772,10 +9927,9 @@ app.post('/api/accounts/:line_uid/action', requireAuth, async (req, res) => {
     }
 
     if (action === 'war_checkin') {
-      const currentEpoch = Math.floor(Date.now() / 1000);
-      const isGwActive = bot.lastGw && (bot.lastGw.st === 'open' || bot.lastGw.st === 'fight') && (!bot.lastGw.ends || bot.lastGw.ends > currentEpoch);
-      const isCwActive = bot.lastCw && (bot.lastCw.st === 'open' || bot.lastCw.st === 'fight') && (!bot.lastCw.ends || bot.lastCw.ends > currentEpoch);
-      const kind = isGwActive ? 'gw' : (isCwActive ? 'cw' : (extra && extra.kind ? extra.kind : 'gw'));
+      const activeCheckinKinds = bot._getActiveWarCheckinKinds();
+      const requestedKind = extra && ['gw', 'cw', 'br', 'fw'].includes(extra.kind) ? extra.kind : null;
+      const kind = requestedKind || activeCheckinKinds[0] || 'gw';
       const requiredLv = bot._getWarCheckinRequirement(kind);
       const playerLv = bot.player && (bot.player.lv || 1);
       if (!bot.player || playerLv < requiredLv) {
@@ -9787,7 +9941,8 @@ app.post('/api/accounts/:line_uid/action', requireAuth, async (req, res) => {
       }
       const ok = await bot._startWarCheckinSession([kind]);
       if (ok && bot.inEventMode) {
-        return res.json({ ok: true, msg: `📝 Đã điểm danh ${kind === 'gw' ? 'Bang Chiến' : 'Quốc Chiến'} thành công! Bot sẽ tự thoát sau 1 phút.` });
+        const labels = { gw: 'Bang Chiến', cw: 'Quốc Chiến', br: 'Battle Royale', fw: 'Guild Flag War' };
+        return res.json({ ok: true, msg: `📝 Đã điểm danh ${labels[kind]} thành công! Bot sẽ tự thoát sau 1 phút.` });
       } else {
         if (bot.eventSnapshot && !bot.inEventMode) bot._rollbackWarCheckinEntry();
         return res.status(400).json({ ok: false, error: 'Không thể điểm danh (Chiến trường chưa mở hoặc không đủ điều kiện).' });
@@ -9840,6 +9995,25 @@ app.post('/api/accounts/:line_uid/action', requireAuth, async (req, res) => {
         }
         return res.status(400).json({ ok: false, error: 'Không thể vào Quốc Chiến (chưa mở hoặc cấp độ chưa đủ).' });
       }
+    }
+
+    if (action === 'brwar_join' || action === 'br_join' || action === 'fwar_join' || action === 'fw_join') {
+      const kind = action.startsWith('br') ? 'br' : 'fw';
+      const join = kind === 'br' ? bot.joinBattleRoyale.bind(bot) : bot.joinGuildFlagWar.bind(bot);
+      bot.captureEventSnapshot(kind);
+      const ok = await join();
+      if (ok) {
+        bot.enterEventMode(kind, 4);
+        return res.json({ ok: true, msg: kind === 'br' ? '🏴‍☠️ Vào Battle Royale thành công!' : '🏕️ Vào Guild Flag War thành công!' });
+      }
+      if (bot.eventSnapshot) {
+        bot.eventSnapshot = null;
+        bot.eventState = 'IDLE';
+        bot.inEventMode = false;
+        bot.currentEventKind = null;
+        bot._persistEventSnapshot();
+      }
+      return res.status(400).json({ ok: false, error: kind === 'br' ? 'Không thể vào Battle Royale (chưa mở hoặc không đủ điều kiện).' : 'Không thể vào Guild Flag War (chưa mở, chưa có guild hoặc không đủ điều kiện).' });
     }
 
     let url = 'https://ragnalok.online/human/xhrpg_upgrade.php';
@@ -10156,18 +10330,23 @@ async function proxyRequest(req, res, targetUrl, uid = null) {
             if (json.cw !== undefined) {
               currentBot.lastCw = json.cw;
             }
+            if (json.br !== undefined) {
+              currentBot.lastBr = json.br;
+            }
+            if (json.fw !== undefined) {
+              currentBot.lastFw = json.fw;
+            }
 
-            // If player is on Map 4 and GW/CW is active, ensure bot inEventMode is true
+            // If player is on Map 4 and a flag event is active, ensure bot inEventMode is true
             const playerMap = json.player ? Number(json.player.map) : (currentBot.player ? Number(currentBot.player.map) : 0);
-            const currentEpoch = Math.floor(Date.now() / 1000);
-            const lastGw = json.gw !== undefined ? json.gw : currentBot.lastGw;
-            const lastCw = json.cw !== undefined ? json.cw : currentBot.lastCw;
-            const isGwActive = lastGw && (lastGw.st === 'open' || lastGw.st === 'fight') && (!lastGw.ends || lastGw.ends > currentEpoch);
-            const isCwActive = lastCw && (lastCw.st === 'open' || lastCw.st === 'fight') && (!lastCw.ends || lastCw.ends > currentEpoch);
+            const isGwActive = currentBot._isEventPayloadActive('gw');
+            const isCwActive = currentBot._isEventPayloadActive('cw');
+            const isBrActive = currentBot._isEventPayloadActive('br');
+            const isFwActive = currentBot._isEventPayloadActive('fw');
 
-            if (playerMap === 4 && (isGwActive || isCwActive)) {
+            if (playerMap === 4 && (isGwActive || isCwActive || isBrActive || isFwActive)) {
               if (!currentBot.inEventMode) {
-                currentBot.enterEventMode(isGwActive ? 'gw' : 'cw', 4);
+                currentBot.enterEventMode(isGwActive ? 'gw' : (isCwActive ? 'cw' : (isBrActive ? 'br' : 'fw')), 4);
               }
             }
 
