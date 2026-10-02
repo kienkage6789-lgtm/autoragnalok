@@ -2199,6 +2199,7 @@ class BotInstance {
     this.partyInviteTimes = new Map();
     this.partyRequestTimes = new Map();
     this.partyResponseIds = new Set();
+    this.partyRequestResponseIds = new Set();
     this.partyActionInFlight = false;
     this.partyAutomationRunning = false;
     this.lastPdun = null;
@@ -2312,8 +2313,16 @@ class BotInstance {
 
   updatePlayerState(newPlayer) {
     if (!newPlayer) return;
+    // The game poll payload exposes the character name as `display_name`,
+    // while the manager's automation code consistently uses `player.name`.
+    // Normalize it here so Party identity matching (invite/join/follow) and
+    // the account picker work with the live game response as well as tests.
+    const normalizedPlayer = { ...newPlayer };
+    if (!normalizedPlayer.name) {
+      normalizedPlayer.name = normalizedPlayer.display_name || (this.player && this.player.name) || '';
+    }
     if (!this.player) {
-      this.player = newPlayer;
+      this.player = normalizedPlayer;
     }
     const COLD_FIELDS = [
       'pistol_modules','sniper_modules','knife_modules','axe_modules','armor_modules','turret_modules',
@@ -2337,11 +2346,11 @@ class BotInstance {
       'pvp_today','pvp_won','pvp_lost','pvp_pts','gdun_in'
     ];
     for (const f of COLD_FIELDS) {
-      if (newPlayer[f] === undefined && this.player[f] !== undefined) {
-        newPlayer[f] = this.player[f];
+      if (normalizedPlayer[f] === undefined && this.player[f] !== undefined) {
+        normalizedPlayer[f] = this.player[f];
       }
     }
-    this.player = newPlayer;
+    this.player = normalizedPlayer;
 
     // Automatically sync guildDungeonActive with gdun_in status or Map 12
     if (this.player && (Number(this.player.gdun_in) === 1 || Number(this.player.map) === 12)) {
@@ -2782,6 +2791,35 @@ class BotInstance {
         this.setPartyState('COOLDOWN', 'đang chờ cooldown request');
       } else if (invite && (!leader || String(invite.nm || '').toLocaleLowerCase() !== String(leader.player && leader.player.name || '').toLocaleLowerCase())) {
         this.setPartyState('PAUSED', 'không xác minh được người mời; giữ lời mời pending');
+      }
+    }
+
+    // A member may fall back to requesting an existing Party when the invite
+    // payload was not delivered. The game client expects the Leader to answer
+    // that request with req_respond; without this branch the request remains
+    // pending forever even though both bots are in the same configured group.
+    if (this.settings.partyRole === 'leader' && this.settings.partyAutoInvite) {
+      const incomingRequest = this.partyPoll.request;
+      const allowedTargets = Array.isArray(this.settings.partyMemberLineUids) ? this.settings.partyMemberLineUids : [];
+      const requester = incomingRequest && incomingRequest.r && incomingRequest.nm
+        ? this.getPartyGroupBots().find(bot => {
+          if (!allowedTargets.includes(bot.line_uid) || bot.settings.partyRole !== 'member') return false;
+          const targetName = String(bot.player && bot.player.name || bot.name || '').trim().toLocaleLowerCase();
+          return targetName && targetName === String(incomingRequest.nm).trim().toLocaleLowerCase();
+        })
+        : null;
+      if (requester && !this.partyRequestResponseIds.has(String(incomingRequest.r))) {
+        if (this.partySnapshot && this.partySnapshot.max > 0 && this.partySnapshot.n >= this.partySnapshot.max) {
+          this.setPartyState('PAUSED', 'Party đã đầy, không nhận request mới');
+          return;
+        }
+        const requestKey = String(incomingRequest.r);
+        this.partyRequestResponseIds.add(requestKey);
+        if (this.partyRequestResponseIds.size > 200) this.partyRequestResponseIds.delete(this.partyRequestResponseIds.values().next().value);
+        this.setPartyState('JOINING', `duyệt request vào Party từ ${requester.name}`);
+        const response = await this.sendPartyAction('req_respond', { ref: incomingRequest.r, ok: 1 });
+        if (response && response.ok) this.setPartyState('WAITING_ACCEPT', `đã nhận request từ ${requester.name}`);
+        return;
       }
     }
 

@@ -868,3 +868,10 @@
 - Auto-join chỉ nhận lời mời khi tên inviter khớp configured same-owner/group Leader; `partyAcceptUnknownInvites` là opt-in rõ ràng. Request join dùng `pid` từ leader snapshot.
 - Party Dungeon bị xem là blocker khi map 14 hoặc `pdun` có mặt trong poll; poll thiếu `pdun` sẽ xoá trạng thái stale, và manager không gọi `xhrpg_pdun.php`/`pdun_call` tự động.
 - Follow movement chỉ dùng vị trí leader từ `others[]` cùng Party ID và fresh snapshot; warp khác map vẫn qua routing layer, chỉ khi `partyAllowWarp` bật và không tranh quyền với Team sync.
+
+## 2026-10-02 - T99: Chuẩn hóa Party identity từ live game poll
+
+- Game live trả tên nhân vật ở `player.display_name`, không phải `player.name` như manager contract nội bộ.
+- Chuẩn hóa một lần tại `BotInstance.updatePlayerState()` thành `player.name`, đồng thời giữ lại tên cũ nếu poll sau thiếu cả hai field.
+- Không đổi contract Party action: `invite` vẫn dùng `others[].rf`/search row `r`, Member vẫn chờ `pty_inv` rồi gửi `respond`; chỉ sửa lớp identity mapping để các guard xác minh tên hoạt động với payload thật.
+- Xác minh live ngày 2026-10-02: Leader `Chaos` → invite Member `Kien`; Member nhận `pty_inv` và respond; snapshot hai bên cùng `pid=25`, `n=2/5`.

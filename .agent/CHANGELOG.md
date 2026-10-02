@@ -1888,3 +1888,10 @@
 - `accounts.json`: bật `autoEnterGdunAt30` cho tài khoản hiện tại.
 - `test.js`: kiểm thử ngoài cửa sổ, cooldown, retry, chống trùng, Event blocker rồi vào lại trong cùng phút và toggle tắt.
 - Đã kiểm tra JSON, `node --check server.js`, `node --check public/app.js`, `node --check test.js`, `git diff --check`, `npm test` — đạt.
+
+## 2026-10-02 - T99 Fix live Party identity và kiểm thử hai account
+
+- `server.js`: normalize `player.display_name` từ game poll thành `player.name`, tránh Party account picker/auto-invite/auto-join bị kẹt ở `DISCOVERING` do thiếu character name.
+- `test.js`: thêm regression test cho payload player chỉ có `display_name`.
+- Live verification: hai account thật đã chạy đủ luồng `invite` → Member nhận `pty_inv` → `respond`; snapshot Party chung xác nhận `pid=25`, `n=2/5`, Leader `ld=true`, Member `ld=false`.
+- Đã kiểm tra: `node --check server.js`, `node --check test.js`, `npm test` — đạt. Các live poll dùng backoff để tránh server trả `too_fast`.

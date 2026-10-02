@@ -299,6 +299,10 @@ try {
   assert.deepStrictEqual(instance.player.home_seeds, { '5': 10 });
   assert.strictEqual(instance.player.pet_mid, 2);
 
+  // Live game polls use display_name; Party identity must normalize it to name.
+  instance.updatePlayerState({ display_name: 'Live Character', lv: 12 });
+  assert.strictEqual(instance.player.name, 'Live Character');
+
   // Verify teamRole & teamId default setting
   console.log('Testing teamRole & teamId default settings...');
   const defaultSettings = instance.getDefaultSettings();
@@ -4365,6 +4369,17 @@ try {
       };
       assert.strictEqual(await leader.findPartyInviteRef(member), 'opaque-search-ref', 'T97: target resolution must fall back to opaque search row.r');
       assert.strictEqual(searchCalls[0].payload.action, 'search', 'T97: fallback target resolution must use Party search action');
+
+      const requestResponseCalls = [];
+      leader.sendRequest = async (url, payload) => {
+        requestResponseCalls.push({ url, payload });
+        return { ok: true };
+      };
+      leader.updatePartyPoll({ pty: null, pty_rq: { r: 'opaque-request-ref', nm: 'Member', mp: 2 }, others: [], pdun: null });
+      await leader.runPartyAutomation();
+      assert.strictEqual(requestResponseCalls.length, 1, 'T97: Leader must answer a configured Member request');
+      assert.strictEqual(requestResponseCalls[0].payload.action, 'req_respond', 'T97: Leader must use Party request response action');
+      assert.strictEqual(requestResponseCalls[0].payload.ref, 'opaque-request-ref', 'T97: Leader must preserve opaque request ref');
 
       const joinCalls = [];
       member.sendRequest = async (url, payload) => {

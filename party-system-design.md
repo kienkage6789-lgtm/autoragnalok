@@ -594,6 +594,12 @@ follow: leader cùng map / khác map / offline / missing others entry
 - [x] Runtime mapping được kiểm thử từ account selection → `line_uid` → character name → `others[].rf`/search row.r → Party action.
 - [x] Không expose `session_token`, raw opaque `ref/id` hoặc dữ liệu nhạy cảm trong account picker.
 
+### 14.2 Verification note cho T99
+
+- Game poll thực tế có thể trả tên nhân vật ở `player.display_name`; runtime phải normalize về `player.name` trước khi resolve Party target hoặc xác minh inviter.
+- Live verification ngày 2026-10-02 đã xác nhận: Leader gửi `invite`, Member nhận `pty_inv`, Member gửi `respond`, và hai account cùng vào Party snapshot `pid=25`, `n=2/5`.
+- Nếu một poll kế tiếp trả `too_fast`, không coi đó là mất membership khi response của action đã trả `pty`; chờ cadence poll kế tiếp theo throttle game server.
+
 ## 15. Ngoài phạm vi tài liệu này
 
 - Tự động vận hành Party Dungeon từ đầu đến cuối; chỉ mô tả điểm tích hợp `pdun_call` và các blocker.

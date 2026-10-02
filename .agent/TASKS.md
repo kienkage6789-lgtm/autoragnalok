@@ -16,6 +16,17 @@
 - Phụ thuộc: T96, T97
 - Trạng thái: done
 
+### [x] T99 - Fix live Party identity normalization and verify invite/accept
+- Mô tả: Khắc phục lỗi live khiến Party automation không nhận diện được nhân vật vì game trả tên ở `player.display_name`, đồng thời xác minh luồng invite/notification/accept bằng hai account test thật.
+- File liên quan: `server.js`, `test.js`, `.agent/TASKS.md`, `.agent/DECISIONS.md`, `.agent/CHANGELOG.md`
+- Acceptance criteria:
+  - [x] Normalize `player.display_name` thành `player.name` tại `updatePlayerState()` và giữ tương thích với cold-field preservation.
+  - [x] Regression test xác nhận player live có `display_name` vẫn được dùng làm Party identity.
+  - [x] `npm test`, `node --check server.js`, `node --check test.js` đạt.
+  - [x] Live test xác nhận Leader gửi `invite`, Member poll nhận `pty_inv`, Member gửi `respond`, và hai bot cùng nhận Party `pid=25`, `n=2/5`.
+- Phụ thuộc: T98
+- Trạng thái: done
+
 ### [x] T97 - Thiết kế account-picker/wizard cho Party
 - Mô tả: Bổ sung tài liệu UX và persistence để người dùng cấu hình Party bằng cách chọn account/character thay vì tự tìm `partyGroupId` hoặc nhập raw `Member line_uid`.
 - File liên quan: `party-system-design.md`, `.agent/TASKS.md`, `.agent/DECISIONS.md`, `.agent/CHANGELOG.md`
