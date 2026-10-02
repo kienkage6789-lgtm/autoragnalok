@@ -2165,6 +2165,7 @@ document.addEventListener('DOMContentLoaded', () => {
               <span class="toggle-label">🔐 Identity Party</span>
               <span style="font-size:.72rem;color:#94a3b8;">Group key do hệ thống tự sinh</span>
             </div>
+            <div id="party-action-controls-${acc.line_uid}" style="display:none;grid-column:span 2;gap:7px;margin-top:4px;"></div>
           </div>
 
           <div class="settings-group" id="admin-proxy-ctrl-${acc.line_uid}" style="display: none; border-top: 1px dashed rgba(255,255,255,0.05); padding-top: 10px; margin-top: 10px;">
@@ -3347,6 +3348,18 @@ document.addEventListener('DOMContentLoaded', () => {
       partyStatus.textContent = snap ? `${pty.state || 'IN_PARTY'} · ${snap.n || 0}/${snap.max || 0}` : (pty.state || 'DISABLED');
       partyStatus.title = pty.reason || pty.error || '';
       partyStatus.style.color = pty.state === 'ERROR' ? '#fca5a5' : (snap ? '#86efac' : '#94a3b8');
+    }
+    const partyActions = document.getElementById(`party-action-controls-${acc.line_uid}`);
+    if (partyActions) {
+      const pty = acc.party || {};
+      const snap = pty.snapshot;
+      const isLeader = !!(snap && (snap.ld === true || Number(snap.ld) === 1));
+      partyActions.style.display = snap ? 'flex' : 'none';
+      partyActions.innerHTML = snap
+        ? (isLeader
+          ? `<button type="button" onclick="partyManualAction('${acc.line_uid}', 'party_disband')" style="flex:1;background:rgba(239,68,68,.14);border:1px solid rgba(248,113,113,.45);color:#fca5a5;border-radius:6px;padding:5px 9px;font-size:.76rem;cursor:pointer;font-weight:700;">💥 Huỷ PT</button>`
+          : `<button type="button" onclick="partyManualAction('${acc.line_uid}', 'party_leave')" style="flex:1;background:rgba(245,158,11,.14);border:1px solid rgba(251,191,36,.45);color:#fde68a;border-radius:6px;padding:5px 9px;font-size:.76rem;cursor:pointer;font-weight:700;">🚪 OUT PT</button>`)
+        : '';
     }
 
 
@@ -7947,6 +7960,15 @@ window.sendAccountAction = async function(line_uid, action, extra = null) {
       window.showToast(`❌ Lỗi kết nối: ${e.message}`, true);
     }
   }
+};
+
+window.partyManualAction = async function(line_uid, action) {
+  const isDisband = action === 'party_disband';
+  const message = isDisband
+    ? 'Huỷ PT sẽ giải tán Party và đưa tất cả Member ra ngoài. Bạn chắc chắn muốn tiếp tục?'
+    : 'Bạn chắc chắn muốn OUT PT?';
+  if (!confirm(message)) return;
+  return window.sendAccountAction(line_uid, action);
 };
 
 // 🐾 Pet Stats & Upgrade Helper

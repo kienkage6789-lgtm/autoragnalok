@@ -4328,7 +4328,7 @@ try {
     const fs = require('fs');
     const canvas = fs.readFileSync('xhrpg_canvas.js', 'utf8');
     const serverSource = fs.readFileSync('server.js', 'utf8');
-    assert.ok(canvas.includes('xhrpg_party.php') && canvas.includes("action: 'invite'") && canvas.includes("action: 'respond'") && canvas.includes("action: 'request'"), 'T95: Party endpoint/actions must match game client');
+    assert.ok(canvas.includes('xhrpg_party.php') && canvas.includes("action: 'invite'") && canvas.includes("action: 'respond'") && canvas.includes("action: 'request'") && canvas.includes("action: act"), 'T95: Party endpoint/actions must match game client');
     assert.ok(serverSource.includes('this.updatePartyPoll(d);') && serverSource.includes('this.runPartyAutomation()'), 'T95: Party poll and automation must be wired into pollGame');
 
     const leader = new BotInstance({
@@ -4434,6 +4434,46 @@ try {
       assert.deepStrictEqual(followPosition, { x: 300, y: 300, name: 'LeaderBot' }, 'T95: Party position follow must use same-party coordinates');
       member.eventState = 'ACTIVE';
       assert.strictEqual(member.getPartyFollowPosition(), null, 'T95: Party follow must pause during Event state');
+
+      const actionMember = new BotInstance({
+        line_uid: 't95_party_action_member', userId: 't95_user', name: 'ActionMember',
+        settings: { partyGroupId: 'party_t95', partyRole: 'member', partyAutoJoin: true }
+      });
+      actionMember.status = 'running';
+      actionMember.partySnapshot = { pid: 95, n: 2, max: 5, ld: false, mem: [] };
+      const leaveCalls = [];
+      actionMember.sendRequest = async (url, payload) => {
+        leaveCalls.push({ url, payload });
+        return { ok: true, pty: null };
+      };
+      const leaveResult = await actionMember.manualPartyAction('leave');
+      assert.strictEqual(leaveResult.ok, true, 'T100: Member OUT PT must succeed');
+      assert.strictEqual(leaveCalls[0].payload.action, 'leave', 'T100: OUT PT must use game leave action');
+      assert.strictEqual(actionMember.partySnapshot, null, 'T100: OUT PT must clear local Party snapshot');
+
+      actionMember.partySnapshot = { pid: 95, n: 2, max: 5, ld: false, mem: [] };
+      const forbiddenDisband = await actionMember.manualPartyAction('disband');
+      assert.strictEqual(forbiddenDisband.ok, false, 'T100: Member must not disband Party');
+      assert.strictEqual(leaveCalls.length, 1, 'T100: Forbidden disband must not call game API');
+
+      const actionLeader = new BotInstance({
+        line_uid: 't95_party_action_leader', userId: 't95_user', name: 'ActionLeader',
+        settings: { partyGroupId: 'party_t95', partyRole: 'leader', partyAutoInvite: true }
+      });
+      actionLeader.status = 'running';
+      actionLeader.partySnapshot = { pid: 95, n: 2, max: 5, ld: true, mem: [] };
+      const disbandCalls = [];
+      actionLeader.sendRequest = async (url, payload) => {
+        disbandCalls.push({ url, payload });
+        return { ok: true, pty: null };
+      };
+      const disbandResult = await actionLeader.manualPartyAction('disband');
+      assert.strictEqual(disbandResult.ok, true, 'T100: Leader huỷ PT must succeed');
+      assert.strictEqual(disbandCalls[0].payload.action, 'disband', 'T100: Huỷ PT must use game disband action');
+      assert.strictEqual(actionLeader.partySnapshot, null, 'T100: Huỷ PT must clear local Party snapshot');
+      assert.ok(serverSource.includes("action === 'party_leave'") && serverSource.includes("action === 'party_disband'"), 'T100: dashboard Party actions must be routed explicitly');
+      const appSource = fs.readFileSync('public/app.js', 'utf8');
+      assert.ok(appSource.includes('partyManualAction') && appSource.includes('party-action-controls-'), 'T100: dashboard must expose safe OUT PT/Huỷ PT controls');
     } finally {
       delete botInstances[leader.line_uid];
       delete botInstances[member.line_uid];

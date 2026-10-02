@@ -2739,6 +2739,41 @@ class BotInstance {
     }
   }
 
+  async manualPartyAction(action) {
+    const partyAction = String(action || '').trim();
+    if (!['leave', 'disband'].includes(partyAction)) {
+      return { ok: false, error: 'Party action thủ công không hợp lệ' };
+    }
+    const snapshot = this.partySnapshot;
+    if (!snapshot || Number(snapshot.pid) <= 0) {
+      return { ok: false, error: 'Bot hiện không ở trong Party' };
+    }
+    const isLeader = snapshot.ld === true || Number(snapshot.ld) === 1;
+    if (partyAction === 'disband' && !isLeader) {
+      return { ok: false, error: 'Chỉ Leader mới được huỷ Party' };
+    }
+    if (partyAction === 'leave' && isLeader) {
+      return { ok: false, error: 'Leader hãy dùng Huỷ PT để giải tán Party' };
+    }
+
+    const result = await this.sendPartyAction(partyAction, { ref: '' });
+    if (!result || result.ok === false || result.ok === 0) {
+      return result || { ok: false, error: `Không thể ${partyAction === 'leave' ? 'rời' : 'huỷ'} Party` };
+    }
+
+    // The action response normally contains pty:null. Clear locally even if
+    // the upstream response omits pty, so the dashboard cannot show stale PT.
+    this.partySnapshot = result.pty !== undefined ? (result.pty || null) : null;
+    this.partyPoll = { ...this.partyPoll, invite: null, request: null };
+    this.partyFollowTarget = null;
+    this.partyCooldownUntil = 0;
+    this.setPartyState(
+      this.isPartyPolicyEnabled() ? 'DISCOVERING' : 'DISABLED',
+      partyAction === 'leave' ? 'đã OUT PT' : 'đã huỷ Party'
+    );
+    return { ...result, pty: this.partySnapshot };
+  }
+
   async fetchPartyState() {
     const result = await this.sendPartyAction('state');
     if (result && result.ok) {
@@ -10548,6 +10583,19 @@ app.post('/api/accounts/:line_uid/action', requireAuth, async (req, res) => {
   }
 
   try {
+    if (action === 'party_leave' || action === 'party_disband') {
+      const partyAction = action === 'party_leave' ? 'leave' : 'disband';
+      const result = await bot.manualPartyAction(partyAction);
+      if (!result || result.ok === false || result.ok === 0) {
+        return res.status(400).json(result || { ok: false, error: 'Không thể thực hiện thao tác Party' });
+      }
+      return res.json({
+        ...result,
+        ok: true,
+        msg: partyAction === 'leave' ? '🚪 Đã OUT PT thành công' : '💥 Đã huỷ Party thành công'
+      });
+    }
+
     let payload = {
       line_uid: bot.line_uid,
       session_token: bot.session_token,

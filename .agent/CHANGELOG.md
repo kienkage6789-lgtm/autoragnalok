@@ -1895,3 +1895,10 @@
 - `test.js`: thêm regression test cho payload player chỉ có `display_name`.
 - Live verification: hai account thật đã chạy đủ luồng `invite` → Member nhận `pty_inv` → `respond`; snapshot Party chung xác nhận `pid=25`, `n=2/5`, Leader `ld=true`, Member `ld=false`.
 - Đã kiểm tra: `node --check server.js`, `node --check test.js`, `npm test` — đạt. Các live poll dùng backoff để tránh server trả `too_fast`.
+
+## 2026-10-02 - T100 Manual OUT PT và huỷ Party
+
+- `server.js`: thêm `BotInstance.manualPartyAction()` và API action `party_leave`/`party_disband`; kiểm tra quyền theo snapshot `ld`, gọi game action `leave`/`disband`, rồi dọn runtime Party stale.
+- `public/app.js`: thêm nút `🚪 OUT PT` cho Member và `💥 Huỷ PT` cho Leader, có confirm trước thao tác.
+- `test.js`: thêm regression cho payload, phân quyền và reset snapshot sau thao tác.
+- Đã kiểm tra: `node --check server.js`, `node --check public/app.js`, `node --check test.js`, `npm test`, `git diff --check` — đạt.

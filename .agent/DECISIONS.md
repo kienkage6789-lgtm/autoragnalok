@@ -875,3 +875,10 @@
 - Chuẩn hóa một lần tại `BotInstance.updatePlayerState()` thành `player.name`, đồng thời giữ lại tên cũ nếu poll sau thiếu cả hai field.
 - Không đổi contract Party action: `invite` vẫn dùng `others[].rf`/search row `r`, Member vẫn chờ `pty_inv` rồi gửi `respond`; chỉ sửa lớp identity mapping để các guard xác minh tên hoạt động với payload thật.
 - Xác minh live ngày 2026-10-02: Leader `Chaos` → invite Member `Kien`; Member nhận `pty_inv` và respond; snapshot hai bên cùng `pid=25`, `n=2/5`.
+
+## 2026-10-02 - T100: Manual OUT PT và huỷ Party theo quyền server
+
+- Dashboard dùng action manager-side `party_leave`/`party_disband`, sau đó adapter gọi đúng game action `leave`/`disband` trên `xhrpg_party.php`.
+- Quyền được quyết định từ Party snapshot live (`ld`), không tin riêng `settings.partyRole`: Member chỉ được OUT PT; Leader chỉ được huỷ Party.
+- Sau response thành công, manager xoá snapshot và các poll intent stale để UI không hiển thị Party cũ; policy auto vẫn giữ nguyên để người dùng có thể cấu hình lại.
+- Không live-call thao tác leave/disband trong regression vì đây là mutation thật trên Party đang dùng; contract được kiểm tra bằng client fixture và unit test.

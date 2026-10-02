@@ -600,6 +600,14 @@ follow: leader cùng map / khác map / offline / missing others entry
 - Live verification ngày 2026-10-02 đã xác nhận: Leader gửi `invite`, Member nhận `pty_inv`, Member gửi `respond`, và hai account cùng vào Party snapshot `pid=25`, `n=2/5`.
 - Nếu một poll kế tiếp trả `too_fast`, không coi đó là mất membership khi response của action đã trả `pty`; chờ cadence poll kế tiếp theo throttle game server.
 
+### 14.3 Acceptance criteria cho T100 manual Party actions
+
+- [x] Member có nút `OUT PT`, gọi `xhrpg_party.php action=leave` sau khi xác nhận.
+- [x] Leader có nút `Huỷ PT`, gọi `xhrpg_party.php action=disband` sau khi xác nhận.
+- [x] Backend kiểm tra snapshot `ld`, không cho Member disband hoặc Leader dùng nhầm leave.
+- [x] Thành công phải clear `partySnapshot`, pending invite/request và follow target ở manager-side.
+- [x] Không tự động gọi live mutation trong test suite; dùng fixture/unit test để xác minh contract.
+
 ## 15. Ngoài phạm vi tài liệu này
 
 - Tự động vận hành Party Dungeon từ đầu đến cuối; chỉ mô tả điểm tích hợp `pdun_call` và các blocker.

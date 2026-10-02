@@ -27,6 +27,18 @@
 - Phụ thuộc: T98
 - Trạng thái: done
 
+### [x] T100 - Manual OUT PT và huỷ Party
+- Mô tả: Bổ sung thao tác thủ công trên Dashboard để Member rời Party và Leader giải tán Party, dùng đúng contract `leave`/`disband` của game.
+- File liên quan: `server.js`, `public/app.js`, `test.js`, `.agent/TASKS.md`, `.agent/DECISIONS.md`, `.agent/CHANGELOG.md`, `party-system-design.md`
+- Acceptance criteria:
+  - [x] Member chỉ thấy và gọi được `OUT PT` → game action `leave`.
+  - [x] Leader chỉ thấy và gọi được `Huỷ PT` → game action `disband`.
+  - [x] Backend kiểm tra Party snapshot và cờ Leader `ld`; chặn Member huỷ Party và chặn Leader dùng nhầm OUT PT.
+  - [x] Sau action thành công, xoá snapshot/invite/request/follow state stale trên Dashboard.
+  - [x] Regression test payload action, quyền Leader/Member và UI control; `npm test` đạt.
+- Phụ thuộc: T99
+- Trạng thái: done
+
 ### [x] T97 - Thiết kế account-picker/wizard cho Party
 - Mô tả: Bổ sung tài liệu UX và persistence để người dùng cấu hình Party bằng cách chọn account/character thay vì tự tìm `partyGroupId` hoặc nhập raw `Member line_uid`.
 - File liên quan: `party-system-design.md`, `.agent/TASKS.md`, `.agent/DECISIONS.md`, `.agent/CHANGELOG.md`
