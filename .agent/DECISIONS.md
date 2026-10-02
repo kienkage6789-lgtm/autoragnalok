@@ -2,6 +2,23 @@
 
 > Captured architectural decisions and trade-offs.
 
+## 2026-10-02 - T98: Triển khai Party account-picker/wizard
+
+- Dùng `GET/POST /api/party/profiles` làm boundary của profile manager; wizard không gửi `pid`, `ref`, invitation `id` hoặc `session_token` lên UI/API profile.
+- Profile mới sinh `ptygrp_<random>` một lần; khi sửa dùng lại group key cũ. Các account được chọn phải cùng owner, một Leader, 1–4 Member và mỗi account chỉ thuộc một profile active.
+- Wizard ghi policy xuống các setting per-account tương thích T96; profile name là metadata manager-side. Account offline/character chưa resolve được giữ ở `WAITING_TARGET`; raw legacy target mất được hiển thị `INVALID_TARGET` để repair thủ công.
+- Main Party card chỉ hiển thị profile/role/status và mở wizard; loại bỏ ô nhập raw `partyGroupId`, `partyMemberLineUids`, `partyLeaderLineUid` khỏi luồng chính.
+- Đã bổ sung test API create/edit, owner scope, stable group key, legacy repair, picker data safety và UI raw-ID regression.
+
+## 2026-10-02 - T97: Account picker thay cho nhập raw Party ID
+
+- `partyGroupId` là khóa nhóm nội bộ của manager, không phải `pid` do game server cấp; người dùng không cần và không nên tự nhập nó trong luồng cấu hình chính.
+- `line_uid` là định danh ổn định của account trong manager. UI dùng account picker từ danh sách account hiện có, hiển thị tên account/character/status; backend mới lưu `line_uid` vào settings.
+- `player.name` chỉ là display và hint để resolve target. Khi runtime invite, manager lấy `others[].rf` hoặc search row.r do game trả về; không dùng tên làm identity cuối cùng và không tự tạo `ref`/`pid`.
+- Party profile phải scoped theo `userId`, có một Leader, allowlist Member, validation conflict và trạng thái `WAITING_TARGET`/`INVALID_TARGET` khi bot offline, character chưa resolve hoặc account đã bị xóa.
+- Giữ tương thích T96 bằng cách wizard ghi vào các field per-account hiện có (`partyGroupId`, `partyRole`, `partyLeaderLineUid`, `partyMemberLineUids`); metadata tên profile là manager-side, không gửi lên game server.
+- Quyết định ban đầu được hiện thực hóa ở T98; phần thiết kế vẫn là contract tham chiếu cho wizard và runtime.
+
 ## 2026-09-17 - T88: Queue Check-in GW/CW và bảo toàn snapshot xuyên suốt phiên
 
 - `autoWarCheckin` dùng session riêng với thứ tự ổn định `gw -> cw`; chỉ các event đang active, đủ level và chưa hoàn tất lượt mới được đưa vào queue.
@@ -816,3 +833,38 @@
 - Giữ `autoWarCheckin` là một toggle chung để tương thích cấu hình cũ, nhưng mở rộng queue từ `gw/cw` thành `gw/cw/br/fw` và đổi nhãn UI để hiển thị đúng phạm vi.
 - GW/CW tiếp tục dùng semantics cũ: cho phép check-in từ phút 35 khi payload còn active. BR dùng cửa sổ 22:35–22:50; FW dùng 20:10–20:20 theo `WT.brFight/brEnd` và `WT.fwFight/fwEnd` trong `xhrpg_canvas.js`.
 - Payload `ends` vẫn là điều kiện chặn cuối cùng; cửa sổ lịch chỉ cho phép bắt đầu đúng thời điểm, tránh FW bị check-in sau 20:20 nếu feed trễ.
+## 2026-09-29 - T92: Mốc chờ Boss tính từ lúc xác nhận tới map
+
+- Dùng state riêng `mvpMapArrivedAt` cho từng bot và reset khi bắt đầu chu kỳ, đổi/bỏ qua map hoặc kết thúc chu kỳ.
+- Khoảng chờ 3 giây không dùng `mvpCycleStats.mapStartTs` cũ vì mốc đó được tạo trước khi warp, khiến thời gian di chuyển bị tính nhầm thành thời gian chờ tải Boss.
+- Trong 3 giây đầu sau khi tới map, payload Boss rỗng không được tăng `mvpConfirmClearCount`; sau thời gian chờ vẫn giữ yêu cầu 3 payload rỗng liên tiếp trước khi chuyển map.
+
+## 2026-09-29 - T93: Event Cây Thế Giới khóa Boss theo payload
+
+- Invasion ACTIVE chọn Boss sống trực tiếp từ `bosses[]`, giữ target hiện tại nếu Boss còn sống và chỉ chọn target mới khi Boss cũ biến mất.
+- Điều khiển Event dùng khoảng cách chiến đấu động giống săn MVP (30–40m hoặc 55–65m theo vũ khí), không phụ thuộc `bossHuntMode`.
+- Săn MVP thường không được phép ghi đè tọa độ khi `inEventMode`; nếu payload chưa có Boss, bot quay về tâm map và full-poll để chờ spawn.
+
+## 2026-09-29 - T94: Scheduler Guild Dungeon dùng toàn bộ phút 30
+
+- Thay cửa sổ cứng `xx:30:05–xx:30:20` bằng toàn bộ phút `xx:30`; tránh bỏ lỡ do poll trễ hoặc request trước kéo dài.
+- Trạng thái Event/restore/dungeon chỉ hoãn entry, không đánh dấu đã xử lý giờ đó; bot được thử lại nếu blocker biến mất trong cùng phút.
+- Request `gdun_enter` thất bại retry tối đa 3 lần mỗi giờ, cooldown 10 giây; chỉ ghi `lastGdunAutoEnterHour` sau khi entry thành công.
+- Bật `autoEnterGdunAt30` cho tài khoản hiện tại theo yêu cầu; mặc định cho tài khoản mới vẫn tắt.
+## 2026-10-02 - T95: Contract thiết kế Auto Party
+
+- Bối cảnh: Client game đã có Party (`xhrpg_party.php`, poll `pty/*`) và Party Dungeon (`xhrpg_pdun.php`), nhưng headless manager chưa tích hợp.
+- Quyết định:
+  1. Tài liệu chỉ dùng các endpoint/action/field đã đọc thấy trong `xhrpg_canvas.js`; không tự phát minh endpoint Party mới.
+  2. Server game là nguồn sự thật cho membership, permission, vị trí, trạng thái online và hiệu lực EXP; bot chỉ lập lịch request, giữ intent và phản ứng theo snapshot/poll.
+  3. `ref`/`id` của Party là opaque identifier do server trả về; manager không suy đoán hoặc tự tạo UID người chơi khác.
+  4. Auto-invite/auto-join/follow là ba policy độc lập, mặc định tắt và phải có cooldown/idempotency; follow không được ghi đè Event, Guild Dungeon, Party Dungeon hoặc trạng thái restore hiện có.
+- Lý do: Giảm rủi ro lệch contract khi game cập nhật và tránh để nhiều automation tranh quyền điều khiển map/trạng thái bot.
+
+## 2026-10-02 - T96: Adapter bảo thủ cho Party automation
+
+- Chỉ gọi `xhrpg_party.php` bằng action/payload đã thấy trong `xhrpg_canvas.js`; target ưu tiên `others[].rf`, fallback dùng `search(tab:'name', q)` và chỉ chọn row có `r` opaque, không có `pt`/`ni`/`iv`.
+- Auto-invite resolve target từ `partyMemberLineUids` trong cùng owner/group, match tên nhân vật rồi dùng ref do server trả về; không tự tạo identity hoặc Party ID.
+- Auto-join chỉ nhận lời mời khi tên inviter khớp configured same-owner/group Leader; `partyAcceptUnknownInvites` là opt-in rõ ràng. Request join dùng `pid` từ leader snapshot.
+- Party Dungeon bị xem là blocker khi map 14 hoặc `pdun` có mặt trong poll; poll thiếu `pdun` sẽ xoá trạng thái stale, và manager không gọi `xhrpg_pdun.php`/`pdun_call` tự động.
+- Follow movement chỉ dùng vị trí leader từ `others[]` cùng Party ID và fresh snapshot; warp khác map vẫn qua routing layer, chỉ khi `partyAllowWarp` bật và không tranh quyền với Team sync.

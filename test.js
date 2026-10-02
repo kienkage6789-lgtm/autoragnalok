@@ -1920,6 +1920,64 @@ try {
     assert.strictEqual(memBot.player.x, 500, 'Test G: Member restored to x 500 (not pulled to Leader x 100)');
   }
 
+  // Test H: Scheduler tự vào Guild Dungeon dùng toàn bộ phút 30 và retry hữu hạn
+  {
+    console.log('  Testing Test H: Guild Dungeon minute-30 scheduler window, blockers and retries...');
+    const autoBot = new BotInstance({
+      line_uid: 'T94_GDUN_AUTO',
+      settings: { autoEnterGdunAt30: true }
+    });
+    autoBot.player = { map: 2, x: 100, y: 200, lv: 60, gdun_in: 0 };
+
+    let enterAttempts = 0;
+    autoBot.enterGuildDungeon = async () => {
+      enterAttempts++;
+      return enterAttempts >= 3;
+    };
+
+    assert.strictEqual(await autoBot.maybeAutoEnterGuildDungeon(new Date(2026, 8, 29, 10, 29, 59)), false, 'Outside minute 30 must not auto-enter');
+    assert.strictEqual(await autoBot.maybeAutoEnterGuildDungeon(new Date(2026, 8, 29, 10, 30, 5)), false, 'First failed request must remain retryable');
+    assert.strictEqual(enterAttempts, 1, 'First minute-30 attempt must be sent');
+    assert.strictEqual(await autoBot.maybeAutoEnterGuildDungeon(new Date(2026, 8, 29, 10, 30, 10)), false, 'Retry must respect the 10-second cooldown');
+    assert.strictEqual(enterAttempts, 1, 'Cooldown must suppress duplicate requests');
+    assert.strictEqual(await autoBot.maybeAutoEnterGuildDungeon(new Date(2026, 8, 29, 10, 30, 15)), false, 'Second failed request must remain retryable');
+    assert.strictEqual(await autoBot.maybeAutoEnterGuildDungeon(new Date(2026, 8, 29, 10, 30, 25)), true, 'Third attempt later in minute 30 may succeed');
+    assert.strictEqual(enterAttempts, 3, 'Scheduler must cap attempts at three per hour');
+    assert.strictEqual(autoBot.lastGdunAutoEnterHour, 10, 'Successful entry must mark the hour complete');
+    assert.strictEqual(await autoBot.maybeAutoEnterGuildDungeon(new Date(2026, 8, 29, 10, 30, 50)), false, 'Successful hour must not enter twice');
+    assert.strictEqual(enterAttempts, 3, 'No duplicate request is allowed after success');
+
+    const blockedBot = new BotInstance({
+      line_uid: 'T94_GDUN_BLOCKED',
+      settings: { autoEnterGdunAt30: true }
+    });
+    blockedBot.player = { map: 2, x: 100, y: 200, lv: 60, gdun_in: 0 };
+    blockedBot.inEventMode = true;
+    blockedBot.eventState = 'ACTIVE';
+    let blockedAttempts = 0;
+    blockedBot.enterGuildDungeon = async () => {
+      blockedAttempts++;
+      return true;
+    };
+
+    assert.strictEqual(await blockedBot.maybeAutoEnterGuildDungeon(new Date(2026, 8, 29, 11, 30, 5)), false, 'Active Event must block Guild Dungeon auto-entry');
+    assert.strictEqual(blockedAttempts, 0, 'Blocked state must not consume an entry attempt');
+    blockedBot.inEventMode = false;
+    blockedBot.eventState = 'IDLE';
+    assert.strictEqual(await blockedBot.maybeAutoEnterGuildDungeon(new Date(2026, 8, 29, 11, 30, 45)), true, 'Bot must retry later in the same minute after blocker clears');
+    assert.strictEqual(blockedAttempts, 1, 'Unblocked bot must enter exactly once');
+
+    const disabledBot = new BotInstance({ line_uid: 'T94_GDUN_DISABLED', settings: { autoEnterGdunAt30: false } });
+    disabledBot.player = { map: 2, lv: 60, gdun_in: 0 };
+    let disabledAttempts = 0;
+    disabledBot.enterGuildDungeon = async () => {
+      disabledAttempts++;
+      return true;
+    };
+    assert.strictEqual(await disabledBot.maybeAutoEnterGuildDungeon(new Date(2026, 8, 29, 12, 30, 30)), false, 'Disabled toggle must never auto-enter');
+    assert.strictEqual(disabledAttempts, 0, 'Disabled toggle must send no request');
+  }
+
   console.log('✅ T82 Auto Boss Guild & Real Coordinate Restoration Tests Passed successfully!');
 
   // ==========================================
@@ -2191,6 +2249,69 @@ try {
     assert.strictEqual(bot7.eventState, 'IDLE', 'Test 7: restored to IDLE');
     assert.strictEqual(bot7.player.map, 3, 'Test 7: player confirmed on Map 3');
     assert.strictEqual(bot7.settings.targetMap, 3, 'Test 7: targetMap confirmed 3');
+  }
+
+  // --- Test 7b: Event Cây Thế Giới khóa Boss độc lập với săn Boss thường ---
+  // --- Test 7b: Event Cây Thế Giới phải khóa và di chuyển theo Boss dù săn Boss thường đang tắt ---
+  {
+    console.log('  Testing Test 7b: World Tree Event targets Boss independently from normal Boss Hunt...');
+    const eventBoss = { id: 901, name: 'World Boss', emoji: '🌋', hp: 9000, hp_max: 10000, lv: 60, x: 1200, y: 1200 };
+    const invBot = new BotInstance({
+      line_uid: 't93_inv_boss',
+      settings: { bossHuntEnabled: false, bossHuntMode: 'off', autoEventJoinInv: true }
+    });
+    invBot.player = { map: 2, x: 900, y: 900, lv: 60, active_gun: 0, hp: 1000, hp_max: 1000 };
+    invBot.inEventMode = true;
+    invBot.eventState = 'ACTIVE';
+    invBot.currentEventKind = 'inv';
+    invBot.lastInv = { st: 'active', hp: 100000, hp_max: 100000, ends: Math.floor(Date.now() / 1000) + 1800 };
+    invBot.bosses = [eventBoss];
+    invBot.monsters = [];
+    invBot.spots = {};
+    invBot.lastChpassSentAt = Date.now();
+
+    let gamePayload = null;
+    invBot.sendRequest = async (url, payload) => {
+      if (url.includes('xhrpg_game.php')) {
+        gamePayload = { ...payload };
+        return {
+          ok: true,
+          player: { ...invBot.player },
+          inv: { ...invBot.lastInv },
+          bosses: [...invBot.bosses],
+          monsters: [],
+          spots: {}
+        };
+      }
+      return { ok: true };
+    };
+
+    await invBot.pollGame();
+    assert.strictEqual(invBot.settings.bossHuntMode, 'off', 'Fixture must keep normal Boss Hunt disabled');
+    assert.strictEqual(invBot.eventBossTargetId, eventBoss.id, 'Invasion must lock a live Event Boss');
+    assert.strictEqual(invBot.targetedMvp, true, 'Event Boss must suppress normal farming');
+    assert.ok(gamePayload, 'Invasion must send a game poll payload');
+    assert.strictEqual(gamePayload.traveling, 1, 'Bot must move toward a distant Event Boss');
+    assert.strictEqual(gamePayload.lock_pos, 0, 'Bot must unlock position while approaching Event Boss');
+    assert.notStrictEqual(gamePayload.explore_cx, 1125, 'Event Boss movement must not be hardcoded to map center');
+    assert.notStrictEqual(gamePayload.explore_cy, 1125, 'Event Boss movement must follow Boss coordinates');
+    assert.strictEqual(invBot.currentMvpBossInfo.id, eventBoss.id, 'Dashboard target info must expose the Event Boss');
+
+    // Khi đã ở cự ly an toàn 35m, bot khóa vị trí để server tự đánh Boss.
+    invBot.player.x = 1165;
+    invBot.player.y = 1200;
+    gamePayload = null;
+    await invBot.pollGame();
+    assert.strictEqual(gamePayload.traveling, 0, 'Bot must stop moving inside Event Boss attack range');
+    assert.strictEqual(gamePayload.lock_pos, 1, 'Bot must lock position to attack Event Boss');
+
+    // Boss biến mất: bỏ target cũ và quay về tâm chờ payload Boss tiếp theo.
+    invBot.bosses = [];
+    gamePayload = null;
+    await invBot.pollGame();
+    assert.strictEqual(invBot.eventBossTargetId, null, 'Dead or missing Event Boss target must be cleared');
+    assert.ok(Math.abs(gamePayload.explore_cx - 1125) <= 18, 'Without an Event Boss, bot must move back near map center');
+    assert.ok(Math.abs(gamePayload.explore_cy - 1125) <= 18, 'Without an Event Boss, bot must move back near map center');
   }
 
   // --- Test 8: Hai poll automation chạy đồng thời không tạo hai lệnh join/exit (Mutex test) ---
@@ -3716,6 +3837,42 @@ try {
     assert.ok(warpBot.logs.some(l => l.msg.includes('Warp thất bại') || l.msg.includes('thất bại sau 16s')), 'Must log warning about warp failure and skip');
   }
 
+  // Test 7b: Thời gian chờ 3 giây được tính từ lúc xác nhận đã tới map
+  {
+    console.log('  Testing Test 7b: Wait 3 seconds after confirmed map arrival before checking empty bosses...');
+    const settleBot = new BotInstance({ line_uid: 't92_settle_bot', settings: { targetMap: 1, bossHuntMaps: [2, 3], bossHuntMode: 'type2' } });
+    settleBot.player = { map: 1, lv: 50 };
+    settleBot.triggerMvpCycle(true);
+
+    // Giả lập warp đã tốn lâu hơn 3 giây rồi mới tới Map 2 với payload Boss tạm rỗng.
+    settleBot.mvpCycleStats.mapStartTs = Date.now() - 10000;
+    settleBot.player.map = 2;
+    settleBot.bosses = [];
+    settleBot.mvpConfirmClearCount = 2;
+
+    await settleBot.updateMvpCycleStatus();
+    assert.strictEqual(settleBot.mvpCycleMapIndex, 0, 'Transit time must not count toward the 3-second arrival wait');
+    assert.ok(settleBot.mvpMapArrivedAt > 0, 'Arrival timestamp must be recorded only after reaching the target map');
+    assert.strictEqual(settleBot.mvpConfirmClearCount, 0, 'Empty payload during settle window must not count as map clear');
+
+    settleBot.mvpConfirmClearCount = 2;
+    await settleBot.updateMvpCycleStatus();
+    assert.strictEqual(settleBot.mvpCycleMapIndex, 0, 'Bot must stay on the map during the 3-second settle window');
+    assert.strictEqual(settleBot.mvpConfirmClearCount, 0, 'Repeated empty payloads inside settle window must still be ignored');
+
+    let nextTargetMap = null;
+    settleBot.warpToMap = async mapId => {
+      nextTargetMap = mapId;
+      return true;
+    };
+    settleBot.mvpMapArrivedAt = Date.now() - 3001;
+    settleBot.mvpConfirmClearCount = 2;
+    await settleBot.updateMvpCycleStatus();
+    assert.strictEqual(settleBot.mvpCycleMapIndex, 1, 'Bot may advance only after the 3-second settle window and 3 empty confirmations');
+    assert.strictEqual(nextTargetMap, 3, 'Bot must continue to the next configured map after confirming the current map is clear');
+    assert.strictEqual(settleBot.mvpMapArrivedAt, 0, 'Arrival timestamp must reset before checking the next map');
+  }
+
   // Test 8: Hoàn thành chu kỳ và quay về Map gốc
   {
     console.log('  Testing Test 8: Cycle completion and return to original farm map...');
@@ -3729,6 +3886,7 @@ try {
     cycleBot.bosses = [];
     cycleBot.mvpConfirmClearCount = 3;
     cycleBot.mvpCycleStats.mapStartTs = Date.now() - 5000; // stayed > 3s
+    cycleBot.mvpMapArrivedAt = Date.now() - 5000; // confirmed arrival > 3s ago
 
     let returnTargetMap = null;
     cycleBot.warpToMap = async (mapId) => {
@@ -3964,6 +4122,7 @@ try {
       bot.bosses = [];
       bot.mvpConfirmClearCount = 2; // updateMvpCycleStatus will increment to 3 and trigger map transition
       bot.mvpCycleStats = { mapStartTs: Date.now() - 5000, bossKilledInMap: 1 };
+      bot.mvpMapArrivedAt = Date.now() - 5000;
 
       let warpCalls = [];
       bot.warpToMap = async (targetMap) => {
@@ -4156,6 +4315,226 @@ try {
     assert.strictEqual(calls.some(c => c.url.includes('xhrpg_brwar.php') && c.payload.action === 'brwar_join'), true, 'Test 15: BR endpoint/action must be exact');
     assert.strictEqual(calls.some(c => c.url.includes('xhrpg_fwar.php') && c.payload.action === 'fwar_join'), true, 'Test 15: FW endpoint/action must be exact');
     assert.deepStrictEqual(bot._getActiveWarCheckinKinds(), [], 'Test 15: BR/FW must not enter independent GW/CW check-in queue');
+  }
+
+  // T95: Party Auto-invite / Auto-join / Follow use only the live client
+  // contract and never accept an unverified invite by default.
+  {
+    console.log('Testing T95 Party automation contract and safety guards...');
+    const fs = require('fs');
+    const canvas = fs.readFileSync('xhrpg_canvas.js', 'utf8');
+    const serverSource = fs.readFileSync('server.js', 'utf8');
+    assert.ok(canvas.includes('xhrpg_party.php') && canvas.includes("action: 'invite'") && canvas.includes("action: 'respond'") && canvas.includes("action: 'request'"), 'T95: Party endpoint/actions must match game client');
+    assert.ok(serverSource.includes('this.updatePartyPoll(d);') && serverSource.includes('this.runPartyAutomation()'), 'T95: Party poll and automation must be wired into pollGame');
+
+    const leader = new BotInstance({
+      line_uid: 't95_party_leader', userId: 't95_user', name: 'LeaderBot',
+      settings: { partyGroupId: 'party_t95', partyRole: 'leader', partyAutoInvite: true, partyMemberLineUids: ['t95_party_member'] }
+    });
+    const member = new BotInstance({
+      line_uid: 't95_party_member', userId: 't95_user', name: 'MemberBot',
+      settings: { partyGroupId: 'party_t95', partyRole: 'member', partyAutoJoin: true }
+    });
+    leader.status = 'running';
+    member.status = 'running';
+    leader.player = { name: 'Leader', map: 2, lv: 60, x: 100, y: 100, gdun_in: 0 };
+    member.player = { name: 'Member', map: 2, lv: 60, x: 100, y: 100, gdun_in: 0 };
+    botInstances[leader.line_uid] = leader;
+    botInstances[member.line_uid] = member;
+
+    try {
+      const inviteCalls = [];
+      leader.sendRequest = async (url, payload) => {
+        inviteCalls.push({ url, payload });
+        return { ok: true };
+      };
+      leader.others = [{ name: 'Member', rf: 'opaque-member-ref', pt: 0 }];
+      leader.updatePartyPoll({ pty: null, pdun: null });
+      await leader.runPartyAutomation();
+      assert.strictEqual(inviteCalls.length, 1, 'T95: Leader must invite a configured member before a Party exists');
+      assert.strictEqual(inviteCalls[0].payload.action, 'invite', 'T95: Leader must use Party invite action');
+      assert.strictEqual(inviteCalls[0].payload.ref, 'opaque-member-ref', 'T95: Leader must use opaque ref from others[]');
+      await leader.runPartyAutomation();
+      assert.strictEqual(inviteCalls.length, 1, 'T95: Leader invite must respect cooldown/dedupe');
+
+      const searchCalls = [];
+      leader.others = [];
+      leader.sendRequest = async (url, payload) => {
+        searchCalls.push({ url, payload });
+        return { ok: true, rows: [{ nm: 'Member', r: 'opaque-search-ref', pt: 0, ni: 0, iv: 0 }] };
+      };
+      assert.strictEqual(await leader.findPartyInviteRef(member), 'opaque-search-ref', 'T97: target resolution must fall back to opaque search row.r');
+      assert.strictEqual(searchCalls[0].payload.action, 'search', 'T97: fallback target resolution must use Party search action');
+
+      const joinCalls = [];
+      member.sendRequest = async (url, payload) => {
+        joinCalls.push({ url, payload });
+        return { ok: true, pty: { pid: 95, n: 2, max: 5, ld: false, mem: [] } };
+      };
+      member.updatePartyPoll({
+        pty: null,
+        pty_inv: { id: 'invite-95', nm: 'Leader', lv: 60, n: 1, mp: 2 },
+        others: [],
+        pdun: null
+      });
+      await member.runPartyAutomation();
+      assert.strictEqual(joinCalls.length, 1, 'T95: Member must auto-respond to a verified Leader invite');
+      assert.strictEqual(joinCalls[0].payload.action, 'respond', 'T95: Member must use Party respond action');
+      assert.strictEqual(joinCalls[0].payload.id, 'invite-95', 'T95: Member must preserve opaque invite id');
+      assert.strictEqual(member.partySnapshot.pid, 95, 'T95: Successful join must update Party snapshot');
+      member.partySnapshot = null;
+      await member.runPartyAutomation();
+      assert.strictEqual(joinCalls.length, 1, 'T95: Same invite id must not be auto-accepted twice');
+
+      const unknown = new BotInstance({
+        line_uid: 't95_party_unknown', userId: 't95_user', name: 'UnknownBot',
+        settings: { partyGroupId: 'party_t95', partyRole: 'member', partyAutoJoin: true }
+      });
+      unknown.status = 'running';
+      unknown.player = { name: 'Unknown', map: 2, lv: 60, gdun_in: 0 };
+      unknown.updatePartyPoll({ pty: null, pty_inv: { id: 'invite-unknown', nm: 'Stranger' }, others: [], pdun: null });
+      let unknownCalls = 0;
+      unknown.sendRequest = async () => { unknownCalls++; return { ok: true }; };
+      await unknown.runPartyAutomation();
+      assert.strictEqual(unknownCalls, 0, 'T95: Unknown invite must not be auto-accepted by default');
+      assert.strictEqual(unknown.partyState, 'PAUSED', 'T95: Unknown invite must pause for manual review');
+
+      leader.partySnapshot = { pid: 95, n: 2, max: 5, ld: true, mem: [] };
+      leader.partyLastSeenAt = Date.now();
+      member.partySnapshot = { pid: 95, n: 2, max: 5, ld: false, mem: [] };
+      member.partyLastSeenAt = Date.now();
+      member.settings.partyFollowMode = 'same_map';
+      member.settings.partyAllowWarp = true;
+      leader.player.map = 3;
+      member.player.map = 1;
+      const followWarpCalls = [];
+      member.warpToMap = async mapId => { followWarpCalls.push(mapId); member.player.map = mapId; return true; };
+      assert.strictEqual(await member.checkAndRouteMap(), true, 'T95: Party follow must route a member to the fresh Leader map');
+      assert.deepStrictEqual(followWarpCalls, [3], 'T95: Party follow must issue exactly one safe map warp');
+
+      member.settings.partyFollowMode = 'map_and_position';
+      member.player.map = 3;
+      member.others = [{ name: 'Leader', pt: 95, x: 300, y: 300 }];
+      const followPosition = member.getPartyFollowPosition();
+      assert.deepStrictEqual(followPosition, { x: 300, y: 300, name: 'LeaderBot' }, 'T95: Party position follow must use same-party coordinates');
+      member.eventState = 'ACTIVE';
+      assert.strictEqual(member.getPartyFollowPosition(), null, 'T95: Party follow must pause during Event state');
+    } finally {
+      delete botInstances[leader.line_uid];
+      delete botInstances[member.line_uid];
+    }
+  }
+
+  // T97: Party account picker/profile persistence owns manager IDs and never
+  // exposes the user to raw group/member identity fields.
+  {
+    console.log('Testing T97 Party account picker/profile API...');
+    const fs = require('fs');
+    const http = require('http');
+    const appJs = fs.readFileSync('public/app.js', 'utf8');
+    const serverSource = fs.readFileSync('server.js', 'utf8');
+    assert.ok(appJs.includes('openPartyWizard') && appJs.includes('party-wizard-members'), 'T97: UI must expose the account picker wizard');
+    assert.ok(!appJs.includes('txt-party-group-id-') && !appJs.includes('txt-party-member-line-uids-'), 'T97: main Party UI must not expose raw group/member ID inputs');
+    assert.ok(serverSource.includes("app.get('/api/party/profiles'") && serverSource.includes("app.post('/api/party/profiles'"), 'T97: profile API routes must exist');
+
+    let fixtureAccountsDb = [
+      { line_uid: 't97_leader', name: 'T97 Leader', userId: 'usr_admin', settings: {} },
+      { line_uid: 't97_member_1', name: 'T97 Member 1', userId: 'usr_admin', settings: {} },
+      { line_uid: 't97_member_2', name: 'T97 Member 2', userId: 'usr_admin', settings: {} },
+      { line_uid: 't97_foreign', name: 'T97 Foreign', userId: 'usr_other', settings: {} },
+      {
+        line_uid: 't97_legacy_leader', name: 'T97 Legacy Leader', userId: 'usr_admin',
+        settings: {
+          partyGroupId: 'legacy_t97', partyProfileName: 'Legacy T97', partyRole: 'leader',
+          partyMemberLineUids: ['t97_deleted_member']
+        }
+      }
+    ];
+    setCustomAccountStorage({
+      loadAccounts: () => JSON.parse(JSON.stringify(fixtureAccountsDb)),
+      saveAccounts: accounts => { fixtureAccountsDb = JSON.parse(JSON.stringify(accounts)); }
+    });
+
+    const apiServer = app.listen(0);
+    const port = apiServer.address().port;
+    const testToken = 'test_token_t97_' + Date.now();
+    userSessions[testToken] = { userId: 'usr_admin', expiresAt: Date.now() + 3600000 };
+    const requestPartyApi = (method, reqPath, payload) => new Promise((resolve, reject) => {
+      const body = payload === undefined ? '' : JSON.stringify(payload);
+      const req = http.request({
+        host: '127.0.0.1', port, path: reqPath, method,
+        headers: {
+          Authorization: `Bearer ${testToken}`,
+          ...(payload === undefined ? {} : { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }),
+          Connection: 'close'
+        },
+        agent: false
+      }, response => {
+        let data = '';
+        response.on('data', chunk => { data += chunk; });
+        response.on('end', () => {
+          let json = null;
+          try { json = JSON.parse(data); } catch (error) { /* keep diagnostics below */ }
+          resolve({ status: response.statusCode, json });
+        });
+      });
+      req.on('error', reject);
+      if (body) req.write(body);
+      req.end();
+    });
+
+    try {
+      const create = await requestPartyApi('POST', '/api/party/profiles', {
+        ownerId: 'usr_admin', name: 'T97 Main Party', leaderLineUid: 't97_leader',
+        memberLineUids: ['t97_member_1', 't97_member_2'], autoInvite: true,
+        autoJoin: true, followMode: 'map_and_position', allowWarp: true, followDistance: 90
+      });
+      assert.strictEqual(create.status, 200, 'T97: valid profile must be created');
+      assert.ok(create.json.profile && /^ptygrp_[a-f0-9]{32}$/.test(create.json.profile.groupId), 'T97: group key must be generated by manager');
+      assert.strictEqual(create.json.profile.state, 'WAITING_TARGET', 'T97: offline bots must be persisted as WAITING_TARGET');
+      const createdGroupId = create.json.profile.groupId;
+      const persistedLeader = fixtureAccountsDb.find(account => account.line_uid === 't97_leader');
+      const persistedMember = fixtureAccountsDb.find(account => account.line_uid === 't97_member_1');
+      assert.strictEqual(persistedLeader.settings.partyRole, 'leader', 'T97: selected Leader role must persist');
+      assert.deepStrictEqual(persistedLeader.settings.partyMemberLineUids, ['t97_member_1', 't97_member_2'], 'T97: selected Member allowlist must persist on Leader');
+      assert.strictEqual(persistedMember.settings.partyLeaderLineUid, 't97_leader', 'T97: Member must point to selected Leader');
+      assert.strictEqual(persistedMember.settings.partyFollowMode, 'map_and_position', 'T97: follow policy must persist on Member');
+      assert.ok(!Object.prototype.hasOwnProperty.call(create.json.accounts[0], 'session_token'), 'T97: picker response must not expose session_token');
+
+      const listed = await requestPartyApi('GET', '/api/party/profiles');
+      assert.strictEqual(listed.status, 200, 'T97: profile list must be readable by owner');
+      assert.ok(listed.json.profiles.some(profile => profile.groupId === createdGroupId), 'T97: generated profile must be listed');
+      assert.ok(listed.json.accounts.every(account => account.partySettings), 'T97: picker must return safe Party settings for edit form');
+      assert.ok(listed.json.accounts.every(account => account.line_uid !== 't97_foreign'), 'T97: picker must be scoped to the owner');
+
+      const invalidForeign = await requestPartyApi('POST', '/api/party/profiles', {
+        ownerId: 'usr_admin', name: 'Invalid foreign target', leaderLineUid: 't97_leader', memberLineUids: ['t97_foreign']
+      });
+      assert.strictEqual(invalidForeign.status, 400, 'T97: cross-owner account must be rejected');
+
+      const edit = await requestPartyApi('POST', '/api/party/profiles', {
+        ownerId: 'usr_admin', groupId: createdGroupId, name: 'T97 Edited Party', leaderLineUid: 't97_leader',
+        memberLineUids: ['t97_member_2'], autoInvite: false, autoJoin: true, followMode: 'same_map', allowWarp: false, followDistance: 60
+      });
+      assert.strictEqual(edit.status, 200, 'T97: existing profile must be editable');
+      assert.strictEqual(edit.json.profile.groupId, createdGroupId, 'T97: editing must preserve generated group key');
+      assert.strictEqual(fixtureAccountsDb.find(account => account.line_uid === 't97_member_1').settings.partyGroupId, 'none', 'T97: removed member must be detached');
+      assert.strictEqual(fixtureAccountsDb.find(account => account.line_uid === 't97_member_2').settings.partyRole, 'member', 'T97: replacement member must be attached');
+
+      const legacy = await requestPartyApi('GET', '/api/party/profiles');
+      const legacyProfile = legacy.json.profiles.find(profile => profile.groupId === 'legacy_t97');
+      assert.strictEqual(legacyProfile.state, 'INVALID_TARGET', 'T97: unresolved legacy line_uid must be visible as INVALID_TARGET');
+      const repaired = await requestPartyApi('POST', '/api/party/profiles', {
+        ownerId: 'usr_admin', groupId: 'legacy_t97', name: 'Repaired T97', leaderLineUid: 't97_legacy_leader', memberLineUids: ['t97_member_1']
+      });
+      assert.strictEqual(repaired.status, 200, 'T97: legacy profile must be repairable by selecting an existing account');
+      assert.strictEqual(repaired.json.profile.groupId, 'legacy_t97', 'T97: repair must preserve legacy group key');
+    } finally {
+      setCustomAccountStorage(null);
+      delete userSessions[testToken];
+      if (typeof apiServer.closeAllConnections === 'function') apiServer.closeAllConnections();
+      await new Promise(resolve => apiServer.close(resolve));
+    }
   }
 
   console.log('✅ T86 Auto Hunt MVP Boss by Map List Engine Tests Passed successfully!');

@@ -2,6 +2,33 @@
 
 > Changelog of actual changes implemented.
 
+### 2026-10-02 - T98: Party account-picker/wizard
+
+- `server.js`: thêm `GET/POST /api/party/profiles`, tự sinh/giữ ổn định group key owner-scoped, validation Leader/Member/conflict, trạng thái offline/legacy và ghi policy tương thích T96.
+- `public/app.js`: thêm Party profile wizard có account picker, preview, hiển thị character/status/level/Party state; card chính không còn ô nhập raw group/member/leader ID.
+- `test.js`: thêm API regression cho create/edit, owner scope, stable group key, `WAITING_TARGET`, legacy `INVALID_TARGET` repair và không lộ session token.
+- Đã kiểm tra: `node --check server.js`, `node --check public/app.js`, `node --check test.js`, `npm test`, `git diff --check` — đạt.
+
+### 2026-10-02 - T97: Thiết kế account-picker/wizard cho Party
+
+- Cập nhật `party-system-design.md`: xác định `partyGroupId` là manager-scoped key và `line_uid` là account identity nội bộ, không phải Party `pid`/`ref` của game.
+- Đặc tả luồng chọn Leader/Member bằng account picker, group key tự sinh, validation cùng owner/conflict, trạng thái offline/invalid và migration cấu hình raw `line_uid`.
+- Đây là contract đầu vào; phần triển khai runtime/UX được ghi ở T98.
+
+### 2026-10-02 - T96: Party automation
+
+- `server.js`: thêm Party snapshot/poll, action adapter cho `xhrpg_party.php`, auto-invite/auto-join có xác minh + cooldown/dedupe, map/position follow có blocker và không ghi đè Team sync.
+- `public/app.js`: thêm cấu hình Party automation, group/role/target/follow policy và hiển thị trạng thái Party live từ API.
+- `test.js`: thêm contract/safety regression cho invite, join, unknown invite, map follow, position follow và Event blocker.
+- Đã QC độc lập: contract đối chiếu `xhrpg_canvas.js`; `node --check server.js`, `node --check public/app.js`, `node --check test.js`, `npm test`, `git diff --check` — đạt.
+
+### 2026-10-02 - T95: Thiết kế Party Auto-invite / Auto-join / Follow
+
+- Tạo `party-system-design.md` mô tả contract Party đã xác minh trong `xhrpg_canvas.js`, gồm `xhrpg_party.php`, poll fields `pty/*`, Party chat và Party Dungeon `xhrpg_pdun.php`.
+- Đặc tả cấu hình đề xuất, state machine, target resolution, cooldown/idempotency, movement priority, API Dashboard và test/regression plan cho Auto-invite/Auto-join/Follow.
+- Ghi rõ Party automation hiện chưa được triển khai trong `server.js`, `public/app.js` hoặc `test.js`; client game/proxy chỉ là nền tảng hiện có.
+- Đã kiểm tra: cấu trúc/anchor tài liệu, `node --check server.js`, `node --check public/app.js`, `node --check test.js`, `npm test`, `git diff --check` — đạt.
+
 ### 2026-09-19 - Sửa test persistence suppression Check-in T84
 
 - `test.js`: test restart T84 nay đọc lại account `t84_fail_bot` từ custom in-memory storage sau khi join fail bị suppress, xác nhận key đã persist rồi mới khởi tạo `BotInstance` mới.
@@ -1841,3 +1868,23 @@
 - `public/app.js`: đổi nhãn và tooltip nút Check-in để hiển thị rõ phạm vi GW/CW/BR/FW theo giờ event.
 - `test.js`: thêm kiểm thử boundary time window, queue BR→FW, snapshot giữ qua event trung gian, restore cuối và UI scope.
 - Đã test: `node --check server.js`, `node --check public/app.js`, `node --check test.js`, `git diff --check`, `npm test` — đạt.
+## 2026-09-29 - T92 Chờ tải Boss 3 giây sau khi tới map
+
+- `server.js`: thêm mốc `mvpMapArrivedAt`; thời gian chờ 3 giây và timeout map được tính từ lúc xác nhận đã tới đúng map, không tính thời gian warp.
+- `server.js`: reset mốc tới map khi bắt đầu/hủy chu kỳ, map thiếu level, warp thất bại, chuyển map và hoàn thành chu kỳ.
+- `test.js`: thêm regression test payload Boss rỗng trong 3 giây đầu không làm bot bỏ qua map; cập nhật fixture chuyển map cũ theo mốc tới map mới.
+- Đã kiểm tra: `node --check server.js`, `node --check public/app.js`, `node --check test.js`, `git diff --check`, `npm test` — đạt.
+
+## 2026-09-29 - T93 Sửa săn Boss Event Cây Thế Giới
+
+- `server.js`: thay cơ chế đứng cố định ở tâm bằng chọn Boss sống từ `bosses[]`, giữ target ổn định, di chuyển/kiting theo tọa độ Boss và khóa vị trí khi vào tầm đánh.
+- `server.js`: Event Boss hoạt động khi `bossHuntMode` đang tắt; ngăn săn MVP thường ghi đè điều khiển Event và reset target khi thoát Event.
+- `test.js`: thêm integration regression qua `pollGame()` cho tiếp cận Boss, khóa vị trí đánh và quay về tâm khi Boss biến mất.
+- Đã kiểm tra: `node --check server.js`, `node --check public/app.js`, `node --check test.js`, `git diff --check`, `npm test` — đạt.
+
+## 2026-09-29 - T94 Sửa tự động vào Boss Guild
+
+- `server.js`: thêm scheduler `maybeAutoEnterGuildDungeon()` chạy trong toàn bộ phút 30, không mất lượt khi bị Event/restore chặn và retry tối đa 3 lần, cooldown 10 giây.
+- `accounts.json`: bật `autoEnterGdunAt30` cho tài khoản hiện tại.
+- `test.js`: kiểm thử ngoài cửa sổ, cooldown, retry, chống trùng, Event blocker rồi vào lại trong cùng phút và toggle tắt.
+- Đã kiểm tra JSON, `node --check server.js`, `node --check public/app.js`, `node --check test.js`, `git diff --check`, `npm test` — đạt.

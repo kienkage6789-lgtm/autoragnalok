@@ -1193,6 +1193,174 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   window.fetchAccounts = fetchAccounts;
 
+  let partyWizardData = null;
+  function getPartyWizardModal() {
+    let modal = document.getElementById('party-profile-wizard');
+    if (modal) return modal;
+    modal = document.createElement('div');
+    modal.id = 'party-profile-wizard';
+    modal.style.cssText = 'display:none; position:fixed; inset:0; z-index:10050; background:rgba(2,6,23,.82); align-items:center; justify-content:center; padding:18px;';
+    modal.innerHTML = `<div style="width:min(680px,96vw); max-height:90vh; overflow:auto; background:#101827; border:1px solid rgba(167,139,250,.35); border-radius:14px; padding:18px; color:#e2e8f0; box-shadow:0 25px 70px #0009;">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px;"><h3 style="margin:0;color:#c4b5fd;">👥 Cấu hình Party</h3><button type="button" data-party-close style="background:transparent;border:0;color:#cbd5e1;font-size:1.35rem;cursor:pointer;">×</button></div>
+      <div id="party-wizard-message" style="font-size:.82rem;color:#fbbf24;margin-bottom:10px;"></div>
+      <label style="display:block;font-size:.8rem;margin:10px 0 4px;">Tên Party profile</label><input id="party-wizard-name" maxlength="64" style="box-sizing:border-box;width:100%;padding:9px;border-radius:7px;background:#0b1220;border:1px solid #334155;color:white;">
+      <label style="display:block;font-size:.8rem;margin:10px 0 4px;">Profile cần sửa (có thể để tạo mới)</label><select id="party-wizard-existing" style="box-sizing:border-box;width:100%;padding:9px;border-radius:7px;background:#0b1220;border:1px solid #334155;color:white;"><option value="">＋ Tạo Party profile mới</option></select>
+      <label style="display:block;font-size:.8rem;margin:10px 0 4px;">👑 Leader</label><select id="party-wizard-leader" style="box-sizing:border-box;width:100%;padding:9px;border-radius:7px;background:#0b1220;border:1px solid #334155;color:white;"></select>
+      <label style="display:block;font-size:.8rem;margin:12px 0 5px;">👥 Members (chọn 1–4 account cùng owner)</label><div id="party-wizard-members" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:6px;"></div>
+      <div style="display:flex;flex-wrap:wrap;gap:14px;margin-top:14px;font-size:.82rem;"><label><input id="party-wizard-auto-invite" type="checkbox"> Auto-invite</label><label><input id="party-wizard-auto-join" type="checkbox"> Auto-join</label><label><input id="party-wizard-warp" type="checkbox"> Cho phép warp theo Leader</label></div>
+      <label style="display:block;font-size:.8rem;margin:10px 0 4px;">Follow</label><select id="party-wizard-follow" style="padding:8px;border-radius:7px;background:#0b1220;border:1px solid #334155;color:white;"><option value="off">Tắt</option><option value="same_map">Theo map</option><option value="map_and_position">Theo map + vị trí</option></select>
+      <label style="display:block;font-size:.8rem;margin:10px 0 4px;">Khoảng cách follow</label><input id="party-wizard-distance" type="number" min="10" max="500" step="10" value="60" style="width:100px;padding:7px;border-radius:7px;background:#0b1220;border:1px solid #334155;color:white;">
+      <div id="party-wizard-preview" style="margin-top:14px;padding:9px;border:1px solid rgba(96,165,250,.25);border-radius:8px;background:rgba(30,64,175,.12);font-size:.78rem;color:#bfdbfe;white-space:pre-line;"></div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:18px;"><button type="button" data-party-close style="padding:8px 13px;border-radius:7px;border:1px solid #475569;background:#1e293b;color:white;cursor:pointer;">Hủy</button><button type="button" id="party-wizard-save" style="padding:8px 15px;border-radius:7px;border:1px solid #7c3aed;background:#6d28d9;color:white;font-weight:700;cursor:pointer;">Lưu profile</button></div>
+    </div>`;
+    document.body.appendChild(modal);
+    modal.querySelectorAll('[data-party-close]').forEach(button => button.addEventListener('click', () => { modal.style.display = 'none'; }));
+    modal.addEventListener('click', event => { if (event.target === modal) modal.style.display = 'none'; });
+    modal.querySelector('#party-wizard-existing').addEventListener('change', () => populatePartyWizardProfile(modal.querySelector('#party-wizard-existing').value));
+    modal.querySelector('#party-wizard-name').addEventListener('input', updatePartyWizardPreview);
+    modal.querySelector('#party-wizard-leader').addEventListener('change', () => {
+      const selectedUids = [...modal.querySelectorAll('.party-wizard-member:checked')].map(input => input.value);
+      renderPartyWizardMembers(selectedUids);
+      updatePartyWizardPreview();
+    });
+    modal.querySelector('#party-wizard-members').addEventListener('change', updatePartyWizardPreview);
+    modal.querySelector('#party-wizard-save').addEventListener('click', savePartyWizardProfile);
+    return modal;
+  }
+
+  function populatePartyWizardProfile(groupId) {
+    const modal = document.getElementById('party-profile-wizard');
+    if (!modal || !partyWizardData) return;
+    const profile = partyWizardData.profiles.find(item => item.groupId === groupId);
+    if (!profile) {
+      modal.querySelector('#party-wizard-name').value = '';
+      modal.querySelector('#party-wizard-leader').value = partyWizardData.preferredLeaderUid
+        || (partyWizardData.accounts[0] && partyWizardData.accounts[0].line_uid) || '';
+      modal.querySelector('#party-wizard-auto-invite').checked = true;
+      modal.querySelector('#party-wizard-auto-join').checked = true;
+      modal.querySelector('#party-wizard-follow').value = 'off';
+      modal.querySelector('#party-wizard-warp').checked = false;
+      renderPartyWizardMembers();
+      modal.querySelector('#party-wizard-message').textContent = '';
+      return;
+    }
+    modal.querySelector('#party-wizard-name').value = profile.name || '';
+    modal.querySelector('#party-wizard-leader').value = profile.leaderLineUid || '';
+    const savedAccount = partyWizardData.accounts.find(account => account.line_uid === profile.leaderLineUid)
+      || (window.lastFetchedAccounts || []).find(account => account.line_uid === profile.leaderLineUid);
+    const settings = savedAccount && (savedAccount.partySettings || savedAccount.settings) || {};
+    modal.querySelector('#party-wizard-auto-invite').checked = settings.partyAutoInvite === true;
+    modal.querySelector('#party-wizard-auto-join').checked = profile.memberLineUids.some(uid => {
+      const member = partyWizardData.accounts.find(account => account.line_uid === uid)
+        || (window.lastFetchedAccounts || []).find(account => account.line_uid === uid);
+      const memberSettings = member && (member.partySettings || member.settings);
+      return memberSettings && memberSettings.partyAutoJoin === true;
+    });
+    const memberSettingsAccount = partyWizardData.accounts.find(account => account.line_uid === profile.memberLineUids[0])
+      || (window.lastFetchedAccounts || []).find(account => account.line_uid === profile.memberLineUids[0]);
+    const memberSettings = memberSettingsAccount && (memberSettingsAccount.partySettings || memberSettingsAccount.settings) || {};
+    modal.querySelector('#party-wizard-follow').value = memberSettings.partyFollowMode || 'off';
+    modal.querySelector('#party-wizard-warp').checked = memberSettings.partyAllowWarp === true;
+    modal.querySelector('#party-wizard-distance').value = memberSettings.partyFollowDistance || 60;
+    renderPartyWizardMembers(profile.memberLineUids);
+    modal.querySelector('#party-wizard-message').textContent = profile.state === 'INVALID_TARGET'
+      ? 'Cấu hình cũ có account không còn tồn tại hoặc thiếu Leader. Chọn lại account để sửa.'
+      : profile.state === 'CONFLICT' ? 'Profile cũ có nhiều Leader hoặc xung đột nhóm. Chọn lại account để sửa.'
+      : profile.state === 'WAITING_TARGET' ? 'Có bot offline hoặc chưa nhận diện nhân vật; profile vẫn lưu được và sẽ chờ bot online.' : '';
+    updatePartyWizardPreview();
+  }
+
+  function renderPartyWizardMembers(selectedUids = []) {
+    const modal = document.getElementById('party-profile-wizard');
+    if (!modal || !partyWizardData) return;
+    const holder = modal.querySelector('#party-wizard-members');
+    const leaderUid = modal.querySelector('#party-wizard-leader').value;
+    holder.replaceChildren();
+    partyWizardData.accounts.filter(account => account.line_uid !== leaderUid).forEach(account => {
+      const label = document.createElement('label');
+      label.style.cssText = 'display:flex;align-items:center;gap:7px;padding:7px;border:1px solid #334155;border-radius:7px;background:#0b1220;font-size:.78rem;';
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox'; checkbox.value = account.line_uid; checkbox.className = 'party-wizard-member';
+      checkbox.checked = selectedUids.includes(account.line_uid);
+      const status = account.status === 'running' && account.characterName ? `Online · ${account.characterName}${account.level ? ` · Lv.${account.level}` : ''}` : 'Chờ bot/nhân vật';
+      const partyState = account.partyState && account.partyState !== 'DISABLED' ? ` · Party: ${account.partyState}` : '';
+      const text = document.createElement('span'); text.textContent = `${account.name} — ${status}${partyState}`;
+      label.append(checkbox, text); holder.appendChild(label);
+    });
+    updatePartyWizardPreview();
+  }
+
+  function updatePartyWizardPreview() {
+    const modal = document.getElementById('party-profile-wizard');
+    if (!modal || !partyWizardData) return;
+    const preview = modal.querySelector('#party-wizard-preview');
+    const leader = modal.querySelector('#party-wizard-leader');
+    const members = [...modal.querySelectorAll('.party-wizard-member:checked')]
+      .map(input => partyWizardData.accounts.find(account => account.line_uid === input.value))
+      .filter(Boolean)
+      .map(account => account.name);
+    const leaderText = leader && leader.selectedOptions[0] ? leader.selectedOptions[0].textContent : 'Chưa chọn';
+    preview.textContent = `Preview: ${modal.querySelector('#party-wizard-name').value.trim() || 'Party chưa đặt tên'}\nLeader: ${leaderText}\nMembers: ${members.length ? members.join(', ') : 'Chưa chọn'}\nGroup key: hệ thống tự sinh · owner-scoped`;
+  }
+
+  window.openPartyWizard = async function(ownerId, groupId = '', preferredLeaderUid = '') {
+    const modal = getPartyWizardModal();
+    const message = modal.querySelector('#party-wizard-message');
+    message.textContent = 'Đang tải account cùng owner…';
+    modal.style.display = 'flex';
+    try {
+      const query = new URLSearchParams({ ownerId: ownerId || (currentUser && currentUser.id) || '' });
+      const response = await fetch(`/api/party/profiles?${query}`);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Không tải được danh sách account');
+      partyWizardData = { ...data, preferredLeaderUid };
+      const profileSelect = modal.querySelector('#party-wizard-existing');
+      profileSelect.replaceChildren(new Option('＋ Tạo Party profile mới', ''));
+      data.profiles.forEach(profile => profileSelect.add(new Option(`${profile.name} · ${profile.state}${profile.legacy ? ' · cấu hình cũ' : ''}`, profile.groupId)));
+      const leaderSelect = modal.querySelector('#party-wizard-leader');
+      leaderSelect.replaceChildren();
+      data.accounts.forEach(account => {
+        const state = account.status === 'running' && account.characterName ? `${account.characterName}${account.level ? ` · Lv.${account.level}` : ''}` : 'Chờ bot/nhân vật';
+        const partyState = account.partyState && account.partyState !== 'DISABLED' ? ` · Party: ${account.partyState}` : '';
+        leaderSelect.add(new Option(`${account.name} — ${state}${partyState}`, account.line_uid));
+      });
+      profileSelect.value = data.profiles.some(profile => profile.groupId === groupId) ? groupId : '';
+      populatePartyWizardProfile(profileSelect.value);
+    } catch (error) {
+      message.textContent = error.message;
+    }
+  };
+
+  async function savePartyWizardProfile() {
+    const modal = document.getElementById('party-profile-wizard');
+    if (!partyWizardData) return;
+    const members = [...modal.querySelectorAll('.party-wizard-member:checked')].map(input => input.value);
+    const payload = {
+      ownerId: partyWizardData.ownerId,
+      groupId: modal.querySelector('#party-wizard-existing').value || undefined,
+      name: modal.querySelector('#party-wizard-name').value.trim(),
+      leaderLineUid: modal.querySelector('#party-wizard-leader').value,
+      memberLineUids: members,
+      autoInvite: modal.querySelector('#party-wizard-auto-invite').checked,
+      autoJoin: modal.querySelector('#party-wizard-auto-join').checked,
+      followMode: modal.querySelector('#party-wizard-follow').value,
+      allowWarp: modal.querySelector('#party-wizard-warp').checked,
+      followDistance: Number(modal.querySelector('#party-wizard-distance').value)
+    };
+    const message = modal.querySelector('#party-wizard-message');
+    message.textContent = 'Đang lưu…';
+    try {
+      const response = await fetch('/api/party/profiles', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Không lưu được Party profile');
+      modal.style.display = 'none';
+      if (typeof showToast === 'function') showToast('success', 'Đã lưu Party profile');
+      await fetchAccounts();
+    } catch (error) {
+      message.textContent = error.message;
+    }
+  }
+
   window.currentTeamFilter = 'all';
   window.setTeamFilter = function(val) {
     window.currentTeamFilter = val;
@@ -1972,6 +2140,30 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
             <div style="grid-column: span 2; margin-top: 4px; display: flex; justify-content: flex-end;">
               <button type="button" id="btn-sync-team-${acc.line_uid}" onclick="syncTeamSetup('${acc.line_uid}')" title="Đồng bộ cấu hình của Leader sang các thành viên cùng Team (không đồng bộ cài đặt tab Chợ)" style="display: none; background: rgba(16,185,129,0.2); border: 1px solid rgba(16,185,129,0.4); color: #34d399; border-radius: 6px; padding: 5px 12px; font-size: 0.82rem; cursor: pointer; font-weight: 600; white-space: nowrap; transition: all 0.2s;" onmouseover="this.style.background='rgba(16,185,129,0.3)'" onmouseout="this.style.background='rgba(16,185,129,0.2)'">🔄 Đồng bộ cài đặt Team</button>
+            </div>
+          </div>
+
+          <div class="settings-group" style="border-top: 1px dashed rgba(165,180,252,0.18); padding-top: 10px; margin-top: 10px;">
+            <div style="grid-column: span 2; display:flex; align-items:center; justify-content:space-between; gap:8px;">
+              <span style="font-weight:700; color:#c4b5fd;">👥 Party automation</span>
+              <button type="button" onclick="openPartyWizard('${acc.userId || ''}', '${acc.settings.partyGroupId && acc.settings.partyGroupId !== 'none' ? acc.settings.partyGroupId : ''}', '${acc.line_uid}')" style="background:rgba(124,58,237,.22);border:1px solid rgba(167,139,250,.55);color:#ddd6fe;border-radius:6px;padding:4px 9px;font-size:.74rem;cursor:pointer;font-weight:700;">🧙 Mở Party wizard</button>
+              <span id="party-status-${acc.line_uid}" style="font-size:0.72rem; color:#94a3b8;">Tắt</span>
+            </div>
+            <div class="input-control">
+              <label>Profile Party</label>
+              <div id="party-profile-summary-${acc.line_uid}" style="min-height:29px;display:flex;align-items:center;color:#cbd5e1;font-size:.78rem;">Chưa tham gia profile</div>
+            </div>
+            <div class="input-control">
+              <label>Vai trò</label>
+              <div id="party-role-summary-${acc.line_uid}" style="min-height:29px;display:flex;align-items:center;color:#cbd5e1;font-size:.78rem;">🚫 Không tham gia</div>
+            </div>
+            <div class="toggle-control">
+              <span class="toggle-label">📨 Auto-invite / 🙋 Auto-join</span>
+              <span style="font-size:.72rem;color:#94a3b8;">Cấu hình trong wizard</span>
+            </div>
+            <div class="toggle-control">
+              <span class="toggle-label">🔐 Identity Party</span>
+              <span style="font-size:.72rem;color:#94a3b8;">Group key do hệ thống tự sinh</span>
             </div>
           </div>
 
@@ -3131,6 +3323,30 @@ document.addEventListener('DOMContentLoaded', () => {
     if (btnSyncTeam) {
       const isLeaderWithTeam = acc.settings.teamRole === 'leader' && (acc.settings.teamId || 'none') !== 'none';
       btnSyncTeam.style.display = isLeaderWithTeam ? 'block' : 'none';
+    }
+
+    // Party profile and live state. Group/member identity is managed by the
+    // account picker; the card intentionally does not expose raw IDs.
+    const partyGroupId = String(acc.settings.partyGroupId || 'none');
+    const partyProfileSummary = document.getElementById(`party-profile-summary-${acc.line_uid}`);
+    if (partyProfileSummary) {
+      partyProfileSummary.textContent = partyGroupId === 'none'
+        ? 'Chưa tham gia profile'
+        : `👥 ${acc.settings.partyProfileName || 'Party profile'} · ${partyGroupId.slice(-8)}`;
+    }
+    const partyRoleSummary = document.getElementById(`party-role-summary-${acc.line_uid}`);
+    if (partyRoleSummary) {
+      partyRoleSummary.textContent = acc.settings.partyRole === 'leader'
+        ? '👑 Leader'
+        : acc.settings.partyRole === 'member' ? '👥 Member' : '🚫 Không tham gia';
+    }
+    const partyStatus = document.getElementById(`party-status-${acc.line_uid}`);
+    if (partyStatus) {
+      const pty = acc.party || {};
+      const snap = pty.snapshot;
+      partyStatus.textContent = snap ? `${pty.state || 'IN_PARTY'} · ${snap.n || 0}/${snap.max || 0}` : (pty.state || 'DISABLED');
+      partyStatus.title = pty.reason || pty.error || '';
+      partyStatus.style.color = pty.state === 'ERROR' ? '#fca5a5' : (snap ? '#86efac' : '#94a3b8');
     }
 
 

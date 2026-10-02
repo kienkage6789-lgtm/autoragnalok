@@ -3,6 +3,89 @@
 > Work Breakdown Structure. Update task states immediately upon changes.
 > Statuses: todo | doing | blocked | review | done
 
+### [x] T98 - Implement Party account-picker/wizard
+- Mô tả: Triển khai luồng tạo/sửa Party profile bằng account picker, tự sinh group key, validation owner/conflict, migration cấu hình legacy và UI wizard cho Auto-invite/Auto-join/Follow.
+- File liên quan: `server.js`, `public/app.js`, `test.js`, `party-system-design.md`, `.agent/TASKS.md`, `.agent/DECISIONS.md`, `.agent/CHANGELOG.md`
+- Acceptance criteria:
+  - [x] UI chọn Leader/Member theo account name, character, status, level và Party state; không còn raw group/member ID trong luồng chính.
+  - [x] Backend tự sinh/giữ ổn định `partyGroupId`, scoped theo owner và ghi policy tương thích T96.
+  - [x] Validation chặn account khác owner, duplicate Leader/Member, conflict group và hỗ trợ repair target legacy bị thiếu.
+  - [x] Offline/character chưa resolve được lưu ở `WAITING_TARGET`; profile hỏng hiển thị `INVALID_TARGET`/`CONFLICT`.
+  - [x] Không lộ `session_token` hoặc opaque Party `pid/ref/id` trong picker response.
+  - [x] `node --check` cho ba JS, `npm test`, `git diff --check` đạt.
+- Phụ thuộc: T96, T97
+- Trạng thái: done
+
+### [x] T97 - Thiết kế account-picker/wizard cho Party
+- Mô tả: Bổ sung tài liệu UX và persistence để người dùng cấu hình Party bằng cách chọn account/character thay vì tự tìm `partyGroupId` hoặc nhập raw `Member line_uid`.
+- File liên quan: `party-system-design.md`, `.agent/TASKS.md`, `.agent/DECISIONS.md`, `.agent/CHANGELOG.md`
+- Acceptance criteria:
+  - [x] Phân biệt rõ `line_uid` nội bộ manager với `pid`/`ref`/invitation `id` của game.
+  - [x] Đặc tả account picker, Party profile, group key tự sinh, validation cùng owner và conflict handling.
+  - [x] Đặc tả trạng thái offline/character chưa resolve, migration raw line_uid và runtime mapping tới opaque Party ref.
+  - [x] Chưa sửa code runtime; tài liệu là đầu vào cho bước triển khai UX tiếp theo.
+- Phụ thuộc: T96
+- Trạng thái: done
+
+### [x] T96 - Party Auto-invite / Auto-join / Follow
+- Mô tả: Implement backend BotInstance, API manager, Dashboard và test Party theo contract đã đọc trong `xhrpg_canvas.js` và thiết kế T95.
+- File liên quan: `server.js`, `public/app.js`, `test.js`, `party-system-design.md`, `.agent/TASKS.md`, `.agent/DECISIONS.md`, `.agent/CHANGELOG.md`
+- Acceptance criteria:
+  - [x] Poll/snapshot Party, actions đã xác minh, auto-invite/join/follow với dedupe/cooldown.
+  - [x] Follow tôn trọng Event, restore, Guild Dungeon, Party Dungeon và automation ưu tiên cao hơn.
+  - [x] Settings mặc định tắt, lưu qua route hiện có; Dashboard cấu hình và xem trạng thái.
+  - [x] Tests action contract, transitions, cooldown/dedupe, invite/join/follow, blockers.
+  - [x] `node --check` cho ba JS, `npm test`, `git diff --check` đạt.
+- Phụ thuộc: T95
+- Trạng thái: done
+
+### [x] T95 - Thiết kế Party Auto-invite / Auto-join / Follow
+- Mô tả: Xây dựng tài liệu contract và kiến trúc triển khai cho hệ thống tự động mời vào Party, tự động tham gia Party và follow Party dựa trên Party API/poll contract mới của game.
+- File liên quan: `party-system-design.md`, `xhrpg_canvas.js`, `server.js`, `public/app.js`, `test.js`, `.agent/TASKS.md`, `.agent/DECISIONS.md`, `.agent/CHANGELOG.md`
+- Acceptance criteria:
+  - [x] Tài liệu ghi rõ contract đã xác minh của `xhrpg_party.php`, poll fields và Party Dungeon `xhrpg_pdun.php`.
+  - [x] Có state machine, policy ưu tiên, cooldown/idempotency, giới hạn an toàn và hành vi khi Party đầy/rời/kick/offline.
+  - [x] Có thiết kế tích hợp vào `BotInstance`, API dashboard, cấu hình tài khoản và test/regression plan.
+  - [x] Phân biệt rõ phần đã tồn tại trong client game với phần backend manager chưa triển khai.
+- Phụ thuộc: Không
+- Trạng thái: done
+
+### [x] T94 - Làm chắc scheduler tự vào Boss Guild phút 30
+- Mô tả: Sửa auto-entry Guild Dungeon đang chỉ thử trong 15 giây và có thể mất cả lượt khi bị Event chặn; dùng toàn bộ phút 30, không tiêu thụ lượt khi chưa đủ điều kiện và retry hữu hạn khi request thất bại.
+- File liên quan: `server.js`, `test.js`, `accounts.json`, `.agent/TASKS.md`, `.agent/DECISIONS.md`, `.agent/CHANGELOG.md`
+- Acceptance criteria:
+  - [x] Toggle bật thì bot có thể vào Guild Dungeon ở bất kỳ thời điểm nào trong phút 30.
+  - [x] Nếu đang Event/restore/Guild Dungeon thì không gửi request và không đánh dấu đã chạy giờ đó.
+  - [x] Request vào thất bại được retry tối đa 3 lần, cách nhau ít nhất 10 giây; thành công chỉ chạy một lần mỗi giờ.
+  - [x] Toggle tắt hoặc ngoài phút 30 không tự vào.
+  - [x] Có test scheduler và toàn bộ kiểm tra bắt buộc đạt.
+- Phụ thuộc: T82
+- Trạng thái: done
+
+### [x] T93 - Săn Boss trong Event Cây Thế Giới
+- Mô tả: Sửa luồng Invasion/Event Cây Thế Giới đang chỉ đứng ở tâm map nhưng không khóa Boss; bot phải chọn Boss sống từ `bosses[]`, di chuyển vào tầm đánh và giữ mục tiêu ổn định, kể cả khi săn Boss thường đang tắt.
+- File liên quan: `server.js`, `test.js`, `.agent/TASKS.md`, `.agent/DECISIONS.md`, `.agent/CHANGELOG.md`
+- Acceptance criteria:
+  - [x] Event Invasion đang ACTIVE tự chọn Boss sống và gửi tọa độ di chuyển theo Boss.
+  - [x] Chức năng không phụ thuộc `bossHuntMode`; săn Boss thường không ghi đè điều khiển Event.
+  - [x] Khi chưa có Boss, bot vẫn chờ an toàn tại tâm map; khi Boss xuất hiện sẽ chuyển sang mục tiêu ngay.
+  - [x] Target Event được reset khi Boss chết, đổi Boss hoặc thoát Event.
+  - [x] Có regression test cho Event ACTIVE + bossHuntMode off và toàn bộ kiểm tra bắt buộc đạt.
+- Phụ thuộc: T83
+- Trạng thái: done
+
+### [x] T92 - Chờ 3 giây sau khi tới map trước khi kiểm tra Boss
+- Mô tả: Sửa chu kỳ săn Boss theo danh sách map để thời gian chờ 3 giây được tính từ lúc bot xác nhận đã tới map mục tiêu, không tính thời gian đang warp; tránh bỏ qua map do payload Boss chưa kịp tải.
+- File liên quan: `server.js`, `test.js`, `.agent/TASKS.md`, `.agent/DECISIONS.md`, `.agent/CHANGELOG.md`
+- Acceptance criteria:
+  - [x] Mỗi lần tới map mới, bot ghi nhận mốc đến map riêng và chờ đủ 3 giây trước khi tăng bộ đếm xác nhận map sạch.
+  - [x] Thời gian warp không được tính vào 3 giây chờ tải Boss.
+  - [x] Mốc đến map được reset khi bắt đầu chu kỳ, bỏ qua hoặc chuyển sang map kế tiếp.
+  - [x] Có regression test chứng minh payload Boss rỗng trong 3 giây đầu không làm bot nhảy map.
+  - [x] Các kiểm tra syntax, `git diff --check` và `npm test` đạt.
+- Phụ thuộc: T86
+- Trạng thái: done
+
 ### [x] T90 - Tích hợp Battle Royale và Guild Flag War
 - Mô tả: Bổ sung backend, lifecycle Event, API và giao diện cho Battle Royale (`br`) và Guild Flag War (`fw`) theo đúng payload/endpoints trong `xhrpg_canvas.js`, không ảnh hưởng inv/GW/CW hoặc check-in GW/CW độc lập.
 - File liên quan: `server.js`, `public/app.js`, `test.js`, `.agent/TASKS.md`, `.agent/DECISIONS.md`, `.agent/CHANGELOG.md`

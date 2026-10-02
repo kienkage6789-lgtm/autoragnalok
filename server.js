@@ -12,6 +12,7 @@ const https = require('https');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const MVP_MAP_SETTLE_MS = 3000;
 app.set('trust proxy', 1); // Trust first proxy (Render, Heroku, Nginx, Cloudflare, etc.)
 
 
@@ -2100,6 +2101,7 @@ class BotInstance {
     this.mvpCycleMapIndex = 0;
     this.mvpCycleMapStayCount = 0;
     this.mvpConfirmClearCount = 0; // Số polls liên tiếp xác nhận map đã sạch boss
+    this.mvpMapArrivedAt = 0; // Chỉ bắt đầu kiểm tra map sạch sau khi đã ở map mục tiêu đủ 3 giây
     this.mvpCycleOriginalMap = null;
     this.mvpCycleOriginalAutoMap = null;
     // Member follow-state: updateMvpCycleStatus() chỉ chạy trên Leader/solo,
@@ -2110,6 +2112,9 @@ class BotInstance {
     this.mvpMemberTransitCycle = null;
     this.lastMvpCycleCheckHour = -1;
     this.lastGdunAutoEnterHour = -1;
+    this.gdunAutoEnterAttemptHour = -1;
+    this.gdunAutoEnterAttemptCount = 0;
+    this.lastGdunAutoEnterAttemptAt = 0;
     this.lootLogs = [];
     this.mvpHuntLog = []; // Nhật ký sự kiện săn Boss MVP
     this.currentMvpBossInfo = null; // Thông tin Boss đang được nhắm { id, name, emoji, lv, mapId, startTs }
@@ -2162,6 +2167,8 @@ class BotInstance {
     this.warCheckinLevelLoggedKeys = {};
     this.inEventMode = false;
     this.currentEventKind = this.eventSnapshot ? (this.eventSnapshot.kind || null) : null;
+    this.eventBossTargetId = null;
+    this._lastEventBossStatusLogAt = 0;
     this.eventOriginalMap = this.eventSnapshot ? this.eventSnapshot.map : null;
     this.eventOriginalAutoMap = this.eventSnapshot ? this.eventSnapshot.autoMap : null;
     this.eventOriginalAutoZone = this.eventSnapshot ? this.eventSnapshot.autoZone : null;
@@ -2176,6 +2183,25 @@ class BotInstance {
     this.lastBr = null;
     this.lastFw = null;
     this.others = [];
+    this.partySnapshot = null;
+    this.partyPoll = { invite: null, request: null, dungeonCall: [], unread: 0 };
+    this.partyLastSeenAt = 0;
+    this.partyState = 'DISABLED';
+    this.partyStateReason = '';
+    this.partyPendingAction = null;
+    this.partyPendingTarget = null;
+    this.partyLastActionAt = 0;
+    this.partyLastAction = null;
+    this.partyCooldownUntil = 0;
+    this.partyError = null;
+    this.partyLastFollowAt = 0;
+    this.partyFollowTarget = null;
+    this.partyInviteTimes = new Map();
+    this.partyRequestTimes = new Map();
+    this.partyResponseIds = new Set();
+    this.partyActionInFlight = false;
+    this.partyAutomationRunning = false;
+    this.lastPdun = null;
 
     // Concurrency, Scheduler & Telemetry
     this.pollGeneration = 0;
@@ -2378,6 +2404,22 @@ class BotInstance {
       bypassHomeWarp: false,
       teamRole: 'none',
       teamId: 'none',
+      partyAutoInvite: false,
+      partyAutoJoin: false,
+      partyFollowMode: 'off',
+      partyGroupId: 'none',
+      partyRole: 'none',
+      partyLeaderLineUid: '',
+      partyMemberLineUids: [],
+      partyAllowWarp: false,
+      partyFollowDistance: 60,
+      partyInvitePolicy: 'group_only',
+      partyAcceptUnknownInvites: false,
+      partyPauseDuringEvents: true,
+      partyPauseDuringGuildDungeon: true,
+      partyPauseDuringPartyDungeon: true,
+      partyRequestCooldownMs: 15000,
+      partyInviteCooldownMs: 60000,
       autoMarketBuy: false,
       marketMaxPrice: 10000,
       marketExactPrice: false,
@@ -2457,6 +2499,18 @@ class BotInstance {
   updateSettings(newSettings) {
     const oldBossHuntMode = this.settings.bossHuntMode;
     const oldBossHuntEnabled = this.settings.bossHuntEnabled;
+
+    if (newSettings.partyRole !== undefined && !['none', 'leader', 'member'].includes(newSettings.partyRole)) newSettings.partyRole = 'none';
+    if (newSettings.partyFollowMode !== undefined && !['off', 'same_map', 'map_and_position'].includes(newSettings.partyFollowMode)) newSettings.partyFollowMode = 'off';
+    if (newSettings.partyGroupId !== undefined) newSettings.partyGroupId = String(newSettings.partyGroupId || 'none').trim().slice(0, 64) || 'none';
+    if (newSettings.partyLeaderLineUid !== undefined) newSettings.partyLeaderLineUid = String(newSettings.partyLeaderLineUid || '').trim().slice(0, 128);
+    if (newSettings.partyMemberLineUids !== undefined) {
+      const list = Array.isArray(newSettings.partyMemberLineUids) ? newSettings.partyMemberLineUids : String(newSettings.partyMemberLineUids || '').split(',');
+      newSettings.partyMemberLineUids = [...new Set(list.map(v => String(v || '').trim()).filter(Boolean))].slice(0, 20);
+    }
+    if (newSettings.partyFollowDistance !== undefined) newSettings.partyFollowDistance = Math.max(10, Math.min(500, Number(newSettings.partyFollowDistance) || 60));
+    if (newSettings.partyInviteCooldownMs !== undefined) newSettings.partyInviteCooldownMs = Math.max(15000, Math.min(3600000, Number(newSettings.partyInviteCooldownMs) || 60000));
+    if (newSettings.partyRequestCooldownMs !== undefined) newSettings.partyRequestCooldownMs = Math.max(5000, Math.min(600000, Number(newSettings.partyRequestCooldownMs) || 15000));
 
     // Đồng bộ 2 chiều bossHuntPriority <-> mvpPriorityMode
     if (newSettings.bossHuntPriority !== undefined) {
@@ -2544,6 +2598,7 @@ class BotInstance {
         this.mvpCycleMapStayCount = 0;
         this.mvpTransitCount = 0;
         this.mvpConfirmClearCount = 0;
+        this.mvpMapArrivedAt = 0;
         this.bosses = null;
         this._bossNameCache = {};
         this._lastBossStatusLogAt = 0;
@@ -2563,6 +2618,223 @@ class BotInstance {
         }
       }
     }
+  }
+
+  setPartyState(state, reason = '') {
+    if (this.partyState !== state || this.partyStateReason !== reason) {
+      this.partyState = state;
+      this.partyStateReason = reason;
+      this.addLog('SYSTEM', `[Party] ${state}${reason ? `: ${reason}` : ''}`);
+    }
+  }
+
+  updatePartyPoll(data = {}) {
+    this.partySnapshot = data.pty && typeof data.pty === 'object' ? {
+      pid: Number(data.pty.pid) || 0,
+      n: Number(data.pty.n) || 0,
+      max: Number(data.pty.max) || 0,
+      ld: data.pty.ld === true || Number(data.pty.ld) === 1,
+      mem: Array.isArray(data.pty.mem) ? data.pty.mem.slice(0, 10).map(m => ({
+        r: m && m.r != null ? String(m.r) : '', nm: m && m.nm != null ? String(m.nm) : '',
+        me: !!(m && m.me), lv: Number(m && m.lv) || 0, hp: Number(m && m.hp) || 0,
+        hp_max: Number(m && m.hp_max) || 0, mp: Number(m && m.mp) || 0,
+        x: Number.isFinite(Number(m && m.x)) ? Number(m.x) : null,
+        y: Number.isFinite(Number(m && m.y)) ? Number(m.y) : null,
+        st: m && m.st ? String(m.st) : ''
+      })) : []
+    } : null;
+    const invite = data.pty_inv && typeof data.pty_inv === 'object' ? data.pty_inv : null;
+    this.partyPoll = {
+      invite: invite ? { id: invite.id != null ? String(invite.id) : '', nm: String(invite.nm || ''), lv: Number(invite.lv) || 0, n: Number(invite.n) || 0, mp: Number(invite.mp) || 0 } : null,
+      request: data.pty_rq && typeof data.pty_rq === 'object' ? { r: data.pty_rq.r != null ? String(data.pty_rq.r) : '', nm: String(data.pty_rq.nm || ''), mp: Number(data.pty_rq.mp) || 0 } : null,
+      dungeonCall: Array.isArray(data.pty_call) ? data.pty_call.slice(0, 10) : [],
+      unread: Number(data.ptchat_n) || 0
+    };
+    this.lastPdun = data.pdun !== undefined ? data.pdun : null;
+    this.partyLastSeenAt = Date.now();
+    if (!this.isPartyPolicyEnabled()) this.setPartyState('DISABLED');
+    else if (this.partySnapshot) this.setPartyState('IN_PARTY');
+    else this.setPartyState('DISCOVERING');
+  }
+
+  isPartyPolicyEnabled() {
+    return this.settings.partyAutoInvite === true || this.settings.partyAutoJoin === true || this.settings.partyFollowMode !== 'off';
+  }
+
+  getPartyBlocker() {
+    if (this._guildDungeonRestoring || this._exitingGuildDungeon || this.eventState !== 'IDLE' || this.inEventMode || this.isEventReturning) return 'event/restore';
+    if (this.settings.partyPauseDuringEvents !== false && ['inv', 'gw', 'cw', 'br', 'fw'].some(kind => this._isEventPayloadActive(kind))) return 'event active';
+    if (this.settings.partyPauseDuringGuildDungeon !== false && (this.guildDungeonActive || Number(this.player && this.player.gdun_in) === 1 || Number(this.player && this.player.map) === 12)) return 'Guild Dungeon';
+    if (this.settings.partyPauseDuringPartyDungeon !== false && (Number(this.player && this.player.map) === 14 || this.lastPdun != null)) return 'Party Dungeon';
+    if (this.isEventCheckinOnly) return 'event check-in';
+    return '';
+  }
+
+  getPartyGroupBots() {
+    const group = String(this.settings.partyGroupId || 'none');
+    if (group === 'none') return [];
+    return Object.values(botInstances).filter(bot => bot && bot.userId === this.userId && String(bot.settings.partyGroupId || 'none') === group);
+  }
+
+  getPartyLeaderBot() {
+    const candidates = this.getPartyGroupBots();
+    const configuredUid = String(this.settings.partyLeaderLineUid || '');
+    const leader = configuredUid
+      ? candidates.find(bot => bot.line_uid === configuredUid && bot.settings.partyRole === 'leader')
+      : candidates.find(bot => bot.settings.partyRole === 'leader');
+    return leader && leader !== this ? leader : null;
+  }
+
+  async findPartyInviteRef(targetBot) {
+    const targetName = String(targetBot && targetBot.player && targetBot.player.name || targetBot && targetBot.name || '').trim();
+    if (!targetName) return null;
+
+    const sameName = row => row && String(row.name || row.nm || '').trim().toLocaleLowerCase() === targetName.toLocaleLowerCase();
+    const visible = this.others.find(row => sameName(row) && row.rf != null && String(row.rf) !== '');
+    if (visible && !(Number(visible.pt) > 0)) return String(visible.rf);
+
+    // The game client uses the verified `search(tab, q)` Party action when a
+    // player is not present in the current `others[]` payload.
+    const result = await this.sendPartyAction('search', { tab: 'name', q: targetName.slice(0, 24) });
+    const rows = result && Array.isArray(result.rows) ? result.rows : [];
+    const match = rows.find(row => sameName(row) && row.r != null && String(row.r) !== '' && !row.pt && !row.ni && !row.iv);
+    return match ? String(match.r) : null;
+  }
+
+  async sendPartyAction(action, payload = {}) {
+    const allowed = new Set(['state', 'search', 'invite', 'respond', 'req_respond', 'req_cancel', 'request', 'lead', 'kick', 'leave', 'disband', 'toggle_noinv', 'toggle_seek', 'lfg_post', 'lfg_del']);
+    if (!allowed.has(action)) throw new Error(`Party action không được hỗ trợ: ${action}`);
+    if (this.partyActionInFlight) return { ok: false, error: 'Party action đang chờ' };
+    const body = { line_uid: this.line_uid, session_token: this.session_token, lang: this.settings.lang || 'vi', action, ...payload };
+    this.partyActionInFlight = true;
+    this.partyPendingAction = action;
+    this.partyPendingTarget = payload.ref || payload.name || payload.pid || payload.id || null;
+    this.partyLastAction = { action, target: this.partyPendingTarget };
+    try {
+      const result = await this.sendRequest('https://ragnalok.online/human/xhrpg_party.php', body, {
+        priority: 3, dedupeKey: `party:${action}:${String(this.partyPendingTarget || '')}`, type: 'PARTY_ACTION', maxAttempts: 1
+      });
+      this.partyLastActionAt = Date.now();
+      if (result && result.pty !== undefined) this.partySnapshot = result.pty || null;
+      this.partyError = result && result.ok === false ? String(result.error || 'Party action failed') : null;
+      return result;
+    } catch (err) {
+      this.partyLastActionAt = Date.now();
+      this.partyError = err.message;
+      this.setPartyState('ERROR', err.message);
+      throw err;
+    } finally {
+      this.partyActionInFlight = false;
+      this.partyPendingAction = null;
+      this.partyPendingTarget = null;
+    }
+  }
+
+  async fetchPartyState() {
+    const result = await this.sendPartyAction('state');
+    if (result && result.ok) {
+      if (result.pty !== undefined) this.partySnapshot = result.pty || null;
+      this.partyLastSeenAt = Date.now();
+      this.partyError = null;
+      this.setPartyState(this.partySnapshot ? 'IN_PARTY' : 'DISCOVERING');
+    }
+    return result;
+  }
+
+  async runPartyAutomation() {
+    if (!this.isPartyPolicyEnabled()) { this.setPartyState('DISABLED'); return; }
+    if (!this.player || this.status !== 'running') return;
+    const blocker = this.getPartyBlocker();
+    if (blocker) { this.setPartyState('PAUSED', blocker); return; }
+    const snapshotTtl = Math.max(10000, (Number(this.settings.pollInterval) || this.userPollInterval || 2000) * 3);
+    if (!this.partyLastSeenAt || Date.now() - this.partyLastSeenAt > snapshotTtl) { this.setPartyState('STALE', 'Party poll chưa mới'); return; }
+    if (this.partyActionInFlight) return;
+
+    const leader = this.getPartyLeaderBot();
+    if (this.settings.partyRole === 'member' && this.settings.partyAutoJoin && !this.partySnapshot) {
+      const invite = this.partyPoll.invite;
+      const knownLeaderName = leader && leader.player && String(leader.player.name || '').trim().toLocaleLowerCase();
+      const inviteMatchesLeader = invite && invite.id && knownLeaderName && String(invite.nm || '').trim().toLocaleLowerCase() === knownLeaderName;
+      if (invite && invite.id && (inviteMatchesLeader || this.settings.partyAcceptUnknownInvites === true)) {
+        const inviteKey = String(invite.id);
+        if (!this.partyResponseIds.has(inviteKey)) {
+          this.setPartyState('JOINING', 'chấp nhận lời mời Leader đã xác minh');
+          const response = await this.sendPartyAction('respond', { id: invite.id, ok: 1 });
+          if (response && response.ok) {
+            this.partyResponseIds.add(inviteKey);
+            if (this.partyResponseIds.size > 200) this.partyResponseIds.delete(this.partyResponseIds.values().next().value);
+            this.setPartyState('WAITING_ACCEPT', 'đã gửi accept, chờ poll xác nhận');
+          }
+          return;
+        }
+      }
+      if (leader && leader.status === 'running' && leader.partySnapshot && Number(leader.partySnapshot.pid) > 0) {
+        const pid = Number(leader.partySnapshot.pid);
+        const cooldown = Number(this.settings.partyRequestCooldownMs) || 15000;
+        if (Date.now() - (this.partyRequestTimes.get(pid) || 0) >= cooldown) {
+          this.partyRequestTimes.set(pid, Date.now());
+          this.partyCooldownUntil = Date.now() + cooldown;
+          this.setPartyState('JOINING', `request vào Party ${pid}`);
+          const response = await this.sendPartyAction('request', { pid });
+          if (response && response.ok) this.setPartyState('WAITING_ACCEPT', 'đã gửi request vào Party');
+          return;
+        }
+        this.setPartyState('COOLDOWN', 'đang chờ cooldown request');
+      } else if (invite && (!leader || String(invite.nm || '').toLocaleLowerCase() !== String(leader.player && leader.player.name || '').toLocaleLowerCase())) {
+        this.setPartyState('PAUSED', 'không xác minh được người mời; giữ lời mời pending');
+      }
+    }
+
+    if (this.settings.partyRole === 'leader' && this.settings.partyAutoInvite) {
+      if (this.partySnapshot && !this.partySnapshot.ld) { this.setPartyState('PAUSED', 'bot không phải leader theo snapshot'); return; }
+      if (this.partySnapshot && this.partySnapshot.max > 0 && this.partySnapshot.n >= this.partySnapshot.max) { this.setPartyState('PAUSED', 'Party đã đầy'); return; }
+      const allowedTargets = Array.isArray(this.settings.partyMemberLineUids) ? this.settings.partyMemberLineUids : [];
+      for (const targetUid of allowedTargets) {
+        const targetBot = this.getPartyGroupBots().find(bot => bot.line_uid === targetUid && bot.settings.partyRole === 'member');
+        const targetTtl = Math.max(10000, (Number(this.settings.pollInterval) || this.userPollInterval || 2000) * 3);
+        if (!targetBot || targetBot.status !== 'running' || !targetBot.player || targetBot.partySnapshot ||
+            (targetBot.partyLastSeenAt && Date.now() - targetBot.partyLastSeenAt > targetTtl)) continue;
+        const inviteKey = String(targetUid);
+        const cooldown = Number(this.settings.partyInviteCooldownMs) || 60000;
+        if (Date.now() - (this.partyInviteTimes.get(inviteKey) || 0) < cooldown) continue;
+        this.partyInviteTimes.set(inviteKey, Date.now());
+        this.partyCooldownUntil = Date.now() + cooldown;
+        this.setPartyState('INVITING', `mời bot ${targetBot.name}`);
+        const ref = await this.findPartyInviteRef(targetBot);
+        if (!ref) {
+          this.setPartyState('PAUSED', `không tìm thấy ref của ${targetBot.name}`);
+          continue;
+        }
+        const response = await this.sendPartyAction('invite', { ref });
+        if (response && response.ok) this.setPartyState('WAITING_ACCEPT', `đã mời ${targetBot.name}`);
+        return;
+      }
+      if (!this.partySnapshot) this.setPartyState('DISCOVERING', 'đang chờ target xuất hiện để invite');
+    }
+
+    if (this.partySnapshot && this.settings.partyFollowMode !== 'off') this.setPartyState('IN_PARTY');
+    else if (!this.partySnapshot && (this.settings.partyAutoJoin || this.settings.partyAutoInvite) && this.partyState !== 'PAUSED') this.setPartyState('DISCOVERING');
+  }
+
+  getPartyFollowLeader() {
+    const leader = this.getPartyLeaderBot();
+    if (!leader || leader.status !== 'running' || !leader.player || !this.partySnapshot || !leader.partySnapshot) return null;
+    if (leader.getPartyBlocker && leader.getPartyBlocker()) return null;
+    if (Number(this.partySnapshot.pid) <= 0 || Number(leader.partySnapshot.pid) !== Number(this.partySnapshot.pid)) return null;
+    const ttl = Math.max(10000, (Number(this.settings.pollInterval) || this.userPollInterval || 2000) * 3);
+    if (Date.now() - this.partyLastSeenAt > ttl || Date.now() - leader.partyLastSeenAt > ttl) return null;
+    return leader;
+  }
+
+  getPartyFollowPosition() {
+    if (this.settings.partyFollowMode !== 'map_and_position' || this.getPartyBlocker() || this.isMvpCycling || this.targetedMvp) return null;
+    const leader = this.getPartyFollowLeader();
+    if (!leader || Number(leader.player.map) !== Number(this.player && this.player.map)) return null;
+    const row = this.others.find(other => other && Number(other.pt) === Number(this.partySnapshot.pid) &&
+      String(other.name || '').trim().toLocaleLowerCase() === String(leader.player.name || '').trim().toLocaleLowerCase() &&
+      Number.isFinite(Number(other.x)) && Number.isFinite(Number(other.y)));
+    if (!row) return null;
+    return { x: Number(row.x), y: Number(row.y), name: leader.name || leader.player.name };
   }
 
   addLog(type, msg) {
@@ -2910,6 +3182,8 @@ class BotInstance {
     this.eventOriginalAutoZone = null;
     this.eventOriginalLockZoneCenter = null;
     this.eventOriginalTargetZone = null;
+    this.eventBossTargetId = null;
+    this._lastEventBossStatusLogAt = 0;
   }
 
   async _beginNextWarCheckin() {
@@ -3159,6 +3433,8 @@ class BotInstance {
 
       this.inEventMode = true;
       this.currentEventKind = kind;
+      this.eventBossTargetId = null;
+      this._lastEventBossStatusLogAt = 0;
       this.eventState = 'ACTIVE';
       this.isEventCheckinOnly = options.checkinOnly === true;
       this.eventCheckinStartedAt = this.isEventCheckinOnly ? Date.now() : 0;
@@ -3207,6 +3483,8 @@ class BotInstance {
 
       this.eventState = 'EXITING';
       this.inEventMode = false;
+      this.eventBossTargetId = null;
+      this._lastEventBossStatusLogAt = 0;
 
       const snap = this.eventSnapshot;
       const returnMap = snap ? snap.map : (this.eventOriginalMap || 1);
@@ -3320,6 +3598,41 @@ class BotInstance {
     this._guildDungeonRestoring = false;
     this._gdunRestoreStartedAt = 0;
     this._persistGdunSnapshot();
+  }
+
+  async maybeAutoEnterGuildDungeon(now = new Date()) {
+    if (!this.settings.autoEnterGdunAt30 || !this.player || now.getMinutes() !== 30) return false;
+
+    const currentHour = now.getHours();
+    if (this.lastGdunAutoEnterHour === currentHour) return false;
+
+    const isBlocked = this.guildDungeonActive || this._guildDungeonRestoring || this._exitingGuildDungeon ||
+      Number(this.player.gdun_in) === 1 || Number(this.player.map) === 12 ||
+      this.inEventMode || this.eventState !== 'IDLE' || this.isEventReturning;
+    if (isBlocked) return false;
+
+    if (this.gdunAutoEnterAttemptHour !== currentHour) {
+      this.gdunAutoEnterAttemptHour = currentHour;
+      this.gdunAutoEnterAttemptCount = 0;
+      this.lastGdunAutoEnterAttemptAt = 0;
+    }
+
+    const nowMs = now.getTime();
+    if (this.gdunAutoEnterAttemptCount >= 3 ||
+        (this.lastGdunAutoEnterAttemptAt > 0 && nowMs - this.lastGdunAutoEnterAttemptAt < 10000)) {
+      return false;
+    }
+
+    this.gdunAutoEnterAttemptCount++;
+    this.lastGdunAutoEnterAttemptAt = nowMs;
+    this.addLog('SYSTEM', `⏰ [Auto Boss Guild] Phút 30: tự động vào Phụ Bản Guild (lần ${this.gdunAutoEnterAttemptCount}/3)...`);
+
+    const entered = await this.enterGuildDungeon(false);
+    if (entered) {
+      this.lastGdunAutoEnterHour = currentHour;
+      return true;
+    }
+    return false;
   }
 
   async enterGuildDungeon(isTeam = false) {
@@ -4277,6 +4590,7 @@ class BotInstance {
     this.mvpCycleMapStayCount = 0;
     this.mvpTransitCount = 0;
     this.mvpConfirmClearCount = 0;
+    this.mvpMapArrivedAt = 0;
     this._loggedMvpMapBosses = null;
     this.bosses = null; // Ép tải danh sách boss trên map mới ngay lập tức
     this.mvpCycleStats = {
@@ -4308,6 +4622,7 @@ class BotInstance {
         this.addLog('WARNING', `⚠️ Chưa cấu hình danh sách bản đồ săn Boss.`);
       }
       this.isMvpCycling = false;
+      this.mvpMapArrivedAt = 0;
       return;
     }
 
@@ -4315,6 +4630,7 @@ class BotInstance {
     if (this.mvpCycleMapIndex >= maps.length) {
       this.isMvpCycling = false;
       this.mvpCycleMapIndex = 0;
+      this.mvpMapArrivedAt = 0;
       const returnMap = this.mvpCycleOriginalMap || (parseInt(this.settings.targetMap) || 1);
       this.addLog('SYSTEM', `✅ [Auto Boss] Đã đi hết danh sách bản đồ -> Quay về Map farm gốc (Map ${returnMap}).`);
       await this.warpToMap(returnMap);
@@ -4332,6 +4648,7 @@ class BotInstance {
         this.mvpCycleMapStayCount = 0;
         this.mvpTransitCount = 0;
         this.mvpConfirmClearCount = 0;
+        this.mvpMapArrivedAt = 0;
         this.bosses = null;
         this._loggedMvpMapBosses = null;
         continue;
@@ -4342,6 +4659,7 @@ class BotInstance {
     if (this.mvpCycleMapIndex >= maps.length) {
       this.isMvpCycling = false;
       this.mvpCycleMapIndex = 0;
+      this.mvpMapArrivedAt = 0;
       const returnMap = this.mvpCycleOriginalMap || (parseInt(this.settings.targetMap) || 1);
       this.addLog('SYSTEM', `✅ [Auto Boss] Đã hoàn thành chu kỳ săn Boss (các map còn lại không đủ level) -> Quay về Map farm gốc (Map ${returnMap}).`);
       await this.warpToMap(returnMap);
@@ -4353,6 +4671,7 @@ class BotInstance {
 
     // 3. Nếu chưa đến được map mục tiêu sau 8 nhịp poll (~16 giây), tự động bỏ qua để tránh dính deadlock
     if (currentMap !== activeTargetMapId) {
+      this.mvpMapArrivedAt = 0;
       this.mvpTransitCount = (this.mvpTransitCount || 0) + 1;
       const mapDef = getMapDefs().find(m => m.id === activeTargetMapId);
       const mapName = mapDef ? mapDef.name : `Map ${activeTargetMapId}`;
@@ -4372,6 +4691,7 @@ class BotInstance {
         this.mvpCycleMapStayCount = 0;
         this.mvpTransitCount = 0;
         this.mvpConfirmClearCount = 0;
+        this.mvpMapArrivedAt = 0;
         this.bosses = null;
         this._loggedMvpMapBosses = null;
         if (this.mvpCycleMapIndex < maps.length) {
@@ -4379,6 +4699,7 @@ class BotInstance {
         } else {
           this.isMvpCycling = false;
           this.mvpCycleMapIndex = 0;
+          this.mvpMapArrivedAt = 0;
           const returnMap = this.mvpCycleOriginalMap || (parseInt(this.settings.targetMap) || 1);
           await this.warpToMap(returnMap);
         }
@@ -4386,8 +4707,16 @@ class BotInstance {
       return;
     }
 
-    // Đã đến đúng map mục tiêu -> Reset bộ đếm di chuyển transit và tăng bộ đếm thời gian lưu lại trên map
+    // 4. Đã đến đúng map mục tiêu: bắt đầu mốc chờ tải payload Boss tại đây,
+    // không tính thời gian đã tiêu tốn trong lúc warp.
     this.mvpTransitCount = 0;
+    const nowTs = Date.now();
+    if (!this.mvpMapArrivedAt) {
+      this.mvpMapArrivedAt = nowTs;
+      this.mvpConfirmClearCount = 0;
+      if (this.mvpCycleStats) this.mvpCycleStats.mapStartTs = nowTs;
+    }
+    const mapSettled = (nowTs - this.mvpMapArrivedAt) >= MVP_MAP_SETTLE_MS;
 
     let isAttackingMvp = false;
     if (this.targetedMvp && this.lastTargetedBossId !== null && this.bosses) {
@@ -4412,7 +4741,7 @@ class BotInstance {
     const aliveTargetBosses = this.bosses ? this.bosses.filter(b => (b.hp === undefined || (b.hp || 0) > 0)) : [];
 
     // Cập nhật bộ đếm xác nhận map sạch boss
-    if (this.bosses === null) {
+    if (!mapSettled || this.bosses === null) {
       // Chưa tải xong danh sách boss từ server -> Chưa xác nhận
       this.mvpConfirmClearCount = 0;
     } else if (aliveTargetBosses.length === 0) {
@@ -4421,10 +4750,10 @@ class BotInstance {
       this.mvpConfirmClearCount = 0;
     }
 
-    const timeSpentMs = Date.now() - (this.mvpCycleStats ? (this.mvpCycleStats.mapStartTs || Date.now()) : Date.now());
+    const timeSpentMs = nowTs - this.mvpMapArrivedAt;
     const isMapTimeout = (timeSpentMs >= 300000); // 5 phút (5 * 60 * 1000)
-    // Confirm map is clear only after staying for at least 3.0 seconds (timeSpentMs >= 3000) and confirming 3 times, or if map timed out
-    const isDoneWithCurrentMap = (this.mvpConfirmClearCount >= 3 && timeSpentMs >= 3000) || isMapTimeout;
+    // Chỉ xác nhận map sạch sau khi đã thực sự ở map mục tiêu đủ 3 giây và có 3 payload rỗng liên tiếp.
+    const isDoneWithCurrentMap = (this.mvpConfirmClearCount >= 3 && mapSettled) || isMapTimeout;
 
     if (isDoneWithCurrentMap) {
       const killedCount = this.mvpCycleStats ? (this.mvpCycleStats.bossKilledInMap || 0) : 0;
@@ -4450,6 +4779,7 @@ class BotInstance {
       this.mvpCycleMapIndex++;
       this.mvpCycleMapStayCount = 0;
       this.mvpConfirmClearCount = 0; // Reset khi chuyển sang map tiếp theo
+      this.mvpMapArrivedAt = 0;
       this.bosses = null;
       if (this.mvpCycleStats) {
         this.mvpCycleStats.bossKilledInMap = 0;
@@ -4464,6 +4794,7 @@ class BotInstance {
       } else {
         this.isMvpCycling = false;
         this.mvpCycleMapIndex = 0;
+        this.mvpMapArrivedAt = 0;
         const returnMap = this.mvpCycleOriginalMap || (parseInt(this.settings.targetMap) || 1);
         const totalTimeMs = Date.now() - (this.mvpCycleStats ? (this.mvpCycleStats.cycleStartTs || Date.now()) : Date.now());
         const totalKilled = this.mvpCycleStats ? (this.mvpCycleStats.bossKilledInCycle || 0) : 0;
@@ -4493,6 +4824,27 @@ class BotInstance {
     // 2. Nếu đang ở Nông trại (Map 5): để hệ thống Farm quản lý, không can thiệp
     if (Number(this.player.map) === 5) {
       return false;
+    }
+
+    // 3. Party follow map routing. This is deliberately opt-in and only
+    // follows a fresh, server-confirmed Party shared by the configured bots.
+    const partyFollowEnabled = ['same_map', 'map_and_position'].includes(this.settings.partyFollowMode);
+    const teamFollowEnabled = this.settings.teamRole === 'member' && this.settings.teamSynced === true && (this.settings.teamId || 'none') !== 'none';
+    const partyLeader = partyFollowEnabled ? this.getPartyFollowLeader() : null;
+    if (!teamFollowEnabled && partyLeader && this.settings.partyAllowWarp === true) {
+      const partyTargetMap = Number(partyLeader.player.map);
+      const partyMapDef = getMapDefs().find(m => m.id === partyTargetMap);
+      const unsafePartyMap = [4, 5, 12, 14].includes(partyTargetMap);
+      if (partyMapDef && !unsafePartyMap && Number(this.player.map) !== partyTargetMap && (this.player.lv || 1) >= partyMapDef.req) {
+        this.addLog('SYSTEM', `👥 [Party Follow] Đồng bộ di chuyển theo Leader (${partyLeader.name}) sang Map ${partyTargetMap}`);
+        try {
+          await this.warpToMap(partyTargetMap);
+          return true;
+        } catch (e) {
+          this.addLog('ERROR', `[Party Follow] Lỗi di chuyển sang Map ${partyTargetMap}: ${e.message}`);
+          return true;
+        }
+      }
     }
 
     const isMember = this.settings.teamRole === 'member';
@@ -4755,21 +5107,9 @@ class BotInstance {
       }
     }
 
-    // ⏰ Check scheduled Guild Dungeon auto-entry (At XX:30:05 every hour)
-    if (this.settings.autoEnterGdunAt30 && this.player) {
-      const nowTime = new Date();
-      const currentHour = nowTime.getHours();
-      const currentMinute = nowTime.getMinutes();
-      const currentSecond = nowTime.getSeconds();
-
-      if (currentMinute === 30 && currentSecond >= 5 && currentSecond <= 20 && this.lastGdunAutoEnterHour !== currentHour) {
-        this.lastGdunAutoEnterHour = currentHour;
-        if (!this.guildDungeonActive && !this._guildDungeonRestoring && Number(this.player.gdun_in) !== 1 && Number(this.player.map) !== 12 && !this.inEventMode) {
-          this.addLog('SYSTEM', `⏰ [Auto Boss Guild] Đến phút thứ 30:05. Tự động kích hoạt cá nhân vào Phụ Bản Guild...`);
-          await this.enterGuildDungeon(false); // Solo entry
-        }
-      }
-    }
+    // ⏰ Auto-entry Guild Dungeon trong toàn bộ phút 30; helper tự chống trùng,
+    // không tiêu thụ lượt khi bị Event chặn và retry hữu hạn nếu request thất bại.
+    await this.maybeAutoEnterGuildDungeon(new Date());
 
     // Request full payload every 2 polls or when monsters/bosses empty for fast spawn detection
     // Enforce isFull = 1 during MVP Cycle on the correct target map to ensure the latest boss list is retrieved
@@ -5020,25 +5360,99 @@ class BotInstance {
     if (!this._guildDungeonRestoring && !isEventRestoring && this.inEventMode && this.eventState === 'ACTIVE' && this.currentEventKind === 'inv') {
       const px = this.player ? this.player.x : 1125;
       const py = this.player ? this.player.y : 1125;
-      const dx = px - 1125;
-      const dy = py - 1125;
-      const distToCenter = Math.sqrt(dx * dx + dy * dy);
+      const aliveEventBosses = (this.bosses || []).filter(b =>
+        (b.hp === undefined || (b.hp || 0) > 0) &&
+        Number.isFinite(Number(b.x)) && Number.isFinite(Number(b.y))
+      );
 
-      exploreCx = 1125;
-      exploreCy = 1125;
-      exploreRadius = 50; // Giới hạn phạm vi hoạt động ở tâm bản đồ
-      this.targetedMvp = true; // Bỏ qua cơ chế săn MVP khác hoặc farm thường
+      let eventBoss = this.eventBossTargetId !== null
+        ? aliveEventBosses.find(b => b.id === this.eventBossTargetId) || null
+        : null;
 
-      if (distToCenter > 15) {
-        traveling = 1;
-        lockPos = 0;
-      } else {
-        traveling = 0;
-        lockPos = 1;
+      if (!eventBoss && aliveEventBosses.length > 0) {
+        const priority = this.getBossHuntPriority();
+        const sorted = [...aliveEventBosses].sort((a, b) => {
+          if (priority === 'hp_asc') {
+            const hpA = a.hp !== undefined ? (a.hp || 0) : (a.hp_max || 0);
+            const hpB = b.hp !== undefined ? (b.hp || 0) : (b.hp_max || 0);
+            if (hpA !== hpB) return hpA - hpB;
+          } else if (priority === 'level_asc' || priority === 'level_desc') {
+            const lvA = a.lv || 0;
+            const lvB = b.lv || 0;
+            if (lvA !== lvB) return priority === 'level_asc' ? lvA - lvB : lvB - lvA;
+          }
+          return Math.hypot(px - Number(a.x), py - Number(a.y)) - Math.hypot(px - Number(b.x), py - Number(b.y));
+        });
+        eventBoss = sorted[0];
       }
 
-      if (this.pollCount % 10 === 0) {
-        this.addLog('SYSTEM', `🌳 [Event Cây Thế Giới] Đang đứng ở tâm bản đồ (Khóa vị trí để đánh Boss)`);
+      this.targetedMvp = true; // Luôn ưu tiên Event, đồng thời ép full payload để bắt Boss mới xuất hiện.
+
+      if (eventBoss) {
+        const isNewTarget = this.eventBossTargetId !== eventBoss.id;
+        this.eventBossTargetId = eventBoss.id;
+        const bossX = Number(eventBoss.x);
+        const bossY = Number(eventBoss.y);
+        const dx = px - bossX;
+        const dy = py - bossY;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const isUsingDaoDai = this.player && Number(this.player.active_gun) === 1;
+        const minBossDist = isUsingDaoDai ? 55 : 30;
+        const maxBossDist = isUsingDaoDai ? 65 : 40;
+        const targetKiteDist = isUsingDaoDai ? 60 : 35;
+        const bossHpPct = Math.round((eventBoss.hp || 0) / Math.max(1, eventBoss.hp_max || 1) * 100);
+
+        this._bossSnipeActive = bossHpPct <= 30;
+        this.currentMvpBossInfo = {
+          id: eventBoss.id,
+          name: eventBoss.name || 'Boss Cây Thế Giới',
+          emoji: eventBoss.emoji || '🌋',
+          lv: eventBoss.lv || 1,
+          mapId: Number(this.player ? this.player.map : 2),
+          startTs: (this.currentMvpBossInfo && this.currentMvpBossInfo.id === eventBoss.id)
+            ? this.currentMvpBossInfo.startTs
+            : Date.now()
+        };
+
+        if (dist > maxBossDist || dist < minBossDist) {
+          const ux = dist > 0 ? dx / dist : 1;
+          const uy = dist > 0 ? dy / dist : 0;
+          exploreCx = Math.round((bossX + ux * targetKiteDist) * 100) / 100;
+          exploreCy = Math.round((bossY + uy * targetKiteDist) * 100) / 100;
+          traveling = 1;
+          lockPos = 0;
+          exploreRadius = 300;
+        } else {
+          exploreCx = bossX;
+          exploreCy = bossY;
+          traveling = 0;
+          lockPos = 1;
+          exploreRadius = 100;
+        }
+
+        const nowMs = Date.now();
+        if (isNewTarget || nowMs - this._lastEventBossStatusLogAt >= 5000) {
+          this._lastEventBossStatusLogAt = nowMs;
+          this.addLog('SYSTEM', `🌳 [Event Cây Thế Giới] Khóa Boss: ${eventBoss.emoji || '🌋'} ${eventBoss.name || 'Boss'} (HP: ${bossHpPct}% - Khoảng cách: ${Math.round(dist)}m)`);
+        }
+      } else {
+        this.eventBossTargetId = null;
+        this.currentMvpBossInfo = null;
+        this._bossSnipeActive = false;
+
+        // Chưa có Boss trong payload: đứng chờ tại tâm để bảo vệ cây và tiếp tục full-poll.
+        const dx = px - 1125;
+        const dy = py - 1125;
+        const distToCenter = Math.sqrt(dx * dx + dy * dy);
+        exploreCx = 1125;
+        exploreCy = 1125;
+        exploreRadius = 50;
+        traveling = distToCenter > 15 ? 1 : 0;
+        lockPos = distToCenter > 15 ? 0 : 1;
+
+        if (this.pollCount % 10 === 0) {
+          this.addLog('SYSTEM', `🌳 [Event Cây Thế Giới] Chưa thấy Boss trong payload, đang chờ tại tâm bản đồ...`);
+        }
       }
     }
 
@@ -5210,7 +5624,7 @@ class BotInstance {
     // 1. Auto MVP Hunting (Priority 1)
     // isCorrectMvpMap is already defined above for isFull calculation
     const isHuntingEnabled = this.settings.bossHuntMode !== 'off';
-    if (!this._guildDungeonRestoring && !isEventRestoring && isHuntingEnabled && isCorrectMvpMap && !this.guildDungeonActive && this.bosses && this.bosses.length > 0) {
+    if (!this._guildDungeonRestoring && !isEventRestoring && !this.inEventMode && isHuntingEnabled && isCorrectMvpMap && !this.guildDungeonActive && this.bosses && this.bosses.length > 0) {
       const aliveBosses = this.bosses.filter(b => (b.hp === undefined || (b.hp || 0) > 0));
 
       if (aliveBosses.length > 0) {
@@ -5404,6 +5818,31 @@ class BotInstance {
     // Clear targeted boss state and log when done
     if (!this.targetedMvp && this.lastTargetedBossId !== null) {
       this.logTargetBossCompletion();
+    }
+
+    // 1.5. Party position follow. MVP, Event and dungeon routing above always
+    // wins; when inside the follow radius the bot keeps its own position.
+    const partyFollowPosition = (!this._guildDungeonRestoring && !isEventRestoring && !this.guildDungeonActive && !this.targetedMvp)
+      ? this.getPartyFollowPosition()
+      : null;
+    if (partyFollowPosition && this.player) {
+      const followDistance = Math.max(10, Number(this.settings.partyFollowDistance) || 60);
+      const distance = Math.hypot(Number(this.player.x) - partyFollowPosition.x, Number(this.player.y) - partyFollowPosition.y);
+      this.partyFollowTarget = { ...partyFollowPosition, distance };
+      if (distance > followDistance) {
+        exploreCx = partyFollowPosition.x;
+        exploreCy = partyFollowPosition.y;
+        exploreRadius = 300;
+        traveling = 1;
+        lockPos = 0;
+      } else {
+        exploreCx = this.player.x;
+        exploreCy = this.player.y;
+        exploreRadius = 100;
+        traveling = 0;
+      }
+    } else {
+      this.partyFollowTarget = null;
     }
 
     // 2. Auto Zone checking (Priority 2, only runs if no MVP is being targeted)
@@ -5820,8 +6259,21 @@ class BotInstance {
     // Update player
     const prevP = this.player;
     this.updatePlayerState(d.player);
+    this.updatePartyPoll(d);
     this.lastUpdate = new Date().toISOString();
     this.error = null;
+
+    // Party automation is independent from the combat automation mutex so a
+    // slow Party action cannot duplicate or block the normal farm loop.
+    if (this.isPartyPolicyEnabled() && !this.partyAutomationRunning) {
+      this.partyAutomationRunning = true;
+      this.runPartyAutomation().catch(err => {
+        this.partyError = err.message;
+        this.setPartyState('ERROR', err.message);
+      }).finally(() => {
+        this.partyAutomationRunning = false;
+      });
+    }
 
     // Urgent Active Potion Healing (Active Potion Healing)
     if (this.player && !this.player.is_dead) {
@@ -7962,6 +8414,182 @@ app.all('/api/auto-add-account', requireAuth, (req, res) => {
 
 // ==================== GAME ACCOUNTS API ROUTES (Protected) ====================
 
+function getPartyProfileOwnerId(req, requestedOwnerId) {
+  if (req.user.role !== 'admin') return String(req.user.id);
+  return String(requestedOwnerId || req.user.id);
+}
+
+function partyAccountSettings(account) {
+  const bot = botInstances[account.line_uid];
+  return (bot && bot.settings) || account.settings || {};
+}
+
+function buildPartyProfiles(ownerId, accountRows = loadAccounts()) {
+  const normalizedOwnerId = String(ownerId);
+  const ownerAccounts = accountRows.filter(account => String(account.userId || '') === normalizedOwnerId);
+  const byUid = new Map(ownerAccounts.map(account => [String(account.line_uid), account]));
+  const grouped = new Map();
+  for (const account of ownerAccounts) {
+    const settings = partyAccountSettings(account);
+    const groupId = String(settings.partyGroupId || 'none');
+    if (!groupId || groupId === 'none') continue;
+    if (!grouped.has(groupId)) grouped.set(groupId, { groupId, accounts: [], settingsByUid: new Map() });
+    grouped.get(groupId).accounts.push(account);
+    grouped.get(groupId).settingsByUid.set(String(account.line_uid), settings);
+  }
+
+  return [...grouped.values()].map(group => {
+    const leaders = group.accounts.filter(account => group.settingsByUid.get(String(account.line_uid)).partyRole === 'leader');
+    const leader = leaders[0] || null;
+    const leaderSettings = leader ? group.settingsByUid.get(String(leader.line_uid)) : {};
+    const memberUids = Array.isArray(leaderSettings.partyMemberLineUids)
+      ? leaderSettings.partyMemberLineUids.map(String)
+      : String(leaderSettings.partyMemberLineUids || '').split(',').map(value => value.trim()).filter(Boolean);
+    const roleMemberUids = group.accounts
+      .filter(account => group.settingsByUid.get(String(account.line_uid)).partyRole === 'member')
+      .map(account => String(account.line_uid));
+    const allMemberUids = [...new Set([...memberUids, ...roleMemberUids])];
+    const missingUids = allMemberUids.filter(uid => !byUid.has(uid));
+    const selectedAccounts = [leader, ...allMemberUids.map(uid => byUid.get(uid)).filter(Boolean)].filter(Boolean);
+    const unresolved = selectedAccounts.some(account => {
+      const bot = botInstances[account.line_uid];
+      return !bot || bot.status !== 'running' || !bot.player || !String(bot.player.name || '').trim();
+    });
+    const savedNames = group.accounts.map(account => partyAccountSettings(account).partyProfileName).find(Boolean);
+    const state = leaders.length > 1
+      ? 'CONFLICT'
+      : missingUids.length || leaders.length !== 1
+        ? 'INVALID_TARGET'
+      : unresolved ? 'WAITING_TARGET' : 'READY';
+    return {
+      groupId: group.groupId,
+      name: String(savedNames || (leader ? `${leader.name || leader.line_uid} Party` : 'Party cần sửa')),
+      ownerId: normalizedOwnerId,
+      leaderLineUid: leader ? String(leader.line_uid) : '',
+      memberLineUids: allMemberUids,
+      accountLineUids: group.accounts.map(account => String(account.line_uid)),
+      missingLineUids: missingUids,
+      state,
+      legacy: group.accounts.some(account => Number(partyAccountSettings(account).partyProfileVersion || 0) < 1)
+    };
+  });
+}
+
+function partyPickerAccounts(ownerId, accountRows = loadAccounts()) {
+  const normalizedOwnerId = String(ownerId);
+  return accountRows.filter(account => String(account.userId || '') === normalizedOwnerId).map(account => {
+    const bot = botInstances[account.line_uid];
+    const settings = partyAccountSettings(account);
+    return {
+      line_uid: String(account.line_uid),
+      name: String((bot && bot.name) || account.name || 'Account'),
+      characterName: bot && bot.player ? String(bot.player.name || '') : '',
+      level: bot && bot.player ? Number(bot.player.lv || 0) : 0,
+      status: bot ? bot.status : 'offline',
+      partyState: bot ? bot.partyState : 'DISABLED',
+      partyGroupId: String(settings.partyGroupId || 'none'),
+      partySettings: {
+        partyProfileName: String(settings.partyProfileName || ''),
+        partyRole: String(settings.partyRole || 'none'),
+        partyAutoInvite: settings.partyAutoInvite === true,
+        partyAutoJoin: settings.partyAutoJoin === true,
+        partyFollowMode: String(settings.partyFollowMode || 'off'),
+        partyAllowWarp: settings.partyAllowWarp === true,
+        partyFollowDistance: Number(settings.partyFollowDistance) || 60
+      }
+    };
+  });
+}
+
+app.get('/api/party/profiles', requireAuth, (req, res) => {
+  const ownerId = getPartyProfileOwnerId(req, req.query.ownerId);
+  const accountRows = loadAccounts();
+  if (req.user.role !== 'admin' && ownerId !== String(req.user.id)) {
+    return res.status(403).json({ error: 'Không có quyền truy cập Party profile của owner này' });
+  }
+  res.json({ ownerId, accounts: partyPickerAccounts(ownerId, accountRows), profiles: buildPartyProfiles(ownerId, accountRows) });
+});
+
+app.post('/api/party/profiles', requireAuth, (req, res) => {
+  const ownerId = getPartyProfileOwnerId(req, req.body.ownerId);
+  const accountRows = loadAccounts();
+  if (req.user.role !== 'admin' && ownerId !== String(req.user.id)) {
+    return res.status(403).json({ error: 'Không có quyền sửa Party profile của owner này' });
+  }
+  const ownerAccounts = accountRows.filter(account => String(account.userId || '') === String(ownerId));
+  const byUid = new Map(ownerAccounts.map(account => [String(account.line_uid), account]));
+  const leaderUid = String(req.body.leaderLineUid || '').trim();
+  const memberUids = Array.isArray(req.body.memberLineUids)
+    ? req.body.memberLineUids.map(value => String(value || '').trim()).filter(Boolean)
+    : [];
+  const priorGroupId = String(req.body.groupId || '').trim();
+  const name = String(req.body.name || '').trim().slice(0, 64);
+
+  if (!name) return res.status(400).json({ error: 'Vui lòng đặt tên Party profile' });
+  if (!leaderUid || !byUid.has(leaderUid)) return res.status(400).json({ error: 'Leader không tồn tại hoặc đã bị xóa' });
+  if (memberUids.length < 1 || memberUids.length > 4) return res.status(400).json({ error: 'Chọn từ 1 đến 4 Member cho Party' });
+  if (new Set(memberUids).size !== memberUids.length) return res.status(400).json({ error: 'Member bị chọn trùng' });
+  if (memberUids.includes(leaderUid)) return res.status(400).json({ error: 'Leader không thể đồng thời là Member' });
+  for (const uid of memberUids) {
+    if (!byUid.has(uid)) return res.status(400).json({ error: `Member ${uid} không tồn tại hoặc đã bị xóa` });
+  }
+
+  const currentProfiles = buildPartyProfiles(ownerId, accountRows);
+  let profile = priorGroupId ? currentProfiles.find(item => item.groupId === priorGroupId) : null;
+  if (priorGroupId && !profile) return res.status(404).json({ error: 'Party profile không còn tồn tại; hãy tạo profile mới' });
+  const groupId = profile ? profile.groupId : `ptygrp_${crypto.randomBytes(16).toString('hex')}`;
+  const selectedUids = new Set([leaderUid, ...memberUids]);
+  for (const uid of selectedUids) {
+    const settings = partyAccountSettings(byUid.get(uid));
+    const assignedGroup = String(settings.partyGroupId || 'none');
+    if (assignedGroup !== 'none' && assignedGroup !== groupId) {
+      return res.status(409).json({ error: `${byUid.get(uid).name || uid} đã thuộc Party profile khác` });
+    }
+  }
+
+  const oldUids = new Set(profile ? [...profile.accountLineUids, ...profile.memberLineUids, profile.leaderLineUid].filter(Boolean) : []);
+  for (const account of ownerAccounts) {
+    const uid = String(account.line_uid);
+    const bot = botInstances[uid];
+    const current = partyAccountSettings(account);
+    if (!selectedUids.has(uid) && !oldUids.has(uid) && String(current.partyGroupId || 'none') !== groupId) continue;
+
+    let nextSettings = { ...current };
+    if (selectedUids.has(uid)) {
+      const isLeader = uid === leaderUid;
+      nextSettings = {
+        ...nextSettings,
+        partyGroupId: groupId,
+        partyProfileName: name,
+        partyProfileVersion: 1,
+        partyRole: isLeader ? 'leader' : 'member',
+        partyLeaderLineUid: isLeader ? '' : leaderUid,
+        partyMemberLineUids: isLeader ? memberUids : [],
+        partyAutoInvite: isLeader && req.body.autoInvite === true,
+        partyAutoJoin: !isLeader && req.body.autoJoin === true,
+        partyFollowMode: isLeader ? 'off' : (['off', 'same_map', 'map_and_position'].includes(req.body.followMode) ? req.body.followMode : 'off'),
+        partyAllowWarp: !isLeader && req.body.allowWarp === true,
+        partyFollowDistance: Math.max(10, Math.min(500, Number(req.body.followDistance) || 60)),
+        partyInvitePolicy: 'group_only',
+        partyAcceptUnknownInvites: false
+      };
+    } else {
+      nextSettings = {
+        ...nextSettings,
+        partyGroupId: 'none', partyProfileName: '', partyProfileVersion: 1,
+        partyRole: 'none', partyLeaderLineUid: '', partyMemberLineUids: [],
+        partyAutoInvite: false, partyAutoJoin: false, partyFollowMode: 'off', partyAllowWarp: false
+      };
+    }
+    if (bot) bot.updateSettings(nextSettings);
+    account.settings = bot ? bot.settings : nextSettings;
+  }
+  saveAccounts(accountRows);
+
+  const savedProfile = buildPartyProfiles(ownerId, accountRows).find(item => item.groupId === groupId);
+  res.json({ success: true, profile: savedProfile, accounts: partyPickerAccounts(ownerId, accountRows) });
+});
+
 app.get('/api/accounts', requireAuth, (req, res) => {
   try {
     res.setHeader('X-User-Expires-At', req.user.expiresAt || '');
@@ -8005,6 +8633,16 @@ app.get('/api/accounts', requireAuth, (req, res) => {
           currentEventKind: bot.currentEventKind || null,
           guildDungeonActive: bot.guildDungeonActive || false,
           guildDungeonIsTeam: bot.guildDungeonIsTeam || false,
+          party: {
+            state: bot.partyState || 'DISABLED',
+            reason: bot.partyStateReason || '',
+            snapshot: bot.partySnapshot || null,
+            poll: bot.partyPoll || { invite: null, request: null, dungeonCall: [], unread: 0 },
+            followTarget: bot.partyFollowTarget || null,
+            lastSeenAt: bot.partyLastSeenAt || 0,
+            lastAction: bot.partyLastAction || null,
+            error: bot.partyError || null
+          },
           proxyInfo: req.user.role === 'admin' ? proxyPool.getBotProxyInfo(bot.line_uid) : null,
           fingerprint: bot.fingerprint || null,
           combatRates: bot.getCombatRates ? bot.getCombatRates() : {
