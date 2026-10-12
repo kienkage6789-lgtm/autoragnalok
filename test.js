@@ -4328,8 +4328,54 @@ try {
     const fs = require('fs');
     const canvas = fs.readFileSync('xhrpg_canvas.js', 'utf8');
     const serverSource = fs.readFileSync('server.js', 'utf8');
+    const playHtml = fs.readFileSync('play.html', 'utf8');
+    const playCss = fs.readFileSync('xhrpg_style.css', 'utf8');
     assert.ok(canvas.includes('xhrpg_party.php') && canvas.includes("action: 'invite'") && canvas.includes("action: 'respond'") && canvas.includes("action: 'request'") && canvas.includes("action: act"), 'T95: Party endpoint/actions must match game client');
     assert.ok(serverSource.includes('this.updatePartyPoll(d);') && serverSource.includes('this.runPartyAutomation()'), 'T95: Party poll and automation must be wired into pollGame');
+    assert.ok(serverSource.includes("app.get(['/js/*', '/human/js/*']") && serverSource.includes('fetchGameAsset(requestedPath)'), 'T101: new game UI JavaScript modules must be proxied instead of falling through to dashboard HTML');
+    assert.ok(playHtml.includes('id="gacha-btn"') && playHtml.includes('id="pty-btn"') && playHtml.includes('id="quest-btn"'), 'T101: play fallback must contain the new game UI controls');
+    assert.ok(playHtml.includes('/js/xhrpg_monart.js') && !playHtml.includes('src="js/'), 'T101: play fallback must load new art modules through the local JS proxy');
+    assert.ok(playCss.includes('.ui-tab') && Buffer.byteLength(playCss, 'utf8') > 70000, 'T101: play fallback CSS must be the new game UI stylesheet');
+    assert.ok(playHtml.includes("callGameUiApi('uiModern', 'ui-tab-m')") && playHtml.includes("callGameUiApi('qualityToggle', 'quality-btn')") && playHtml.includes("typeof xhrpg !== 'undefined' ? xhrpg : window.xhrpg"), 'T101: optional new UI controls must resolve both global lexical and window canvas APIs safely');
+    assert.ok(serverSource.includes("(?:[A-Za-z0-9_-]+\\/)*[A-Za-z0-9_-][A-Za-z0-9._-]*\\.js$"), 'T101: JavaScript proxy must reject traversal and duplicate-separator paths');
+
+    const http = require('http');
+    const uiAssetServer = app.listen(0);
+    const uiAssetPort = uiAssetServer.address().port;
+    const requestUiAsset = reqPath => new Promise((resolve, reject) => {
+      const req = http.request({ host: '127.0.0.1', port: uiAssetPort, path: reqPath, method: 'GET', agent: false }, res => {
+        let body = '';
+        res.setEncoding('utf8');
+        res.on('data', chunk => { body += chunk; });
+        res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body }));
+      });
+      req.on('error', reject);
+      req.end();
+    });
+    try {
+      const cssResponse = await requestUiAsset('/css/xhrpg_style.css?v=t101');
+      assert.strictEqual(cssResponse.status, 200, 'T101: synced UI CSS must be served locally');
+      assert.ok(cssResponse.body.includes('.ui-tab'), 'T101: local UI CSS response must contain the synced UI rules');
+      playMockPool.intercept({
+        path: /^\/human\/js\/xhrpg_monart\.js\?_cb=\d+$/,
+        method: 'GET'
+      }).reply(200, 'window.__t101GameUiModule = true;', {
+        headers: { 'content-type': 'application/javascript' }
+      });
+      const originalUiAssetDispatcher = proxyPool.getDefaultDispatcher;
+      proxyPool.getDefaultDispatcher = () => playMockAgent;
+      try {
+        const jsResponse = await requestUiAsset('/js/xhrpg_monart.js');
+        assert.strictEqual(jsResponse.status, 200, 'T101: valid UI JavaScript module must be proxied successfully');
+        assert.ok(jsResponse.body.includes('__t101GameUiModule'), 'T101: proxied UI JavaScript response must preserve module content');
+      } finally {
+        proxyPool.getDefaultDispatcher = originalUiAssetDispatcher;
+      }
+      const traversalResponse = await requestUiAsset('/js/%2e%2e/escape.js');
+      assert.strictEqual(traversalResponse.status, 404, 'T101: JavaScript proxy must reject encoded traversal segments');
+    } finally {
+      await new Promise(resolve => uiAssetServer.close(resolve));
+    }
 
     const leader = new BotInstance({
       line_uid: 't95_party_leader', userId: 't95_user', name: 'LeaderBot',

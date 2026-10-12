@@ -882,3 +882,9 @@
 - Quyền được quyết định từ Party snapshot live (`ld`), không tin riêng `settings.partyRole`: Member chỉ được OUT PT; Leader chỉ được huỷ Party.
 - Sau response thành công, manager xoá snapshot và các poll intent stale để UI không hiển thị Party cũ; policy auto vẫn giữ nguyên để người dùng có thể cấu hình lại.
 - Không live-call thao tác leave/disband trong regression vì đây là mutation thật trên Party đang dùng; contract được kiểm tra bằng client fixture và unit test.
+
+## 2026-10-12 - T101: Proxy module assets cho game UI mới
+
+- Upstream game hiện dùng HTML/CSS mới và tách renderer thành nhiều module `xhrpg_*art.js`/effect JS; chỉ proxy `xhrpg_canvas.js` là không đủ, vì module chưa có route sẽ rơi vào dashboard HTML.
+- Giữ các handler đặc biệt cho canvas/lang/jquery/sdk; thêm allowlist path `.js` dưới `/js/*` và `/human/js/*`, dùng chung `fetchGameAsset()` để có timeout, cache và chặn HTML masquerading as JavaScript.
+- Cập nhật `play.html`/`xhrpg_style.css` thành snapshot public mới làm fallback; runtime `/play` vẫn ưu tiên HTML upstream động và giữ custom startup/proxy patch hiện có.

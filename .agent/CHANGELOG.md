@@ -1902,3 +1902,10 @@
 - `public/app.js`: thêm nút `🚪 OUT PT` cho Member và `💥 Huỷ PT` cho Leader, có confirm trước thao tác.
 - `test.js`: thêm regression cho payload, phân quyền và reset snapshot sau thao tác.
 - Đã kiểm tra: `node --check server.js`, `node --check public/app.js`, `node --check test.js`, `npm test`, `git diff --check` — đạt.
+
+## 2026-10-12 - T101 Đồng bộ game UI mới cho /play
+
+- `play.html` và `xhrpg_style.css`: đồng bộ snapshot giao diện public mới từ game, gồm các control/tab mới và layout cập nhật.
+- `server.js`: thêm proxy/cache cho các JavaScript module mới dưới `/js/*` và `/human/js/*`; giữ route đặc biệt cho canvas/lang/jquery/sdk.
+- `test.js`: thêm kiểm tra fallback có UI mới, asset path qua proxy và stylesheet mới.
+- Đã kiểm tra: `node --check server.js`, `node --check public/app.js`, `node --check test.js`, `npm test`, `git diff --check` — đạt.

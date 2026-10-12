@@ -39,6 +39,18 @@
 - Phụ thuộc: T99
 - Trạng thái: done
 
+### [x] T101 - Đồng bộ giao diện game mới cho /play
+- Mô tả: Cập nhật fallback HTML/CSS của `/play` theo giao diện game mới và proxy các module JavaScript art/effect mà client mới tải thêm.
+- File liên quan: `play.html`, `xhrpg_style.css`, `server.js`, `test.js`, `.agent/TASKS.md`, `.agent/DECISIONS.md`, `.agent/CHANGELOG.md`
+- Acceptance criteria:
+  - [x] Fallback có các control UI mới như Gacha, Quest, Party và các tab giao diện mới.
+  - [x] CSS fallback được đồng bộ theo stylesheet upstream mới.
+  - [x] Các `xhrpg_*art.js`/effect module được proxy qua `/js/*` và không rơi về `public/index.html`.
+  - [x] Giữ handler riêng cho `xhrpg_canvas.js`, `xhrpg_lang_vi.js`, `jquery` và `sdk` để không phá patch/cache hiện tại.
+  - [x] Regression contract cho HTML/CSS/proxy; syntax check và `npm test` đạt.
+- Phụ thuộc: T100
+- Trạng thái: done
+
 ### [x] T97 - Thiết kế account-picker/wizard cho Party
 - Mô tả: Bổ sung tài liệu UX và persistence để người dùng cấu hình Party bằng cách chọn account/character thay vì tự tìm `partyGroupId` hoặc nhập raw `Member line_uid`.
 - File liên quan: `party-system-design.md`, `.agent/TASKS.md`, `.agent/DECISIONS.md`, `.agent/CHANGELOG.md`

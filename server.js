@@ -11786,6 +11786,30 @@ app.get(['/js/sdk.js', '/human/js/sdk.js'], async (req, res) => {
   }
 });
 
+// The game UI now loads multiple versioned art/effect modules beside
+// xhrpg_canvas.js. Keep the explicit handlers above for patched/local files,
+// then proxy the remaining public JavaScript modules through the same cache-
+// busted asset adapter instead of letting them fall through to dashboard HTML.
+app.get(['/js/*', '/human/js/*'], async (req, res) => {
+  const requestedPath = String(req.path || '').replace(/^\/human(?=\/)/, '');
+  // Only allow normal JS path segments. In particular, reject `.`/`..` and
+  // duplicate separators before the path is appended to the upstream URL.
+  if (!/^\/js\/(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_-][A-Za-z0-9._-]*\.js$/.test(requestedPath)) {
+    return res.status(404).send('Not found');
+  }
+  try {
+    const data = await fetchGameAsset(requestedPath);
+    res.set({
+      'Cache-Control': 'public, max-age=1800',
+      'Content-Type': 'application/javascript; charset=utf-8'
+    });
+    res.send(data);
+  } catch (e) {
+    console.error(`Fetch game JS asset error (${requestedPath}):`, e.message);
+    res.status(502).json({ error: 'Không thể tải game JavaScript asset', path: requestedPath });
+  }
+});
+
 // Proxy PHP endpoints
 app.all(['/xhrpg_*.php', '/human/xhrpg_*.php'], async (req, res) => {
   let cleanPath = req.originalUrl;
@@ -11835,7 +11859,20 @@ app.all('/assets/*', (req, res) => {
   res.redirect(`https://ragnalok.online/human${req.originalUrl}`);
 });
 
-// Redirect styles directly to the official game CDN to prevent proxy lag and connection queuing
+// Serve the synced game stylesheet locally so the /play fallback still renders
+// when the upstream game server is unavailable. Other CSS files keep the CDN
+// redirect behavior to avoid adding proxy latency to unrelated dashboard assets.
+app.get('/css/xhrpg_style.css', (req, res) => {
+  console.log(`[Local CSS] ${req.originalUrl}`);
+  res.set({
+    'Cache-Control': 'public, max-age=1800',
+    'Content-Type': 'text/css; charset=utf-8',
+    'ETag': 'xhrpg-style-v1'
+  });
+  res.sendFile(path.join(__dirname, 'xhrpg_style.css'));
+});
+
+// Redirect other styles directly to the official game CDN to prevent proxy lag and connection queuing
 app.all('/css/*', (req, res) => {
   console.log(`[Redirect CSS] ${req.originalUrl}`);
   res.redirect(`https://ragnalok.online/human${req.originalUrl}`);
